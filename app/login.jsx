@@ -30,7 +30,7 @@ export default function LoginPage() {
         router.replace('/admin/dashboard');
         return;
       }
-
+// Regular login flow using Firebase Authentication
       const userCredential = await signInWithEmailAndPassword(
         auth,
         email,
