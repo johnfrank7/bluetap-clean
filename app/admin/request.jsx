@@ -175,6 +175,12 @@ export default function AdminRequestPage() {
             <Text style={styles.navItemText}>Dashboard</Text>
           </TouchableOpacity>
           <TouchableOpacity
+            style={styles.navItem}
+            onPress={() => router.replace('/admin/products')}
+          >
+            <Text style={styles.navItemText}>Products</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
             style={[styles.navItem, styles.navItemActive]}
             onPress={() => router.replace('/admin/request')}
           >

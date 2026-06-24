@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -6,14 +6,35 @@ import {
   Image,
   TouchableOpacity,
   ScrollView,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { StatusBar } from 'expo-status-bar';
 import { useRouter } from 'expo-router';
+import { subscribeProducts } from '../../services/products';
+
+const formatPrice = (price) => `P${Number(price || 0).toFixed(2)}`;
 
 export default function RequesterDashboard() {
   const router = useRouter(); 
+  const [products, setProducts] = useState([]);
+  const [productsLoading, setProductsLoading] = useState(true);
+
+  useEffect(() => {
+    const unsubscribe = subscribeProducts(
+      (nextProducts) => {
+        setProducts(nextProducts);
+        setProductsLoading(false);
+      },
+      () => {
+        setProductsLoading(false);
+      }
+    );
+
+    return unsubscribe;
+  }, []);
+
   return (
     <LinearGradient
       colors={['#187BCD', '#42A5F5']}
@@ -43,19 +64,76 @@ export default function RequesterDashboard() {
               <Text style={styles.subText}>Need mineral water?</Text>
             </View>
 
-            <View style={styles.card}>
-              <Text style={styles.cardTitle}>Current Request</Text>
+            <View style={styles.productsSection}>
+              {productsLoading ? (
+                <View style={styles.productsGrid}>
+                  <View style={[styles.productTile, styles.productTileEmpty]}>
+                    <ActivityIndicator size="small" color="#187BCD" />
+                  </View>
+                </View>
+              ) : products.length === 0 ? (
+                <View style={styles.productsGrid}>
+                  <View style={[styles.productTile, styles.productTileEmpty]}>
+                    <Text style={styles.productName}>No products available.</Text>
+                  </View>
+                </View>
+              ) : (
+                <View style={styles.productsGrid}>
+                  {products.map((product) => (
+                    <View style={styles.productTile} key={product.id}>
+                      <View style={styles.priceBadge}>
+                        <Text style={styles.priceBadgeText}>
+                          {formatPrice(product.price)}
+                        </Text>
+                      </View>
 
-              <Text style={styles.cardText}>Request ID: BT-01302</Text>
-              <Text style={styles.cardText}>Quantity: 4 Gallons</Text>
-              <Text style={styles.cardText}>Container: Exchange</Text>
-              <Text style={styles.cardText}>
-                Toledo Pure Water Station
-              </Text>
+                      <View style={styles.productImageWrap}>
+                        {product.image ? (
+                          <Image
+                            source={{ uri: product.image }}
+                            style={styles.productImage}
+                            resizeMode="contain"
+                          />
+                        ) : (
+                          <Image
+                            source={require('../../assets/icons/bluetaplogo.png')}
+                            style={styles.productImage}
+                            resizeMode="contain"
+                          />
+                        )}
+                      </View>
 
-              <Text style={styles.status}>
-                Status: Out for delivery
-              </Text>
+                      <View style={styles.productDetails}>
+                        <Text style={styles.productName} numberOfLines={2}>
+                          {product.product_name}
+                        </Text>
+                        {!!product.capacity && (
+                          <Text style={styles.productSubtext} numberOfLines={1}>
+                            {product.capacity}
+                          </Text>
+                        )}
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              )}
+            </View>
+
+            <View style={styles.currentRequestSection}>
+              <Text style={styles.currentRequestLabel}>Current Request</Text>
+
+              <View style={styles.card}>
+                <Text style={styles.cardText}>Request ID: BT-01302</Text>
+                <Text style={styles.cardText}>Quantity: 4 Gallons</Text>
+                <Text style={styles.cardText}>Container: Exchange</Text>
+                <Text style={styles.cardText}>
+                  Toledo Pure Water Station
+                </Text>
+
+                <Text style={styles.status}>
+                  Status: Out for delivery
+                </Text>
+              </View>
             </View>
 
             <View style={{ height: 200 }} />
@@ -109,55 +187,134 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     flexGrow: 1,
-    paddingHorizontal: 20,
-    paddingTop: 10,
+    paddingHorizontal: 34,
+    paddingTop: 56,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginTop: 10,
   },
   appName: {
     color: '#FFFFFF',
-    fontSize: 22,
+    fontSize: 20,
     fontWeight: 'bold',
+    letterSpacing: 0,
   },
   logo: {
-    width: 28,
-    height: 28,
+    width: 30,
+    height: 30,
     tintColor: '#FFFFFF',
   },
   welcomeSection: {
-    marginTop: 40,
+    marginTop: 32,
   },
   welcomeText: {
     color: '#FFFFFF',
     fontSize: 26,
     fontWeight: 'bold',
+    letterSpacing: 0,
   },
   subText: {
-    color: '#EAF4FF',
+    color: '#FFFFFF',
     fontSize: 14,
-    marginTop: 4,
+    fontWeight: '600',
+    marginTop: 5,
   },
-  card: {
+  productsSection: {
+    marginTop: 36,
+  },
+  productsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+  },
+  productTile: {
+    width: '48%',
+    minHeight: 170,
     backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 16,
-    marginTop: 30,
-    elevation: 5,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingTop: 18,
+    paddingBottom: 12,
+    marginBottom: 18,
+    position: 'relative',
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 3 },
   },
-  cardTitle: {
+  productTileEmpty: {
+    width: '100%',
+    minHeight: 128,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  priceBadge: {
+    position: 'absolute',
+    top: 9,
+    left: 9,
+    backgroundColor: '#187BCD',
+    borderRadius: 4,
+    paddingHorizontal: 5,
+    paddingVertical: 2,
+    zIndex: 1,
+  },
+  priceBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 9,
+    fontWeight: 'bold',
+  },
+  productImageWrap: {
+    height: 100,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 8,
+  },
+  productImage: {
+    width: 88,
+    height: 94,
+  },
+  productDetails: {
+    marginTop: 8,
+  },
+  productName: {
     color: '#187BCD',
+    fontSize: 13,
+    lineHeight: 16,
+    fontWeight: 'bold',
+  },
+  productSubtext: {
+    color: '#187BCD',
+    fontSize: 10,
+    lineHeight: 13,
+    fontWeight: 'bold',
+    marginTop: 1,
+  },
+  currentRequestSection: {
+    marginTop: 18,
+  },
+  currentRequestLabel: {
+    color: '#FFFFFF',
     fontSize: 16,
     fontWeight: 'bold',
     marginBottom: 10,
   },
+  card: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 8,
+    padding: 16,
+    elevation: 5,
+    shadowColor: '#000',
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 3 },
+  },
   cardText: {
     color: '#187BCD',
     fontSize: 14,
-    marginBottom: 4,
+    marginBottom: 6,
   },
   status: {
     color: '#187BCD',
@@ -166,11 +323,11 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
 
-    bottomNav: {
+  bottomNav: {
     position: 'absolute',
     bottom: 24,
-    left: 20,
-    right: 20,
+    left: 34,
+    right: 34,
 
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -179,34 +336,20 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     paddingVertical: 14,
     paddingHorizontal: 28,
-    borderRadius: 22,
+    borderRadius: 24,
 
-    zIndex: 2, 
+    zIndex: 2,
 
     elevation: 8,
     shadowColor: '#000',
     shadowOpacity: 0.12,
     shadowRadius: 6,
     shadowOffset: { width: 0, height: 3 },
-    },
+  },
 
   navIcon: {
     width: 26,
     height: 26,
     tintColor: '#187BCD',
-  },
-  addButton: {
-    backgroundColor: '#187BCD',
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  addText: {
-    color: '#FFFFFF',
-    fontSize: 30,
-    fontWeight: 'bold',
-    marginTop: -2,
   },
 });
