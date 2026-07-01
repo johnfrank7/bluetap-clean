@@ -12,14 +12,29 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { StatusBar } from 'expo-status-bar';
 import { useRouter } from 'expo-router';
+import { auth } from '../../firebase';
+import { getLocalUsers } from '../../localUsers';
 import { subscribeProducts } from '../../services/products';
+import { subscribeRequesterRequests } from '../../services/requests';
 
-const formatPrice = (price) => `P${Number(price || 0).toFixed(2)}`;
+const formatPrice = (price) => `\u20B1${Number(price || 0).toFixed(2)}`;
+const getRequestProductSummary = (request) => {
+  if (!request) return '4 Gallons';
+
+  if (Array.isArray(request.items) && request.items.length > 0) {
+    return request.items
+      .map((item) => `${item.quantity} ${item.product_name}`)
+      .join(', ');
+  }
+
+  return `${request.quantity} ${request.product_name}`;
+};
 
 export default function RequesterDashboard() {
   const router = useRouter(); 
   const [products, setProducts] = useState([]);
   const [productsLoading, setProductsLoading] = useState(true);
+  const [currentRequest, setCurrentRequest] = useState(null);
 
   useEffect(() => {
     const unsubscribe = subscribeProducts(
@@ -33,6 +48,24 @@ export default function RequesterDashboard() {
     );
 
     return unsubscribe;
+  }, []);
+
+  useEffect(() => {
+    const requesterId =
+      auth.currentUser?.uid ||
+      getLocalUsers().find((localUser) => localUser.role === 'requester')?.uid ||
+      '';
+
+    if (!requesterId) return undefined;
+
+    return subscribeRequesterRequests(requesterId, (requests) => {
+      const activeRequest =
+        requests.find(
+          (request) => request.status?.toLowerCase() !== 'delivered'
+        ) || requests[0];
+
+      setCurrentRequest(activeRequest || null);
+    });
   }, []);
 
   return (
@@ -80,7 +113,17 @@ export default function RequesterDashboard() {
               ) : (
                 <View style={styles.productsGrid}>
                   {products.map((product) => (
-                    <View style={styles.productTile} key={product.id}>
+                    <TouchableOpacity
+                      style={styles.productTile}
+                      key={product.id}
+                      activeOpacity={0.85}
+                      onPress={() =>
+                        router.push({
+                          pathname: '/requester/requestform',
+                          params: { productId: product.id },
+                        })
+                      }
+                    >
                       <View style={styles.priceBadge}>
                         <Text style={styles.priceBadgeText}>
                           {formatPrice(product.price)}
@@ -113,7 +156,7 @@ export default function RequesterDashboard() {
                           </Text>
                         )}
                       </View>
-                    </View>
+                    </TouchableOpacity>
                   ))}
                 </View>
               )}
@@ -123,15 +166,21 @@ export default function RequesterDashboard() {
               <Text style={styles.currentRequestLabel}>Current Request</Text>
 
               <View style={styles.card}>
-                <Text style={styles.cardText}>Request ID: BT-01302</Text>
-                <Text style={styles.cardText}>Quantity: 4 Gallons</Text>
-                <Text style={styles.cardText}>Container: Exchange</Text>
                 <Text style={styles.cardText}>
-                  Toledo Pure Water Station
+                  Request ID: {currentRequest?.request_id || 'BT-01302'}
+                </Text>
+                <Text style={styles.cardText}>
+                  Quantity: {getRequestProductSummary(currentRequest)}
+                </Text>
+                <Text style={styles.cardText}>
+                  Container: {currentRequest?.container || 'Exchange'}
+                </Text>
+                <Text style={styles.cardText}>
+                  {currentRequest?.water_station || 'Toledo Pure Water Station'}
                 </Text>
 
                 <Text style={styles.status}>
-                  Status: Out for delivery
+                  Status: {currentRequest?.status || 'Out for delivery'}
                 </Text>
               </View>
             </View>

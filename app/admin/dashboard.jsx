@@ -176,7 +176,7 @@ export default function AdminDashboard() {
               style={styles.logoImage}
               resizeMode="contain"
             />
-            <Text style={styles.stationName}>Station Name</Text>
+            <Text style={styles.stationName}>BlueTap</Text>
           </View>
 
           <TouchableOpacity
