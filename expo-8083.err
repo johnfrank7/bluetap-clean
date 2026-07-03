@@ -1,0 +1,20 @@
+C:\Users\HOME\Documents\CAPSTONE\final\bluetap-clean-main\node_modules\@expo\cli\build\src\utils\errors.js:130
+    throw error;
+    ^
+
+Error: write EPIPE
+    at ChildProcess.target._send (node:internal/child_process:877:20)
+    at ChildProcess.target.send (node:internal/child_process:751:19)
+    at ChildProcessWorker.initialize (C:\Users\HOME\Documents\CAPSTONE\final\bluetap-clean-main\node_modules\jest-worker\build\workers\ChildProcessWorker.js:169:17)
+    at ChildProcessWorker._onExit (C:\Users\HOME\Documents\CAPSTONE\final\bluetap-clean-main\node_modules\jest-worker\build\workers\ChildProcessWorker.js:334:12)
+    at ChildProcess.emit (node:events:524:28)
+    at Process.ChildProcess._handle.onexit (node:internal/child_process:293:12)
+Emitted 'error' event on ChildProcess instance at:
+    at node:internal/child_process:881:39
+    at processTicksAndRejections (node:internal/process/task_queues:85:11) {
+  errno: -4047,
+  code: 'EPIPE',
+  syscall: 'write'
+}
+
+Node.js v22.12.0

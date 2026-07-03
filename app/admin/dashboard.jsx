@@ -17,6 +17,7 @@ import { auth, db } from '../../firebase';
 import { signOut } from 'firebase/auth';
 import { collection, doc, onSnapshot, query, serverTimestamp, setDoc, where } from 'firebase/firestore';
 import { getLocalUsers, subscribeLocalUsers, updateLocalUserStatus } from '../../localUsers';
+import { getLocalRequests } from '../../services/requests';
 
 const getRegisteredLocalDistributors = (firestoreDistributors = []) =>
   getLocalUsers()
@@ -34,9 +35,40 @@ const getRegisteredLocalDistributors = (firestoreDistributors = []) =>
         )
     );
 
+const defaultStations = ['aquabea', 'bluetap'];
+
+const getRequestQuantity = (request) => {
+  if (Array.isArray(request.items) && request.items.length > 0) {
+    return request.items.reduce(
+      (sum, item) => sum + Number(item.quantity || 0),
+      0
+    );
+  }
+
+  return Number(request.quantity || 0);
+};
+
+const mergeByIdentity = (items) => {
+  const itemMap = new Map();
+
+  items.forEach((item) => {
+    const key = item.uid || item.id || item.email;
+    if (key) {
+      itemMap.set(key, item);
+    }
+  });
+
+  return Array.from(itemMap.values());
+};
+
 export default function AdminDashboard() {
   const router = useRouter();
   const [registeredDistributors, setRegisteredDistributors] = useState([]);
+  const [dashboardStats, setDashboardStats] = useState({
+    registeredUsers: 0,
+    productSales: 0,
+    stations: defaultStations.length,
+  });
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [removingId, setRemovingId] = useState(null);
@@ -88,6 +120,80 @@ export default function AdminDashboard() {
 
     return () => {
       unsubscribe();
+      unsubscribeLocalUsers();
+    };
+  }, []);
+
+  useEffect(() => {
+    let firestoreUsers = [];
+    let firestoreRequests = [];
+
+    const refreshDashboardStats = () => {
+      const allUsers = mergeByIdentity([
+        ...firestoreUsers,
+        ...getLocalUsers(),
+      ]);
+      const localRequests = getLocalRequests();
+      const requestIds = new Set(firestoreRequests.map((item) => item.id));
+      const allRequests = [
+        ...firestoreRequests,
+        ...localRequests.filter((item) => !requestIds.has(item.id)),
+      ];
+      const stationNames = new Set(defaultStations);
+
+      allRequests.forEach((request) => {
+        if (request.water_station) {
+          stationNames.add(String(request.water_station).trim().toLowerCase());
+        }
+      });
+
+      setDashboardStats({
+        registeredUsers: allUsers.length,
+        productSales: allRequests.reduce(
+          (sum, request) => sum + getRequestQuantity(request),
+          0
+        ),
+        stations: stationNames.size,
+      });
+    };
+
+    refreshDashboardStats();
+    const unsubscribeLocalUsers = subscribeLocalUsers(refreshDashboardStats);
+
+    const unsubscribeUsers = onSnapshot(
+      collection(db, 'users'),
+      (snapshot) => {
+        firestoreUsers = snapshot.docs.map((item) => ({
+          id: item.id,
+          uid: item.id,
+          ...item.data(),
+        }));
+        refreshDashboardStats();
+      },
+      (error) => {
+        console.log('Dashboard users metric error:', error.message);
+        refreshDashboardStats();
+      }
+    );
+
+    const unsubscribeRequests = onSnapshot(
+      collection(db, 'requests'),
+      (snapshot) => {
+        firestoreRequests = snapshot.docs.map((item) => ({
+          id: item.id,
+          ...item.data(),
+        }));
+        refreshDashboardStats();
+      },
+      (error) => {
+        console.log('Dashboard requests metric error:', error.message);
+        refreshDashboardStats();
+      }
+    );
+
+    return () => {
+      unsubscribeUsers();
+      unsubscribeRequests();
       unsubscribeLocalUsers();
     };
   }, []);
@@ -164,6 +270,28 @@ export default function AdminDashboard() {
     );
   };
 
+  const diagramItems = [
+    {
+      label: 'Registered Users',
+      value: dashboardStats.registeredUsers,
+      helper: 'Active app accounts',
+    },
+    {
+      label: 'Product Sales',
+      value: dashboardStats.productSales,
+      helper: 'Total gallons ordered',
+    },
+    {
+      label: 'Stations',
+      value: dashboardStats.stations,
+      helper: 'Available stations',
+    },
+  ];
+  const maxDiagramValue = Math.max(
+    ...diagramItems.map((item) => item.value),
+    1
+  );
+
   return (
     <SafeAreaView style={styles.root}>
       <StatusBar style="dark" />
@@ -228,6 +356,38 @@ export default function AdminDashboard() {
 
           {/* Registered distributors table */}
           <ScrollView contentContainerStyle={styles.cardScroll} showsVerticalScrollIndicator={false}>
+            <View style={styles.diagramCard}>
+              <View style={styles.cardHeader}>
+                <Text style={styles.cardTitle}>Data Overview</Text>
+              </View>
+
+              <View style={styles.diagramGrid}>
+                {diagramItems.map((item, index) => {
+                  const barWidth = `${Math.max(
+                    10,
+                    (item.value / maxDiagramValue) * 100
+                  )}%`;
+
+                  return (
+                    <View
+                      key={item.label}
+                      style={[
+                        styles.diagramItem,
+                        index === diagramItems.length - 1 && styles.diagramItemLast,
+                      ]}
+                    >
+                      <Text style={styles.diagramLabel}>{item.label}</Text>
+                      <Text style={styles.diagramValue}>{item.value}</Text>
+                      <View style={styles.diagramBarTrack}>
+                        <View style={[styles.diagramBarFill, { width: barWidth }]} />
+                      </View>
+                      <Text style={styles.diagramHelper}>{item.helper}</Text>
+                    </View>
+                  );
+                })}
+              </View>
+            </View>
+
             <View style={styles.card}>
               <View style={styles.cardHeader}>
                 <Text style={styles.cardTitle}>Registered Distributors</Text>
@@ -420,6 +580,19 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     elevation: 3,
   },
+  diagramCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 8,
+    paddingHorizontal: 20,
+    paddingTop: 14,
+    paddingBottom: 20,
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 3,
+  },
   cardHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -430,6 +603,49 @@ const styles = StyleSheet.create({
     color: '#187BCD',
     fontSize: 16,
     fontWeight: 'bold',
+  },
+  diagramGrid: {
+    flexDirection: 'row',
+  },
+  diagramItem: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: '#E3F2FD',
+    borderRadius: 8,
+    padding: 14,
+    marginRight: 12,
+    backgroundColor: '#FAFDFF',
+  },
+  diagramItemLast: {
+    marginRight: 0,
+  },
+  diagramLabel: {
+    color: '#455A64',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  diagramValue: {
+    color: '#187BCD',
+    fontSize: 26,
+    fontWeight: 'bold',
+    marginTop: 8,
+  },
+  diagramBarTrack: {
+    height: 8,
+    borderRadius: 8,
+    backgroundColor: '#E3F2FD',
+    marginTop: 12,
+    overflow: 'hidden',
+  },
+  diagramBarFill: {
+    height: '100%',
+    borderRadius: 8,
+    backgroundColor: '#187BCD',
+  },
+  diagramHelper: {
+    color: '#78909C',
+    fontSize: 12,
+    marginTop: 8,
   },
   removeButton: {
     paddingHorizontal: 12,
