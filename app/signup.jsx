@@ -9,7 +9,6 @@ import {
   TextInput,
   ScrollView,
   Modal,
-  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -20,16 +19,95 @@ import { createUserWithEmailAndPassword, deleteUser, signOut } from 'firebase/au
 import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { saveLocalUser } from '../localUsers';
 
+const barangayOptions = [
+  'Awihao',
+  'Bagakay',
+  'Bato',
+  'Biga',
+  'Bulongan',
+  'Bunga',
+  'Cabitoonan',
+  'Calongcalong',
+  'Cambang-ug',
+  'Camp 8',
+  'Canlumampao',
+  'Cantabaco',
+  'Capitan Claudio',
+  'Carmen',
+  'Daanglungsod',
+  'Don Andres Soriano',
+  'Dumlog',
+  'Gen. Climaco',
+  'Ibo',
+  'Ilihan',
+  'Juan Climaco, Sr.',
+  'Landahan',
+  'Loay',
+  'Luray II',
+  'Matab-ang',
+  'Media Once',
+  'Pangamihan',
+  'Poblacion',
+  'Poog',
+  'Putingbato',
+  'Sagay',
+  'Sam-ang',
+  'Sangi',
+  'Santo Niño',
+  'Subayon',
+  'Talavera',
+  'Tubod',
+  'Tungkay',
+];
+
+const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 const authErrorMessages = {
   'auth/email-already-in-use': 'This email is already registered. Please log in instead.',
   'auth/invalid-email': 'Please enter a valid email address.',
-  'auth/weak-password': 'Password should be at least 6 characters.',
+  'auth/weak-password': 'Password must be at least 8 characters.',
   'auth/network-request-failed': 'Network error. Please check your connection and try again.',
   'permission-denied': 'The account was created, but Firestore blocked saving the profile. Please check Firestore rules.',
 };
 
 const getAuthErrorMessage = (error) =>
   authErrorMessages[error?.code] || error?.message || 'Something went wrong. Please try again.';
+
+const isValidEmail = (value) => emailPattern.test(value.trim().toLowerCase());
+
+const validateSignupFields = (values) => {
+  const nextErrors = {};
+
+  if (!values.firstName.trim()) {
+    nextErrors.firstName = 'First name is required.';
+  }
+
+  if (!values.lastName.trim()) {
+    nextErrors.lastName = 'Last name is required.';
+  }
+
+  if (!values.email.trim() || !isValidEmail(values.email)) {
+    nextErrors.email = 'Please enter a valid email address.';
+  }
+
+  if (!values.phone.trim()) {
+    nextErrors.phone = 'Phone number is required.';
+  }
+
+  if (!values.barangay.trim()) {
+    nextErrors.barangay = 'Please select your barangay.';
+  }
+
+  if (!values.password.trim()) {
+    nextErrors.password = 'Password is required.';
+  } else if (values.password.trim().length < 8) {
+    nextErrors.password = 'Password must be at least 8 characters.';
+  }
+
+  return nextErrors;
+};
+
+const hasValidationErrors = (errors) => Object.keys(errors).length > 0;
 
 export default function SignupPage() {
   const router = useRouter();
@@ -40,19 +118,81 @@ export default function SignupPage() {
   const [lastName, setLastName] = React.useState('');
   const [email, setEmail] = React.useState('');
   const [phone, setPhone] = React.useState('');
-  const [address, setAddress] = React.useState('');
+  const [barangay, setBarangay] = React.useState('');
   const [password, setPassword] = React.useState('');
+  const [showBarangays, setShowBarangays] = React.useState(false);
+  const [hasAttemptedSubmit, setHasAttemptedSubmit] = React.useState(false);
+  const [formErrors, setFormErrors] = React.useState({});
+  const [notification, setNotification] = React.useState(null);
+  const passwordMeetsMinimum = password.trim().length >= 8;
+
+  const showNotification = (title, message, onConfirm) => {
+    setNotification({ title, message, onConfirm });
+  };
+
+  const closeNotification = () => {
+    const onConfirm = notification?.onConfirm;
+    setNotification(null);
+    onConfirm?.();
+  };
+
+  const getFormValues = (overrides = {}) => ({
+    firstName,
+    lastName,
+    email,
+    phone,
+    barangay,
+    password,
+    ...overrides,
+  });
+
+  const updateValidation = (nextValues) => {
+    const nextErrors = validateSignupFields(nextValues);
+    setFormErrors(nextErrors);
+    return nextErrors;
+  };
+
+  const handleFieldChange = (field, value, setter) => {
+    setter(value);
+
+    if (hasAttemptedSubmit) {
+      updateValidation(getFormValues({ [field]: value }));
+    }
+  };
+
+  const handleFieldBlur = () => {
+    if (hasAttemptedSubmit) {
+      updateValidation(getFormValues());
+    }
+  };
+
+  const getVisibleError = (field) => {
+    if (!hasAttemptedSubmit || !formErrors[field]) return '';
+    return formErrors[field];
+  };
+
+  const fieldBorderStyle = (field) =>
+    getVisibleError(field) ? styles.inputError : null;
+
+  const selectBarangay = (selectedBarangay) => {
+    setBarangay(selectedBarangay);
+    setShowBarangays(false);
+
+    if (hasAttemptedSubmit) {
+      updateValidation(getFormValues({ barangay: selectedBarangay }));
+    }
+  };
 
   const handleContinue = () => {
-    if (
-      !firstName.trim() ||
-      !lastName.trim() ||
-      !email.trim() ||
-      !phone.trim() ||
-      !address.trim() ||
-      !password.trim()
-    ) {
-      Alert.alert('Missing details', 'Please complete all fields before continuing.');
+    setHasAttemptedSubmit(true);
+
+    const nextErrors = updateValidation(getFormValues());
+
+    if (hasValidationErrors(nextErrors)) {
+      showNotification(
+        'Check sign-up details',
+        'Please correct the highlighted fields before continuing.'
+      );
       return;
     }
 
@@ -67,11 +207,19 @@ export default function SignupPage() {
       setLoading(true);
 
       const normalizedEmail = email.trim().toLowerCase();
+      const trimmedBarangay = barangay.trim();
+      const nextErrors = updateValidation(getFormValues());
+
+      if (hasValidationErrors(nextErrors)) {
+        setHasAttemptedSubmit(true);
+        setLoading(false);
+        return;
+      }
 
       const userCredential = await createUserWithEmailAndPassword(
         auth,
         normalizedEmail,
-        password.trim()
+        password
       );
 
       const user = userCredential.user;
@@ -83,7 +231,8 @@ export default function SignupPage() {
         lastName: lastName.trim(),
         email: (user.email || normalizedEmail).trim().toLowerCase(),
         phone: phone.trim(),
-        address: address.trim(),
+        barangay: trimmedBarangay,
+        address: trimmedBarangay,
         role: type,
         approvalStatus: isDistributor ? 'pending' : 'approved',
       };
@@ -107,11 +256,12 @@ export default function SignupPage() {
         router.replace('/requester/r_dashboard');
       } else {
         await signOut(auth);
-        Alert.alert(
-          'Registration submitted',
-          'Your distributor account is pending admin approval. You can log in after it is accepted.'
+        setLoading(false);
+        showNotification(
+          'Registration Submitted',
+          'Your distributor account has been successfully submitted.\n\nYour account is currently Pending Approval.\n\nPlease wait for the administrator to review and approve your registration before you can log in.',
+          () => router.replace('/login')
         );
-        router.replace('/login');
       }
 
     } catch (error) {
@@ -123,7 +273,7 @@ export default function SignupPage() {
           console.log('Signup cleanup error:', deleteError.message);
         }
       }
-      Alert.alert('Signup failed', getAuthErrorMessage(error));
+      showNotification('Signup failed', getAuthErrorMessage(error));
     } finally {
       setLoading(false);
     }
@@ -152,12 +302,128 @@ export default function SignupPage() {
 
             <View style={styles.formContainer}>
               <View style={styles.inputContainer}>
-                <TextInput style={styles.input} placeholder="Enter first name" placeholderTextColor="#FFFFFF" onChangeText={setFirstName} />
-                <TextInput style={styles.input} placeholder="Enter last name" placeholderTextColor="#FFFFFF" onChangeText={setLastName} />
-                <TextInput style={styles.input} placeholder="Enter email" placeholderTextColor="#FFFFFF" keyboardType="email-address" autoCapitalize="none" onChangeText={setEmail} />
-                <TextInput style={styles.input} placeholder="Enter phone number" placeholderTextColor="#FFFFFF" keyboardType="phone-pad" onChangeText={setPhone} />
-                <TextInput style={styles.input} placeholder="Enter home address" placeholderTextColor="#FFFFFF" onChangeText={setAddress} />
-                <TextInput style={styles.input} placeholder="Enter password" placeholderTextColor="#FFFFFF" secureTextEntry onChangeText={setPassword} />
+                <View style={styles.fieldGroup}>
+                  <TextInput
+                    style={[styles.input, fieldBorderStyle('firstName')]}
+                    placeholder="Enter first name"
+                    placeholderTextColor="#FFFFFF"
+                    value={firstName}
+                    onBlur={() => handleFieldBlur('firstName')}
+                    onChangeText={(value) => handleFieldChange('firstName', value, setFirstName)}
+                  />
+                  {!!getVisibleError('firstName') && (
+                    <Text style={styles.validationText}>{getVisibleError('firstName')}</Text>
+                  )}
+                </View>
+
+                <View style={styles.fieldGroup}>
+                  <TextInput
+                    style={[styles.input, fieldBorderStyle('lastName')]}
+                    placeholder="Enter last name"
+                    placeholderTextColor="#FFFFFF"
+                    value={lastName}
+                    onBlur={() => handleFieldBlur('lastName')}
+                    onChangeText={(value) => handleFieldChange('lastName', value, setLastName)}
+                  />
+                  {!!getVisibleError('lastName') && (
+                    <Text style={styles.validationText}>{getVisibleError('lastName')}</Text>
+                  )}
+                </View>
+
+                <View style={styles.fieldGroup}>
+                  <TextInput
+                    style={[styles.input, fieldBorderStyle('email')]}
+                    placeholder="Enter email"
+                    placeholderTextColor="#FFFFFF"
+                    keyboardType="email-address"
+                    autoCapitalize="none"
+                    value={email}
+                    onBlur={() => handleFieldBlur('email')}
+                    onChangeText={(value) => handleFieldChange('email', value, setEmail)}
+                  />
+                  {!!getVisibleError('email') && (
+                    <Text style={styles.validationText}>{getVisibleError('email')}</Text>
+                  )}
+                </View>
+
+                <View style={styles.fieldGroup}>
+                  <TextInput
+                    style={[styles.input, fieldBorderStyle('phone')]}
+                    placeholder="Enter phone number"
+                    placeholderTextColor="#FFFFFF"
+                    keyboardType="phone-pad"
+                    value={phone}
+                    onBlur={() => handleFieldBlur('phone')}
+                    onChangeText={(value) => handleFieldChange('phone', value, setPhone)}
+                  />
+                  {!!getVisibleError('phone') && (
+                    <Text style={styles.validationText}>{getVisibleError('phone')}</Text>
+                  )}
+                </View>
+
+                <View style={styles.fieldGroup}>
+                  <TouchableOpacity
+                    style={[styles.input, styles.selectInput, fieldBorderStyle('barangay')]}
+                    onPress={() => setShowBarangays((isVisible) => !isVisible)}
+                    activeOpacity={0.85}
+                  >
+                    <Text style={[styles.selectText, !barangay && styles.placeholderText]}>
+                      {barangay || 'Select Barangay'}
+                    </Text>
+                  </TouchableOpacity>
+                  {!!getVisibleError('barangay') && (
+                    <Text style={styles.validationText}>{getVisibleError('barangay')}</Text>
+                  )}
+                  {showBarangays && (
+                    <ScrollView
+                      style={styles.dropdownOptions}
+                      nestedScrollEnabled
+                      showsVerticalScrollIndicator={false}
+                    >
+                      {barangayOptions.map((option) => (
+                        <TouchableOpacity
+                          key={option}
+                          style={styles.dropdownOption}
+                          onPress={() => selectBarangay(option)}
+                        >
+                          <Text style={styles.dropdownOptionText}>{option}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </ScrollView>
+                  )}
+                </View>
+
+                <View style={styles.fieldGroup}>
+                  <TextInput
+                    style={[
+                      styles.input,
+                      getVisibleError('password') && styles.inputError,
+                      hasAttemptedSubmit &&
+                        passwordMeetsMinimum &&
+                        !getVisibleError('password') &&
+                        styles.inputValid,
+                    ]}
+                    placeholder="Enter password"
+                    placeholderTextColor="#FFFFFF"
+                    secureTextEntry
+                    value={password}
+                    onBlur={() => handleFieldBlur('password')}
+                    onChangeText={(value) => handleFieldChange('password', value, setPassword)}
+                  />
+                  {!!getVisibleError('password') && password.length === 0 && (
+                    <Text style={styles.validationText}>{getVisibleError('password')}</Text>
+                  )}
+                  {hasAttemptedSubmit && password.length > 0 && !passwordMeetsMinimum && (
+                    <Text style={styles.validationText}>
+                      {'\u274C'} Password must be at least 8 characters.
+                    </Text>
+                  )}
+                  {hasAttemptedSubmit && passwordMeetsMinimum && (
+                    <Text style={styles.validationSuccessText}>
+                      {'\u2705'} Password meets the minimum requirement.
+                    </Text>
+                  )}
+                </View>
               </View>
             </View>
 
@@ -214,6 +480,19 @@ export default function SignupPage() {
           </View>
         </Modal>
 
+        <Modal visible={!!notification} transparent animationType="fade">
+          <View style={styles.modalBackground}>
+            <View style={styles.modalContainer}>
+              <Text style={styles.modalTitle}>{notification?.title}</Text>
+              <Text style={styles.notificationMessage}>{notification?.message}</Text>
+
+              <TouchableOpacity style={styles.modalButton} onPress={closeNotification}>
+                <Text style={styles.modalButtonText}>OK</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+
       </SafeAreaView>
     </LinearGradient>
   );
@@ -247,8 +526,54 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 10,
     fontSize: 15,
-    marginBottom: 12,
     color: '#FFFFFF',
+  },
+  fieldGroup: { marginBottom: 12 },
+  inputError: {
+    borderColor: '#FFCDD2',
+    backgroundColor: 'rgba(211, 47, 47, 0.14)',
+  },
+  inputValid: {
+    borderColor: '#C8E6C9',
+  },
+  validationText: {
+    color: '#FFCDD2',
+    fontSize: 12,
+    marginTop: 4,
+  },
+  validationSuccessText: {
+    color: '#C8E6C9',
+    fontSize: 12,
+    marginTop: 4,
+  },
+  selectInput: {
+    justifyContent: 'center',
+    minHeight: 42,
+  },
+  selectText: {
+    color: '#FFFFFF',
+    fontSize: 15,
+  },
+  placeholderText: {
+    color: '#FFFFFF',
+  },
+  dropdownOptions: {
+    maxHeight: 160,
+    marginTop: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.45)',
+    borderRadius: 10,
+    backgroundColor: 'rgba(24, 123, 205, 0.96)',
+  },
+  dropdownOption: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.15)',
+  },
+  dropdownOptionText: {
+    color: '#FFFFFF',
+    fontSize: 14,
   },
   buttonContainer: { width: '100%', paddingHorizontal: 24, marginBottom: 16 },
   continueButton: {
@@ -277,6 +602,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   modalTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 20 },
+  notificationMessage: {
+    width: '100%',
+    color: '#455A64',
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: 'center',
+    marginTop: -8,
+    marginBottom: 16,
+  },
   modalButton: {
     width: '100%',
     backgroundColor: '#187BCD',
