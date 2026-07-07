@@ -25,9 +25,11 @@ import { doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
 import { findLocalUserByEmail, saveLocalUser } from '../localUsers';
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const pendingApprovalTitle = 'Pending request';
+const pendingApprovalTitle = 'Pending Approval';
 const pendingApprovalMessage =
-  'Your account is still pending administrator approval. Please wait for the admin to approve your account.';
+  'Your distributor application is still pending administrator approval.';
+const distributorRegistrationMessage =
+  'Your application has been submitted successfully.\n\nYour account is currently Pending Approval.\n\nPlease wait for the administrator to review and approve your application before you can log in.';
 
 const authErrorMessages = {
   'auth/invalid-email': 'Please enter a valid email address.',
@@ -58,6 +60,9 @@ const getPasswordResetErrorMessage = (error) =>
 const isValidEmail = (value) => emailPattern.test(value.trim().toLowerCase());
 const isWrongLoginError = (error) =>
   ['auth/invalid-credential', 'auth/user-not-found', 'auth/wrong-password'].includes(error?.code);
+const normalizeApprovalStatus = (status) =>
+  (status || 'pending').toString().trim().toLowerCase();
+const normalizeRole = (role) => (role || '').toString().trim().toLowerCase();
 
 export default function LoginPage() {
   const router = useRouter();
@@ -85,9 +90,11 @@ export default function LoginPage() {
   };
 
   const navigateToRoleHome = (role) => {
-    if (role === 'requester') {
+    const normalizedRole = normalizeRole(role);
+
+    if (normalizedRole === 'requester') {
       router.replace('/requester/r_dashboard');
-    } else if (role === 'distributor') {
+    } else if (normalizedRole === 'distributor') {
       router.replace('/distributor/d_dashboard');
     } else {
       showNotification('Login failed', 'This account has no valid role.');
@@ -149,18 +156,23 @@ export default function LoginPage() {
         const localUser = findLocalUserByEmail(normalizedEmail);
 
         if (localUser) {
-          if (localUser.role === 'distributor' && localUser.approvalStatus !== 'approved') {
+          const localRole = normalizeRole(localUser.role);
+          const localApprovalStatus = normalizeApprovalStatus(
+            localUser.approvalStatus || localUser.accountStatus || localUser.status
+          );
+
+          if (localRole === 'distributor' && localApprovalStatus !== 'approved') {
             await signOut(auth);
             showNotification(
-              localUser.approvalStatus === 'rejected' ? 'Account rejected' : pendingApprovalTitle,
-              localUser.approvalStatus === 'rejected'
+              localApprovalStatus === 'rejected' ? 'Account rejected' : pendingApprovalTitle,
+              localApprovalStatus === 'rejected'
                 ? 'Your distributor account was rejected by the admin.'
                 : pendingApprovalMessage
             );
             return;
           }
 
-          finishSuccessfulLogin(localUser.role);
+          finishSuccessfulLogin(localRole);
           return;
         }
 
@@ -173,19 +185,28 @@ export default function LoginPage() {
       }
 
       const userData = userDoc.data();
-      const { role, approvalStatus } = userData;
+      const { role, approvalStatus, accountStatus, status } = userData;
+      const profileRole = normalizeRole(role);
+      const profileApprovalStatus = normalizeApprovalStatus(
+        approvalStatus ||
+          accountStatus ||
+          status ||
+          (profileRole === 'distributor' ? 'pending' : 'approved')
+      );
       const profileData = {
         uid: user.uid,
         ...userData,
+        role: profileRole,
         email: (userData.email || user.email || normalizedEmail).trim().toLowerCase(),
+        approvalStatus: profileApprovalStatus,
       };
 
-      if (role === 'distributor' && approvalStatus !== 'approved') {
+      if (profileRole === 'distributor' && profileApprovalStatus !== 'approved') {
         saveLocalUser(profileData);
         await signOut(auth);
         showNotification(
-          approvalStatus === 'rejected' ? 'Account rejected' : pendingApprovalTitle,
-          approvalStatus === 'rejected'
+          profileApprovalStatus === 'rejected' ? 'Account rejected' : pendingApprovalTitle,
+          profileApprovalStatus === 'rejected'
             ? 'Your distributor account was rejected by the admin.'
             : pendingApprovalMessage
         );
@@ -193,7 +214,7 @@ export default function LoginPage() {
       }
 
       saveLocalUser(profileData);
-      finishSuccessfulLogin(role);
+      finishSuccessfulLogin(profileRole);
 
     } catch (error) {
       console.log('Login error:', error.message);
@@ -242,7 +263,7 @@ export default function LoginPage() {
         setLoading(false);
         showNotification(
           'Registration Submitted',
-          'Your distributor account has been successfully submitted.\n\nYour account is currently Pending Approval.\n\nPlease wait for the administrator to review and approve your registration before you can log in.',
+          distributorRegistrationMessage,
           () => router.replace('/login')
         );
         return;

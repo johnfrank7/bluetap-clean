@@ -61,6 +61,8 @@ const barangayOptions = [
 ];
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const distributorRegistrationMessage =
+  'Your application has been submitted successfully.\n\nYour account is currently Pending Approval.\n\nPlease wait for the administrator to review and approve your application before you can log in.';
 
 const authErrorMessages = {
   'auth/email-already-in-use': 'This email is already registered. Please log in instead.',
@@ -111,7 +113,8 @@ const hasValidationErrors = (errors) => Object.keys(errors).length > 0;
 
 export default function SignupPage() {
   const router = useRouter();
-  const [modalVisible, setModalVisible] = React.useState(false);
+  const [modalVisible, setModalVisible] = React.useState(true);
+  const [selectedAccountType, setSelectedAccountType] = React.useState(null);
   const [loading, setLoading] = React.useState(false);
 
   const [firstName, setFirstName] = React.useState('');
@@ -183,7 +186,9 @@ export default function SignupPage() {
     }
   };
 
-  const handleContinue = () => {
+  const handleContinue = async () => {
+    if (loading) return;
+
     setHasAttemptedSubmit(true);
 
     const nextErrors = updateValidation(getFormValues());
@@ -196,14 +201,31 @@ export default function SignupPage() {
       return;
     }
 
-    setModalVisible(true);
+    if (!selectedAccountType) {
+      setModalVisible(true);
+      return;
+    }
+
+    await registerAccount(selectedAccountType);
   };
 
-  const handleAccountType = async (type) => {
+  const handleAccountType = (type) => {
+    setSelectedAccountType(type);
+    setModalVisible(false);
+  };
+
+  const closeAccountTypeSelection = () => {
+    setModalVisible(false);
+
+    if (!selectedAccountType) {
+      router.replace('/login');
+    }
+  };
+
+  const registerAccount = async (type) => {
     let createdUser = null;
 
     try {
-      setModalVisible(false);
       setLoading(true);
 
       const normalizedEmail = email.trim().toLowerCase();
@@ -259,7 +281,7 @@ export default function SignupPage() {
         setLoading(false);
         showNotification(
           'Registration Submitted',
-          'Your distributor account has been successfully submitted.\n\nYour account is currently Pending Approval.\n\nPlease wait for the administrator to review and approve your registration before you can log in.',
+          distributorRegistrationMessage,
           () => router.replace('/login')
         );
       }
@@ -472,7 +494,7 @@ export default function SignupPage() {
                 <Text style={styles.modalButtonText}>Distributor</Text>
               </TouchableOpacity>
 
-              <TouchableOpacity style={styles.modalCancel} onPress={() => setModalVisible(false)}>
+              <TouchableOpacity style={styles.modalCancel} onPress={closeAccountTypeSelection}>
                 <Text style={styles.modalCancelText}>Cancel</Text>
               </TouchableOpacity>
 
