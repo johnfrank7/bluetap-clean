@@ -90,6 +90,7 @@ const normalizeRequest = (id, data = {}) => {
     status: data.status || 'Pending',
     created_at: data.created_at || null,
     updated_at: data.updated_at || null,
+    canceled_at: data.canceled_at || null,
     isLocal: !!data.isLocal,
   };
 };
@@ -193,12 +194,38 @@ const subscribeLocalRequests = (listener) => {
 };
 
 const mergeRequests = (firestoreRequests, localRequests) => {
-  const firestoreRequestIds = new Set(firestoreRequests.map((request) => request.id));
-  const onlyLocalRequests = localRequests.filter(
-    (request) => !firestoreRequestIds.has(request.id)
-  );
+  const requestsById = new Map();
 
-  return sortRequests([...firestoreRequests, ...onlyLocalRequests]);
+  firestoreRequests.forEach((request) => {
+    requestsById.set(request.id, request);
+  });
+
+  localRequests.forEach((localRequest) => {
+    const firestoreRequest = requestsById.get(localRequest.id);
+
+    if (!firestoreRequest) {
+      requestsById.set(localRequest.id, localRequest);
+      return;
+    }
+
+    const localUpdatedAt = timestampToMillis(localRequest.updated_at);
+    const firestoreUpdatedAt = timestampToMillis(firestoreRequest.updated_at);
+    const hasLocalStatusChange =
+      localRequest.status &&
+      localRequest.status.toLowerCase() !== firestoreRequest.status.toLowerCase();
+    const shouldUseLocalRequest =
+      localUpdatedAt >= firestoreUpdatedAt ||
+      (firestoreUpdatedAt === 0 && hasLocalStatusChange);
+
+    requestsById.set(
+      localRequest.id,
+      shouldUseLocalRequest
+        ? { ...firestoreRequest, ...localRequest, isLocal: true }
+        : firestoreRequest
+    );
+  });
+
+  return sortRequests(Array.from(requestsById.values()));
 };
 
 export const subscribeRequesterRequests = (requesterId, listener, onError) => {
@@ -301,6 +328,67 @@ export const createRequest = async (requestData) => {
 
     error.savedLocal = true;
     error.localRequest = localRequest;
+    throw error;
+  }
+};
+
+export const cancelRequest = async (request) => {
+  const requestId = typeof request === 'string' ? request : request?.id;
+
+  if (!requestId) {
+    throw new Error('Request is missing an ID.');
+  }
+
+  const matchingLocalRequest = getLocalRequests().find(
+    (localRequest) => localRequest.id === requestId
+  );
+  const requestData =
+    typeof request === 'string'
+      ? matchingLocalRequest
+      : { ...(matchingLocalRequest || {}), ...request };
+  const normalizedRequest = normalizeRequest(requestId, requestData);
+
+  if (normalizedRequest.status.toLowerCase() !== 'pending') {
+    throw new Error('Only pending requests can be canceled.');
+  }
+
+  const canceledAt = new Date().toISOString();
+  const canceledRequest = normalizeRequest(requestId, {
+    ...normalizedRequest,
+    status: 'Cancelled',
+    updated_at: canceledAt,
+    canceled_at: canceledAt,
+    isLocal: true,
+  });
+
+  if (normalizedRequest.isLocal) {
+    upsertLocalRequest(canceledRequest);
+    return canceledRequest;
+  }
+
+  try {
+    await setDoc(
+      doc(db, REQUESTS_COLLECTION, requestId),
+      {
+        status: 'Cancelled',
+        updated_at: serverTimestamp(),
+        canceled_at: serverTimestamp(),
+      },
+      { merge: true }
+    );
+    removeLocalRequest(requestId);
+
+    return {
+      ...normalizedRequest,
+      status: 'Cancelled',
+      updated_at: canceledAt,
+      canceled_at: canceledAt,
+    };
+  } catch (error) {
+    upsertLocalRequest(canceledRequest);
+
+    error.savedLocal = true;
+    error.localRequest = canceledRequest;
     throw error;
   }
 };

@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   ScrollView,
   ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -15,7 +16,7 @@ import { useRouter } from 'expo-router';
 import { auth } from '../../firebase';
 import { getLocalUsers } from '../../localUsers';
 import { subscribeProducts } from '../../services/products';
-import { subscribeRequesterRequests } from '../../services/requests';
+import { cancelRequest, subscribeRequesterRequests } from '../../services/requests';
 
 const formatPrice = (price) => `\u20B1${Number(price || 0).toFixed(2)}`;
 const getRequestProductSummary = (request) => {
@@ -29,12 +30,20 @@ const getRequestProductSummary = (request) => {
 
   return `${request.quantity} ${request.product_name}`;
 };
+const inactiveStatuses = ['delivered', 'cancelled', 'canceled'];
+const getNormalizedStatus = (status) =>
+  (status || '').toString().trim().toLowerCase();
+const isActiveRequest = (request) =>
+  !inactiveStatuses.includes(getNormalizedStatus(request.status));
+const isPendingRequest = (request) =>
+  getNormalizedStatus(request.status) === 'pending';
 
 export default function RequesterDashboard() {
   const router = useRouter(); 
   const [products, setProducts] = useState([]);
   const [productsLoading, setProductsLoading] = useState(true);
-  const [currentRequest, setCurrentRequest] = useState(null);
+  const [currentRequests, setCurrentRequests] = useState([]);
+  const [cancellingRequestId, setCancellingRequestId] = useState('');
 
   useEffect(() => {
     const unsubscribe = subscribeProducts(
@@ -59,14 +68,53 @@ export default function RequesterDashboard() {
     if (!requesterId) return undefined;
 
     return subscribeRequesterRequests(requesterId, (requests) => {
-      const activeRequest =
-        requests.find(
-          (request) => request.status?.toLowerCase() !== 'delivered'
-        ) || requests[0];
-
-      setCurrentRequest(activeRequest || null);
+      setCurrentRequests(requests.filter(isActiveRequest));
     });
   }, []);
+
+  const cancelPendingRequest = async (request) => {
+    if (cancellingRequestId) return;
+
+    try {
+      setCancellingRequestId(request.id);
+      await cancelRequest(request);
+      Alert.alert('Request cancelled', 'Your pending request has been cancelled.');
+    } catch (error) {
+      if (error.savedLocal) {
+        Alert.alert(
+          'Saved locally',
+          'Your request was cancelled on this device, but Firebase did not accept the update.'
+        );
+        return;
+      }
+
+      Alert.alert('Cancel failed', error.message);
+    } finally {
+      setCancellingRequestId('');
+    }
+  };
+
+  const confirmCancelRequest = (request) => {
+    if (globalThis.confirm) {
+      if (globalThis.confirm('Cancel this pending request?')) {
+        cancelPendingRequest(request);
+      }
+      return;
+    }
+
+    Alert.alert(
+      'Cancel request',
+      'Cancel this pending request?',
+      [
+        { text: 'No', style: 'cancel' },
+        {
+          text: 'Cancel request',
+          style: 'destructive',
+          onPress: () => cancelPendingRequest(request),
+        },
+      ]
+    );
+  };
 
   return (
     <LinearGradient
@@ -165,24 +213,52 @@ export default function RequesterDashboard() {
             <View style={styles.currentRequestSection}>
               <Text style={styles.currentRequestLabel}>Current Request</Text>
 
-              <View style={styles.card}>
-                <Text style={styles.cardText}>
-                  Request ID: {currentRequest?.request_id || 'BT-01302'}
-                </Text>
-                <Text style={styles.cardText}>
-                  Quantity: {getRequestProductSummary(currentRequest)}
-                </Text>
-                <Text style={styles.cardText}>
-                  Container: {currentRequest?.container || 'Exchange'}
-                </Text>
-                <Text style={styles.cardText}>
-                  {currentRequest?.water_station || 'Toledo Pure Water Station'}
-                </Text>
+              {currentRequests.length === 0 ? (
+                <View style={styles.card}>
+                  <Text style={styles.cardText}>No current request.</Text>
+                </View>
+              ) : (
+                currentRequests.map((request, index) => (
+                  <View
+                    style={[styles.card, index > 0 && styles.currentRequestCardGap]}
+                    key={request.id}
+                  >
+                    <Text style={styles.cardText}>
+                      Request ID: {request.request_id || request.id}
+                    </Text>
+                    <Text style={styles.cardText}>
+                      Quantity: {getRequestProductSummary(request)}
+                    </Text>
+                    <Text style={styles.cardText}>
+                      Container: {request.container || 'Not set'}
+                    </Text>
+                    <Text style={styles.cardText}>
+                      {request.water_station || 'Water station not set'}
+                    </Text>
 
-                <Text style={styles.status}>
-                  Status: {currentRequest?.status || 'Out for delivery'}
-                </Text>
-              </View>
+                    <Text style={styles.status}>
+                      Status: {request.status || 'Pending'}
+                    </Text>
+
+                    {isPendingRequest(request) && (
+                      <TouchableOpacity
+                        style={[
+                          styles.cancelRequestButton,
+                          cancellingRequestId === request.id && styles.buttonDisabled,
+                        ]}
+                        onPress={() => confirmCancelRequest(request)}
+                        disabled={cancellingRequestId === request.id}
+                      >
+                        <Text style={styles.cancelRequestText}>
+                          {cancellingRequestId === request.id
+                            ? 'Cancelling...'
+                            : 'Cancel request'}
+                        </Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                ))
+              )}
             </View>
 
             <View style={{ height: 200 }} />
@@ -360,6 +436,9 @@ const styles = StyleSheet.create({
     shadowRadius: 6,
     shadowOffset: { width: 0, height: 3 },
   },
+  currentRequestCardGap: {
+    marginTop: 10,
+  },
   cardText: {
     color: '#187BCD',
     fontSize: 14,
@@ -370,6 +449,23 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: 'bold',
     marginTop: 8,
+  },
+  cancelRequestButton: {
+    alignSelf: 'flex-start',
+    borderWidth: 1,
+    borderColor: '#187BCD',
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    marginTop: 10,
+  },
+  cancelRequestText: {
+    color: '#187BCD',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  buttonDisabled: {
+    opacity: 0.7,
   },
 
   bottomNav: {
