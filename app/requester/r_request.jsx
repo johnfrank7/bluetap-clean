@@ -7,7 +7,6 @@ import {
   TouchableOpacity,
   ScrollView,
   Modal,
-  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -15,10 +14,10 @@ import { useRouter } from 'expo-router';
 
 import { auth } from '../../firebase';
 import { getLocalUsers } from '../../localUsers';
-import { cancelRequest, subscribeRequesterRequests } from '../../services/requests';
+import { subscribeRequesterRequests } from '../../services/requests';
 
 const formatPrice = (price) => `\u20B1${Number(price || 0).toFixed(2)}`;
-const initialVisibleRequestCount = 3;
+const initialVisibleRequestCount = 1;
 
 const timestampToDate = (timestamp) => {
   if (!timestamp) return null;
@@ -60,17 +59,12 @@ const getRequestProductSummary = (request) => {
 
   return `${request.quantity} ${request.product_name}`.trim();
 };
-const getNormalizedStatus = (status) =>
-  (status || '').toString().trim().toLowerCase();
-const isPendingRequest = (request) =>
-  getNormalizedStatus(request.status) === 'pending';
 
 export default function RequesterRequests() {
   const router = useRouter();
   const [requests, setRequests] = useState([]);
   const [selectedRequest, setSelectedRequest] = useState(null);
   const [showAllRequests, setShowAllRequests] = useState(false);
-  const [cancellingRequestId, setCancellingRequestId] = useState('');
 
   useEffect(() => {
     const requesterId =
@@ -86,55 +80,6 @@ export default function RequesterRequests() {
   const visibleRequests = showAllRequests
     ? requests
     : requests.slice(0, initialVisibleRequestCount);
-
-  const cancelPendingRequest = async (request) => {
-    if (cancellingRequestId) return;
-
-    try {
-      setCancellingRequestId(request.id);
-      await cancelRequest(request);
-      setSelectedRequest((currentRequest) =>
-        currentRequest?.id === request.id
-          ? { ...currentRequest, status: 'Cancelled' }
-          : currentRequest
-      );
-      Alert.alert('Request cancelled', 'Your pending request has been cancelled.');
-    } catch (error) {
-      if (error.savedLocal) {
-        Alert.alert(
-          'Saved locally',
-          'Your request was cancelled on this device, but Firebase did not accept the update.'
-        );
-        return;
-      }
-
-      Alert.alert('Cancel failed', error.message);
-    } finally {
-      setCancellingRequestId('');
-    }
-  };
-
-  const confirmCancelRequest = (request) => {
-    if (globalThis.confirm) {
-      if (globalThis.confirm('Cancel this pending request?')) {
-        cancelPendingRequest(request);
-      }
-      return;
-    }
-
-    Alert.alert(
-      'Cancel request',
-      'Cancel this pending request?',
-      [
-        { text: 'No', style: 'cancel' },
-        {
-          text: 'Cancel request',
-          style: 'destructive',
-          onPress: () => cancelPendingRequest(request),
-        },
-      ]
-    );
-  };
 
   return (
     <SafeAreaView style={styles.container}>
@@ -177,17 +122,6 @@ export default function RequesterRequests() {
 
                   <View style={styles.requestFooterRow}>
                     <View style={styles.requestUnderline} />
-                    {isPendingRequest(request) && (
-                      <TouchableOpacity
-                        style={styles.cancelRequestButton}
-                        onPress={() => confirmCancelRequest(request)}
-                        disabled={cancellingRequestId === request.id}
-                      >
-                        <Text style={styles.cancelRequestText}>
-                          {cancellingRequestId === request.id ? 'Cancelling...' : 'Cancel'}
-                        </Text>
-                      </TouchableOpacity>
-                    )}
                     <TouchableOpacity
                       style={styles.detailsButton}
                       onPress={() => setSelectedRequest(request)}
@@ -271,23 +205,6 @@ export default function RequesterRequests() {
                   <Text style={styles.modalTotal}>
                     Total: {formatPrice(selectedRequest.total_cost)}
                   </Text>
-
-                  {isPendingRequest(selectedRequest) && (
-                    <TouchableOpacity
-                      style={[
-                        styles.modalCancelRequestButton,
-                        cancellingRequestId === selectedRequest.id && styles.buttonDisabled,
-                      ]}
-                      onPress={() => confirmCancelRequest(selectedRequest)}
-                      disabled={cancellingRequestId === selectedRequest.id}
-                    >
-                      <Text style={styles.modalCancelRequestText}>
-                        {cancellingRequestId === selectedRequest.id
-                          ? 'Cancelling...'
-                          : 'Cancel request'}
-                      </Text>
-                    </TouchableOpacity>
-                  )}
                 </>
               )}
 
@@ -401,15 +318,6 @@ const styles = StyleSheet.create({
   detailsButton: {
     marginLeft: 8,
   },
-  cancelRequestButton: {
-    marginLeft: 8,
-  },
-  cancelRequestText: {
-    color: '#FFFFFF',
-    fontSize: 13,
-    fontWeight: '600',
-    textDecorationLine: 'underline',
-  },
   detailsText: {
     color: '#FFFFFF',
     fontSize: 13,
@@ -479,18 +387,6 @@ const styles = StyleSheet.create({
     marginTop: 6,
     marginBottom: 16,
   },
-  modalCancelRequestButton: {
-    borderWidth: 1,
-    borderColor: '#187BCD',
-    padding: 12,
-    borderRadius: 10,
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-  modalCancelRequestText: {
-    color: '#187BCD',
-    fontWeight: 'bold',
-  },
   modalButton: {
     backgroundColor: '#187BCD',
     padding: 14,
@@ -501,7 +397,6 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontWeight: 'bold',
   },
-  buttonDisabled: { opacity: 0.7 },
   bottomNav: {
     position: 'absolute',
     bottom: 24,

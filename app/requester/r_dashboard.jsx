@@ -44,6 +44,7 @@ export default function RequesterDashboard() {
   const [productsLoading, setProductsLoading] = useState(true);
   const [currentRequests, setCurrentRequests] = useState([]);
   const [cancellingRequestId, setCancellingRequestId] = useState('');
+  const [openRequestMenuId, setOpenRequestMenuId] = useState('');
 
   useEffect(() => {
     const unsubscribe = subscribeProducts(
@@ -95,6 +96,8 @@ export default function RequesterDashboard() {
   };
 
   const confirmCancelRequest = (request) => {
+    setOpenRequestMenuId('');
+
     if (globalThis.confirm) {
       if (globalThis.confirm('Cancel this pending request?')) {
         cancelPendingRequest(request);
@@ -223,6 +226,38 @@ export default function RequesterDashboard() {
                     style={[styles.card, index > 0 && styles.currentRequestCardGap]}
                     key={request.id}
                   >
+                    {isPendingRequest(request) && (
+                      <View style={styles.requestMenuWrap}>
+                        <TouchableOpacity
+                          style={styles.requestMenuButton}
+                          onPress={() =>
+                            setOpenRequestMenuId((currentId) =>
+                              currentId === request.id ? '' : request.id
+                            )
+                          }
+                          disabled={cancellingRequestId === request.id}
+                        >
+                          <Text style={styles.requestMenuDots}>...</Text>
+                        </TouchableOpacity>
+
+                        {openRequestMenuId === request.id && (
+                          <View style={styles.requestMenu}>
+                            <TouchableOpacity
+                              style={styles.requestMenuItem}
+                              onPress={() => confirmCancelRequest(request)}
+                              disabled={cancellingRequestId === request.id}
+                            >
+                              <Text style={styles.requestMenuItemText}>
+                                {cancellingRequestId === request.id
+                                  ? 'Cancelling...'
+                                  : 'Cancel request'}
+                              </Text>
+                            </TouchableOpacity>
+                          </View>
+                        )}
+                      </View>
+                    )}
+
                     <Text style={styles.cardText}>
                       Request ID: {request.request_id || request.id}
                     </Text>
@@ -239,23 +274,6 @@ export default function RequesterDashboard() {
                     <Text style={styles.status}>
                       Status: {request.status || 'Pending'}
                     </Text>
-
-                    {isPendingRequest(request) && (
-                      <TouchableOpacity
-                        style={[
-                          styles.cancelRequestButton,
-                          cancellingRequestId === request.id && styles.buttonDisabled,
-                        ]}
-                        onPress={() => confirmCancelRequest(request)}
-                        disabled={cancellingRequestId === request.id}
-                      >
-                        <Text style={styles.cancelRequestText}>
-                          {cancellingRequestId === request.id
-                            ? 'Cancelling...'
-                            : 'Cancel request'}
-                        </Text>
-                      </TouchableOpacity>
-                    )}
                   </View>
                 ))
               )}
@@ -430,6 +448,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderRadius: 8,
     padding: 16,
+    paddingRight: 48,
+    position: 'relative',
     elevation: 5,
     shadowColor: '#000',
     shadowOpacity: 0.08,
@@ -450,22 +470,48 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     marginTop: 8,
   },
-  cancelRequestButton: {
-    alignSelf: 'flex-start',
-    borderWidth: 1,
-    borderColor: '#187BCD',
-    borderRadius: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    marginTop: 10,
+  requestMenuWrap: {
+    position: 'absolute',
+    top: 8,
+    right: 10,
+    zIndex: 3,
+    alignItems: 'flex-end',
   },
-  cancelRequestText: {
+  requestMenuButton: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  requestMenuDots: {
+    color: '#187BCD',
+    fontSize: 18,
+    fontWeight: 'bold',
+    lineHeight: 18,
+  },
+  requestMenu: {
+    minWidth: 126,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#BBDEFB',
+    borderRadius: 8,
+    paddingVertical: 4,
+    marginTop: 2,
+    elevation: 6,
+    shadowColor: '#000',
+    shadowOpacity: 0.12,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 3 },
+  },
+  requestMenuItem: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  requestMenuItemText: {
     color: '#187BCD',
     fontSize: 12,
     fontWeight: 'bold',
-  },
-  buttonDisabled: {
-    opacity: 0.7,
   },
 
   bottomNav: {
