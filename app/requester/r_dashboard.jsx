@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -8,16 +8,22 @@ import {
   ScrollView,
   ActivityIndicator,
   Alert,
+  useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { StatusBar } from 'expo-status-bar';
 import { useRouter } from 'expo-router';
+import Carousel from 'react-native-reanimated-carousel';
 import { auth } from '../../firebase';
 import { getLocalUsers } from '../../localUsers';
 import { subscribeProducts } from '../../services/products';
 import { cancelRequest, subscribeRequesterRequests } from '../../services/requests';
 
+const PHONE_MAX_WIDTH = 375;
+const DASHBOARD_HORIZONTAL_PADDING = 34;
+const PRODUCT_CARD_WIDTH_RATIO = 0.88;
+const PRODUCT_CAROUSEL_HEIGHT = 226;
 const formatPrice = (price) => `\u20B1${Number(price || 0).toFixed(2)}`;
 const getRequestProductSummary = (request) => {
   if (!request) return '4 Gallons';
@@ -37,14 +43,68 @@ const isActiveRequest = (request) =>
   !inactiveStatuses.includes(getNormalizedStatus(request.status));
 const isPendingRequest = (request) =>
   getNormalizedStatus(request.status) === 'pending';
+const getProductGallons = (product) =>
+  product.capacity ||
+  product.gallons ||
+  product.gallon ||
+  product.volume ||
+  product.size ||
+  product.product_name ||
+  '';
+const getProductStockText = (product) => {
+  const statusText =
+    product.stockAvailability ||
+    product.stock_availability ||
+    product.stockStatus ||
+    product.stock_status ||
+    product.availability;
+
+  if (statusText) return String(statusText);
+
+  const stockValue =
+    product.stock ??
+    product.stocks ??
+    product.inventory ??
+    product.available_stock ??
+    product.quantity_available;
+
+  if (stockValue === undefined || stockValue === null || stockValue === '') {
+    return '';
+  }
+
+  if (typeof stockValue === 'boolean') {
+    return stockValue ? 'In stock' : 'Out of stock';
+  }
+
+  const numericStock = Number(stockValue);
+
+  if (Number.isFinite(numericStock)) {
+    return numericStock > 0 ? `${numericStock} in stock` : 'Out of stock';
+  }
+
+  return String(stockValue);
+};
+const isUnavailableStock = (stockText) =>
+  stockText.toLowerCase().includes('out') ||
+  stockText.toLowerCase().includes('unavailable');
 
 export default function RequesterDashboard() {
   const router = useRouter(); 
+  const productCarouselRef = useRef(null);
+  const { width: windowWidth } = useWindowDimensions();
   const [products, setProducts] = useState([]);
   const [productsLoading, setProductsLoading] = useState(true);
+  const [activeProductIndex, setActiveProductIndex] = useState(0);
   const [currentRequests, setCurrentRequests] = useState([]);
   const [cancellingRequestId, setCancellingRequestId] = useState('');
   const [openRequestMenuId, setOpenRequestMenuId] = useState('');
+  const productCarouselWidth = Math.max(1, Math.min(windowWidth, PHONE_MAX_WIDTH));
+  const productCarouselItemWidth = Math.max(
+    1,
+    Math.round(productCarouselWidth * PRODUCT_CARD_WIDTH_RATIO)
+  );
+  const productCarouselSideInset =
+    (productCarouselWidth - productCarouselItemWidth) / 2;
 
   useEffect(() => {
     const unsubscribe = subscribeProducts(
@@ -59,6 +119,17 @@ export default function RequesterDashboard() {
 
     return unsubscribe;
   }, []);
+
+  useEffect(() => {
+    if (products.length === 0) {
+      setActiveProductIndex(0);
+      return;
+    }
+
+    if (activeProductIndex > products.length - 1) {
+      setActiveProductIndex(0);
+    }
+  }, [activeProductIndex, products.length]);
 
   useEffect(() => {
     const requesterId =
@@ -119,6 +190,95 @@ export default function RequesterDashboard() {
     );
   };
 
+  const openProductRequest = useCallback(
+    (productId) => {
+      router.push({
+        pathname: '/requester/requestform',
+        params: { productId },
+      });
+    },
+    [router]
+  );
+
+  const renderProductCard = useCallback(
+    ({ item: product }) => {
+      const stockText = getProductStockText(product);
+
+      return (
+        <View style={styles.productCarouselItem}>
+          <View style={styles.productCard}>
+            <View style={styles.priceBadge}>
+              <Text style={styles.priceBadgeText}>
+                {formatPrice(product.price)}
+              </Text>
+            </View>
+
+            <View style={styles.productImageWrap}>
+              {product.image ? (
+                <Image
+                  source={{ uri: product.image }}
+                  style={styles.productImage}
+                  resizeMode="contain"
+                />
+              ) : (
+                <Image
+                  source={require('../../assets/icons/bluetaplogo.png')}
+                  style={styles.productImage}
+                  resizeMode="contain"
+                />
+              )}
+            </View>
+
+            <View style={styles.productDetails}>
+              <Text style={styles.productName} numberOfLines={2}>
+                {product.product_name}
+              </Text>
+              <Text style={styles.productGallons} numberOfLines={1}>
+                {getProductGallons(product)}
+              </Text>
+              {!!stockText && (
+                <Text
+                  style={[
+                    styles.productStock,
+                    isUnavailableStock(stockText) && styles.productStockUnavailable,
+                  ]}
+                  numberOfLines={1}
+                >
+                  {stockText}
+                </Text>
+              )}
+            </View>
+
+            <TouchableOpacity
+              style={styles.orderButton}
+              activeOpacity={0.85}
+              onPress={() => openProductRequest(product.id)}
+            >
+              <Text style={styles.orderButtonText}>Order</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      );
+    },
+    [openProductRequest]
+  );
+
+  const productCarouselAnimation = useCallback(
+    (value) => {
+      'worklet';
+
+      return {
+        transform: [
+          {
+            translateX:
+              productCarouselSideInset + value * productCarouselItemWidth,
+          },
+        ],
+      };
+    },
+    [productCarouselItemWidth, productCarouselSideInset]
+  );
+
   return (
     <LinearGradient
       colors={['#187BCD', '#42A5F5']}
@@ -150,66 +310,57 @@ export default function RequesterDashboard() {
 
             <View style={styles.productsSection}>
               {productsLoading ? (
-                <View style={styles.productsGrid}>
-                  <View style={[styles.productTile, styles.productTileEmpty]}>
-                    <ActivityIndicator size="small" color="#187BCD" />
-                  </View>
+                <View style={styles.productStateCard}>
+                  <ActivityIndicator size="small" color="#187BCD" />
                 </View>
               ) : products.length === 0 ? (
-                <View style={styles.productsGrid}>
-                  <View style={[styles.productTile, styles.productTileEmpty]}>
-                    <Text style={styles.productName}>No products available.</Text>
-                  </View>
+                <View style={styles.productStateCard}>
+                  <Text style={styles.productName}>No products available.</Text>
                 </View>
               ) : (
-                <View style={styles.productsGrid}>
-                  {products.map((product) => (
-                    <TouchableOpacity
-                      style={styles.productTile}
-                      key={product.id}
-                      activeOpacity={0.85}
-                      onPress={() =>
-                        router.push({
-                          pathname: '/requester/requestform',
-                          params: { productId: product.id },
-                        })
-                      }
-                    >
-                      <View style={styles.priceBadge}>
-                        <Text style={styles.priceBadgeText}>
-                          {formatPrice(product.price)}
-                        </Text>
-                      </View>
+                <>
+                  <Carousel
+                    ref={productCarouselRef}
+                    data={products}
+                    loop={products.length > 1}
+                    style={[
+                      styles.productCarousel,
+                      {
+                        width: productCarouselWidth,
+                        height: PRODUCT_CAROUSEL_HEIGHT,
+                        marginLeft: -DASHBOARD_HORIZONTAL_PADDING,
+                      },
+                    ]}
+                    itemWidth={productCarouselItemWidth}
+                    itemHeight={PRODUCT_CAROUSEL_HEIGHT}
+                    scrollAnimationDuration={450}
+                    customAnimation={productCarouselAnimation}
+                    onSnapToItem={setActiveProductIndex}
+                    renderItem={renderProductCard}
+                  />
 
-                      <View style={styles.productImageWrap}>
-                        {product.image ? (
-                          <Image
-                            source={{ uri: product.image }}
-                            style={styles.productImage}
-                            resizeMode="contain"
-                          />
-                        ) : (
-                          <Image
-                            source={require('../../assets/icons/bluetaplogo.png')}
-                            style={styles.productImage}
-                            resizeMode="contain"
-                          />
-                        )}
-                      </View>
-
-                      <View style={styles.productDetails}>
-                        <Text style={styles.productName} numberOfLines={2}>
-                          {product.product_name}
-                        </Text>
-                        {!!product.capacity && (
-                          <Text style={styles.productSubtext} numberOfLines={1}>
-                            {product.capacity}
-                          </Text>
-                        )}
-                      </View>
-                    </TouchableOpacity>
-                  ))}
-                </View>
+                  <View style={styles.paginationDots}>
+                    {products.map((product, index) => (
+                      <TouchableOpacity
+                        key={product.id}
+                        style={[
+                          styles.paginationDot,
+                          activeProductIndex === index && styles.paginationDotActive,
+                        ]}
+                        activeOpacity={0.75}
+                        onPress={() => {
+                          productCarouselRef.current?.scrollTo({
+                            index,
+                            animated: true,
+                          });
+                          setActiveProductIndex(index);
+                        }}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Show ${product.product_name}`}
+                      />
+                    ))}
+                  </View>
+                </>
               )}
             </View>
 
@@ -365,78 +516,134 @@ const styles = StyleSheet.create({
     marginTop: 5,
   },
   productsSection: {
-    marginTop: 36,
+    marginTop: 24,
   },
-  productsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
+  productCarousel: {
+    alignSelf: 'flex-start',
   },
-  productTile: {
-    width: '48%',
-    minHeight: 170,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingTop: 18,
-    paddingBottom: 12,
-    marginBottom: 18,
-    position: 'relative',
-    elevation: 4,
-    shadowColor: '#000',
-    shadowOpacity: 0.08,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 3 },
-  },
-  productTileEmpty: {
+  productCarouselItem: {
     width: '100%',
-    minHeight: 128,
+    height: '100%',
+    paddingHorizontal: 6,
+    paddingVertical: 8,
+  },
+  productStateCard: {
+    minHeight: 146,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
+    elevation: 6,
+    shadowColor: '#000',
+    shadowOpacity: 0.12,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 5 },
+  },
+  productCard: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    paddingBottom: 12,
+    position: 'relative',
+    justifyContent: 'space-between',
+    elevation: 6,
+    shadowColor: '#000',
+    shadowOpacity: 0.13,
+    shadowRadius: 9,
+    shadowOffset: { width: 0, height: 5 },
   },
   priceBadge: {
     position: 'absolute',
-    top: 9,
-    left: 9,
+    top: 12,
+    left: 14,
     backgroundColor: '#187BCD',
-    borderRadius: 4,
-    paddingHorizontal: 5,
-    paddingVertical: 2,
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
     zIndex: 1,
   },
   priceBadgeText: {
     color: '#FFFFFF',
-    fontSize: 9,
+    fontSize: 10,
     fontWeight: 'bold',
   },
   productImageWrap: {
-    height: 100,
+    height: 88,
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 8,
   },
   productImage: {
-    width: 88,
-    height: 94,
+    width: 96,
+    height: 96,
   },
   productDetails: {
-    marginTop: 8,
+    minHeight: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 0,
   },
   productName: {
     color: '#187BCD',
+    fontSize: 15,
+    lineHeight: 18,
+    fontWeight: 'bold',
+    textAlign: 'center',
+  },
+  productGallons: {
+    color: '#455A64',
+    fontSize: 12,
+    lineHeight: 15,
+    fontWeight: '600',
+    marginTop: 3,
+    textAlign: 'center',
+  },
+  productStock: {
+    color: '#2E7D32',
+    fontSize: 11,
+    lineHeight: 14,
+    fontWeight: '700',
+    marginTop: 2,
+    textAlign: 'center',
+  },
+  productStockUnavailable: {
+    color: '#D32F2F',
+  },
+  orderButton: {
+    height: 32,
+    backgroundColor: '#187BCD',
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 6,
+  },
+  orderButtonText: {
+    color: '#FFFFFF',
     fontSize: 13,
-    lineHeight: 16,
     fontWeight: 'bold',
   },
-  productSubtext: {
-    color: '#187BCD',
-    fontSize: 10,
-    lineHeight: 13,
-    fontWeight: 'bold',
-    marginTop: 1,
+  paginationDots: {
+    minHeight: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 4,
+  },
+  paginationDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: 'rgba(255, 255, 255, 0.5)',
+    marginHorizontal: 4,
+  },
+  paginationDotActive: {
+    width: 22,
+    backgroundColor: '#FFFFFF',
   },
   currentRequestSection: {
-    marginTop: 18,
+    marginTop: 10,
   },
   currentRequestLabel: {
     color: '#FFFFFF',
