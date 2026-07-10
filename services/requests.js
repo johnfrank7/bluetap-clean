@@ -228,46 +228,129 @@ const mergeRequests = (firestoreRequests, localRequests) => {
   return sortRequests(Array.from(requestsById.values()));
 };
 
+const REQUEST_SUBSCRIPTION_IDLE_MS = 15000;
+const requesterRequestSubscriptions = new Map();
+
+const getRequestSignature = (requests) =>
+  requests
+    .map(
+      (request) =>
+        `${request.id}|${request.status}|${timestampToMillis(request.updated_at)}|${timestampToMillis(request.created_at)}|${request.total_cost}|${request.quantity}`
+    )
+    .join('::');
+
+const getRequesterRequestEntry = (requesterId) => {
+  if (!requesterRequestSubscriptions.has(requesterId)) {
+    requesterRequestSubscriptions.set(requesterId, {
+      firestoreRequests: [],
+      cachedRequests: null,
+      cachedSignature: '',
+      subscribers: new Set(),
+      unsubscribeFirestore: null,
+      unsubscribeLocal: null,
+      stopTimer: null,
+    });
+  }
+
+  return requesterRequestSubscriptions.get(requesterId);
+};
+
+const notifyRequesterRequestSubscribers = (entry) => {
+  entry.subscribers.forEach(({ listener }) => {
+    listener(entry.cachedRequests || []);
+  });
+};
+
+const emitRequesterRequests = (requesterId, entry, force = false) => {
+  const localRequests = getLocalRequests().filter(
+    (request) => request.requester_id === requesterId
+  );
+  const nextRequests = mergeRequests(entry.firestoreRequests, localRequests);
+  const nextSignature = getRequestSignature(nextRequests);
+
+  if (!force && entry.cachedRequests && nextSignature === entry.cachedSignature) {
+    return;
+  }
+
+  entry.cachedRequests = nextRequests;
+  entry.cachedSignature = nextSignature;
+  notifyRequesterRequestSubscribers(entry);
+};
+
+const stopRequesterRequestSubscription = (requesterId, entry) => {
+  entry.unsubscribeFirestore?.();
+  entry.unsubscribeLocal?.();
+  entry.unsubscribeFirestore = null;
+  entry.unsubscribeLocal = null;
+  entry.stopTimer = null;
+};
+
+const scheduleRequesterRequestStop = (requesterId, entry) => {
+  if (entry.subscribers.size > 0 || entry.stopTimer) return;
+
+  entry.stopTimer = setTimeout(() => {
+    if (entry.subscribers.size === 0) {
+      stopRequesterRequestSubscription(requesterId, entry);
+    }
+  }, REQUEST_SUBSCRIPTION_IDLE_MS);
+};
+
+const startRequesterRequestSubscription = (requesterId, entry) => {
+  if (entry.stopTimer) {
+    clearTimeout(entry.stopTimer);
+    entry.stopTimer = null;
+  }
+
+  if (entry.unsubscribeFirestore && entry.unsubscribeLocal) {
+    return;
+  }
+
+  entry.unsubscribeLocal = subscribeLocalRequests(() =>
+    emitRequesterRequests(requesterId, entry)
+  );
+
+  const requestsQuery = query(
+    collection(db, REQUESTS_COLLECTION),
+    where('requester_id', '==', requesterId)
+  );
+
+  entry.unsubscribeFirestore = onSnapshot(
+    requestsQuery,
+    (snapshot) => {
+      entry.firestoreRequests = snapshot.docs.map((item) =>
+        normalizeRequest(item.id, item.data())
+      );
+      emitRequesterRequests(requesterId, entry);
+    },
+    (error) => {
+      console.log('Requests Firestore subscription error:', error.message);
+      entry.subscribers.forEach(({ onError }) => onError?.(error));
+      emitRequesterRequests(requesterId, entry, true);
+    }
+  );
+};
+
 export const subscribeRequesterRequests = (requesterId, listener, onError) => {
   if (!requesterId) {
     listener([]);
     return () => {};
   }
 
-  let firestoreRequests = [];
+  const entry = getRequesterRequestEntry(requesterId);
+  const subscriber = { listener, onError };
+  entry.subscribers.add(subscriber);
 
-  const emitRequests = () => {
-    const localRequests = getLocalRequests().filter(
-      (request) => request.requester_id === requesterId
-    );
-    listener(mergeRequests(firestoreRequests, localRequests));
-  };
+  if (entry.cachedRequests) {
+    listener(entry.cachedRequests);
+  } else {
+    emitRequesterRequests(requesterId, entry, true);
+  }
 
-  emitRequests();
-  const unsubscribeLocalRequests = subscribeLocalRequests(emitRequests);
-  const requestsQuery = query(
-    collection(db, REQUESTS_COLLECTION),
-    where('requester_id', '==', requesterId)
-  );
-
-  const unsubscribeFirestore = onSnapshot(
-    requestsQuery,
-    (snapshot) => {
-      firestoreRequests = snapshot.docs.map((item) =>
-        normalizeRequest(item.id, item.data())
-      );
-      emitRequests();
-    },
-    (error) => {
-      console.log('Requests Firestore subscription error:', error.message);
-      onError?.(error);
-      emitRequests();
-    }
-  );
+  startRequesterRequestSubscription(requesterId, entry);
 
   return () => {
-    unsubscribeFirestore();
-    unsubscribeLocalRequests();
+    entry.subscribers.delete(subscriber);
+    scheduleRequesterRequestStop(requesterId, entry);
   };
 };
 

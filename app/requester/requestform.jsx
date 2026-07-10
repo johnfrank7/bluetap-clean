@@ -533,20 +533,6 @@ export default function RequestFormPage() {
             </TouchableOpacity>
           </ScrollView>
 
-          {/* Bottom navigation bar */}
-          <View style={styles.bottomNav}>
-            <TouchableOpacity onPress={() => router.replace('/requester/r_dashboard')}>
-              <Image source={require('../../assets/icons/home.png')} style={styles.navIcon} />
-            </TouchableOpacity>
-
-            <TouchableOpacity onPress={() => router.replace('/requester/requestform')}>
-              <Image source={require('../../assets/icons/square-plus.png')} style={styles.navIcon} />
-            </TouchableOpacity>
-
-            <TouchableOpacity onPress={() => router.replace('/requester/r_profile')}>
-              <Image source={require('../../assets/icons/user.png')} style={styles.navIcon} />
-            </TouchableOpacity>
-          </View>
         </View>
 
         <Modal visible={summaryVisible} transparent animationType="slide">
@@ -852,24 +838,4 @@ const styles = StyleSheet.create({
   modalButtonText: { color: '#fff', fontWeight: 'bold' },
   modalCancel: { marginTop: 12, alignItems: 'center' },
   modalCancelText: { color: '#187BCD', fontWeight: 'bold' },
-  bottomNav: {
-    position: 'absolute',
-    bottom: 24,
-    left: 20,
-    right: 20,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    paddingVertical: 14,
-    paddingHorizontal: 28,
-    borderRadius: 22,
-    zIndex: 2,
-    elevation: 8,
-    shadowColor: '#000',
-    shadowOpacity: 0.12,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 3 },
-  },
-  navIcon: { width: 26, height: 26, tintColor: '#187BCD' },
 });

@@ -15,42 +15,120 @@ import { useRouter } from 'expo-router';
 import { auth, db } from '../../firebase';
 import { signOut } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
+import { findLocalUserByEmail, getLocalUsers } from '../../localUsers';
+
+const PROFILE_CACHE_TTL_MS = 60000;
+
+let cachedRequesterProfile = null;
+let cachedRequesterProfileUid = '';
+let cachedRequesterProfileFetchedAt = 0;
+
+const getLocalRequesterProfile = (user) => {
+  if (user?.email) {
+    return findLocalUserByEmail(user.email);
+  }
+
+  return getLocalUsers().find((localUser) => localUser.role === 'requester') || null;
+};
+
+const buildProfileData = (profile = {}, user = null) => ({
+  ...profile,
+  uid: user?.uid || profile.uid || profile.id || '',
+  email: profile.email || user?.email || '',
+});
+
+const cacheProfile = (profile) => {
+  cachedRequesterProfile = profile;
+  cachedRequesterProfileUid = profile?.uid || '';
+  cachedRequesterProfileFetchedAt = Date.now();
+};
 
 export default function ProfilePage() {
   const router = useRouter();
-  const [loading, setLoading] = useState(true);
-  const [userData, setUserData] = useState(null);
+  const [loading, setLoading] = useState(!cachedRequesterProfile);
+  const [userData, setUserData] = useState(cachedRequesterProfile);
 
   useEffect(() => {
+    let isMounted = true;
+
     const loadProfile = async () => {
       const user = auth.currentUser;
-      if (!user) {
+      const localProfile = getLocalRequesterProfile(user);
+
+      if (!user && !localProfile) {
         router.replace('/login');
         return;
       }
 
-      const snap = await getDoc(doc(db, 'users', user.uid));
-      if (snap.exists()) {
-        setUserData(snap.data());
+      const profileUid = user?.uid || localProfile?.uid || '';
+      const hasFreshCache =
+        cachedRequesterProfile &&
+        cachedRequesterProfileUid === profileUid &&
+        Date.now() - cachedRequesterProfileFetchedAt < PROFILE_CACHE_TTL_MS;
+
+      if (hasFreshCache) {
+        if (isMounted) {
+          setUserData(cachedRequesterProfile);
+          setLoading(false);
+        }
+        return;
       }
-      setLoading(false);
+
+      if (localProfile) {
+        const nextProfile = buildProfileData(localProfile, user);
+        cacheProfile(nextProfile);
+
+        if (isMounted) {
+          setUserData(nextProfile);
+          setLoading(false);
+        }
+      }
+
+      if (!user) {
+        if (isMounted) {
+          setLoading(false);
+        }
+        return;
+      }
+
+      try {
+        const snap = await getDoc(doc(db, 'users', user.uid));
+
+        if (snap.exists()) {
+          const nextProfile = buildProfileData(
+            {
+              ...localProfile,
+              ...snap.data(),
+            },
+            user
+          );
+
+          cacheProfile(nextProfile);
+
+          if (isMounted) {
+            setUserData(nextProfile);
+          }
+        }
+      } catch (error) {
+        console.log('Requester profile read error:', error.message);
+      } finally {
+        if (isMounted) {
+          setLoading(false);
+        }
+      }
     };
 
     loadProfile();
-  }, []);
+
+    return () => {
+      isMounted = false;
+    };
+  }, [router]);
 
   const handleLogout = async () => {
     await signOut(auth);
     router.replace('/login');
   };
-
-  if (loading) {
-    return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-        <ActivityIndicator size="large" color="#187BCD" />
-      </View>
-    );
-  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -76,19 +154,29 @@ export default function ProfilePage() {
               <Image source={require('../../assets/icons/pencil.png')} style={styles.editIcon} />
             </View>
 
-            <Text style={styles.label}>Full Name</Text>
-            <Text style={styles.value}>
-              {userData?.firstName ? `${userData.firstName} ${userData.lastName}` : 'Not set'}
-            </Text>
+            {loading && !userData ? (
+              <View style={styles.infoLoading}>
+                <ActivityIndicator size="small" color="#187BCD" />
+              </View>
+            ) : (
+              <>
+                <Text style={styles.label}>Full Name</Text>
+                <Text style={styles.value}>
+                  {userData?.firstName
+                    ? `${userData.firstName} ${userData.lastName}`.trim()
+                    : 'Not set'}
+                </Text>
 
-            <Text style={styles.label}>Contact Number</Text>
-            <Text style={styles.value}>{userData?.phone || 'Not set'}</Text>
+                <Text style={styles.label}>Contact Number</Text>
+                <Text style={styles.value}>{userData?.phone || 'Not set'}</Text>
 
-            <Text style={styles.label}>Address</Text>
-            <Text style={styles.value}>{userData?.address || 'Not set'}</Text>
+                <Text style={styles.label}>Address</Text>
+                <Text style={styles.value}>{userData?.address || 'Not set'}</Text>
 
-            <Text style={styles.label}>Email</Text>
-            <Text style={styles.value}>{userData?.email}</Text>
+                <Text style={styles.label}>Email</Text>
+                <Text style={styles.value}>{userData?.email || 'Not set'}</Text>
+              </>
+            )}
           </View>
 
           <View style={{ height: 40 }} />
@@ -121,21 +209,6 @@ export default function ProfilePage() {
           <View style={{ height: 120 }} />
 
         </ScrollView>
-
-        {/* Bottom Nav */}
-        <View style={styles.bottomNav}>
-          <TouchableOpacity onPress={() => router.replace('/requester/r_dashboard')}>
-            <Image source={require('../../assets/icons/home.png')} style={styles.navIcon} />
-          </TouchableOpacity>
-
-          <TouchableOpacity onPress={() => router.replace('/requester/requestform')}>
-            <Image source={require('../../assets/icons/square-plus.png')} style={styles.navIcon} />
-          </TouchableOpacity>
-
-          <TouchableOpacity onPress={() => router.replace('/requester/r_profile')}>
-            <Image source={require('../../assets/icons/user.png')} style={styles.navIcon} />
-          </TouchableOpacity>
-        </View>
 
       </View>
     </SafeAreaView>
@@ -170,6 +243,11 @@ header: {
   infoHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 },
   infoTitle: { fontSize: 16, fontWeight: 'bold', color: '#187BCD' },
   editIcon: { width: 18, height: 18, tintColor: '#187BCD' },
+  infoLoading: {
+    minHeight: 110,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 
   label: { marginTop: 10, fontSize: 13, color: '#187BCD', opacity: 0.6 },
   value: { fontSize: 15, fontWeight: 'bold', color: '#187BCD' },
@@ -209,25 +287,4 @@ header: {
 
   logoutText: { color: '#FFFFFF', fontWeight: 'bold', fontSize: 15 },
 
-  bottomNav: {
-    position: 'absolute',
-    bottom: 24,
-    left: 20,
-    right: 20,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    paddingVertical: 14,
-    paddingHorizontal: 28,
-    borderRadius: 22,
-    zIndex: 2,
-    elevation: 8,
-    shadowColor: '#000',
-    shadowOpacity: 0.12,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 3 },
-  },
-
-  navIcon: { width: 26, height: 26, tintColor: '#187BCD' },
 });

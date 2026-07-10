@@ -8,6 +8,7 @@ import {
   ScrollView,
   ActivityIndicator,
   Alert,
+  Modal,
   useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -98,6 +99,8 @@ export default function RequesterDashboard() {
   const [currentRequests, setCurrentRequests] = useState([]);
   const [cancellingRequestId, setCancellingRequestId] = useState('');
   const [openRequestMenuId, setOpenRequestMenuId] = useState('');
+  const [requestToCancel, setRequestToCancel] = useState(null);
+  const [notification, setNotification] = useState(null);
   const productCarouselWidth = Math.max(1, Math.min(windowWidth, PHONE_MAX_WIDTH));
   const productCarouselItemWidth = Math.max(
     1,
@@ -150,13 +153,23 @@ export default function RequesterDashboard() {
     try {
       setCancellingRequestId(request.id);
       await cancelRequest(request);
-      Alert.alert('Request cancelled', 'Your pending request has been cancelled.');
+      setCurrentRequests((requests) =>
+        requests.filter((currentRequest) => currentRequest.id !== request.id)
+      );
+      setNotification({
+        title: 'Request Cancelled',
+        message: 'Your pending request has been cancelled.',
+      });
     } catch (error) {
       if (error.savedLocal) {
-        Alert.alert(
-          'Saved locally',
-          'Your request was cancelled on this device, but Firebase did not accept the update.'
+        setCurrentRequests((requests) =>
+          requests.filter((currentRequest) => currentRequest.id !== request.id)
         );
+        setNotification({
+          title: 'Saved Locally',
+          message:
+            'Your request was cancelled on this device, but Firebase did not accept the update.',
+        });
         return;
       }
 
@@ -168,26 +181,21 @@ export default function RequesterDashboard() {
 
   const confirmCancelRequest = (request) => {
     setOpenRequestMenuId('');
+    setRequestToCancel(request);
+  };
 
-    if (globalThis.confirm) {
-      if (globalThis.confirm('Cancel this pending request?')) {
-        cancelPendingRequest(request);
-      }
-      return;
-    }
+  const closeCancelModal = () => {
+    if (requestToCancel?.id && cancellingRequestId === requestToCancel.id) return;
 
-    Alert.alert(
-      'Cancel request',
-      'Cancel this pending request?',
-      [
-        { text: 'No', style: 'cancel' },
-        {
-          text: 'Cancel request',
-          style: 'destructive',
-          onPress: () => cancelPendingRequest(request),
-        },
-      ]
-    );
+    setRequestToCancel(null);
+  };
+
+  const proceedWithCancelRequest = async () => {
+    if (!requestToCancel) return;
+
+    const selectedRequest = requestToCancel;
+    setRequestToCancel(null);
+    await cancelPendingRequest(selectedRequest);
   };
 
   const openProductRequest = useCallback(
@@ -434,30 +442,57 @@ export default function RequesterDashboard() {
 
           </ScrollView>
 
-          <View style={styles.bottomNav}>
-            <TouchableOpacity onPress={() => router.replace('/requester/r_dashboard')}>
-              <Image
-                source={require('../../assets/icons/home.png')}
-                style={styles.navIcon}
-              />
-            </TouchableOpacity>
-
-            <TouchableOpacity onPress={() => router.replace('/requester/r_request')}>
-              <Image
-                source={require('../../assets/icons/square-plus.png')}
-                style={styles.navIcon}
-              />
-            </TouchableOpacity>
-
-            <TouchableOpacity onPress={() => router.replace('/requester/r_profile')}>
-              <Image
-                source={require('../../assets/icons/user.png')}
-                style={styles.navIcon}
-              />
-            </TouchableOpacity>
-          </View>
-
         </View>
+
+        <Modal visible={!!requestToCancel} transparent animationType="fade">
+          <View style={styles.modalBackground}>
+            <View style={styles.modalContainer}>
+              <Text style={styles.modalTitle}>Cancel Request</Text>
+              <Text style={styles.modalMessage}>
+                Are you sure you want to cancel this pending request?
+                {'\n\n'}
+                This action cannot be undone.
+              </Text>
+
+              <View style={styles.modalActions}>
+                <TouchableOpacity
+                  style={styles.modalSecondaryButton}
+                  onPress={closeCancelModal}
+                  disabled={!!cancellingRequestId}
+                >
+                  <Text style={styles.modalSecondaryButtonText}>No</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.modalPrimaryButton,
+                    !!cancellingRequestId && styles.modalButtonDisabled,
+                  ]}
+                  onPress={proceedWithCancelRequest}
+                  disabled={!!cancellingRequestId}
+                >
+                  <Text style={styles.modalPrimaryButtonText}>Yes, Cancel</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+
+        <Modal visible={!!notification} transparent animationType="fade">
+          <View style={styles.modalBackground}>
+            <View style={styles.modalContainer}>
+              <Text style={styles.modalTitle}>{notification?.title}</Text>
+              <Text style={styles.modalMessage}>{notification?.message}</Text>
+
+              <TouchableOpacity
+                style={styles.modalFullButton}
+                onPress={() => setNotification(null)}
+              >
+                <Text style={styles.modalPrimaryButtonText}>OK</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
       </SafeAreaView>
     </LinearGradient>
   );
@@ -721,33 +756,80 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
 
-  bottomNav: {
-    position: 'absolute',
-    bottom: 24,
-    left: 34,
-    right: 34,
-
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+  modalBackground: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
     alignItems: 'center',
-
-    backgroundColor: '#FFFFFF',
-    paddingVertical: 14,
-    paddingHorizontal: 28,
-    borderRadius: 24,
-
-    zIndex: 2,
-
-    elevation: 8,
-    shadowColor: '#000',
-    shadowOpacity: 0.12,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 3 },
+    paddingHorizontal: 24,
   },
-
-  navIcon: {
-    width: 26,
-    height: 26,
-    tintColor: '#187BCD',
+  modalContainer: {
+    width: '100%',
+    maxWidth: 320,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 20,
+    alignItems: 'center',
+  },
+  modalTitle: {
+    color: '#187BCD',
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 14,
+    textAlign: 'center',
+  },
+  modalMessage: {
+    width: '100%',
+    color: '#455A64',
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  modalActions: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  modalSecondaryButton: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: '#187BCD',
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 8,
+  },
+  modalSecondaryButtonText: {
+    color: '#187BCD',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  modalPrimaryButton: {
+    flex: 1,
+    backgroundColor: '#187BCD',
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 8,
+  },
+  modalFullButton: {
+    width: '100%',
+    backgroundColor: '#187BCD',
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 2,
+  },
+  modalPrimaryButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  modalButtonDisabled: {
+    opacity: 0.7,
   },
 });

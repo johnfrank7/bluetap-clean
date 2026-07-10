@@ -198,38 +198,109 @@ const mergeProducts = (firestoreProducts, localProducts) => {
   return sortProducts(Array.from(productsById.values()));
 };
 
-export const subscribeProducts = (listener, onError) => {
-  let firestoreProducts = [];
+const PRODUCTS_SUBSCRIPTION_IDLE_MS = 15000;
+let sharedFirestoreProducts = [];
+let cachedProducts = null;
+let cachedProductsSignature = '';
+let unsubscribeSharedFirestoreProducts = null;
+let unsubscribeSharedLocalProducts = null;
+let stopProductsSubscriptionTimer = null;
+const productSubscribers = new Set();
 
-  const emitProducts = () => {
-    listener(mergeProducts(firestoreProducts, getLocalProducts()));
-  };
+const getProductSignature = (products) =>
+  products
+    .map(
+      (product) =>
+        `${product.id}|${product.product_name}|${product.price}|${product.image}|${product.capacity}|${timestampToMillis(product.updated_at)}`
+    )
+    .join('::');
 
-  emitProducts();
-  const unsubscribeLocalProducts = subscribeLocalProducts(emitProducts);
+const notifyProductSubscribers = () => {
+  productSubscribers.forEach(({ listener }) => {
+    listener(cachedProducts || []);
+  });
+};
+
+const emitSharedProducts = (force = false) => {
+  const nextProducts = mergeProducts(sharedFirestoreProducts, getLocalProducts());
+  const nextSignature = getProductSignature(nextProducts);
+
+  if (!force && cachedProducts && nextSignature === cachedProductsSignature) {
+    return;
+  }
+
+  cachedProducts = nextProducts;
+  cachedProductsSignature = nextSignature;
+  notifyProductSubscribers();
+};
+
+const stopSharedProductsSubscription = () => {
+  unsubscribeSharedFirestoreProducts?.();
+  unsubscribeSharedLocalProducts?.();
+  unsubscribeSharedFirestoreProducts = null;
+  unsubscribeSharedLocalProducts = null;
+  stopProductsSubscriptionTimer = null;
+};
+
+const scheduleSharedProductsStop = () => {
+  if (productSubscribers.size > 0 || stopProductsSubscriptionTimer) return;
+
+  stopProductsSubscriptionTimer = setTimeout(() => {
+    if (productSubscribers.size === 0) {
+      stopSharedProductsSubscription();
+    }
+  }, PRODUCTS_SUBSCRIPTION_IDLE_MS);
+};
+
+const startSharedProductsSubscription = () => {
+  if (stopProductsSubscriptionTimer) {
+    clearTimeout(stopProductsSubscriptionTimer);
+    stopProductsSubscriptionTimer = null;
+  }
+
+  if (unsubscribeSharedFirestoreProducts && unsubscribeSharedLocalProducts) {
+    return;
+  }
+
+  unsubscribeSharedLocalProducts = subscribeLocalProducts(() => emitSharedProducts());
+
   const productsQuery = query(
     collection(db, PRODUCTS_COLLECTION),
     orderBy('created_at', 'asc')
   );
 
-  const unsubscribeFirestore = onSnapshot(
+  unsubscribeSharedFirestoreProducts = onSnapshot(
     productsQuery,
     (snapshot) => {
-      firestoreProducts = snapshot.docs.map((item) =>
+      sharedFirestoreProducts = snapshot.docs.map((item) =>
         normalizeProduct(item.id, item.data())
       );
-      emitProducts();
+      emitSharedProducts();
     },
     (error) => {
       console.log('Products Firestore subscription error:', error.message);
-      onError?.(error);
-      emitProducts();
+      productSubscribers.forEach(({ onError }) => onError?.(error));
+      emitSharedProducts(true);
     }
   );
+};
+
+export const subscribeProducts = (listener, onError) => {
+  const subscriber = { listener, onError };
+  productSubscribers.add(subscriber);
+
+  const previousCachedProducts = cachedProducts;
+  emitSharedProducts(!cachedProducts);
+
+  if (cachedProducts && cachedProducts === previousCachedProducts) {
+    listener(cachedProducts);
+  }
+
+  startSharedProductsSubscription();
 
   return () => {
-    unsubscribeFirestore();
-    unsubscribeLocalProducts();
+    productSubscribers.delete(subscriber);
+    scheduleSharedProductsStop();
   };
 };
 
