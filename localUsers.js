@@ -62,9 +62,29 @@ export const saveLocalUser = (userData) => {
 export const findLocalUserByEmail = (email) =>
   getLocalUsers().find((user) => normalizeEmail(user.email) === normalizeEmail(email));
 
-export const updateLocalUserStatus = (uid, approvalStatus) => {
+const toApplicationStatus = (approvalStatus) => {
+  const normalizedStatus = (approvalStatus || '').toString().trim().toLowerCase();
+
+  if (normalizedStatus === 'approved') return 'Approved';
+  if (normalizedStatus === 'rejected') return 'Rejected';
+
+  return 'Pending';
+};
+
+export const updateLocalUserStatus = (uid, approvalStatus, options = {}) => {
+  const normalizedStatus = (approvalStatus || '').toString().trim().toLowerCase();
   const nextUsers = getLocalUsers().map((user) =>
-    user.uid === uid ? { ...user, approvalStatus } : user
+    user.uid === uid
+      ? {
+          ...user,
+          approvalStatus: normalizedStatus,
+          status: toApplicationStatus(normalizedStatus),
+          rejectionReason:
+            normalizedStatus === 'rejected'
+              ? options.rejectionReason || user.rejectionReason || ''
+              : null,
+        }
+      : user
   );
 
   try {

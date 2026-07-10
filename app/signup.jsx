@@ -257,6 +257,8 @@ export default function SignupPage() {
         address: trimmedBarangay,
         role: type,
         approvalStatus: isDistributor ? 'pending' : 'approved',
+        status: isDistributor ? 'Pending' : 'Approved',
+        rejectionReason: null,
       };
 
       saveLocalUser(userData);

@@ -19,11 +19,23 @@ import { collection, doc, onSnapshot, query, serverTimestamp, setDoc, where } fr
 import { getLocalUsers, subscribeLocalUsers, updateLocalUserStatus } from '../../localUsers';
 import { getLocalRequests } from '../../services/requests';
 
+const normalizeApplicationStatus = (status) =>
+  (status || 'pending').toString().trim().toLowerCase();
+
+const getDistributorApplicationStatus = (distributor) =>
+  normalizeApplicationStatus(
+    distributor.status ||
+      distributor.approvalStatus ||
+      distributor.accountStatus ||
+      'pending'
+  );
+
 const getRegisteredLocalDistributors = (firestoreDistributors = []) =>
   getLocalUsers()
     .filter(
       (user) =>
-        user.role === 'distributor' && user.approvalStatus === 'approved'
+        user.role === 'distributor' &&
+        getDistributorApplicationStatus(user) === 'approved'
     )
     .map((user) => ({ ...user, id: user.uid, isLocal: true }))
     .filter(
@@ -106,7 +118,7 @@ export default function AdminDashboard() {
             uid: item.id,
             ...item.data(),
           }))
-          .filter((item) => item.approvalStatus === 'approved');
+          .filter((item) => getDistributorApplicationStatus(item) === 'approved');
 
         refreshRegisteredDistributors(firestoreDistributors);
         setLoadError('');
@@ -230,6 +242,8 @@ export default function AdminDashboard() {
             address: distributor.address || distributor.barangay || '',
             role: 'distributor',
             approvalStatus: 'rejected',
+            status: 'Rejected',
+            rejectionReason: distributor.rejectionReason || null,
             removedAt: serverTimestamp(),
           },
           { merge: true }

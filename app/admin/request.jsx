@@ -9,6 +9,7 @@ import {
   Image,
   ActivityIndicator,
   Alert,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -26,12 +27,32 @@ import {
 } from 'firebase/firestore';
 import { getLocalUsers, subscribeLocalUsers, updateLocalUserStatus } from '../../localUsers';
 
+const normalizeApplicationStatus = (status) =>
+  (status || 'pending').toString().trim().toLowerCase();
+
+const toApplicationStatus = (status) => {
+  const normalizedStatus = normalizeApplicationStatus(status);
+
+  if (normalizedStatus === 'approved') return 'Approved';
+  if (normalizedStatus === 'rejected') return 'Rejected';
+
+  return 'Pending';
+};
+
+const getDistributorApplicationStatus = (distributor) =>
+  normalizeApplicationStatus(
+    distributor.status ||
+      distributor.approvalStatus ||
+      distributor.accountStatus ||
+      'pending'
+  );
+
 const getPendingLocalDistributors = (firestoreDistributors = []) =>
   getLocalUsers()
     .filter(
       (user) =>
         user.role === 'distributor' &&
-        (user.approvalStatus || 'pending') === 'pending'
+        getDistributorApplicationStatus(user) === 'pending'
     )
     .map((user) => ({ ...user, id: user.uid, isLocal: true }))
     .filter(
@@ -43,8 +64,9 @@ const getPendingLocalDistributors = (firestoreDistributors = []) =>
         )
     );
 
-const buildDistributorUpdate = (distributor, approvalStatus) => {
+const buildDistributorUpdate = (distributor, approvalStatus, rejectionReason = '') => {
   const uid = distributor.uid || distributor.id;
+  const isRejected = approvalStatus === 'rejected';
 
   return {
     uid,
@@ -56,6 +78,8 @@ const buildDistributorUpdate = (distributor, approvalStatus) => {
     address: distributor.address || distributor.barangay || '',
     role: 'distributor',
     approvalStatus,
+    status: toApplicationStatus(approvalStatus),
+    rejectionReason: isRejected ? rejectionReason : null,
     reviewedAt: serverTimestamp(),
   };
 };
@@ -66,6 +90,9 @@ export default function AdminRequestPage() {
   const [loading, setLoading] = useState(true);
   const [updatingId, setUpdatingId] = useState(null);
   const [loadError, setLoadError] = useState('');
+  const [rejectingDistributor, setRejectingDistributor] = useState(null);
+  const [rejectionReason, setRejectionReason] = useState('');
+  const [rejectionReasonError, setRejectionReasonError] = useState('');
 
   useEffect(() => {
     let firestorePending = [];
@@ -96,7 +123,7 @@ export default function AdminRequestPage() {
             uid: item.id,
             ...item.data(),
           }))
-          .filter((item) => (item.approvalStatus || 'pending') === 'pending');
+          .filter((item) => getDistributorApplicationStatus(item) === 'pending');
 
         refreshPendingDistributors(firestoreDistributors);
         setLoadError('');
@@ -123,12 +150,18 @@ export default function AdminRequestPage() {
     router.replace('/login');
   };
 
-  const updateDistributorStatus = async (distributor, approvalStatus) => {
+  const updateDistributorStatus = async (distributor, approvalStatus, reason = '') => {
     const id = distributor.uid || distributor.id;
+    const rejectionReason = reason.trim();
+
+    if (approvalStatus === 'rejected' && !rejectionReason) {
+      setRejectionReasonError('Rejection reason is required.');
+      return;
+    }
 
     try {
       setUpdatingId(id);
-      updateLocalUserStatus(id, approvalStatus);
+      updateLocalUserStatus(id, approvalStatus, { rejectionReason });
       setPendingDistributors((current) =>
         current.filter((distributor) => distributor.uid !== id && distributor.id !== id)
       );
@@ -136,7 +169,7 @@ export default function AdminRequestPage() {
       try {
         await setDoc(
           doc(db, 'users', id),
-          buildDistributorUpdate(distributor, approvalStatus),
+          buildDistributorUpdate(distributor, approvalStatus, rejectionReason),
           { merge: true }
         );
       } catch (error) {
@@ -153,6 +186,39 @@ export default function AdminRequestPage() {
       setUpdatingId(null);
     }
   };
+
+  const openRejectModal = (distributor) => {
+    setRejectingDistributor(distributor);
+    setRejectionReason('');
+    setRejectionReasonError('');
+  };
+
+  const closeRejectModal = () => {
+    const id = rejectingDistributor?.uid || rejectingDistributor?.id;
+
+    if (id && updatingId === id) return;
+
+    setRejectingDistributor(null);
+    setRejectionReason('');
+    setRejectionReasonError('');
+  };
+
+  const submitRejection = async () => {
+    if (!rejectingDistributor) return;
+
+    const trimmedReason = rejectionReason.trim();
+
+    if (!trimmedReason) {
+      setRejectionReasonError('Rejection reason is required.');
+      return;
+    }
+
+    await updateDistributorStatus(rejectingDistributor, 'rejected', trimmedReason);
+    closeRejectModal();
+  };
+
+  const rejectingDistributorId = rejectingDistributor?.uid || rejectingDistributor?.id;
+  const isSavingRejection = !!rejectingDistributorId && updatingId === rejectingDistributorId;
 
   return (
     <SafeAreaView style={styles.root}>
@@ -221,15 +287,14 @@ export default function AdminRequestPage() {
             <View style={styles.card}>
               <View style={styles.cardHeader}>
                 <Text style={styles.cardTitle}>Pending Distributors</Text>
-                <TouchableOpacity style={styles.removeButton}>
-                  <Text style={styles.removeButtonText}>Remove</Text>
-                </TouchableOpacity>
+                
               </View>
 
               {/* Table header */}
               <View style={[styles.row, styles.tableHeaderRow]}>
                 <Text style={[styles.cell, styles.cellNameHeader]}>Name</Text>
                 <Text style={[styles.cell, styles.cellPhoneHeader]}>Contact Number</Text>
+                <Text style={[styles.cell, styles.cellEmailHeader]}>Email Address</Text>
                 <Text style={[styles.cell, styles.cellActionsHeader]}>Actions</Text>
               </View>
 
@@ -257,10 +322,11 @@ export default function AdminRequestPage() {
                     >
                       <Text style={[styles.cell, styles.cellName]}>{fullName}</Text>
                       <Text style={[styles.cell, styles.cellPhone]}>{d.phone || 'Not set'}</Text>
+                      <Text style={[styles.cell, styles.cellEmail]}>{d.email || 'Not set'}</Text>
                       <View style={[styles.cell, styles.cellActions]}>
                         <TouchableOpacity
                           style={[styles.rejectButton, isUpdating && styles.actionDisabled]}
-                          onPress={() => updateDistributorStatus(d, 'rejected')}
+                          onPress={() => openRejectModal(d)}
                           disabled={isUpdating}
                         >
                           <Text style={styles.rejectText}>Reject</Text>
@@ -281,6 +347,61 @@ export default function AdminRequestPage() {
           </ScrollView>
         </View>
       </View>
+
+      <Modal visible={!!rejectingDistributor} transparent animationType="fade">
+        <View style={styles.modalBackground}>
+          <View style={styles.modalContainer}>
+            <Text style={styles.modalTitle}>Reject Application</Text>
+            <Text style={styles.modalMessage}>
+              Enter the reason this distributor application is being rejected.
+            </Text>
+
+            <TextInput
+              style={[
+                styles.reasonInput,
+                !!rejectionReasonError && styles.reasonInputError,
+              ]}
+              placeholder="Example: Unable to verify your identity (Unverified Personnel)"
+              placeholderTextColor="#90A4AE"
+              value={rejectionReason}
+              onChangeText={(value) => {
+                setRejectionReason(value);
+                if (rejectionReasonError && value.trim()) {
+                  setRejectionReasonError('');
+                }
+              }}
+              multiline
+              textAlignVertical="top"
+            />
+            {!!rejectionReasonError && (
+              <Text style={styles.reasonErrorText}>{rejectionReasonError}</Text>
+            )}
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={styles.modalCancelButton}
+                onPress={closeRejectModal}
+                disabled={isSavingRejection}
+              >
+                <Text style={styles.modalCancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.modalRejectButton,
+                  isSavingRejection && styles.actionDisabled,
+                ]}
+                onPress={submitRejection}
+                disabled={isSavingRejection}
+              >
+                <Text style={styles.modalRejectButtonText}>
+                  {isSavingRejection ? 'Saving...' : 'Save Rejection'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -457,15 +578,18 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#455A64',
   },
-  cellNameHeader: { flex: 2, fontWeight: 'bold' },
-  cellPhoneHeader: { flex: 1.4, fontWeight: 'bold' },
-  cellActionsHeader: { flex: 1.8, fontWeight: 'bold' },
-  cellName: { flex: 2 },
-  cellPhone: { flex: 1.4 },
+  cellNameHeader: { flex: 1.7, fontWeight: 'bold' },
+  cellPhoneHeader: { flex: 1.3, fontWeight: 'bold' },
+  cellEmailHeader: { flex: 2, fontWeight: 'bold' },
+  cellActionsHeader: { flex: 1.6, fontWeight: 'bold', textAlign: 'center' },
+  cellName: { flex: 1.7 },
+  cellPhone: { flex: 1.3 },
+  cellEmail: { flex: 2 },
   cellActions: {
-    flex: 1.8,
+    flex: 1.6,
     flexDirection: 'row',
-    justifyContent: 'flex-end',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   emptyState: {
     paddingVertical: 24,
@@ -482,21 +606,27 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   rejectButton: {
+    minWidth: 58,
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 8,
     backgroundColor: '#EEEEEE',
     marginRight: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   rejectText: {
     color: '#757575',
     fontSize: 13,
   },
   acceptButton: {
+    minWidth: 72,
     paddingHorizontal: 16,
     paddingVertical: 6,
     borderRadius: 8,
     backgroundColor: '#187BCD',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   acceptText: {
     color: '#FFFFFF',
@@ -505,5 +635,87 @@ const styles = StyleSheet.create({
   },
   actionDisabled: {
     opacity: 0.6,
+  },
+  modalBackground: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+  },
+  modalContainer: {
+    width: '85%',
+    maxWidth: 420,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 20,
+    alignItems: 'center',
+  },
+  modalTitle: {
+    color: '#187BCD',
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 12,
+  },
+  modalMessage: {
+    width: '100%',
+    color: '#455A64',
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: 'center',
+    marginBottom: 14,
+  },
+  reasonInput: {
+    width: '100%',
+    minHeight: 96,
+    borderWidth: 1,
+    borderColor: '#BBDEFB',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    color: '#455A64',
+    fontSize: 14,
+    lineHeight: 20,
+    marginBottom: 8,
+  },
+  reasonInputError: {
+    borderColor: '#D32F2F',
+    backgroundColor: '#FFEBEE',
+  },
+  reasonErrorText: {
+    width: '100%',
+    color: '#D32F2F',
+    fontSize: 12,
+    marginBottom: 8,
+  },
+  modalActions: {
+    width: '100%',
+    flexDirection: 'row',
+    marginTop: 4,
+  },
+  modalCancelButton: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: '#187BCD',
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginRight: 8,
+  },
+  modalCancelButtonText: {
+    color: '#187BCD',
+    fontWeight: 'bold',
+  },
+  modalRejectButton: {
+    flex: 1,
+    backgroundColor: '#187BCD',
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginLeft: 8,
+  },
+  modalRejectButtonText: {
+    color: '#FFFFFF',
+    fontWeight: 'bold',
   },
 });
