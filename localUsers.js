@@ -2,6 +2,7 @@ const STORAGE_KEY = 'bluetapLocalUsers';
 export const LOCAL_USERS_CHANGED_EVENT = 'bluetapLocalUsersChanged';
 
 const normalizeEmail = (email) => email?.trim().toLowerCase() || '';
+const normalizeRole = (role) => role?.toString().trim().toLowerCase() || '';
 
 const getMemoryStore = () => {
   if (!globalThis.__bluetapLocalUsers) {
@@ -61,6 +62,31 @@ export const saveLocalUser = (userData) => {
 
 export const findLocalUserByEmail = (email) =>
   getLocalUsers().find((user) => normalizeEmail(user.email) === normalizeEmail(email));
+
+export const findLocalUserForAuthUser = (authUser) => {
+  const uid = authUser?.uid || '';
+  const email = normalizeEmail(authUser?.email);
+
+  if (!uid && !email) return null;
+
+  return (
+    getLocalUsers().find(
+      (user) =>
+        (uid && user.uid === uid) ||
+        (email && normalizeEmail(user.email) === email)
+    ) || null
+  );
+};
+
+export const findLocalUserForAuthRole = (authUser, role) => {
+  const localUser = findLocalUserForAuthUser(authUser);
+
+  if (!localUser || normalizeRole(localUser.role) !== normalizeRole(role)) {
+    return null;
+  }
+
+  return localUser;
+};
 
 const toApplicationStatus = (approvalStatus) => {
   const normalizedStatus = (approvalStatus || '').toString().trim().toLowerCase();

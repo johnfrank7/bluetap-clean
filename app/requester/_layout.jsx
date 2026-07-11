@@ -2,6 +2,7 @@ import React from 'react';
 import { View, StyleSheet, TouchableOpacity, Image } from 'react-native';
 import { Stack, usePathname, useRouter } from 'expo-router';
 import RequesterHeader from '../../components/RequesterHeader';
+import RoleGate from '../../components/RoleGate';
 
 const dashboardRoutes = ['/requester/r_dashboard'];
 const requestsRoutes = ['/requester/r_request', '/requester/r_notification'];
@@ -18,39 +19,41 @@ export default function RequesterLayout() {
   const isDashboard = pathname.startsWith('/requester/r_dashboard');
 
   return (
-    <View style={styles.root}>
-      <RequesterHeader />
+    <RoleGate role="requester">
+      <View style={styles.root}>
+        <RequesterHeader />
 
-      <View style={styles.screenContent}>
-        <Stack
-          screenOptions={{
-            headerShown: false,
-            animation: 'none',
-          }}
-        />
-      </View>
+        <View style={styles.screenContent}>
+          <Stack
+            screenOptions={{
+              headerShown: false,
+              animation: 'none',
+            }}
+          />
+        </View>
 
-      <View style={styles.navOverlay} pointerEvents="box-none">
-        <View style={styles.navFrame} pointerEvents="box-none">
-          <View style={[styles.bottomNav, isDashboard && styles.dashboardBottomNav]}>
-            <TouchableOpacity onPress={() => router.replace('/requester/r_dashboard')}>
-              <Image source={require('../../assets/icons/home.png')} style={styles.navIcon} />
-            </TouchableOpacity>
+        <View style={styles.navOverlay} pointerEvents="box-none">
+          <View style={styles.navFrame} pointerEvents="box-none">
+            <View style={[styles.bottomNav, isDashboard && styles.dashboardBottomNav]}>
+              <TouchableOpacity onPress={() => router.replace('/requester/r_dashboard')}>
+                <Image source={require('../../assets/icons/home.png')} style={styles.navIcon} />
+              </TouchableOpacity>
 
-            <TouchableOpacity onPress={() => router.replace(getMiddleRoute(pathname))}>
-              <Image
-                source={require('../../assets/icons/square-plus.png')}
-                style={styles.navIcon}
-              />
-            </TouchableOpacity>
+              <TouchableOpacity onPress={() => router.replace(getMiddleRoute(pathname))}>
+                <Image
+                  source={require('../../assets/icons/square-plus.png')}
+                  style={styles.navIcon}
+                />
+              </TouchableOpacity>
 
-            <TouchableOpacity onPress={() => router.replace('/requester/r_profile')}>
-              <Image source={require('../../assets/icons/user.png')} style={styles.navIcon} />
-            </TouchableOpacity>
+              <TouchableOpacity onPress={() => router.replace('/requester/r_profile')}>
+                <Image source={require('../../assets/icons/user.png')} style={styles.navIcon} />
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </View>
-    </View>
+    </RoleGate>
   );
 }
 

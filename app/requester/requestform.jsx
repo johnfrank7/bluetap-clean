@@ -16,7 +16,8 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { doc, getDoc } from 'firebase/firestore';
 
 import { auth, db } from '../../firebase';
-import { findLocalUserByEmail, getLocalUsers } from '../../localUsers';
+import { findLocalUserForAuthRole } from '../../localUsers';
+import { normalizeRole } from '../../services/authSession';
 import { createRequest } from '../../services/requests';
 import { subscribeProducts } from '../../services/products';
 
@@ -109,16 +110,23 @@ export default function RequestFormPage() {
       let profile = null;
 
       if (user) {
-        profile = findLocalUserByEmail(user.email);
+        profile = findLocalUserForAuthRole(user, 'requester');
 
         try {
           const profileSnapshot = await getDoc(doc(db, 'users', user.uid));
           if (profileSnapshot.exists()) {
+            const firestoreProfile = profileSnapshot.data();
+
+            if (normalizeRole(firestoreProfile.role) !== 'requester') {
+              router.replace('/login');
+              return;
+            }
+
             profile = {
               ...profile,
-              ...profileSnapshot.data(),
+              ...firestoreProfile,
               uid: user.uid,
-              email: profileSnapshot.data().email || user.email,
+              email: firestoreProfile.email || user.email,
             };
           }
         } catch (error) {
@@ -131,7 +139,8 @@ export default function RequestFormPage() {
           email: user.email || profile?.email || '',
         };
       } else {
-        profile = getLocalUsers().find((localUser) => localUser.role === 'requester');
+        router.replace('/login');
+        return;
       }
 
       const fullName =
@@ -149,7 +158,7 @@ export default function RequestFormPage() {
     };
 
     loadRequesterInfo();
-  }, []);
+  }, [router]);
 
   const productMap = useMemo(
     () => new Map(products.map((product) => [product.id, product])),

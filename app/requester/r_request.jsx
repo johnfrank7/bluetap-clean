@@ -12,7 +12,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useRouter } from 'expo-router';
 
 import { auth } from '../../firebase';
-import { getLocalUsers } from '../../localUsers';
+import { findLocalUserForAuthRole } from '../../localUsers';
 import { subscribeRequesterRequests } from '../../services/requests';
 
 const formatPrice = (price) => `\u20B1${Number(price || 0).toFixed(2)}`;
@@ -67,9 +67,7 @@ export default function RequesterRequests() {
 
   useEffect(() => {
     const requesterId =
-      auth.currentUser?.uid ||
-      getLocalUsers().find((localUser) => localUser.role === 'requester')?.uid ||
-      '';
+      findLocalUserForAuthRole(auth.currentUser, 'requester')?.uid || '';
 
     if (!requesterId) return undefined;
 

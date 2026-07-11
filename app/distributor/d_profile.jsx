@@ -13,8 +13,8 @@ import { StatusBar } from 'expo-status-bar';
 import { useRouter } from 'expo-router';
 
 import { auth, db } from '../../firebase';
-import { signOut } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
+import { normalizeRole, signOutAndClearSessions } from '../../services/authSession';
 
 export default function DistributorProfilePage() {
   const router = useRouter();
@@ -31,16 +31,23 @@ export default function DistributorProfilePage() {
 
       const snap = await getDoc(doc(db, 'users', user.uid));
       if (snap.exists()) {
-        setUserData(snap.data());
+        const profile = snap.data();
+
+        if (normalizeRole(profile.role) !== 'distributor') {
+          router.replace('/login');
+          return;
+        }
+
+        setUserData(profile);
       }
       setLoading(false);
     };
 
     loadProfile();
-  }, []);
+  }, [router]);
 
   const handleLogout = async () => {
-    await signOut(auth);
+    await signOutAndClearSessions();
     router.replace('/login');
   };
 

@@ -15,9 +15,9 @@ import { StatusBar } from 'expo-status-bar';
 import { useRouter } from 'expo-router';
 
 import { auth, db } from '../../firebase';
-import { signOut } from 'firebase/auth';
 import { doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
-import { findLocalUserByEmail, getLocalUsers, saveLocalUser } from '../../localUsers';
+import { findLocalUserForAuthRole, saveLocalUser } from '../../localUsers';
+import { normalizeRole, signOutAndClearSessions } from '../../services/authSession';
 
 const PROFILE_CACHE_TTL_MS = 60000;
 
@@ -26,11 +26,7 @@ let cachedRequesterProfileUid = '';
 let cachedRequesterProfileFetchedAt = 0;
 
 const getLocalRequesterProfile = (user) => {
-  if (user?.email) {
-    return findLocalUserByEmail(user.email);
-  }
-
-  return getLocalUsers().find((localUser) => localUser.role === 'requester') || null;
+  return findLocalUserForAuthRole(user, 'requester');
 };
 
 const buildProfileData = (profile = {}, user = null) => ({
@@ -121,10 +117,17 @@ export default function ProfilePage() {
         const snap = await getDoc(doc(db, 'users', user.uid));
 
         if (snap.exists()) {
+          const firestoreProfile = snap.data();
+
+          if (normalizeRole(firestoreProfile.role) !== 'requester') {
+            router.replace('/login');
+            return;
+          }
+
           const nextProfile = buildProfileData(
             {
               ...localProfile,
-              ...snap.data(),
+              ...firestoreProfile,
             },
             user
           );
@@ -152,7 +155,7 @@ export default function ProfilePage() {
   }, [router]);
 
   const handleLogout = async () => {
-    await signOut(auth);
+    await signOutAndClearSessions();
     router.replace('/login');
   };
 

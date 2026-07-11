@@ -18,7 +18,7 @@ import { useRouter } from 'expo-router';
 import Carousel from 'react-native-reanimated-carousel';
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from '../../firebase';
-import { getLocalUsers } from '../../localUsers';
+import { findLocalUserForAuthRole } from '../../localUsers';
 import { subscribeProducts } from '../../services/products';
 import {
   cancelRequest,
@@ -139,9 +139,12 @@ export default function RequesterDashboard() {
     let activeRequesterId = '';
     let unsubscribeRequests = () => {};
 
-    const getLocalRequesterId = () =>
-      getLocalUsers().find((localUser) => localUser.role === 'requester')?.uid ||
-      '';
+    const getRequesterId = (user) => {
+      if (!user) return '';
+
+      const localRequester = findLocalUserForAuthRole(user, 'requester');
+      return localRequester?.uid || '';
+    };
 
     const subscribeForRequester = (requesterId) => {
       const normalizedRequesterId = (requesterId || '').toString().trim();
@@ -163,7 +166,7 @@ export default function RequesterDashboard() {
     };
 
     const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
-      subscribeForRequester(user?.uid || getLocalRequesterId());
+      subscribeForRequester(getRequesterId(user));
     });
 
     return () => {

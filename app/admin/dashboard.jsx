@@ -13,11 +13,11 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { useRouter } from 'expo-router';
-import { auth, db } from '../../firebase';
-import { signOut } from 'firebase/auth';
+import { db } from '../../firebase';
 import { collection, doc, onSnapshot, query, serverTimestamp, setDoc, where } from 'firebase/firestore';
 import { getLocalUsers, subscribeLocalUsers, updateLocalUserStatus } from '../../localUsers';
 import { getLocalRequests } from '../../services/requests';
+import { signOutAndClearSessions } from '../../services/authSession';
 
 const normalizeApplicationStatus = (status) =>
   (status || 'pending').toString().trim().toLowerCase();
@@ -211,11 +211,7 @@ export default function AdminDashboard() {
   }, []);
 
   const handleLogout = async () => {
-    try {
-      await signOut(auth);
-    } catch (e) {
-      // ignore errors for secret admin or non-auth sessions
-    }
+    await signOutAndClearSessions();
     router.replace('/login');
   };
 

@@ -14,8 +14,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { useRouter } from 'expo-router';
-import { auth, db } from '../../firebase';
-import { signOut } from 'firebase/auth';
+import { db } from '../../firebase';
 import {
   collection,
   doc,
@@ -26,6 +25,7 @@ import {
   where,
 } from 'firebase/firestore';
 import { getLocalUsers, subscribeLocalUsers, updateLocalUserStatus } from '../../localUsers';
+import { signOutAndClearSessions } from '../../services/authSession';
 
 const normalizeApplicationStatus = (status) =>
   (status || 'pending').toString().trim().toLowerCase();
@@ -142,11 +142,7 @@ export default function AdminRequestPage() {
   }, []);
 
   const handleLogout = async () => {
-    try {
-      await signOut(auth);
-    } catch (e) {
-      // ignore if secret admin not in Firebase session
-    }
+    await signOutAndClearSessions();
     router.replace('/login');
   };
 

@@ -14,14 +14,13 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { useRouter } from 'expo-router';
-import { auth } from '../../firebase';
-import { signOut } from 'firebase/auth';
 import {
   createProduct,
   deleteProduct,
   subscribeProducts,
   updateProduct,
 } from '../../services/products';
+import { signOutAndClearSessions } from '../../services/authSession';
 
 const emptyForm = {
   product_name: '',
@@ -71,11 +70,7 @@ export default function AdminProductsPage() {
   }, [products, search]);
 
   const handleLogout = async () => {
-    try {
-      await signOut(auth);
-    } catch (e) {
-      // ignore errors for secret admin or non-auth sessions
-    }
+    await signOutAndClearSessions();
     router.replace('/login');
   };
 

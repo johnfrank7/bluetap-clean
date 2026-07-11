@@ -23,6 +23,11 @@ import {
 } from 'firebase/auth';
 import { doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
 import { findLocalUserByEmail, saveLocalUser } from '../localUsers';
+import {
+  clearAllAuthSessions,
+  saveAdminSession,
+  saveRoleSession,
+} from '../services/authSession';
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const applicationPendingTitle = 'Application Pending';
@@ -118,7 +123,9 @@ export default function LoginPage() {
   const navigateToRoleHome = (role) => {
     const normalizedRole = normalizeRole(role);
 
-    if (normalizedRole === 'requester') {
+    if (normalizedRole === 'admin') {
+      router.replace('/admin/dashboard');
+    } else if (normalizedRole === 'requester') {
       router.replace('/requester/r_dashboard');
     } else if (normalizedRole === 'distributor') {
       router.replace('/distributor/d_dashboard');
@@ -127,7 +134,14 @@ export default function LoginPage() {
     }
   };
 
-  const finishSuccessfulLogin = (role) => {
+  const finishSuccessfulLogin = (profile) => {
+    const role = normalizeRole(profile?.role || profile);
+
+    saveRoleSession({
+      ...(typeof profile === 'object' ? profile : {}),
+      role,
+    });
+
     setLoading(false);
     showNotification(
       'Successfully logged in',
@@ -152,6 +166,13 @@ export default function LoginPage() {
 
       // Secret admin credentials (bypass Firebase, go straight to admin panel)
       if (normalizedEmail === 'bluetapadmin' && trimmedPassword === '12345678') {
+        try {
+          await signOut(auth);
+        } catch (error) {
+          console.log('Admin Firebase sign out error:', error.message);
+        }
+
+        saveAdminSession();
         setLoading(false);
         showNotification(
           'Successfully logged in',
@@ -184,8 +205,22 @@ export default function LoginPage() {
         if (localUser) {
           const localRole = normalizeRole(localUser.role);
           const localApplicationStatus = getApplicationStatus(localUser);
+          const localProfileData = {
+            ...localUser,
+            uid: user.uid,
+            role: localRole,
+            email: (localUser.email || user.email || normalizedEmail).trim().toLowerCase(),
+          };
+
+          if (!['requester', 'distributor'].includes(localRole)) {
+            clearAllAuthSessions();
+            await signOut(auth);
+            showNotification('Login failed', 'This account has no valid role.');
+            return;
+          }
 
           if (localRole === 'distributor' && localApplicationStatus !== 'approved') {
+            clearAllAuthSessions();
             await signOut(auth);
             showDistributorStatusNotification(
               localApplicationStatus,
@@ -194,7 +229,24 @@ export default function LoginPage() {
             return;
           }
 
-          finishSuccessfulLogin(localRole);
+          try {
+            await setDoc(
+              doc(db, 'users', user.uid),
+              {
+                ...localProfileData,
+                updatedAt: serverTimestamp(),
+              },
+              { merge: true }
+            );
+          } catch (error) {
+            console.log('Local profile Firestore sync error:', error.message);
+            clearAllAuthSessions();
+            await signOut(auth);
+            showNotification('Login failed', getAuthErrorMessage(error));
+            return;
+          }
+
+          finishSuccessfulLogin(localProfileData);
           return;
         }
 
@@ -223,8 +275,16 @@ export default function LoginPage() {
         rejectionReason: userData.rejectionReason || null,
       };
 
+      if (!['admin', 'requester', 'distributor'].includes(profileRole)) {
+        clearAllAuthSessions();
+        await signOut(auth);
+        showNotification('Login failed', 'This account has no valid role.');
+        return;
+      }
+
       if (profileRole === 'distributor' && profileApplicationStatus !== 'approved') {
         saveLocalUser(profileData);
+        clearAllAuthSessions();
         await signOut(auth);
         showDistributorStatusNotification(
           profileApplicationStatus,
@@ -234,7 +294,7 @@ export default function LoginPage() {
       }
 
       saveLocalUser(profileData);
-      finishSuccessfulLogin(profileRole);
+      finishSuccessfulLogin(profileData);
 
     } catch (error) {
       console.log('Login error:', error.message);
@@ -276,11 +336,15 @@ export default function LoginPage() {
         });
       } catch (error) {
         console.log('Profile setup Firestore error:', error.message);
+        if (role === 'requester') {
+          throw error;
+        }
       }
 
       setPendingUser(null);
 
       if (role === 'distributor') {
+        clearAllAuthSessions();
         await signOut(auth);
         setLoading(false);
         showNotification(
@@ -291,7 +355,7 @@ export default function LoginPage() {
         return;
       }
 
-      finishSuccessfulLogin(role);
+      finishSuccessfulLogin(localUserData);
     } catch (error) {
       console.log('Profile setup error:', error.message);
       showNotification('Setup failed', getAuthErrorMessage(error));

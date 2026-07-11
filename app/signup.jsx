@@ -18,6 +18,7 @@ import { auth, db } from '../firebase';
 import { createUserWithEmailAndPassword, deleteUser, signOut } from 'firebase/auth';
 import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { saveLocalUser } from '../localUsers';
+import { clearAllAuthSessions, saveRoleSession } from '../services/authSession';
 
 const barangayOptions = [
   'Awihao',
@@ -277,8 +278,10 @@ export default function SignupPage() {
       }
 
       if (type === 'requester') {
+        saveRoleSession(userData);
         router.replace('/requester/r_dashboard');
       } else {
+        clearAllAuthSessions();
         await signOut(auth);
         setLoading(false);
         showNotification(
@@ -290,6 +293,7 @@ export default function SignupPage() {
 
     } catch (error) {
       console.log('Signup error:', error.message);
+      clearAllAuthSessions();
       if (createdUser && type !== 'distributor') {
         try {
           await deleteUser(createdUser);
