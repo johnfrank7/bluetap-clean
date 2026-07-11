@@ -16,10 +16,14 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { StatusBar } from 'expo-status-bar';
 import { useRouter } from 'expo-router';
 import Carousel from 'react-native-reanimated-carousel';
+import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from '../../firebase';
 import { getLocalUsers } from '../../localUsers';
 import { subscribeProducts } from '../../services/products';
-import { cancelRequest, subscribeRequesterRequests } from '../../services/requests';
+import {
+  cancelRequest,
+  subscribeRequesterCurrentRequests,
+} from '../../services/requests';
 
 const PHONE_MAX_WIDTH = 375;
 const DASHBOARD_HORIZONTAL_PADDING = 34;
@@ -37,11 +41,8 @@ const getRequestProductSummary = (request) => {
 
   return `${request.quantity} ${request.product_name}`;
 };
-const inactiveStatuses = ['delivered', 'cancelled', 'canceled'];
 const getNormalizedStatus = (status) =>
   (status || '').toString().trim().toLowerCase();
-const isActiveRequest = (request) =>
-  !inactiveStatuses.includes(getNormalizedStatus(request.status));
 const isPendingRequest = (request) =>
   getNormalizedStatus(request.status) === 'pending';
 const getProductGallons = (product) =>
@@ -135,16 +136,40 @@ export default function RequesterDashboard() {
   }, [activeProductIndex, products.length]);
 
   useEffect(() => {
-    const requesterId =
-      auth.currentUser?.uid ||
+    let activeRequesterId = '';
+    let unsubscribeRequests = () => {};
+
+    const getLocalRequesterId = () =>
       getLocalUsers().find((localUser) => localUser.role === 'requester')?.uid ||
       '';
 
-    if (!requesterId) return undefined;
+    const subscribeForRequester = (requesterId) => {
+      const normalizedRequesterId = (requesterId || '').toString().trim();
 
-    return subscribeRequesterRequests(requesterId, (requests) => {
-      setCurrentRequests(requests.filter(isActiveRequest));
+      if (normalizedRequesterId === activeRequesterId) return;
+
+      unsubscribeRequests();
+      activeRequesterId = normalizedRequesterId;
+
+      if (!normalizedRequesterId) {
+        setCurrentRequests([]);
+        return;
+      }
+
+      unsubscribeRequests = subscribeRequesterCurrentRequests(
+        normalizedRequesterId,
+        setCurrentRequests
+      );
+    };
+
+    const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
+      subscribeForRequester(user?.uid || getLocalRequesterId());
     });
+
+    return () => {
+      unsubscribeAuth();
+      unsubscribeRequests();
+    };
   }, []);
 
   const cancelPendingRequest = async (request) => {
@@ -294,7 +319,7 @@ export default function RequesterDashboard() {
       start={{ x: 0, y: 0 }}
       end={{ x: 0, y: 1 }}
     >
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView edges={['left', 'right', 'bottom']} style={styles.container}>
         <StatusBar style="light" />
 
         <View style={styles.phoneWrapper}>
@@ -302,14 +327,6 @@ export default function RequesterDashboard() {
             contentContainerStyle={styles.scrollContent}
             showsVerticalScrollIndicator={false}
           >
-
-            <View style={styles.header}>
-              <Text style={styles.appName}>BlueTap</Text>
-              <Image
-                source={require('../../assets/icons/bluetapwhitelogo.png')}
-                style={styles.logo}
-              />
-            </View>
 
             <View style={styles.welcomeSection}>
               <Text style={styles.welcomeText}>WELCOME!</Text>
@@ -517,23 +534,7 @@ const styles = StyleSheet.create({
   scrollContent: {
     flexGrow: 1,
     paddingHorizontal: 34,
-    paddingTop: 56,
-  },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  appName: {
-    color: '#FFFFFF',
-    fontSize: 20,
-    fontWeight: 'bold',
-    letterSpacing: 0,
-  },
-  logo: {
-    width: 30,
-    height: 30,
-    tintColor: '#FFFFFF',
+    paddingTop: 0,
   },
   welcomeSection: {
     marginTop: 32,

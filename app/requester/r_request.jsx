@@ -3,7 +3,6 @@ import {
   View,
   Text,
   StyleSheet,
-  Image,
   TouchableOpacity,
   ScrollView,
   Modal,
@@ -82,19 +81,11 @@ export default function RequesterRequests() {
     : requests.slice(0, initialVisibleRequestCount);
 
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar style="dark" />
+    <SafeAreaView edges={['left', 'right', 'bottom']} style={styles.container}>
+      <StatusBar style="light" />
 
       <View style={styles.phoneWrapper}>
         <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-          {/* Header */}
-          <View style={styles.header}>
-            <Text style={styles.appName}>BlueTap</Text>
-            <TouchableOpacity onPress={() => router.replace('/requester/r_notification')}>
-              <Image source={require('../../assets/icons/notif.png')} style={styles.logo} />
-            </TouchableOpacity>
-          </View>
-
           {/* Blue requests panel */}
           <View style={styles.requestsPanel}>
             <Text style={styles.pageTitle}>REQUESTS</Text>
@@ -221,24 +212,8 @@ const styles = StyleSheet.create({
   scrollContent: {
     flexGrow: 1,
     paddingHorizontal: 20,
-    paddingTop: 10,
+    paddingTop: 0,
     paddingBottom: 140,
-  },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginTop: 6,
-  },
-  appName: {
-    color: '#187BCD',
-    fontSize: 22,
-    fontWeight: 'bold',
-  },
-  logo: {
-    width: 24,
-    height: 24,
-    tintColor: '#187BCD',
   },
   requestsPanel: {
     marginTop: 28,

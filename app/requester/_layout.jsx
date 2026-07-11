@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, StyleSheet, TouchableOpacity, Image } from 'react-native';
 import { Stack, usePathname, useRouter } from 'expo-router';
+import RequesterHeader from '../../components/RequesterHeader';
 
 const dashboardRoutes = ['/requester/r_dashboard'];
 const requestsRoutes = ['/requester/r_request', '/requester/r_notification'];
@@ -18,12 +19,16 @@ export default function RequesterLayout() {
 
   return (
     <View style={styles.root}>
-      <Stack
-        screenOptions={{
-          headerShown: false,
-          animation: 'none',
-        }}
-      />
+      <RequesterHeader />
+
+      <View style={styles.screenContent}>
+        <Stack
+          screenOptions={{
+            headerShown: false,
+            animation: 'none',
+          }}
+        />
+      </View>
 
       <View style={styles.navOverlay} pointerEvents="box-none">
         <View style={styles.navFrame} pointerEvents="box-none">
@@ -51,6 +56,9 @@ export default function RequesterLayout() {
 
 const styles = StyleSheet.create({
   root: {
+    flex: 1,
+  },
+  screenContent: {
     flex: 1,
   },
   navOverlay: {

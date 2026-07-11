@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, Image, TouchableOpacity, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { useRouter } from 'expo-router';
@@ -7,29 +7,28 @@ import { useRouter } from 'expo-router';
 export default function RequesterNotification() {
   const router = useRouter();
 
+  const goBack = () => {
+    router.replace('/requester/r_dashboard');
+  };
+
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar style="dark" />
+    <SafeAreaView edges={['left', 'right', 'bottom']} style={styles.container}>
+      <StatusBar style="light" />
 
       <View style={styles.phoneWrapper}>
-        {/* Header */}
-        <View style={styles.header}>
-          <Text style={styles.appName}>BlueTap</Text>
-
-          <View style={styles.headerIcons}>
-            <TouchableOpacity onPress={() => router.replace('/requester/r_request')}>
-              <Text style={styles.backIcon}>{'\u2190'}</Text>
-            </TouchableOpacity>
-
-            <Image source={require('../../assets/icons/notif.png')} style={styles.notifIcon} />
-          </View>
-        </View>
-
         {/* Main notification card */}
         <ScrollView
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
         >
+          <TouchableOpacity
+            style={styles.backButton}
+            activeOpacity={0.85}
+            onPress={goBack}
+          >
+            <Text style={styles.backIcon}>{'\u2190'}</Text>
+          </TouchableOpacity>
+
           <View style={styles.card}>
             {/* Blue title bar */}
             <View style={styles.cardHeader}>
@@ -73,35 +72,18 @@ const styles = StyleSheet.create({
     maxWidth: 375,
     alignSelf: 'center',
   },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingTop: 10,
-  },
-  appName: {
-    fontSize: 22,
-    fontWeight: 'bold',
-    color: '#187BCD',
-  },
-  headerIcons: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  backIcon: {
-    fontSize: 20,
-    color: '#187BCD',
-    marginRight: 12,
-  },
-  notifIcon: {
-    width: 22,
-    height: 22,
-    tintColor: '#187BCD',
-  },
   scrollContent: {
     paddingHorizontal: 20,
     paddingTop: 20,
+  },
+  backButton: {
+    alignSelf: 'flex-start',
+    marginBottom: 12,
+  },
+  backIcon: {
+    color: '#187BCD',
+    fontSize: 22,
+    fontWeight: 'bold',
   },
   card: {
     borderWidth: 2,

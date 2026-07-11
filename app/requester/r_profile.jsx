@@ -7,6 +7,8 @@ import {
   TouchableOpacity,
   ScrollView,
   ActivityIndicator,
+  TextInput,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -14,8 +16,8 @@ import { useRouter } from 'expo-router';
 
 import { auth, db } from '../../firebase';
 import { signOut } from 'firebase/auth';
-import { doc, getDoc } from 'firebase/firestore';
-import { findLocalUserByEmail, getLocalUsers } from '../../localUsers';
+import { doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
+import { findLocalUserByEmail, getLocalUsers, saveLocalUser } from '../../localUsers';
 
 const PROFILE_CACHE_TTL_MS = 60000;
 
@@ -43,10 +45,34 @@ const cacheProfile = (profile) => {
   cachedRequesterProfileFetchedAt = Date.now();
 };
 
+const getFullName = (profile) =>
+  `${profile?.firstName || ''} ${profile?.lastName || ''}`.trim();
+
+const buildProfileDraft = (profile = {}) => ({
+  fullName: getFullName(profile),
+  phone: profile.phone || '',
+  address: profile.address || '',
+});
+
+const splitFullName = (fullName) => {
+  const nameParts = fullName.trim().split(/\s+/).filter(Boolean);
+  const firstName = nameParts.shift() || '';
+
+  return {
+    firstName,
+    lastName: nameParts.join(' '),
+  };
+};
+
 export default function ProfilePage() {
   const router = useRouter();
   const [loading, setLoading] = useState(!cachedRequesterProfile);
   const [userData, setUserData] = useState(cachedRequesterProfile);
+  const [editingProfile, setEditingProfile] = useState(false);
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [profileDraft, setProfileDraft] = useState(() =>
+    buildProfileDraft(cachedRequesterProfile || {})
+  );
 
   useEffect(() => {
     let isMounted = true;
@@ -130,28 +156,107 @@ export default function ProfilePage() {
     router.replace('/login');
   };
 
+  const openProfileEditor = () => {
+    setProfileDraft(buildProfileDraft(userData || {}));
+    setEditingProfile(true);
+  };
+
+  const cancelProfileEdit = () => {
+    if (savingProfile) return;
+
+    setProfileDraft(buildProfileDraft(userData || {}));
+    setEditingProfile(false);
+  };
+
+  const updateProfileDraft = (field, value) => {
+    setProfileDraft((currentDraft) => ({
+      ...currentDraft,
+      [field]: value,
+    }));
+  };
+
+  const saveProfileChanges = async () => {
+    if (savingProfile) return;
+
+    const uid = userData?.uid || auth.currentUser?.uid || '';
+    const fullName = profileDraft.fullName.trim();
+    const phone = profileDraft.phone.trim();
+    const address = profileDraft.address.trim();
+
+    if (!uid) {
+      Alert.alert('Profile not saved', 'Please log in again before editing your profile.');
+      return;
+    }
+
+    if (!fullName) {
+      Alert.alert('Missing name', 'Full name cannot be empty.');
+      return;
+    }
+
+    const nameParts = splitFullName(fullName);
+    const profileUpdate = {
+      ...nameParts,
+      phone,
+      address,
+    };
+    const nextProfile = {
+      ...(userData || {}),
+      ...profileUpdate,
+      uid,
+      email: userData?.email || auth.currentUser?.email || '',
+    };
+
+    try {
+      setSavingProfile(true);
+      saveLocalUser(nextProfile);
+      cacheProfile(nextProfile);
+      setUserData(nextProfile);
+
+      if (auth.currentUser?.uid) {
+        try {
+          await setDoc(
+            doc(db, 'users', auth.currentUser.uid),
+            {
+              ...profileUpdate,
+              updatedAt: serverTimestamp(),
+            },
+            { merge: true }
+          );
+        } catch (error) {
+          console.log('Requester profile save error:', error.message);
+          Alert.alert(
+            'Saved locally',
+            'Your profile was updated on this device, but Firebase did not accept the update.'
+          );
+        }
+      }
+
+      setEditingProfile(false);
+    } catch (error) {
+      console.log('Requester profile edit error:', error.message);
+      Alert.alert('Profile not saved', error.message);
+    } finally {
+      setSavingProfile(false);
+    }
+  };
+
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar style="dark" />
+    <SafeAreaView edges={['left', 'right', 'bottom']} style={styles.container}>
+      <StatusBar style="light" />
 
       <View style={styles.phoneWrapper}>
         <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-
-          {/* Header */}
-          <View style={styles.header}>
-            <Text style={styles.appName}>BlueTap</Text>
-            <TouchableOpacity onPress={() => router.replace('/requester/r_notification')}>
-              <Image source={require('../../assets/icons/notif.png')} style={styles.logo} />
-            </TouchableOpacity>
-          </View>
-
           <Text style={styles.profileTitle}>PROFILE</Text>
 
           {/* Info Section */}
           <View style={styles.infoSection}>
             <View style={styles.infoHeader}>
               <Text style={styles.infoTitle}>User Information</Text>
-              <Image source={require('../../assets/icons/pencil.png')} style={styles.editIcon} />
+              {!editingProfile && (
+                <TouchableOpacity onPress={openProfileEditor} disabled={loading}>
+                  <Image source={require('../../assets/icons/pencil.png')} style={styles.editIcon} />
+                </TouchableOpacity>
+              )}
             </View>
 
             {loading && !userData ? (
@@ -161,20 +266,74 @@ export default function ProfilePage() {
             ) : (
               <>
                 <Text style={styles.label}>Full Name</Text>
-                <Text style={styles.value}>
-                  {userData?.firstName
-                    ? `${userData.firstName} ${userData.lastName}`.trim()
-                    : 'Not set'}
-                </Text>
+                {editingProfile ? (
+                  <TextInput
+                    style={styles.input}
+                    value={profileDraft.fullName}
+                    onChangeText={(value) => updateProfileDraft('fullName', value)}
+                    placeholder="Full Name"
+                    placeholderTextColor="#90A4AE"
+                    editable={!savingProfile}
+                  />
+                ) : (
+                  <Text style={styles.value}>
+                    {getFullName(userData) || 'Not set'}
+                  </Text>
+                )}
 
                 <Text style={styles.label}>Contact Number</Text>
-                <Text style={styles.value}>{userData?.phone || 'Not set'}</Text>
+                {editingProfile ? (
+                  <TextInput
+                    style={styles.input}
+                    value={profileDraft.phone}
+                    onChangeText={(value) => updateProfileDraft('phone', value)}
+                    placeholder="Contact Number"
+                    placeholderTextColor="#90A4AE"
+                    keyboardType="phone-pad"
+                    editable={!savingProfile}
+                  />
+                ) : (
+                  <Text style={styles.value}>{userData?.phone || 'Not set'}</Text>
+                )}
 
                 <Text style={styles.label}>Address</Text>
-                <Text style={styles.value}>{userData?.address || 'Not set'}</Text>
+                {editingProfile ? (
+                  <TextInput
+                    style={styles.input}
+                    value={profileDraft.address}
+                    onChangeText={(value) => updateProfileDraft('address', value)}
+                    placeholder="Address"
+                    placeholderTextColor="#90A4AE"
+                    editable={!savingProfile}
+                  />
+                ) : (
+                  <Text style={styles.value}>{userData?.address || 'Not set'}</Text>
+                )}
 
                 <Text style={styles.label}>Email</Text>
                 <Text style={styles.value}>{userData?.email || 'Not set'}</Text>
+
+                {editingProfile && (
+                  <View style={styles.editActions}>
+                    <TouchableOpacity
+                      style={styles.cancelEditButton}
+                      onPress={cancelProfileEdit}
+                      disabled={savingProfile}
+                    >
+                      <Text style={styles.cancelEditText}>Cancel</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={[styles.saveEditButton, savingProfile && styles.buttonDisabled]}
+                      onPress={saveProfileChanges}
+                      disabled={savingProfile}
+                    >
+                      <Text style={styles.saveEditText}>
+                        {savingProfile ? 'Saving...' : 'Save'}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
               </>
             )}
           </View>
@@ -218,24 +377,7 @@ export default function ProfilePage() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#FFFFFF' },
   phoneWrapper: { width: '100%', maxWidth: 375, alignSelf: 'center', flex: 1 },
-  scrollContent: { paddingHorizontal: 20, paddingTop: 10 },
-
-header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginTop: 10,
-  },
-  appName: {
-    color: '#187BCD',
-    fontSize: 22,
-    fontWeight: 'bold',
-  },
-  logo: {
-    width: 25,
-    height: 25,
-    tintColor: '#187BCD',
-  },
+  scrollContent: { paddingHorizontal: 20, paddingTop: 0 },
 
   profileTitle: { marginTop: 40, fontSize: 26, fontWeight: 'bold', color: '#187BCD' },
 
@@ -251,6 +393,50 @@ header: {
 
   label: { marginTop: 10, fontSize: 13, color: '#187BCD', opacity: 0.6 },
   value: { fontSize: 15, fontWeight: 'bold', color: '#187BCD' },
+  input: {
+    borderWidth: 1,
+    borderColor: '#BBDEFB',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    color: '#187BCD',
+    fontSize: 15,
+    fontWeight: 'bold',
+    marginTop: 4,
+  },
+  editActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    marginTop: 18,
+  },
+  cancelEditButton: {
+    borderWidth: 1,
+    borderColor: '#187BCD',
+    borderRadius: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    marginRight: 8,
+  },
+  cancelEditText: {
+    color: '#187BCD',
+    fontSize: 13,
+    fontWeight: 'bold',
+  },
+  saveEditButton: {
+    backgroundColor: '#187BCD',
+    borderRadius: 10,
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+  },
+  saveEditText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: 'bold',
+  },
+  buttonDisabled: {
+    opacity: 0.7,
+  },
 
   helpCard: {
     marginTop: 30,

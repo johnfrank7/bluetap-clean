@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, Image, TouchableOpacity, ScrollView, TextInput } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { useRouter } from 'expo-router';
@@ -8,14 +8,13 @@ export default function BlueTapAIPage() {
   const router = useRouter();
 
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar style="dark" />
+    <SafeAreaView edges={['left', 'right', 'bottom']} style={styles.container}>
+      <StatusBar style="light" />
 
       <View style={styles.phoneWrapper}>
         <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-          {/* Header */}
-          <View style={styles.header}>
-            <Text style={styles.appName}>BlueTap AI</Text>
+          <View style={styles.aiTitleRow}>
+            <Text style={styles.aiTitle}>BlueTap AI</Text>
 
             <TouchableOpacity onPress={() => router.replace('/requester/r_profile')}>
               <Text style={styles.closeIcon}>✕</Text>
@@ -85,12 +84,12 @@ const styles = StyleSheet.create({
     paddingTop: 20,
     paddingBottom: 140,
   },
-  header: {
+  aiTitleRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
-  appName: {
+  aiTitle: {
     fontSize: 22,
     fontWeight: 'bold',
     color: '#187BCD',

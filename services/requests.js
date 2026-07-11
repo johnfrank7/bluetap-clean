@@ -72,7 +72,7 @@ const normalizeRequest = (id, data = {}) => {
   return {
     id,
     request_id: data.request_id || '',
-    requester_id: data.requester_id || '',
+    requester_id: (data.requester_id || '').toString().trim(),
     requester_name: data.requester_name || '',
     contact_number: data.contact_number || '',
     address: data.address || '',
@@ -100,6 +100,25 @@ const sortRequests = (requests) =>
     (left, right) =>
       timestampToMillis(right.created_at) - timestampToMillis(left.created_at)
   );
+
+const inactiveCurrentRequestStatuses = new Set([
+  'cancelled',
+  'canceled',
+  'delivered',
+  'rejected',
+]);
+
+export const isCurrentRequesterRequest = (request) => {
+  const normalizedStatus = (request.status || 'Pending')
+    .toString()
+    .trim()
+    .toLowerCase();
+
+  return !inactiveCurrentRequestStatuses.has(normalizedStatus);
+};
+
+const getCurrentRequesterRequests = (requests) =>
+  sortRequests(requests.filter(isCurrentRequesterRequest));
 
 const createRequestNumber = () =>
   `BT-${String(Date.now()).slice(-5).padStart(5, '0')}`;
@@ -331,28 +350,37 @@ const startRequesterRequestSubscription = (requesterId, entry) => {
 };
 
 export const subscribeRequesterRequests = (requesterId, listener, onError) => {
-  if (!requesterId) {
+  const normalizedRequesterId = (requesterId || '').toString().trim();
+
+  if (!normalizedRequesterId) {
     listener([]);
     return () => {};
   }
 
-  const entry = getRequesterRequestEntry(requesterId);
+  const entry = getRequesterRequestEntry(normalizedRequesterId);
   const subscriber = { listener, onError };
   entry.subscribers.add(subscriber);
 
   if (entry.cachedRequests) {
     listener(entry.cachedRequests);
   } else {
-    emitRequesterRequests(requesterId, entry, true);
+    emitRequesterRequests(normalizedRequesterId, entry, true);
   }
 
-  startRequesterRequestSubscription(requesterId, entry);
+  startRequesterRequestSubscription(normalizedRequesterId, entry);
 
   return () => {
     entry.subscribers.delete(subscriber);
-    scheduleRequesterRequestStop(requesterId, entry);
+    scheduleRequesterRequestStop(normalizedRequesterId, entry);
   };
 };
+
+export const subscribeRequesterCurrentRequests = (requesterId, listener, onError) =>
+  subscribeRequesterRequests(
+    requesterId,
+    (requests) => listener(getCurrentRequesterRequests(requests)),
+    onError
+  );
 
 const buildLocalRequest = (id, payload) => {
   const now = new Date().toISOString();
@@ -368,6 +396,7 @@ const buildLocalRequest = (id, payload) => {
 
 export const createRequest = async (requestData) => {
   const requestRef = doc(collection(db, REQUESTS_COLLECTION));
+  const requesterId = (requestData.requester_id || '').toString().trim();
   const items = normalizeItems(requestData);
   const totalQuantity = items.reduce((sum, item) => sum + item.quantity, 0);
   const totalCost =
@@ -377,7 +406,7 @@ export const createRequest = async (requestData) => {
 
   const requestPayload = {
     request_id: createRequestNumber(),
-    requester_id: requestData.requester_id,
+    requester_id: requesterId,
     requester_name: requestData.requester_name,
     contact_number: requestData.contact_number,
     address: requestData.address,
@@ -401,10 +430,7 @@ export const createRequest = async (requestData) => {
     await setDoc(requestRef, requestPayload);
     removeLocalRequest(requestRef.id);
 
-    return {
-      id: requestRef.id,
-      ...requestPayload,
-    };
+    return normalizeRequest(requestRef.id, requestPayload);
   } catch (error) {
     const localRequest = buildLocalRequest(requestRef.id, requestPayload);
     upsertLocalRequest(localRequest);

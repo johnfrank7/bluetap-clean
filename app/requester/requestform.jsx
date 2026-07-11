@@ -302,26 +302,11 @@ export default function RequestFormPage() {
       start={{ x: 0, y: 0 }}
       end={{ x: 0, y: 1 }}
     >
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView edges={['left', 'right', 'bottom']} style={styles.container}>
         <StatusBar style="light" />
 
         <View style={styles.phoneWrapper}>
           <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-            {/* Header */}
-            <View style={styles.header}>
-              <Text style={styles.appName}>BlueTap</Text>
-
-              <View style={styles.headerIcons}>
-                <TouchableOpacity onPress={() => router.replace('/requester/r_request')}>
-                  <Text style={styles.backIcon}>{'\u2190'}</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity onPress={() => router.replace('/requester/r_notification')}>
-                  <Image source={require('../../assets/icons/notif.png')} style={styles.notifIcon} />
-                </TouchableOpacity>
-              </View>
-            </View>
-
             {/* NEW REQUEST title */}
             <Text style={styles.pageTitle}>NEW REQUEST</Text>
 
@@ -587,19 +572,9 @@ const styles = StyleSheet.create({
   scrollContent: {
     flexGrow: 1,
     paddingHorizontal: 20,
-    paddingTop: 10,
+    paddingTop: 0,
     paddingBottom: 140,
   },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginTop: 6,
-  },
-  appName: { color: '#FFFFFF', fontSize: 22, fontWeight: 'bold' },
-  headerIcons: { flexDirection: 'row', alignItems: 'center' },
-  backIcon: { color: '#FFFFFF', fontSize: 20, marginRight: 10 },
-  notifIcon: { width: 22, height: 22, tintColor: '#FFFFFF' },
   pageTitle: {
     marginTop: 32,
     fontSize: 24,
