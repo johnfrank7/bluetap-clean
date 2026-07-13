@@ -135,6 +135,9 @@ export default function DistributorProfilePage() {
           <TouchableOpacity onPress={() => router.replace('/distributor/d_requests')}>
             <Image source={require('../../assets/icons/ballot.png')} style={styles.navIcon} />
           </TouchableOpacity>
+          <TouchableOpacity onPress={() => router.replace('/distributor/d_scheduled_requests')}>
+            <Image source={require('../../assets/icons/calendar-clock.png')} style={styles.navIcon} />
+          </TouchableOpacity>
           <TouchableOpacity onPress={() => router.replace('/distributor/d_profile')}>
             <Image source={require('../../assets/icons/user.png')} style={styles.navIconActive} />
           </TouchableOpacity>

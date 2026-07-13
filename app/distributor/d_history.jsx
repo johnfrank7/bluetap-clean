@@ -41,22 +41,6 @@ export default function DistributorHistory() {
     <SafeAreaView edges={['left', 'right', 'bottom']} style={styles.container}>
       <BlueTapHeader
         notificationPath="/distributor/d_notification"
-        rightContent={
-          <>
-            <TouchableOpacity onPress={() => router.replace('/distributor/d_scheduled_requests')}>
-              <Image
-                source={require('../../assets/icons/calendar-clock.png')}
-                style={styles.headerIcon}
-              />
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => router.replace('/distributor/d_history')}>
-              <Image
-                source={require('../../assets/icons/time-past.png')}
-                style={styles.headerIcon}
-              />
-            </TouchableOpacity>
-          </>
-        }
       />
 
       <View style={styles.phoneWrapper}>
@@ -66,8 +50,28 @@ export default function DistributorHistory() {
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.historyCard}>
-            <Text style={styles.pageTitle}>HISTORY</Text>
+            <Text style={styles.pageTitle}>SCHEDULE</Text>
             <Text style={styles.subtitle}>Request History</Text>
+
+            <View style={styles.scheduleTabs}>
+              <TouchableOpacity
+                style={styles.scheduleTab}
+                activeOpacity={0.85}
+                onPress={() => router.replace('/distributor/d_scheduled_requests')}
+              >
+                <Text style={styles.scheduleTabText}>Scheduled</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.scheduleTab, styles.scheduleTabActive]}
+                activeOpacity={0.85}
+                onPress={() => router.replace('/distributor/d_history')}
+              >
+                <Text style={[styles.scheduleTabText, styles.scheduleTabTextActive]}>
+                  History
+                </Text>
+              </TouchableOpacity>
+            </View>
 
             {HISTORY_REQUESTS.map((req, index) => (
               <View key={req.id}>
@@ -94,11 +98,15 @@ export default function DistributorHistory() {
         {/* Bottom navigation bar */}
         <View style={styles.bottomNav}>
           <TouchableOpacity onPress={() => router.replace('/distributor/d_dashboard')}>
-            <Image source={require('../../assets/icons/home.png')} style={styles.navIconActive} />
+            <Image source={require('../../assets/icons/home.png')} style={styles.navIcon} />
           </TouchableOpacity>
 
           <TouchableOpacity onPress={() => router.replace('/distributor/d_requests')}>
             <Image source={require('../../assets/icons/ballot.png')} style={styles.navIcon} />
+          </TouchableOpacity>
+
+          <TouchableOpacity onPress={() => router.replace('/distributor/d_scheduled_requests')}>
+            <Image source={require('../../assets/icons/calendar-clock.png')} style={styles.navIconActive} />
           </TouchableOpacity>
 
           <TouchableOpacity onPress={() => router.replace('/distributor/d_profile')}>
@@ -174,7 +182,33 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#187BCD',
     marginTop: 4,
-    marginBottom: 20,
+    marginBottom: 12,
+  },
+  scheduleTabs: {
+    flexDirection: 'row',
+    borderWidth: 1.5,
+    borderColor: '#187BCD',
+    borderRadius: 12,
+    overflow: 'hidden',
+    marginBottom: 16,
+  },
+  scheduleTab: {
+    flex: 1,
+    minHeight: 38,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
+  },
+  scheduleTabActive: {
+    backgroundColor: '#187BCD',
+  },
+  scheduleTabText: {
+    color: '#187BCD',
+    fontSize: 13,
+    fontWeight: 'bold',
+  },
+  scheduleTabTextActive: {
+    color: '#FFFFFF',
   },
   requestBlock: {
     paddingVertical: 12,

@@ -41,22 +41,6 @@ export default function DistributorRequests() {
     <SafeAreaView edges={['left', 'right', 'bottom']} style={styles.container}>
       <BlueTapHeader
         notificationPath="/distributor/d_notification"
-        rightContent={
-          <>
-            <TouchableOpacity onPress={() => router.replace('/distributor/d_scheduled_requests')}>
-              <Image
-                source={require('../../assets/icons/calendar-clock.png')}
-                style={styles.headerIcon}
-              />
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => router.replace('/distributor/d_history')}>
-              <Image
-                source={require('../../assets/icons/time-past.png')}
-                style={styles.headerIcon}
-              />
-            </TouchableOpacity>
-          </>
-        }
       />
 
       <View style={styles.phoneWrapper}>
@@ -101,6 +85,10 @@ export default function DistributorRequests() {
 
           <TouchableOpacity onPress={() => router.replace('/distributor/d_requests')}>
             <Image source={require('../../assets/icons/ballot.png')} style={styles.navIconActive} />
+          </TouchableOpacity>
+
+          <TouchableOpacity onPress={() => router.replace('/distributor/d_scheduled_requests')}>
+            <Image source={require('../../assets/icons/calendar-clock.png')} style={styles.navIcon} />
           </TouchableOpacity>
 
           <TouchableOpacity onPress={() => router.replace('/distributor/d_profile')}>
