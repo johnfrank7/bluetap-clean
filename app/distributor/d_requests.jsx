@@ -8,8 +8,8 @@ import {
   ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { StatusBar } from 'expo-status-bar';
 import { useRouter } from 'expo-router';
+import BlueTapHeader from '../../components/BlueTapHeader';
 
 const PENDING_REQUESTS = [
   {
@@ -38,14 +38,11 @@ export default function DistributorRequests() {
   const router = useRouter();
 
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar style="dark" />
-
-      <View style={styles.phoneWrapper}>
-        {/* Top Header - White */}
-        <View style={styles.header}>
-          <Text style={styles.appName}>BlueTap</Text>
-          <View style={styles.headerIcons}>
+    <SafeAreaView edges={['left', 'right', 'bottom']} style={styles.container}>
+      <BlueTapHeader
+        notificationPath="/distributor/d_notification"
+        rightContent={
+          <>
             <TouchableOpacity onPress={() => router.replace('/distributor/d_scheduled_requests')}>
               <Image
                 source={require('../../assets/icons/calendar-clock.png')}
@@ -58,9 +55,11 @@ export default function DistributorRequests() {
                 style={styles.headerIcon}
               />
             </TouchableOpacity>
-          </View>
-        </View>
+          </>
+        }
+      />
 
+      <View style={styles.phoneWrapper}>
         {/* Blue content area */}
         <ScrollView
           contentContainerStyle={styles.scrollContent}
@@ -146,7 +145,7 @@ const styles = StyleSheet.create({
   headerIcon: {
     width: 22,
     height: 22,
-    tintColor: '#187BCD',
+    tintColor: '#FFFFFF',
   },
   scrollContent: {
     flexGrow: 1,

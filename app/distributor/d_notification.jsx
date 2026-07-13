@@ -1,25 +1,24 @@
 import React from 'react';
 import { View, Text, StyleSheet, Image, TouchableOpacity, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { StatusBar } from 'expo-status-bar';
 import { useRouter } from 'expo-router';
+import BlueTapHeader from '../../components/BlueTapHeader';
 
 export default function DistributorNotification() {
   const router = useRouter();
 
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar style="dark" />
-
-      <View style={styles.phoneWrapper}>
-        {/* Header */}
-        <View style={styles.header}>
-          <Text style={styles.appName}>BlueTap</Text>
+    <SafeAreaView edges={['left', 'right', 'bottom']} style={styles.container}>
+      <BlueTapHeader
+        notificationPath="/distributor/d_notification"
+        rightContent={
           <TouchableOpacity onPress={() => router.back()}>
             <Text style={styles.backIcon}>{'\u2190'}</Text>
           </TouchableOpacity>
-        </View>
+        }
+      />
 
+      <View style={styles.phoneWrapper}>
         {/* Main content - light blue border card */}
         <ScrollView
           contentContainerStyle={styles.scrollContent}
@@ -84,7 +83,7 @@ const styles = StyleSheet.create({
   },
   backIcon: {
     fontSize: 24,
-    color: '#187BCD',
+    color: '#FFFFFF',
     fontWeight: 'bold',
   },
   scrollContent: {

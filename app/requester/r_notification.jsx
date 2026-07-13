@@ -8,7 +8,7 @@ export default function RequesterNotification() {
   const router = useRouter();
 
   const goBack = () => {
-    router.replace('/requester/r_dashboard');
+    router.back();
   };
 
   return (

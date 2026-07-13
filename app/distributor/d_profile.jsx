@@ -9,12 +9,12 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { StatusBar } from 'expo-status-bar';
 import { useRouter } from 'expo-router';
 
 import { auth, db } from '../../firebase';
 import { doc, getDoc } from 'firebase/firestore';
 import { normalizeRole, signOutAndClearSessions } from '../../services/authSession';
+import BlueTapHeader from '../../components/BlueTapHeader';
 
 export default function DistributorProfilePage() {
   const router = useRouter();
@@ -53,26 +53,26 @@ export default function DistributorProfilePage() {
 
   if (loading) {
     return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-        <ActivityIndicator size="large" color="#187BCD" />
-      </View>
+      <SafeAreaView edges={['left', 'right', 'bottom']} style={styles.container}>
+        <BlueTapHeader
+          notificationPath="/distributor/d_notification"
+        />
+
+        <View style={styles.loadingState}>
+          <ActivityIndicator size="large" color="#187BCD" />
+        </View>
+      </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar style="dark" />
+    <SafeAreaView edges={['left', 'right', 'bottom']} style={styles.container}>
+      <BlueTapHeader
+        notificationPath="/distributor/d_notification"
+      />
 
       <View style={styles.phoneWrapper}>
         <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-          {/* Header */}
-          <View style={styles.header}>
-            <Text style={styles.appName}>BlueTap</Text>
-            <TouchableOpacity onPress={() => router.replace('/distributor/d_notification')}>
-              <Image source={require('../../assets/icons/notif.png')} style={styles.notifIcon} />
-            </TouchableOpacity>
-          </View>
-
           <Text style={styles.profileTitle}>PROFILE</Text>
 
           {/* User Information */}
@@ -146,6 +146,7 @@ export default function DistributorProfilePage() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#FFFFFF' },
+  loadingState: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   phoneWrapper: { width: '100%', maxWidth: 375, alignSelf: 'center', flex: 1 },
   scrollContent: { paddingHorizontal: 20, paddingTop: 10 },
 

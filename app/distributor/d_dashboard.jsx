@@ -8,15 +8,17 @@ import {
   ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { StatusBar } from 'expo-status-bar';
 import { useRouter } from 'expo-router';
+import BlueTapHeader from '../../components/BlueTapHeader';
 
 export default function DistributorDashboard() {
   const router = useRouter();
 
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar style="dark" />
+    <SafeAreaView edges={['left', 'right', 'bottom']} style={styles.container}>
+      <BlueTapHeader
+        notificationPath="/distributor/d_notification"
+      />
 
       <View style={styles.phoneWrapper}>
         <ScrollView
@@ -24,16 +26,6 @@ export default function DistributorDashboard() {
           showsVerticalScrollIndicator={false}
         >
           
-
-          {/* Header: BlueTap + logo */}
-          <View style={styles.header}>
-            <Text style={styles.appName}>BlueTap</Text>
-            <Image
-              source={require('../../assets/icons/bluetaplogo.png')}
-              style={styles.logo}
-              resizeMode="contain"
-            />
-          </View>
 
           {/* Welcome section */}
           <View style={styles.welcomeSection}>
