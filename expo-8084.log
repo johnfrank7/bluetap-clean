@@ -1,0 +1,9 @@
+Starting project at C:\Users\HOME\Documents\CAPSTONE\final\bluetap-clean-main
+Starting Metro Bundler
+Waiting on http://localhost:8084
+Logs for your project will appear below.
+Web Bundled 1656ms node_modules\expo-router\entry.js (1297 modules)
+ LOG  [web] Logs will appear in the browser console
+Web node_modules\expo-router\entry.js ░░░░░░░░░░░░░░░░  0.0% (0/1)
+Web Bundled 44ms node_modules\expo-router\entry.js (1 module)
+ LOG  [web] Logs will appear in the browser console

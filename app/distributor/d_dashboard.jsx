@@ -12,6 +12,21 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import BlueTapHeader from '../../components/BlueTapHeader';
 
+const BLUE = '#187BCD';
+const BLUE_LIGHT = '#E3F2FD';
+const CARD_BORDER = '#D7ECFF';
+const TEXT_MUTED = '#6F8EA8';
+const TEXT_DARK = '#20384D';
+const STATUS_COLORS = {
+  pending: '#FBC02D',
+  scheduled: '#2196F3',
+  processing: '#FB8C00',
+  outForDelivery: '#8E24AA',
+  delivered: '#43A047',
+  rejected: '#E53935',
+  cancelled: '#757575',
+};
+
 const DISTRIBUTOR_NAME = 'Distributor';
 
 const DASHBOARD_SUMMARY = [
@@ -63,6 +78,66 @@ const normalizeStatus = (status) =>
 const getStatusActionLabel = (status) =>
   STATUS_ACTIONS[normalizeStatus(status)] || 'Update Request';
 
+const STATUS_STYLES = {
+  pending: {
+    backgroundColor: STATUS_COLORS.pending,
+    color: TEXT_DARK,
+    label: '\u25CF Pending',
+  },
+  accepted: {
+    backgroundColor: STATUS_COLORS.scheduled,
+    color: '#FFFFFF',
+    label: '\u25CF Scheduled',
+  },
+  scheduled: {
+    backgroundColor: STATUS_COLORS.scheduled,
+    color: '#FFFFFF',
+    label: '\u25CF Scheduled',
+  },
+  processing: {
+    backgroundColor: STATUS_COLORS.processing,
+    color: '#FFFFFF',
+    label: '\u25CF Processing',
+  },
+  'out for delivery': {
+    backgroundColor: STATUS_COLORS.outForDelivery,
+    color: '#FFFFFF',
+    label: '\u25CF Out for Delivery',
+  },
+  delivered: {
+    backgroundColor: STATUS_COLORS.delivered,
+    color: '#FFFFFF',
+    label: '\u25CF Delivered',
+  },
+  rejected: {
+    backgroundColor: STATUS_COLORS.rejected,
+    color: '#FFFFFF',
+    label: '\u25CF Rejected',
+  },
+  cancelled: {
+    backgroundColor: STATUS_COLORS.cancelled,
+    color: '#FFFFFF',
+    label: '\u25CF Cancelled',
+  },
+  canceled: {
+    backgroundColor: STATUS_COLORS.cancelled,
+    color: '#FFFFFF',
+    label: '\u25CF Cancelled',
+  },
+};
+
+const getStatusStyle = (status) => {
+  const normalizedStatus = normalizeStatus(status);
+
+  return (
+    STATUS_STYLES[normalizedStatus] || {
+      backgroundColor: BLUE_LIGHT,
+      color: BLUE,
+      label: status || 'Status',
+    }
+  );
+};
+
 const formatAmountDue = (amount) =>
   `\u20B1${Number(amount || 0).toFixed(2)}`;
 
@@ -74,6 +149,9 @@ export default function DistributorDashboard() {
   const primaryActionLabel = activeRequest
     ? getStatusActionLabel(activeRequest.status)
     : '';
+  const activeStatusStyle = activeRequest
+    ? getStatusStyle(activeRequest.status)
+    : null;
   const requestDetails = activeRequest
     ? [
         { label: 'Customer Name', value: activeRequest.customerName },
@@ -134,12 +212,22 @@ export default function DistributorDashboard() {
                 <View style={styles.requestCardHeader}>
                   <View style={styles.requestTitleBlock}>
                     <Text style={styles.requestId}>
-                      Request ID {activeRequest.requestId}
+                      Request ID: {activeRequest.requestId}
                     </Text>
                   </View>
-                  <View style={styles.statusPill}>
-                    <Text style={styles.statusPillText}>
-                      {activeRequest.status}
+                  <View
+                    style={[
+                      styles.statusPill,
+                      { backgroundColor: activeStatusStyle.backgroundColor },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.statusPillText,
+                        { color: activeStatusStyle.color },
+                      ]}
+                    >
+                      {activeStatusStyle.label}
                     </Text>
                   </View>
                 </View>
@@ -147,8 +235,11 @@ export default function DistributorDashboard() {
                 <View style={styles.compactRequestBody}>
                   <View style={[styles.infoGridRow, styles.infoGridRowDivider]}>
                     <View style={styles.infoGridColumn}>
-                      <Text style={styles.infoGridLabel}>Customer</Text>
-                      <Text style={styles.infoGridValue} numberOfLines={1}>
+                      <Text style={styles.infoGridLabel}>Customer Name</Text>
+                      <Text
+                        style={styles.infoGridPrimaryValue}
+                        numberOfLines={1}
+                      >
                         {activeRequest.customerName}
                       </Text>
                     </View>
@@ -170,8 +261,14 @@ export default function DistributorDashboard() {
                     </View>
 
                     <View style={styles.infoGridColumn}>
-                      <Text style={styles.infoGridLabel}>Product</Text>
-                      <Text style={styles.infoGridValue} numberOfLines={2}>
+                      <Text style={styles.infoGridLabel}>Product Ordered</Text>
+                      <Text
+                        style={styles.infoGridPrimaryValue}
+                        numberOfLines={2}
+                      >
+                        {activeRequest.productsOrdered}
+                      </Text>
+                      <Text style={styles.infoGridSubValue} numberOfLines={1}>
                         {activeRequest.quantity} | {activeRequest.containerType}
                       </Text>
                     </View>
@@ -307,7 +404,7 @@ export default function DistributorDashboard() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#F4FAFF',
   },
   phoneWrapper: {
     width: '100%',
@@ -325,19 +422,19 @@ const styles = StyleSheet.create({
     marginTop: 12,
   },
   welcomeText: {
-    color: '#187BCD',
+    color: BLUE,
     fontSize: 26,
     fontWeight: 'bold',
     letterSpacing: 0,
   },
   greetingText: {
-    color: '#187BCD',
+    color: BLUE,
     fontSize: 16,
     fontWeight: '700',
     marginTop: 4,
   },
   dateText: {
-    color: '#6F8EA8',
+    color: TEXT_MUTED,
     fontSize: 13,
     marginTop: 4,
   },
@@ -350,21 +447,21 @@ const styles = StyleSheet.create({
     flex: 1,
     minHeight: 86,
     backgroundColor: '#FFFFFF',
-    borderWidth: 1.5,
-    borderColor: '#90CAF9',
-    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: CARD_BORDER,
+    borderRadius: 16,
     paddingHorizontal: 8,
     paddingVertical: 12,
     justifyContent: 'space-between',
   },
   summaryValue: {
-    color: '#187BCD',
+    color: BLUE,
     fontSize: 24,
     fontWeight: 'bold',
     textAlign: 'center',
   },
   summaryLabel: {
-    color: '#187BCD',
+    color: BLUE,
     fontSize: 11,
     lineHeight: 14,
     fontWeight: '600',
@@ -374,17 +471,22 @@ const styles = StyleSheet.create({
     marginTop: 24,
   },
   sectionTitle: {
-    color: '#187BCD',
+    color: BLUE,
     fontSize: 16,
     fontWeight: 'bold',
     marginBottom: 10,
   },
   currentRequestCard: {
     backgroundColor: '#FFFFFF',
-    borderWidth: 1.5,
-    borderColor: '#90CAF9',
-    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: CARD_BORDER,
+    borderRadius: 20,
     padding: 16,
+    elevation: 6,
+    shadowColor: '#0D47A1',
+    shadowOpacity: 0.12,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 5 },
   },
   requestCardHeader: {
     flexDirection: 'row',
@@ -393,25 +495,23 @@ const styles = StyleSheet.create({
     gap: 10,
     paddingBottom: 10,
     borderBottomWidth: 1,
-    borderBottomColor: '#E3F2FD',
+    borderBottomColor: BLUE_LIGHT,
   },
   requestTitleBlock: {
     flex: 1,
   },
   requestId: {
-    color: '#187BCD',
-    fontSize: 16,
+    color: BLUE,
+    fontSize: 15,
     fontWeight: 'bold',
   },
   statusPill: {
-    backgroundColor: '#E3F2FD',
     borderRadius: 999,
-    paddingHorizontal: 9,
+    paddingHorizontal: 10,
     paddingVertical: 5,
     flexShrink: 0,
   },
   statusPillText: {
-    color: '#187BCD',
     fontSize: 11,
     fontWeight: 'bold',
   },
@@ -425,22 +525,35 @@ const styles = StyleSheet.create({
   },
   infoGridRowDivider: {
     borderBottomWidth: 1,
-    borderBottomColor: '#E3F2FD',
+    borderBottomColor: BLUE_LIGHT,
   },
   infoGridColumn: {
     flex: 1,
   },
   infoGridLabel: {
-    color: '#6F8EA8',
-    fontSize: 12,
-    fontWeight: '600',
+    color: TEXT_MUTED,
+    fontSize: 11,
+    fontWeight: 'bold',
     marginBottom: 3,
   },
-  infoGridValue: {
-    color: '#187BCD',
+  infoGridPrimaryValue: {
+    color: BLUE,
     fontSize: 14,
-    fontWeight: '700',
+    fontWeight: 'bold',
     lineHeight: 18,
+  },
+  infoGridValue: {
+    color: TEXT_DARK,
+    fontSize: 13,
+    fontWeight: '700',
+    lineHeight: 17,
+  },
+  infoGridSubValue: {
+    color: TEXT_DARK,
+    fontSize: 12,
+    fontWeight: '700',
+    lineHeight: 16,
+    marginTop: 2,
   },
   cardActionsRow: {
     flexDirection: 'row',
@@ -452,43 +565,53 @@ const styles = StyleSheet.create({
     height: 44,
     backgroundColor: '#FFFFFF',
     borderWidth: 1.5,
-    borderColor: '#187BCD',
-    borderRadius: 12,
+    borderColor: BLUE,
+    borderRadius: 13,
     alignItems: 'center',
     justifyContent: 'center',
   },
   viewDetailsText: {
-    color: '#187BCD',
-    fontSize: 14,
+    color: BLUE,
+    fontSize: 13,
     fontWeight: 'bold',
   },
   primaryActionButton: {
     flex: 1,
     height: 44,
-    backgroundColor: '#187BCD',
-    borderRadius: 12,
+    backgroundColor: BLUE,
+    borderRadius: 13,
     alignItems: 'center',
     justifyContent: 'center',
+    elevation: 4,
+    shadowColor: BLUE,
+    shadowOpacity: 0.22,
+    shadowRadius: 7,
+    shadowOffset: { width: 0, height: 4 },
   },
   primaryActionText: {
     color: '#FFFFFF',
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: 'bold',
   },
   emptyRequestCard: {
     backgroundColor: '#FFFFFF',
-    borderWidth: 1.5,
-    borderColor: '#90CAF9',
-    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: CARD_BORDER,
+    borderRadius: 20,
     padding: 16,
+    elevation: 4,
+    shadowColor: '#0D47A1',
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
   },
   emptyRequestTitle: {
-    color: '#187BCD',
+    color: BLUE,
     fontSize: 15,
     fontWeight: 'bold',
   },
   emptyRequestText: {
-    color: '#6F8EA8',
+    color: TEXT_MUTED,
     fontSize: 13,
     lineHeight: 18,
     marginTop: 4,
@@ -503,8 +626,8 @@ const styles = StyleSheet.create({
   quickActionButton: {
     flex: 1,
     minHeight: 50,
-    backgroundColor: '#187BCD',
-    borderRadius: 12,
+    backgroundColor: BLUE,
+    borderRadius: 13,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 10,
@@ -512,7 +635,7 @@ const styles = StyleSheet.create({
   quickActionSecondary: {
     backgroundColor: '#FFFFFF',
     borderWidth: 1.5,
-    borderColor: '#187BCD',
+    borderColor: BLUE,
   },
   quickActionText: {
     color: '#FFFFFF',
@@ -522,11 +645,11 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   quickActionSecondaryText: {
-    color: '#187BCD',
+    color: BLUE,
   },
   modalBackdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.45)',
+    backgroundColor: 'rgba(8, 31, 51, 0.46)',
     justifyContent: 'flex-end',
     alignItems: 'center',
   },
@@ -534,8 +657,8 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: 375,
     backgroundColor: '#FFFFFF',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
+    borderTopLeftRadius: 22,
+    borderTopRightRadius: 22,
     paddingHorizontal: 20,
     paddingTop: 18,
     paddingBottom: 28,
@@ -546,18 +669,18 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   modalTitle: {
-    color: '#187BCD',
+    color: BLUE,
     fontSize: 18,
     fontWeight: 'bold',
   },
   modalCloseText: {
-    color: '#187BCD',
+    color: BLUE,
     fontSize: 13,
     fontWeight: 'bold',
   },
   modalDivider: {
     height: 1,
-    backgroundColor: '#E3F2FD',
+    backgroundColor: BLUE_LIGHT,
     marginTop: 12,
     marginBottom: 12,
   },
@@ -565,13 +688,13 @@ const styles = StyleSheet.create({
     marginBottom: 11,
   },
   modalDetailLabel: {
-    color: '#6F8EA8',
+    color: TEXT_MUTED,
     fontSize: 12,
-    fontWeight: '600',
+    fontWeight: 'bold',
     marginBottom: 2,
   },
   modalDetailValue: {
-    color: '#187BCD',
+    color: TEXT_DARK,
     fontSize: 14,
     fontWeight: '700',
     lineHeight: 18,
@@ -598,6 +721,6 @@ const styles = StyleSheet.create({
   navIcon: {
     width: 26,
     height: 26,
-    tintColor: '#187BCD',
+    tintColor: BLUE,
   },
 });
