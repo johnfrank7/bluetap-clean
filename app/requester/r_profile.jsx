@@ -1,23 +1,29 @@
-import React, { useEffect, useState } from 'react';
+import React, { memo, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  Image,
-  TouchableOpacity,
-  ScrollView,
-  ActivityIndicator,
-  TextInput,
   Alert,
+  ActivityIndicator,
+  Animated,
+  Image,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { StatusBar } from 'expo-status-bar';
 import { useRouter } from 'expo-router';
 
 import { auth, db } from '../../firebase';
 import { doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
 import { findLocalUserForAuthRole, saveLocalUser } from '../../localUsers';
 import { normalizeRole, signOutAndClearSessions } from '../../services/authSession';
+
+const BLUE = '#187BCD';
+const BLUE_LIGHT = '#E3F2FD';
+const CARD_BORDER = '#D7ECFF';
+const TEXT_MUTED = '#6F8EA8';
+const TEXT_DARK = '#20384D';
 
 const PROFILE_CACHE_TTL_MS = 60000;
 
@@ -60,8 +66,40 @@ const splitFullName = (fullName) => {
   };
 };
 
+const ProfileField = memo(function ProfileField({
+  editable = false,
+  keyboardType = 'default',
+  label,
+  multiline = false,
+  onChangeText,
+  placeholder,
+  saving = false,
+  value,
+}) {
+  return (
+    <View style={styles.profileField}>
+      <Text style={styles.label}>{label}</Text>
+      {editable ? (
+        <TextInput
+          style={[styles.input, multiline && styles.multilineInput]}
+          value={value}
+          onChangeText={onChangeText}
+          placeholder={placeholder || label}
+          placeholderTextColor="#90A4AE"
+          keyboardType={keyboardType}
+          editable={!saving}
+          multiline={multiline}
+        />
+      ) : (
+        <Text style={styles.value}>{value || 'Not set'}</Text>
+      )}
+    </View>
+  );
+});
+
 export default function ProfilePage() {
   const router = useRouter();
+  const editFadeAnim = useRef(new Animated.Value(0)).current;
   const [loading, setLoading] = useState(!cachedRequesterProfile);
   const [userData, setUserData] = useState(cachedRequesterProfile);
   const [editingProfile, setEditingProfile] = useState(false);
@@ -154,12 +192,32 @@ export default function ProfilePage() {
     };
   }, [router]);
 
+  useEffect(() => {
+    Animated.timing(editFadeAnim, {
+      toValue: editingProfile ? 1 : 0,
+      duration: 180,
+      useNativeDriver: true,
+    }).start();
+  }, [editFadeAnim, editingProfile]);
+
+  const profileDisplay = useMemo(
+    () => ({
+      fullName: getFullName(userData),
+      phone: userData?.phone || '',
+      email: userData?.email || auth.currentUser?.email || '',
+      address: userData?.address || '',
+    }),
+    [userData]
+  );
+
   const handleLogout = async () => {
     await signOutAndClearSessions();
     router.replace('/login');
   };
 
   const openProfileEditor = () => {
+    if (loading || savingProfile) return;
+
     setProfileDraft(buildProfileDraft(userData || {}));
     setEditingProfile(true);
   };
@@ -245,81 +303,92 @@ export default function ProfilePage() {
 
   return (
     <SafeAreaView edges={['left', 'right', 'bottom']} style={styles.container}>
-      <StatusBar style="light" />
-
       <View style={styles.phoneWrapper}>
-        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+        >
           <Text style={styles.profileTitle}>PROFILE</Text>
 
-          {/* Info Section */}
           <View style={styles.infoSection}>
             <View style={styles.infoHeader}>
               <Text style={styles.infoTitle}>User Information</Text>
               {!editingProfile && (
-                <TouchableOpacity onPress={openProfileEditor} disabled={loading}>
-                  <Image source={require('../../assets/icons/pencil.png')} style={styles.editIcon} />
+                <TouchableOpacity
+                  activeOpacity={0.75}
+                  onPress={openProfileEditor}
+                  disabled={loading || savingProfile}
+                >
+                  <Image
+                    source={require('../../assets/icons/pencil.png')}
+                    style={styles.editIcon}
+                  />
                 </TouchableOpacity>
               )}
             </View>
+            <View style={styles.infoDivider} />
 
             {loading && !userData ? (
               <View style={styles.infoLoading}>
-                <ActivityIndicator size="small" color="#187BCD" />
+                <ActivityIndicator size="small" color={BLUE} />
+                <Text style={styles.loadingText}>Loading profile...</Text>
               </View>
             ) : (
               <>
-                <Text style={styles.label}>Full Name</Text>
-                {editingProfile ? (
-                  <TextInput
-                    style={styles.input}
-                    value={profileDraft.fullName}
-                    onChangeText={(value) => updateProfileDraft('fullName', value)}
-                    placeholder="Full Name"
-                    placeholderTextColor="#90A4AE"
-                    editable={!savingProfile}
-                  />
-                ) : (
-                  <Text style={styles.value}>
-                    {getFullName(userData) || 'Not set'}
-                  </Text>
-                )}
+                <ProfileField
+                  label="Full Name"
+                  value={editingProfile ? profileDraft.fullName : profileDisplay.fullName}
+                  editable={editingProfile}
+                  saving={savingProfile}
+                  onChangeText={(value) => updateProfileDraft('fullName', value)}
+                />
 
-                <Text style={styles.label}>Contact Number</Text>
-                {editingProfile ? (
-                  <TextInput
-                    style={styles.input}
-                    value={profileDraft.phone}
-                    onChangeText={(value) => updateProfileDraft('phone', value)}
-                    placeholder="Contact Number"
-                    placeholderTextColor="#90A4AE"
-                    keyboardType="phone-pad"
-                    editable={!savingProfile}
-                  />
-                ) : (
-                  <Text style={styles.value}>{userData?.phone || 'Not set'}</Text>
-                )}
+                <ProfileField
+                  label="Contact Number"
+                  value={editingProfile ? profileDraft.phone : profileDisplay.phone}
+                  editable={editingProfile}
+                  saving={savingProfile}
+                  keyboardType="phone-pad"
+                  onChangeText={(value) => updateProfileDraft('phone', value)}
+                />
 
-                <Text style={styles.label}>Address</Text>
-                {editingProfile ? (
-                  <TextInput
-                    style={styles.input}
-                    value={profileDraft.address}
-                    onChangeText={(value) => updateProfileDraft('address', value)}
-                    placeholder="Address"
-                    placeholderTextColor="#90A4AE"
-                    editable={!savingProfile}
-                  />
-                ) : (
-                  <Text style={styles.value}>{userData?.address || 'Not set'}</Text>
-                )}
+                <ProfileField
+                  label="Email Address"
+                  value={profileDisplay.email}
+                />
 
-                <Text style={styles.label}>Email</Text>
-                <Text style={styles.value}>{userData?.email || 'Not set'}</Text>
+                <ProfileField
+                  label="Complete Address"
+                  value={editingProfile ? profileDraft.address : profileDisplay.address}
+                  editable={editingProfile}
+                  saving={savingProfile}
+                  multiline
+                  onChangeText={(value) => updateProfileDraft('address', value)}
+                />
 
                 {editingProfile && (
-                  <View style={styles.editActions}>
+                  <Animated.View
+                    style={[
+                      styles.editActions,
+                      {
+                        opacity: editFadeAnim,
+                        transform: [
+                          {
+                            translateY: editFadeAnim.interpolate({
+                              inputRange: [0, 1],
+                              outputRange: [8, 0],
+                            }),
+                          },
+                        ],
+                      },
+                    ]}
+                  >
                     <TouchableOpacity
-                      style={styles.cancelEditButton}
+                      activeOpacity={0.8}
+                      style={[
+                        styles.cancelEditButton,
+                        savingProfile && styles.buttonDisabled,
+                      ]}
                       onPress={cancelProfileEdit}
                       disabled={savingProfile}
                     >
@@ -327,33 +396,37 @@ export default function ProfilePage() {
                     </TouchableOpacity>
 
                     <TouchableOpacity
-                      style={[styles.saveEditButton, savingProfile && styles.buttonDisabled]}
+                      activeOpacity={0.85}
+                      style={[
+                        styles.saveEditButton,
+                        savingProfile && styles.buttonDisabled,
+                      ]}
                       onPress={saveProfileChanges}
                       disabled={savingProfile}
                     >
-                      <Text style={styles.saveEditText}>
-                        {savingProfile ? 'Saving...' : 'Save'}
-                      </Text>
+                      {savingProfile ? (
+                        <ActivityIndicator color="#FFFFFF" size="small" />
+                      ) : (
+                        <Text style={styles.saveEditText}>Save Changes</Text>
+                      )}
                     </TouchableOpacity>
-                  </View>
+                  </Animated.View>
                 )}
               </>
             )}
           </View>
 
-          <View style={{ height: 40 }} />
-
-          {/* BLUE HELP CARD */}
           <View style={styles.helpCard}>
             <View style={styles.helpRow}>
-              <View>
-                <Text style={styles.helpTitle}>Need help?</Text>
-                <Text style={styles.helpSubtitle}>
-                  Tap BlueTap AI for quick guidance inside the app.
-                </Text>
+              <View style={styles.helpTextBlock}>
+                <Text style={styles.helpTitle}>Need Help?</Text>
+                <Text style={styles.helpSubtitle}>Tap BlueTap AI for quick guidance inside the app.</Text>
               </View>
 
-              <TouchableOpacity onPress={() => router.replace('/requester/bluetap_AI')}>
+              <TouchableOpacity
+                activeOpacity={0.85}
+                onPress={() => router.replace('/requester/bluetap_AI')}
+              >
                 <View style={styles.helpIconWrapper}>
                   <Image
                     source={require('../../assets/icons/bluetapwhitelogo.png')}
@@ -363,12 +436,18 @@ export default function ProfilePage() {
               </TouchableOpacity>
             </View>
 
-            <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
-              <Text style={styles.logoutText}>LOGOUT</Text>
+            <TouchableOpacity
+              activeOpacity={0.85}
+              style={styles.logoutButton}
+              onPress={handleLogout}
+              disabled={savingProfile}
+            >
+              <Text style={styles.logoutIcon}>{'\u21AA'}</Text>
+              <Text style={styles.logoutText}>Logout</Text>
             </TouchableOpacity>
           </View>
 
-          <View style={{ height: 120 }} />
+          <View style={{ height: 130 }} />
 
         </ScrollView>
 
@@ -378,59 +457,134 @@ export default function ProfilePage() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#FFFFFF' },
-  phoneWrapper: { width: '100%', maxWidth: 375, alignSelf: 'center', flex: 1 },
-  scrollContent: { paddingHorizontal: 20, paddingTop: 0 },
-
-  profileTitle: { marginTop: 40, fontSize: 26, fontWeight: 'bold', color: '#187BCD' },
-
-  infoSection: { marginTop: 20 },
-  infoHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 },
-  infoTitle: { fontSize: 16, fontWeight: 'bold', color: '#187BCD' },
-  editIcon: { width: 18, height: 18, tintColor: '#187BCD' },
+  container: {
+    flex: 1,
+    backgroundColor: '#F4FAFF',
+  },
+  phoneWrapper: {
+    width: '100%',
+    maxWidth: 375,
+    alignSelf: 'center',
+    flex: 1,
+  },
+  scrollContent: {
+    paddingHorizontal: 20,
+    paddingTop: 18,
+  },
+  profileTitle: {
+    fontSize: 26,
+    fontWeight: 'bold',
+    color: BLUE,
+    letterSpacing: 0,
+  },
+  infoSection: {
+    marginTop: 18,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: CARD_BORDER,
+    padding: 16,
+    elevation: 6,
+    shadowColor: '#0D47A1',
+    shadowOpacity: 0.1,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 5 },
+  },
+  infoHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  infoTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: BLUE,
+  },
+  editIcon: {
+    width: 20,
+    height: 20,
+    tintColor: BLUE,
+  },
+  infoDivider: {
+    height: 1,
+    backgroundColor: BLUE_LIGHT,
+    marginBottom: 2,
+  },
   infoLoading: {
-    minHeight: 110,
+    minHeight: 160,
     alignItems: 'center',
     justifyContent: 'center',
   },
-
-  label: { marginTop: 10, fontSize: 13, color: '#187BCD', opacity: 0.6 },
-  value: { fontSize: 15, fontWeight: 'bold', color: '#187BCD' },
+  loadingText: {
+    color: TEXT_MUTED,
+    fontSize: 13,
+    fontWeight: '600',
+    marginTop: 8,
+  },
+  profileField: {
+    marginTop: 14,
+  },
+  label: {
+    fontSize: 12,
+    color: TEXT_MUTED,
+    fontWeight: 'bold',
+    marginBottom: 4,
+  },
+  value: {
+    fontSize: 15,
+    lineHeight: 20,
+    fontWeight: 'bold',
+    color: TEXT_DARK,
+  },
   input: {
+    minHeight: 42,
     borderWidth: 1,
     borderColor: '#BBDEFB',
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    color: '#187BCD',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    color: TEXT_DARK,
     fontSize: 15,
     fontWeight: 'bold',
-    marginTop: 4,
+    backgroundColor: '#F7FBFF',
+  },
+  multilineInput: {
+    minHeight: 78,
+    textAlignVertical: 'top',
   },
   editActions: {
     flexDirection: 'row',
-    justifyContent: 'flex-end',
-    alignItems: 'center',
+    gap: 10,
     marginTop: 18,
   },
   cancelEditButton: {
-    borderWidth: 1,
-    borderColor: '#187BCD',
-    borderRadius: 10,
-    paddingHorizontal: 16,
-    paddingVertical: 9,
-    marginRight: 8,
+    flex: 1,
+    minHeight: 44,
+    borderWidth: 1.5,
+    borderColor: BLUE,
+    borderRadius: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
   },
   cancelEditText: {
-    color: '#187BCD',
+    color: BLUE,
     fontSize: 13,
     fontWeight: 'bold',
   },
   saveEditButton: {
-    backgroundColor: '#187BCD',
-    borderRadius: 10,
-    paddingHorizontal: 18,
-    paddingVertical: 10,
+    flex: 1,
+    minHeight: 44,
+    backgroundColor: BLUE,
+    borderRadius: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 4,
+    shadowColor: BLUE,
+    shadowOpacity: 0.22,
+    shadowRadius: 7,
+    shadowOffset: { width: 0, height: 4 },
   },
   saveEditText: {
     color: '#FFFFFF',
@@ -438,42 +592,70 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   buttonDisabled: {
-    opacity: 0.7,
+    opacity: 0.65,
   },
-
   helpCard: {
-    marginTop: 30,
-    backgroundColor: '#1E88E5',
+    marginTop: 22,
+    backgroundColor: BLUE,
     borderRadius: 20,
-    padding: 20,
+    padding: 18,
+    elevation: 5,
+    shadowColor: '#0D47A1',
+    shadowOpacity: 0.12,
+    shadowRadius: 9,
+    shadowOffset: { width: 0, height: 4 },
   },
-
   helpRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    gap: 12,
   },
-
-  helpTitle: { color: '#FFFFFF', fontSize: 20, fontWeight: 'bold' },
-  helpSubtitle: { color: '#EAF4FF', fontSize: 13, marginTop: 4, maxWidth: 220 },
-
+  helpTextBlock: {
+    flex: 1,
+  },
+  helpTitle: {
+    color: '#FFFFFF',
+    fontSize: 19,
+    fontWeight: 'bold',
+  },
+  helpSubtitle: {
+    color: '#EAF4FF',
+    fontSize: 13,
+    lineHeight: 17,
+    marginTop: 6,
+  },
   helpIconWrapper: {
     borderWidth: 2,
     borderColor: '#FFFFFF',
     borderRadius: 999,
     padding: 6,
   },
-  helpIcon: { width: 40, height: 40, tintColor: '#FFFFFF' },
-
-  logoutButton: {
-    marginTop: 20,
-    borderWidth: 1.5,
-    borderColor: '#FFFFFF',
-    paddingVertical: 12,
-    borderRadius: 12,
-    alignItems: 'center',
+  helpIcon: {
+    width: 38,
+    height: 38,
+    tintColor: '#FFFFFF',
   },
-
-  logoutText: { color: '#FFFFFF', fontWeight: 'bold', fontSize: 15 },
-
+  logoutButton: {
+    marginTop: 18,
+    minHeight: 44,
+    borderWidth: 1.5,
+    borderColor: BLUE,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+  },
+  logoutIcon: {
+    color: BLUE,
+    fontSize: 15,
+    fontWeight: 'bold',
+    marginRight: 8,
+  },
+  logoutText: {
+    color: BLUE,
+    fontWeight: 'bold',
+    fontSize: 14,
+  },
 });

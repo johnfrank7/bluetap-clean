@@ -1,101 +1,258 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
   Image,
-  TouchableOpacity,
+  Modal,
+  Pressable,
   ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import BlueTapHeader from '../../components/BlueTapHeader';
 
+const BLUE = '#187BCD';
+const BLUE_LIGHT = '#E3F2FD';
+const CARD_BORDER = '#D7ECFF';
+const TEXT_MUTED = '#6F8EA8';
+const TEXT_DARK = '#20384D';
+
+const STATUS_BADGES = {
+  pending: {
+    backgroundColor: '#FFF8E1',
+    color: '#F9A825',
+    label: '\u25CF Pending',
+  },
+  scheduled: {
+    backgroundColor: '#E3F2FD',
+    color: '#1976D2',
+    label: '\u25CF Scheduled',
+  },
+  'out for delivery': {
+    backgroundColor: '#F3E5F5',
+    color: '#8E24AA',
+    label: '\u25CF Out for Delivery',
+  },
+  delivered: {
+    backgroundColor: '#E8F5E9',
+    color: '#2E7D32',
+    label: '\u25CF Delivered',
+  },
+  rejected: {
+    backgroundColor: '#FFEBEE',
+    color: '#C62828',
+    label: '\u25CF Rejected',
+  },
+  cancelled: {
+    backgroundColor: '#F5F5F5',
+    color: '#616161',
+    label: '\u25CF Cancelled',
+  },
+  canceled: {
+    backgroundColor: '#F5F5F5',
+    color: '#616161',
+    label: '\u25CF Cancelled',
+  },
+};
+
+const getStatusBadge = (status) =>
+  STATUS_BADGES[(status || '').toString().trim().toLowerCase()] ||
+  STATUS_BADGES.delivered;
+
 const HISTORY_REQUESTS = [
   {
     id: 'BT-01267',
-    date: '01/23/26',
     quantity: '3 Gallons',
+    productName: 'Purified Mineral Water',
     container: 'Exchange Container',
     requester: 'Chane Sarcon',
     contact: '09123456789',
     address: 'Magdugo, Toledo City',
-    deliveryDate: 'Jan 25, 2026',
+    scheduledDateTime: 'Jan 25, 2026, 9:00 AM',
+    deliveredDateTime: 'Jan 25, 2026, 10:15 AM',
+    amountPaid: '\u20B175.00',
+    status: 'Delivered',
   },
   {
     id: 'BT-01265',
-    date: '01/22/26',
     quantity: '2 Gallons',
+    productName: 'Purified Mineral Water',
     container: 'New Container',
     requester: 'Angelyn Paculba',
     contact: '09123456789',
     address: 'Pinamungajan',
-    deliveryDate: 'Jan 25, 2026',
+    scheduledDateTime: 'Jan 25, 2026, 11:00 AM',
+    deliveredDateTime: 'Jan 25, 2026, 12:05 PM',
+    amountPaid: '\u20B150.00',
+    status: 'Delivered',
   },
 ];
 
+const DetailModal = ({ request, onClose }) => (
+  <Modal
+    visible={!!request}
+    transparent
+    animationType="fade"
+    onRequestClose={onClose}
+  >
+    <View style={styles.modalBackdrop}>
+      <Pressable style={StyleSheet.absoluteFillObject} onPress={onClose} />
+      <View style={styles.detailsModal}>
+        <View style={styles.modalHeader}>
+          <Text style={styles.modalTitle}>Request Details</Text>
+          <TouchableOpacity activeOpacity={0.75} onPress={onClose}>
+            <Text style={styles.modalCloseText}>Close</Text>
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.modalDivider} />
+
+        {request && (
+          <ScrollView
+            style={styles.modalDetailsList}
+            showsVerticalScrollIndicator={false}
+          >
+            {[
+              ['Request ID', request.id],
+              ['Customer Name', request.requester],
+              ['Contact Number', request.contact],
+              ['Delivery Address', request.address],
+              ['Product', request.productName],
+              ['Quantity', request.quantity],
+              ['Container Type', request.container],
+              ['Scheduled Date', request.scheduledDateTime],
+              ['Delivered Date', request.deliveredDateTime],
+              ['Amount Paid', request.amountPaid || 'Not set'],
+              ['Status', request.status || 'Delivered'],
+            ].map(([label, value]) => (
+              <View key={label} style={styles.modalDetailRow}>
+                <Text style={styles.modalDetailLabel}>{label}</Text>
+                <Text style={styles.modalDetailValue}>{value}</Text>
+              </View>
+            ))}
+          </ScrollView>
+        )}
+      </View>
+    </View>
+  </Modal>
+);
+
+const HistoryRequestCard = ({ request, onViewDetails }) => {
+  const badge = getStatusBadge(request.status);
+
+  return (
+    <View style={styles.requestCard}>
+      <View style={styles.requestCardHeader}>
+        <Text style={styles.requestId}>Request ID: {request.id}</Text>
+        <View style={[styles.statusBadge, { backgroundColor: badge.backgroundColor }]}>
+          <Text style={[styles.statusBadgeText, { color: badge.color }]}>
+            {badge.label}
+          </Text>
+        </View>
+      </View>
+
+      <View style={styles.compactInfoGrid}>
+        <View style={styles.compactInfoColumn}>
+          <Text style={styles.compactLabel}>Customer Name</Text>
+          <Text style={styles.compactPrimaryValue} numberOfLines={1}>
+            {request.requester}
+          </Text>
+
+          <Text style={[styles.compactLabel, styles.compactLabelGap]}>
+            Contact Number
+          </Text>
+          <Text style={styles.compactValue} numberOfLines={1}>
+            {request.contact}
+          </Text>
+        </View>
+
+        <View style={styles.compactInfoColumn}>
+          <Text style={styles.compactLabel}>Product Ordered</Text>
+          <Text style={styles.compactPrimaryValue} numberOfLines={1}>
+            {request.productName}
+          </Text>
+
+          <Text style={[styles.compactLabel, styles.compactLabelGap]}>
+            Container Type
+          </Text>
+          <Text style={styles.compactValue} numberOfLines={1}>
+            {request.container}
+          </Text>
+        </View>
+      </View>
+
+      <View style={styles.fullWidthInfoBlock}>
+        <Text style={styles.compactLabel}>Delivery Address</Text>
+        <Text style={styles.compactAddressValue} numberOfLines={2}>
+          {request.address}
+        </Text>
+
+        <Text style={[styles.compactLabel, styles.compactLabelGap]}>
+          Delivered Date & Time
+        </Text>
+        <Text style={styles.compactValue} numberOfLines={1}>
+          {request.deliveredDateTime}
+        </Text>
+      </View>
+
+      <TouchableOpacity
+        activeOpacity={0.8}
+        style={styles.fullWidthActionButton}
+        onPress={() => onViewDetails(request)}
+      >
+        <Text style={styles.secondaryActionText}>View Details</Text>
+      </TouchableOpacity>
+    </View>
+  );
+};
+
 export default function DistributorHistory() {
   const router = useRouter();
+  const [selectedRequest, setSelectedRequest] = useState(null);
 
   return (
     <SafeAreaView edges={['left', 'right', 'bottom']} style={styles.container}>
-      <BlueTapHeader
-        notificationPath="/distributor/d_notification"
-      />
+      <BlueTapHeader notificationPath="/distributor/d_notification" />
 
       <View style={styles.phoneWrapper}>
-        {/* Main content - White card with light blue border */}
         <ScrollView
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
         >
-          <View style={styles.historyCard}>
-            <Text style={styles.pageTitle}>SCHEDULE</Text>
-            <Text style={styles.subtitle}>Request History</Text>
+          <Text style={styles.pageTitle}>SCHEDULE</Text>
+          <Text style={styles.subtitle}>Request History</Text>
 
-            <View style={styles.scheduleTabs}>
-              <TouchableOpacity
-                style={styles.scheduleTab}
-                activeOpacity={0.85}
-                onPress={() => router.replace('/distributor/d_scheduled_requests')}
-              >
-                <Text style={styles.scheduleTabText}>Scheduled</Text>
-              </TouchableOpacity>
+          <View style={styles.scheduleTabs}>
+            <TouchableOpacity
+              style={styles.scheduleTab}
+              activeOpacity={0.85}
+              onPress={() => router.replace('/distributor/d_scheduled_requests')}
+            >
+              <Text style={styles.scheduleTabText}>Scheduled</Text>
+            </TouchableOpacity>
 
-              <TouchableOpacity
-                style={[styles.scheduleTab, styles.scheduleTabActive]}
-                activeOpacity={0.85}
-                onPress={() => router.replace('/distributor/d_history')}
-              >
-                <Text style={[styles.scheduleTabText, styles.scheduleTabTextActive]}>
-                  History
-                </Text>
-              </TouchableOpacity>
-            </View>
-
-            {HISTORY_REQUESTS.map((req, index) => (
-              <View key={req.id}>
-                {index > 0 && <View style={styles.itemDivider} />}
-                <View style={styles.requestBlock}>
-                  <View style={styles.requestRow}>
-                    <Text style={styles.requestId}>Request #{req.id}</Text>
-                    <Text style={styles.requestDate}>{req.date}</Text>
-                  </View>
-                  <Text style={styles.requestDetail}>{req.quantity}</Text>
-                  <Text style={styles.requestDetail}>{req.container}</Text>
-                  <Text style={styles.requestDetail}>{req.requester}</Text>
-                  <Text style={styles.requestDetail}>{req.contact}</Text>
-                  <Text style={styles.requestDetail}>{req.address}</Text>
-                  <Text style={styles.requestDetail}>Delivery date: {req.deliveryDate}</Text>
-                </View>
-              </View>
-            ))}
-
-            <View style={{ height: 100 }} />
+            <TouchableOpacity
+              style={[styles.scheduleTab, styles.scheduleTabActive]}
+              activeOpacity={0.85}
+              onPress={() => router.replace('/distributor/d_history')}
+            >
+              <Text style={[styles.scheduleTabText, styles.scheduleTabTextActive]}>
+                History
+              </Text>
+            </TouchableOpacity>
           </View>
+
+          {HISTORY_REQUESTS.map((request) => (
+            <HistoryRequestCard
+              key={request.id}
+              request={request}
+              onViewDetails={setSelectedRequest}
+            />
+          ))}
         </ScrollView>
 
-        {/* Bottom navigation bar */}
         <View style={styles.bottomNav}>
           <TouchableOpacity onPress={() => router.replace('/distributor/d_dashboard')}>
             <Image source={require('../../assets/icons/home.png')} style={styles.navIcon} />
@@ -114,6 +271,8 @@ export default function DistributorHistory() {
           </TouchableOpacity>
         </View>
       </View>
+
+      <DetailModal request={selectedRequest} onClose={() => setSelectedRequest(null)} />
     </SafeAreaView>
   );
 }
@@ -121,7 +280,7 @@ export default function DistributorHistory() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#F4FAFF',
   },
   phoneWrapper: {
     width: '100%',
@@ -129,114 +288,200 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
     flex: 1,
   },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingTop: 10,
-    paddingBottom: 12,
-    backgroundColor: '#FFFFFF',
-    borderBottomWidth: 0,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOpacity: 0.08,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 2 },
-  },
-  appName: {
-    color: '#187BCD',
-    fontSize: 22,
-    fontWeight: 'bold',
-  },
-  headerIcons: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  headerIcon: {
-    width: 22,
-    height: 22,
-    tintColor: '#FFFFFF',
-  },
   scrollContent: {
     flexGrow: 1,
     paddingHorizontal: 20,
     paddingTop: 20,
-    paddingBottom: 24,
-  },
-  historyCard: {
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1.5,
-    borderColor: '#90CAF9',
-    borderRadius: 14,
-    padding: 18,
+    paddingBottom: 150,
   },
   pageTitle: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: '#187BCD',
-    letterSpacing: 1,
+    color: BLUE,
+    letterSpacing: 0,
   },
   subtitle: {
     fontSize: 14,
-    color: '#187BCD',
+    color: BLUE,
+    fontWeight: '600',
     marginTop: 4,
-    marginBottom: 12,
+    marginBottom: 14,
   },
   scheduleTabs: {
     flexDirection: 'row',
     borderWidth: 1.5,
-    borderColor: '#187BCD',
-    borderRadius: 12,
+    borderColor: BLUE,
+    borderRadius: 13,
     overflow: 'hidden',
     marginBottom: 16,
   },
   scheduleTab: {
     flex: 1,
-    minHeight: 38,
+    minHeight: 40,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#FFFFFF',
   },
   scheduleTabActive: {
-    backgroundColor: '#187BCD',
+    backgroundColor: BLUE,
   },
   scheduleTabText: {
-    color: '#187BCD',
+    color: BLUE,
     fontSize: 13,
     fontWeight: 'bold',
   },
   scheduleTabTextActive: {
     color: '#FFFFFF',
   },
-  requestBlock: {
-    paddingVertical: 12,
+  requestCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 16,
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: CARD_BORDER,
+    elevation: 6,
+    shadowColor: '#0D47A1',
+    shadowOpacity: 0.12,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 5 },
   },
-  requestRow: {
+  requestCardHeader: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 6,
+    justifyContent: 'space-between',
+    gap: 10,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: BLUE_LIGHT,
   },
   requestId: {
-    fontSize: 16,
+    flex: 1,
+    color: BLUE,
+    fontSize: 15,
     fontWeight: 'bold',
-    color: '#187BCD',
   },
-  requestDate: {
-    fontSize: 14,
-    color: '#187BCD',
+  statusBadge: {
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    flexShrink: 0,
   },
-  requestDetail: {
+  statusBadgeText: {
+    fontSize: 11,
+    fontWeight: 'bold',
+  },
+  compactInfoGrid: {
+    flexDirection: 'row',
+    gap: 12,
+    paddingTop: 12,
+  },
+  compactInfoColumn: {
+    flex: 1,
+    minWidth: 0,
+  },
+  compactLabel: {
+    color: TEXT_MUTED,
+    fontSize: 11,
+    fontWeight: 'bold',
+    marginBottom: 3,
+  },
+  compactLabelGap: {
+    marginTop: 10,
+  },
+  compactPrimaryValue: {
+    color: BLUE,
     fontSize: 14,
-    color: '#187BCD',
+    lineHeight: 18,
+    fontWeight: 'bold',
+  },
+  compactValue: {
+    color: TEXT_DARK,
+    fontSize: 13,
+    lineHeight: 17,
+    fontWeight: '700',
+  },
+  fullWidthInfoBlock: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: BLUE_LIGHT,
+  },
+  compactAddressValue: {
+    color: TEXT_DARK,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '700',
+  },
+  fullWidthActionButton: {
+    minHeight: 44,
+    borderWidth: 1.5,
+    borderColor: BLUE,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 16,
+  },
+  secondaryActionText: {
+    color: BLUE,
+    fontSize: 13,
+    fontWeight: 'bold',
+  },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(8, 31, 51, 0.46)',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+  },
+  detailsModal: {
+    width: '100%',
+    maxWidth: 375,
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 22,
+    borderTopRightRadius: 22,
+    paddingHorizontal: 20,
+    paddingTop: 18,
+    paddingBottom: 30,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  modalTitle: {
+    color: BLUE,
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  modalCloseText: {
+    color: BLUE,
+    fontSize: 13,
+    fontWeight: 'bold',
+  },
+  modalDivider: {
+    height: 1,
+    backgroundColor: BLUE_LIGHT,
+    marginTop: 12,
+    marginBottom: 12,
+  },
+  modalDetailsList: {
+    maxHeight: 520,
+  },
+  modalDetailRow: {
+    marginBottom: 11,
+  },
+  modalDetailLabel: {
+    color: TEXT_MUTED,
+    fontSize: 12,
+    fontWeight: 'bold',
     marginBottom: 2,
   },
-  itemDivider: {
-    height: 1,
-    backgroundColor: '#E0E0E0',
-    marginVertical: 4,
+  modalDetailValue: {
+    color: TEXT_DARK,
+    fontSize: 14,
+    fontWeight: '700',
+    lineHeight: 18,
   },
   bottomNav: {
     position: 'absolute',
@@ -260,11 +505,11 @@ const styles = StyleSheet.create({
   navIcon: {
     width: 26,
     height: 26,
-    tintColor: '#187BCD',
+    tintColor: BLUE,
   },
   navIconActive: {
     width: 26,
     height: 26,
-    tintColor: '#187BCD',
+    tintColor: BLUE,
   },
 });
