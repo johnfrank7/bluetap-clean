@@ -19,6 +19,7 @@ import Carousel from 'react-native-reanimated-carousel';
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from '../../firebase';
 import { findLocalUserForAuthRole } from '../../localUsers';
+import RequestDetailsModal from '../../components/RequestDetailsModal';
 import { subscribeProducts } from '../../services/products';
 import {
   cancelRequest,
@@ -29,22 +30,219 @@ const PHONE_MAX_WIDTH = 375;
 const DASHBOARD_HORIZONTAL_PADDING = 34;
 const PRODUCT_CARD_WIDTH_RATIO = 0.88;
 const PRODUCT_CAROUSEL_HEIGHT = 226;
+const BLUE = '#187BCD';
+const BLUE_LIGHT = '#E3F2FD';
+const CARD_BORDER = '#D7ECFF';
+const TEXT_MUTED = '#6F8EA8';
+const TEXT_DARK = '#20384D';
+const REQUESTER_NAME = 'Requester';
+const STATUS_BADGES = {
+  pending: {
+    backgroundColor: '#FBC02D',
+    color: TEXT_DARK,
+    label: '\u25CF Pending',
+  },
+  accepted: {
+    backgroundColor: '#2196F3',
+    color: '#FFFFFF',
+    label: '\u25CF Accepted',
+  },
+  'out for delivery': {
+    backgroundColor: '#8E24AA',
+    color: '#FFFFFF',
+    label: '\u25CF Out for Delivery',
+  },
+  delivered: {
+    backgroundColor: '#43A047',
+    color: '#FFFFFF',
+    label: '\u25CF Delivered',
+  },
+  cancelled: {
+    backgroundColor: '#E53935',
+    color: '#FFFFFF',
+    label: '\u25CF Cancelled',
+  },
+  canceled: {
+    backgroundColor: '#E53935',
+    color: '#FFFFFF',
+    label: '\u25CF Cancelled',
+  },
+};
 const formatPrice = (price) => `\u20B1${Number(price || 0).toFixed(2)}`;
-const getRequestProductSummary = (request) => {
-  if (!request) return '4 Gallons';
+const formatDashboardDate = (date) =>
+  new Intl.DateTimeFormat('en-US', {
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+  }).format(date);
+const formatRequestDate = (value) => {
+  if (!value) return 'Not set';
 
-  if (Array.isArray(request.items) && request.items.length > 0) {
-    return request.items
-      .map((item) => `${item.quantity} ${item.product_name}`)
-      .join(', ');
+  let dateValue = null;
+
+  if (value instanceof Date) {
+    dateValue = value;
+  } else if (typeof value?.toDate === 'function') {
+    dateValue = value.toDate();
+  } else if (typeof value?.toMillis === 'function') {
+    dateValue = new Date(value.toMillis());
+  } else if (value?.seconds) {
+    dateValue = new Date(value.seconds * 1000);
+  } else if (typeof value === 'string') {
+    const formDateMatch = value.match(
+      /^(\d{1,2})\s*-\s*(\d{1,2})\s*-\s*(\d{4})$/
+    );
+
+    if (formDateMatch) {
+      dateValue = new Date(
+        Number(formDateMatch[3]),
+        Number(formDateMatch[1]) - 1,
+        Number(formDateMatch[2])
+      );
+    } else {
+      dateValue = new Date(value);
+    }
   }
 
-  return `${request.quantity} ${request.product_name}`;
+  if (!dateValue || Number.isNaN(dateValue.getTime())) {
+    return String(value);
+  }
+
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  }).format(dateValue);
+};
+const normalizeRequestItem = (item, fallback = {}) => {
+  const quantity = Number(item?.quantity || 0);
+  const unitPrice = Number(item?.product_price ?? item?.price ?? 0);
+  const lineTotal = Number(
+    item?.line_total ?? (Number.isFinite(unitPrice) ? unitPrice * quantity : 0)
+  );
+
+  return {
+    id: item?.product_id || fallback.id || fallback.product_id || '',
+    product_name:
+      item?.product_name || item?.productName || fallback.product_name || 'Product',
+    quantity: Number.isFinite(quantity) ? quantity : 0,
+    product_price: Number.isFinite(unitPrice) ? unitPrice : 0,
+    line_total: Number.isFinite(lineTotal) ? lineTotal : 0,
+  };
+};
+const getRequestItems = (request) => {
+  if (!request) return [];
+
+  if (Array.isArray(request.items) && request.items.length > 0) {
+    return request.items.map((item, index) =>
+      normalizeRequestItem(item, {
+        id: `${request.id || request.request_id || 'request'}-${index}`,
+        product_name: request.product_name,
+      })
+    );
+  }
+
+  if (!request.product_name) return [];
+
+  const quantity = Number(request.quantity || 0);
+  const unitPrice = Number(request.product_price || 0);
+  const totalCost = Number(request.total_cost || 0);
+
+  return [
+    normalizeRequestItem(
+      {
+        product_id: request.product_id,
+        product_name: request.product_name,
+        product_price: unitPrice || (quantity > 0 ? totalCost / quantity : 0),
+        quantity,
+        line_total: totalCost,
+      },
+      request
+    ),
+  ];
+};
+const getRequestProductName = (request) => {
+  if (!request) return 'Not set';
+  if (Array.isArray(request.items) && request.items.length > 0) {
+    const productNames = request.items
+      .map((item) => item.product_name)
+      .filter(Boolean);
+
+    if (productNames.length > 0) {
+      return productNames.join(', ');
+    }
+  }
+
+  return request.product_name || 'Not set';
+};
+const getCardProductSummary = (request) => {
+  const items = getRequestItems(request);
+
+  if (items.length === 0) return getRequestProductName(request);
+
+  const firstProductName = items[0].product_name || 'Product';
+
+  return items.length > 1
+    ? `${firstProductName} +${items.length - 1} more`
+    : firstProductName;
+};
+const getRequestQuantityText = (request) => {
+  if (!request) return 'Not set';
+
+  const quantity = Number(request.quantity);
+
+  if (Number.isFinite(quantity) && quantity > 0) {
+    return String(quantity);
+  }
+
+  if (Array.isArray(request.items) && request.items.length > 0) {
+    const totalQuantity = request.items.reduce(
+      (sum, item) => sum + Number(item.quantity || 0),
+      0
+    );
+
+    if (totalQuantity > 0) {
+      return String(totalQuantity);
+    }
+  }
+
+  return request.quantity ? String(request.quantity) : 'Not set';
+};
+const getRequestTotalAmount = (request) => {
+  const totalAmount = Number(request?.total_cost || 0);
+
+  if (Number.isFinite(totalAmount) && totalAmount > 0) {
+    return totalAmount;
+  }
+
+  return getRequestItems(request).reduce(
+    (sum, item) => sum + Number(item.line_total || 0),
+    0
+  );
 };
 const getNormalizedStatus = (status) =>
-  (status || '').toString().trim().toLowerCase();
+  (status || '')
+    .toString()
+    .trim()
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .toLowerCase()
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ');
 const isPendingRequest = (request) =>
   getNormalizedStatus(request.status) === 'pending';
+const getStatusBadge = (status) => {
+  const statusText = status || 'Pending';
+  const normalizedStatus = getNormalizedStatus(statusText);
+
+  return (
+    STATUS_BADGES[normalizedStatus] || {
+      backgroundColor: BLUE_LIGHT,
+      color: BLUE,
+      label: statusText,
+    }
+  );
+};
 const getProductGallons = (product) =>
   product.capacity ||
   product.gallons ||
@@ -94,13 +292,14 @@ export default function RequesterDashboard() {
   const router = useRouter(); 
   const productCarouselRef = useRef(null);
   const { width: windowWidth } = useWindowDimensions();
+  const todayText = formatDashboardDate(new Date());
   const [products, setProducts] = useState([]);
   const [productsLoading, setProductsLoading] = useState(true);
   const [activeProductIndex, setActiveProductIndex] = useState(0);
   const [currentRequests, setCurrentRequests] = useState([]);
   const [cancellingRequestId, setCancellingRequestId] = useState('');
-  const [openRequestMenuId, setOpenRequestMenuId] = useState('');
   const [requestToCancel, setRequestToCancel] = useState(null);
+  const [detailsRequest, setDetailsRequest] = useState(null);
   const [notification, setNotification] = useState(null);
   const productCarouselWidth = Math.max(1, Math.min(windowWidth, PHONE_MAX_WIDTH));
   const productCarouselItemWidth = Math.max(
@@ -208,7 +407,6 @@ export default function RequesterDashboard() {
   };
 
   const confirmCancelRequest = (request) => {
-    setOpenRequestMenuId('');
     setRequestToCancel(request);
   };
 
@@ -314,6 +512,28 @@ export default function RequesterDashboard() {
     },
     [productCarouselItemWidth, productCarouselSideInset]
   );
+  const detailsRequestData = detailsRequest
+    ? {
+        requestId: detailsRequest.request_id || detailsRequest.id,
+        status: detailsRequest.status || 'Pending',
+        orderDate: formatRequestDate(detailsRequest.created_at),
+        deliveryDate: formatRequestDate(detailsRequest.delivery_date),
+        product: getCardProductSummary(detailsRequest),
+        containerType: detailsRequest.container || 'Not set',
+        quantity: getRequestQuantityText(detailsRequest),
+        totalAmount: getRequestTotalAmount(detailsRequest),
+        waterStation: detailsRequest.water_station || 'Not set',
+        paymentMethod:
+          detailsRequest.payment_method ||
+          detailsRequest.paymentMethod ||
+          'Not set',
+        customerName: detailsRequest.requester_name || 'Not set',
+        contactNumber: detailsRequest.contact_number || 'Not set',
+        deliveryAddress: detailsRequest.address || 'Not set',
+        items: getRequestItems(detailsRequest),
+        grandTotalAmount: getRequestTotalAmount(detailsRequest),
+      }
+    : null;
 
   return (
     <LinearGradient
@@ -333,7 +553,10 @@ export default function RequesterDashboard() {
 
             <View style={styles.welcomeSection}>
               <Text style={styles.welcomeText}>WELCOME!</Text>
-              <Text style={styles.subText}>Need mineral water?</Text>
+              <Text style={styles.greetingText}>
+                Good Morning, {REQUESTER_NAME}
+              </Text>
+              <Text style={styles.dateText}>{todayText}</Text>
             </View>
 
             <View style={styles.productsSection}>
@@ -396,69 +619,118 @@ export default function RequesterDashboard() {
               <Text style={styles.currentRequestLabel}>Current Request</Text>
 
               {currentRequests.length === 0 ? (
-                <View style={styles.card}>
-                  <Text style={styles.cardText}>No current request.</Text>
+                <View style={styles.emptyRequestCard}>
+                  <Text style={styles.emptyRequestTitle}>No current request.</Text>
+                  <Text style={styles.emptyRequestText}>
+                    Your active orders will appear here once you place a request.
+                  </Text>
                 </View>
               ) : (
-                currentRequests.map((request, index) => (
-                  <View
-                    style={[styles.card, index > 0 && styles.currentRequestCardGap]}
-                    key={request.id}
-                  >
-                    {isPendingRequest(request) && (
-                      <View style={styles.requestMenuWrap}>
-                        <TouchableOpacity
-                          style={styles.requestMenuButton}
-                          onPress={() =>
-                            setOpenRequestMenuId((currentId) =>
-                              currentId === request.id ? '' : request.id
-                            )
-                          }
-                          disabled={cancellingRequestId === request.id}
+                currentRequests.map((request, index) => {
+                  const statusBadge = getStatusBadge(request.status);
+                  const isRequestPending = isPendingRequest(request);
+
+                  return (
+                    <View
+                      style={[
+                        styles.currentRequestCard,
+                        index > 0 && styles.currentRequestCardGap,
+                      ]}
+                      key={request.id}
+                    >
+                      <View style={styles.requestCardHeader}>
+                        <Text style={styles.requestId} numberOfLines={1}>
+                          Request ID: {request.request_id || request.id}
+                        </Text>
+                        <View
+                          style={[
+                            styles.statusBadge,
+                            { backgroundColor: statusBadge.backgroundColor },
+                          ]}
                         >
-                          <Text style={styles.requestMenuDots}>...</Text>
+                          <Text
+                            style={[
+                              styles.statusBadgeText,
+                              { color: statusBadge.color },
+                            ]}
+                          >
+                            {statusBadge.label}
+                          </Text>
+                        </View>
+                      </View>
+
+                      <View style={styles.requestDetailsGrid}>
+                        <View style={styles.requestInfoRow}>
+                          <View style={styles.requestInfoBlock}>
+                            <Text style={styles.requestInfoLabel}>Product</Text>
+                            <Text
+                              style={styles.requestInfoPrimaryValue}
+                              numberOfLines={2}
+                            >
+                              {getCardProductSummary(request)}
+                            </Text>
+                          </View>
+
+                          <View style={styles.requestInfoBlock}>
+                            <Text style={styles.requestInfoLabel}>
+                              Container Type
+                            </Text>
+                            <Text style={styles.requestInfoValue} numberOfLines={2}>
+                              {request.container || 'Not set'}
+                            </Text>
+                          </View>
+                        </View>
+
+                        <View style={[styles.requestInfoRow, styles.requestInfoRowSpaced]}>
+                          <View style={styles.requestInfoBlock}>
+                            <Text style={styles.requestInfoLabel}>Quantity</Text>
+                            <Text style={styles.requestInfoValue}>
+                              {getRequestQuantityText(request)}
+                            </Text>
+                          </View>
+
+                          <View style={styles.requestInfoBlock}>
+                            <Text style={styles.requestInfoLabel}>Total Amount</Text>
+                            <Text style={styles.requestInfoValue}>
+                              {formatPrice(getRequestTotalAmount(request))}
+                            </Text>
+                          </View>
+                        </View>
+                      </View>
+
+                      <View style={styles.cardActionsRow}>
+                        <TouchableOpacity
+                          style={styles.viewDetailsButton}
+                          activeOpacity={0.75}
+                          onPress={() => setDetailsRequest(request)}
+                        >
+                          <Text style={styles.viewDetailsText}>View Details</Text>
                         </TouchableOpacity>
 
-                        {openRequestMenuId === request.id && (
-                          <View style={styles.requestMenu}>
-                            <TouchableOpacity
-                              style={styles.requestMenuItem}
-                              onPress={() => confirmCancelRequest(request)}
-                              disabled={cancellingRequestId === request.id}
-                            >
-                              <Text style={styles.requestMenuItemText}>
-                                {cancellingRequestId === request.id
-                                  ? 'Cancelling...'
-                                  : 'Cancel request'}
-                              </Text>
-                            </TouchableOpacity>
-                          </View>
+                        {isRequestPending && (
+                          <TouchableOpacity
+                            style={[
+                              styles.cancelRequestButton,
+                              cancellingRequestId === request.id &&
+                                styles.actionButtonDisabled,
+                            ]}
+                            activeOpacity={0.85}
+                            onPress={() => confirmCancelRequest(request)}
+                            disabled={cancellingRequestId === request.id}
+                          >
+                            <Text style={styles.cancelRequestText}>
+                              {cancellingRequestId === request.id
+                                ? 'Cancelling...'
+                                : 'Cancel Request'}
+                            </Text>
+                          </TouchableOpacity>
                         )}
                       </View>
-                    )}
-
-                    <Text style={styles.cardText}>
-                      Request ID: {request.request_id || request.id}
-                    </Text>
-                    <Text style={styles.cardText}>
-                      Quantity: {getRequestProductSummary(request)}
-                    </Text>
-                    <Text style={styles.cardText}>
-                      Container: {request.container || 'Not set'}
-                    </Text>
-                    <Text style={styles.cardText}>
-                      {request.water_station || 'Water station not set'}
-                    </Text>
-
-                    <Text style={styles.status}>
-                      Status: {request.status || 'Pending'}
-                    </Text>
-                  </View>
-                ))
+                    </View>
+                  );
+                })
               )}
             </View>
-
-            <View style={{ height: 200 }} />
 
           </ScrollView>
 
@@ -497,6 +769,12 @@ export default function RequesterDashboard() {
             </View>
           </View>
         </Modal>
+
+        <RequestDetailsModal
+          visible={!!detailsRequest}
+          onClose={() => setDetailsRequest(null)}
+          request={detailsRequestData}
+        />
 
         <Modal visible={!!notification} transparent animationType="fade">
           <View style={styles.modalBackground}>
@@ -538,9 +816,10 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     paddingHorizontal: 34,
     paddingTop: 0,
+    paddingBottom: 148,
   },
   welcomeSection: {
-    marginTop: 32,
+    marginTop: 18,
   },
   welcomeText: {
     color: '#FFFFFF',
@@ -548,11 +827,17 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     letterSpacing: 0,
   },
-  subText: {
+  greetingText: {
     color: '#FFFFFF',
-    fontSize: 14,
+    fontSize: 16,
+    fontWeight: '700',
+    marginTop: 4,
+  },
+  dateText: {
+    color: '#E3F2FD',
+    fontSize: 13,
     fontWeight: '600',
-    marginTop: 5,
+    marginTop: 4,
   },
   productsSection: {
     marginTop: 24,
@@ -682,7 +967,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
   },
   currentRequestSection: {
-    marginTop: 10,
+    marginTop: 8,
   },
   currentRequestLabel: {
     color: '#FFFFFF',
@@ -690,76 +975,151 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     marginBottom: 10,
   },
-  card: {
+  currentRequestCard: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 8,
-    padding: 16,
-    paddingRight: 48,
+    borderWidth: 1,
+    borderColor: CARD_BORDER,
+    borderRadius: 20,
+    padding: 15,
     position: 'relative',
-    elevation: 5,
-    shadowColor: '#000',
-    shadowOpacity: 0.08,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 3 },
+    elevation: 6,
+    shadowColor: '#0D47A1',
+    shadowOpacity: 0.12,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 5 },
   },
   currentRequestCardGap: {
-    marginTop: 10,
+    marginTop: 12,
   },
-  cardText: {
-    color: '#187BCD',
+  requestCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 10,
+    paddingBottom: 11,
+    borderBottomWidth: 1,
+    borderBottomColor: BLUE_LIGHT,
+  },
+  requestId: {
+    flex: 1,
+    color: BLUE,
     fontSize: 14,
-    marginBottom: 6,
-  },
-  status: {
-    color: '#187BCD',
-    fontSize: 14,
-    fontWeight: 'bold',
-    marginTop: 8,
-  },
-  requestMenuWrap: {
-    position: 'absolute',
-    top: 8,
-    right: 10,
-    zIndex: 3,
-    alignItems: 'flex-end',
-  },
-  requestMenuButton: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  requestMenuDots: {
-    color: '#187BCD',
-    fontSize: 18,
     fontWeight: 'bold',
     lineHeight: 18,
   },
-  requestMenu: {
-    minWidth: 126,
+  statusBadge: {
+    flexShrink: 0,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  statusBadgeText: {
+    fontSize: 11,
+    fontWeight: 'bold',
+    lineHeight: 14,
+  },
+  requestDetailsGrid: {
+    paddingTop: 13,
+  },
+  requestInfoRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  requestInfoRowSpaced: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: BLUE_LIGHT,
+  },
+  requestInfoBlock: {
+    flex: 1,
+  },
+  requestInfoLabel: {
+    color: TEXT_MUTED,
+    fontSize: 11,
+    fontWeight: 'bold',
+    marginBottom: 4,
+  },
+  requestInfoPrimaryValue: {
+    color: BLUE,
+    fontSize: 14,
+    fontWeight: 'bold',
+    lineHeight: 18,
+  },
+  requestInfoValue: {
+    color: TEXT_DARK,
+    fontSize: 13,
+    fontWeight: '700',
+    lineHeight: 17,
+  },
+  cardActionsRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 15,
+  },
+  viewDetailsButton: {
+    flex: 1,
+    minHeight: 42,
     backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#BBDEFB',
-    borderRadius: 8,
-    paddingVertical: 4,
-    marginTop: 2,
-    elevation: 6,
-    shadowColor: '#000',
-    shadowOpacity: 0.12,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 3 },
+    borderWidth: 1.5,
+    borderColor: BLUE,
+    borderRadius: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 10,
   },
-  requestMenuItem: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-  },
-  requestMenuItemText: {
-    color: '#187BCD',
+  viewDetailsText: {
+    color: BLUE,
     fontSize: 12,
     fontWeight: 'bold',
+    textAlign: 'center',
   },
-
+  cancelRequestButton: {
+    flex: 1,
+    minHeight: 42,
+    backgroundColor: '#E53935',
+    borderRadius: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 10,
+    elevation: 4,
+    shadowColor: '#E53935',
+    shadowOpacity: 0.2,
+    shadowRadius: 7,
+    shadowOffset: { width: 0, height: 4 },
+  },
+  cancelRequestText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: 'bold',
+    textAlign: 'center',
+  },
+  actionButtonDisabled: {
+    opacity: 0.7,
+  },
+  emptyRequestCard: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: CARD_BORDER,
+    borderRadius: 20,
+    padding: 16,
+    elevation: 4,
+    shadowColor: '#0D47A1',
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+  },
+  emptyRequestTitle: {
+    color: BLUE,
+    fontSize: 15,
+    fontWeight: 'bold',
+  },
+  emptyRequestText: {
+    color: TEXT_MUTED,
+    fontSize: 13,
+    lineHeight: 18,
+    marginTop: 4,
+  },
   modalBackground: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',

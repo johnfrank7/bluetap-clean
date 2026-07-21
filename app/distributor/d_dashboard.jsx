@@ -6,11 +6,11 @@ import {
   Image,
   TouchableOpacity,
   ScrollView,
-  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import BlueTapHeader from '../../components/BlueTapHeader';
+import RequestDetailsModal from '../../components/RequestDetailsModal';
 
 const BLUE = '#187BCD';
 const BLUE_LIGHT = '#E3F2FD';
@@ -46,6 +46,7 @@ const DASHBOARD_SUMMARY = [
 
 const CURRENT_REQUEST = {
   requestId: 'BT-01245',
+  orderDate: 'Jan 25, 2026',
   customerName: 'Jeanne Ortega',
   contactNumber: '09123456789',
   deliveryAddress: 'Poblacion, Toledo City',
@@ -141,6 +142,74 @@ const getStatusStyle = (status) => {
 const formatAmountDue = (amount) =>
   `\u20B1${Number(amount || 0).toFixed(2)}`;
 
+const getNumericQuantity = (quantity) => {
+  const match = String(quantity || '').match(/\d+(\.\d+)?/);
+  const parsedQuantity = Number(match?.[0] ?? quantity);
+
+  return Number.isFinite(parsedQuantity) ? parsedQuantity : 0;
+};
+
+const getDistributorRequestItems = (request) => {
+  if (!request) return [];
+
+  if (Array.isArray(request.items) && request.items.length > 0) {
+    return request.items.map((item, index) => {
+      const quantity = Number(item.quantity || 0);
+      const unitPrice = Number(item.product_price ?? item.unitPrice ?? 0);
+      const subtotal = Number(
+        item.line_total ?? item.subtotal ?? unitPrice * quantity
+      );
+
+      return {
+        id: item.product_id || item.id || `${request.requestId}-${index}`,
+        productName: item.product_name || item.productName || 'Product',
+        quantity: Number.isFinite(quantity) ? quantity : item.quantity,
+        unitPrice: Number.isFinite(unitPrice) ? unitPrice : 0,
+        subtotal: Number.isFinite(subtotal) ? subtotal : 0,
+      };
+    });
+  }
+
+  const quantity = getNumericQuantity(request.quantity);
+  const totalAmount = Number(request.total_cost || request.totalAmount || 0);
+  const unitPrice = quantity > 0 ? totalAmount / quantity : totalAmount;
+
+  return [
+    {
+      id: request.productId || request.requestId,
+      productName: request.productsOrdered || request.productName || 'Product',
+      quantity: request.quantity || quantity || 'Not set',
+      unitPrice,
+      subtotal: totalAmount,
+    },
+  ];
+};
+
+const getDistributorProductSummary = (request) => {
+  const items = getDistributorRequestItems(request);
+
+  if (items.length === 0) {
+    return request?.productsOrdered || request?.productName || 'Not set';
+  }
+
+  return items.length > 1
+    ? `${items[0].productName} +${items.length - 1} more`
+    : items[0].productName;
+};
+
+const getDistributorTotalAmount = (request) => {
+  const totalAmount = Number(request?.total_cost || request?.totalAmount || 0);
+
+  if (Number.isFinite(totalAmount) && totalAmount > 0) {
+    return totalAmount;
+  }
+
+  return getDistributorRequestItems(request).reduce(
+    (sum, item) => sum + Number(item.subtotal || 0),
+    0
+  );
+};
+
 export default function DistributorDashboard() {
   const router = useRouter();
   const [detailsVisible, setDetailsVisible] = useState(false);
@@ -152,18 +221,29 @@ export default function DistributorDashboard() {
   const activeStatusStyle = activeRequest
     ? getStatusStyle(activeRequest.status)
     : null;
-  const requestDetails = activeRequest
-    ? [
-        { label: 'Customer Name', value: activeRequest.customerName },
-        { label: 'Contact Number', value: activeRequest.contactNumber },
-        { label: 'Delivery Address', value: activeRequest.deliveryAddress },
-        { label: 'Products Ordered', value: activeRequest.productsOrdered },
-        { label: 'Quantity', value: activeRequest.quantity },
-        { label: 'Container Type', value: activeRequest.containerType },
-        { label: 'Delivery Date', value: activeRequest.deliveryDate },
-        { label: 'Status', value: activeRequest.status },
-      ]
-    : [];
+  const detailsRequestData = activeRequest
+    ? {
+        requestId: activeRequest.requestId,
+        status: activeRequest.status,
+        orderDate: activeRequest.orderDate || 'Not set',
+        deliveryDate: activeRequest.deliveryDate || 'Not set',
+        product: getDistributorProductSummary(activeRequest),
+        containerType: activeRequest.containerType || activeRequest.container || 'Not set',
+        quantity: activeRequest.quantity || 'Not set',
+        totalAmount: getDistributorTotalAmount(activeRequest),
+        waterStation: activeRequest.waterStation || activeRequest.water_station || 'Not set',
+        paymentMethod:
+          activeRequest.paymentMethod ||
+          activeRequest.payment_method ||
+          'Not set',
+        customerName: activeRequest.customerName || activeRequest.requester_name || 'Not set',
+        contactNumber: activeRequest.contactNumber || activeRequest.contact_number || 'Not set',
+        deliveryAddress:
+          activeRequest.deliveryAddress || activeRequest.address || 'Not set',
+        items: getDistributorRequestItems(activeRequest),
+        grandTotalAmount: getDistributorTotalAmount(activeRequest),
+      }
+    : null;
 
   const handleCurrentRequestAction = () => {
     if (!activeRequest) return;
@@ -368,35 +448,11 @@ export default function DistributorDashboard() {
         </View>
       </View>
 
-      <Modal
+      <RequestDetailsModal
         visible={detailsVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setDetailsVisible(false)}
-      >
-        <View style={styles.modalBackdrop}>
-          <View style={styles.detailsModal}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Request Details</Text>
-              <TouchableOpacity
-                activeOpacity={0.75}
-                onPress={() => setDetailsVisible(false)}
-              >
-                <Text style={styles.modalCloseText}>Close</Text>
-              </TouchableOpacity>
-            </View>
-
-            <View style={styles.modalDivider} />
-
-            {requestDetails.map((detail) => (
-              <View key={detail.label} style={styles.modalDetailRow}>
-                <Text style={styles.modalDetailLabel}>{detail.label}</Text>
-                <Text style={styles.modalDetailValue}>{detail.value}</Text>
-              </View>
-            ))}
-          </View>
-        </View>
-      </Modal>
+        onClose={() => setDetailsVisible(false)}
+        request={detailsRequestData}
+      />
     </SafeAreaView>
   );
 }

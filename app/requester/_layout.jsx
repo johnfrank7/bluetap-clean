@@ -22,7 +22,7 @@ export default function RequesterLayout() {
     <RoleGate role="requester">
       <View style={styles.root}>
         <RequesterHeader />
-//hi
+
         <View style={styles.screenContent}>
           <Stack
             screenOptions={{
