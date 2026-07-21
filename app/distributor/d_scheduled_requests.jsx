@@ -12,54 +12,14 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import BlueTapHeader from '../../components/BlueTapHeader';
+import SoftStatusBadge from '../../components/SoftStatusBadge';
+import { createShadow } from '../../components/shadowStyles';
 
 const BLUE = '#187BCD';
 const BLUE_LIGHT = '#E3F2FD';
 const CARD_BORDER = '#D7ECFF';
 const TEXT_MUTED = '#6F8EA8';
 const TEXT_DARK = '#20384D';
-
-const STATUS_BADGES = {
-  pending: {
-    backgroundColor: '#FFF8E1',
-    color: '#F9A825',
-    label: '\u25CF Pending',
-  },
-  scheduled: {
-    backgroundColor: '#E3F2FD',
-    color: '#1976D2',
-    label: '\u25CF Scheduled',
-  },
-  'out for delivery': {
-    backgroundColor: '#F3E5F5',
-    color: '#8E24AA',
-    label: '\u25CF Out for Delivery',
-  },
-  delivered: {
-    backgroundColor: '#E8F5E9',
-    color: '#2E7D32',
-    label: '\u25CF Delivered',
-  },
-  rejected: {
-    backgroundColor: '#FFEBEE',
-    color: '#C62828',
-    label: '\u25CF Rejected',
-  },
-  cancelled: {
-    backgroundColor: '#F5F5F5',
-    color: '#616161',
-    label: '\u25CF Cancelled',
-  },
-  canceled: {
-    backgroundColor: '#F5F5F5',
-    color: '#616161',
-    label: '\u25CF Cancelled',
-  },
-};
-
-const getStatusBadge = (status) =>
-  STATUS_BADGES[(status || '').toString().trim().toLowerCase()] ||
-  STATUS_BADGES.scheduled;
 
 const SCHEDULED_REQUESTS = [
   {
@@ -137,17 +97,11 @@ const DetailModal = ({ request, onClose }) => (
 );
 
 const ScheduledRequestCard = ({ request, onViewDetails }) => {
-  const badge = getStatusBadge(request.status);
-
   return (
     <View style={styles.requestCard}>
       <View style={styles.requestCardHeader}>
         <Text style={styles.requestId}>Request ID: {request.id}</Text>
-        <View style={[styles.statusBadge, { backgroundColor: badge.backgroundColor }]}>
-          <Text style={[styles.statusBadgeText, { color: badge.color }]}>
-            {badge.label}
-          </Text>
-        </View>
+        <SoftStatusBadge status={request.status} />
       </View>
 
       <View style={styles.compactInfoGrid}>
@@ -258,19 +212,19 @@ export default function DistributorScheduledRequests() {
 
         <View style={styles.bottomNav}>
           <TouchableOpacity onPress={() => router.replace('/distributor/d_dashboard')}>
-            <Image source={require('../../assets/icons/home.png')} style={styles.navIcon} />
+            <Image source={require('../../assets/icons/home.png')} style={styles.navIcon} tintColor={BLUE} />
           </TouchableOpacity>
 
           <TouchableOpacity onPress={() => router.replace('/distributor/d_requests')}>
-            <Image source={require('../../assets/icons/ballot.png')} style={styles.navIcon} />
+            <Image source={require('../../assets/icons/ballot.png')} style={styles.navIcon} tintColor={BLUE} />
           </TouchableOpacity>
 
           <TouchableOpacity onPress={() => router.replace('/distributor/d_scheduled_requests')}>
-            <Image source={require('../../assets/icons/calendar-clock.png')} style={styles.navIcon} />
+            <Image source={require('../../assets/icons/calendar-clock.png')} style={styles.navIcon} tintColor={BLUE} />
           </TouchableOpacity>
 
           <TouchableOpacity onPress={() => router.replace('/distributor/d_profile')}>
-            <Image source={require('../../assets/icons/user.png')} style={styles.navIcon} />
+            <Image source={require('../../assets/icons/user.png')} style={styles.navIcon} tintColor={BLUE} />
           </TouchableOpacity>
         </View>
       </View>
@@ -343,11 +297,13 @@ const styles = StyleSheet.create({
     marginBottom: 14,
     borderWidth: 1,
     borderColor: CARD_BORDER,
-    elevation: 6,
-    shadowColor: '#0D47A1',
-    shadowOpacity: 0.12,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 5 },
+    ...createShadow({
+      color: '#0D47A1',
+      elevation: 6,
+      opacity: 0.12,
+      radius: 10,
+      offset: { width: 0, height: 5 },
+    }),
   },
   requestCardHeader: {
     flexDirection: 'row',
@@ -362,16 +318,6 @@ const styles = StyleSheet.create({
     flex: 1,
     color: BLUE,
     fontSize: 15,
-    fontWeight: 'bold',
-  },
-  statusBadge: {
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    flexShrink: 0,
-  },
-  statusBadgeText: {
-    fontSize: 11,
     fontWeight: 'bold',
   },
   compactInfoGrid: {
@@ -425,29 +371,31 @@ const styles = StyleSheet.create({
     flex: 1,
     minHeight: 44,
     borderWidth: 1.5,
-    borderColor: BLUE,
+    borderColor: '#2563EB',
     backgroundColor: '#FFFFFF',
-    borderRadius: 13,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },
   secondaryActionText: {
-    color: BLUE,
+    color: '#2563EB',
     fontSize: 13,
-    fontWeight: 'bold',
+    fontWeight: '600',
   },
   primaryActionButton: {
     flex: 1,
     minHeight: 44,
     backgroundColor: BLUE,
-    borderRadius: 13,
+    borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
-    elevation: 4,
-    shadowColor: BLUE,
-    shadowOpacity: 0.22,
-    shadowRadius: 7,
-    shadowOffset: { width: 0, height: 4 },
+    ...createShadow({
+      color: BLUE,
+      elevation: 4,
+      opacity: 0.18,
+      radius: 10,
+      offset: { width: 0, height: 4 },
+    }),
   },
   primaryActionText: {
     color: '#FFFFFF',
@@ -522,15 +470,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 28,
     borderRadius: 22,
     zIndex: 2,
-    elevation: 8,
-    shadowColor: '#000',
-    shadowOpacity: 0.12,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 3 },
+    ...createShadow({
+      color: '#000',
+      elevation: 8,
+      opacity: 0.12,
+      radius: 6,
+      offset: { width: 0, height: 3 },
+    }),
   },
   navIcon: {
     width: 26,
     height: 26,
-    tintColor: BLUE,
   },
 });

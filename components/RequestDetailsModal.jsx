@@ -7,82 +7,14 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import SoftStatusBadge from './SoftStatusBadge';
+import { createShadow } from './shadowStyles';
 
 const BLUE = '#187BCD';
 const BLUE_LIGHT = '#E3F2FD';
 const CARD_BORDER = '#D7ECFF';
 const TEXT_MUTED = '#6F8EA8';
 const TEXT_DARK = '#20384D';
-
-const STATUS_BADGES = {
-  pending: {
-    backgroundColor: '#FBC02D',
-    color: TEXT_DARK,
-    label: '\u25CF Pending',
-  },
-  accepted: {
-    backgroundColor: '#2196F3',
-    color: '#FFFFFF',
-    label: '\u25CF Accepted',
-  },
-  scheduled: {
-    backgroundColor: '#2196F3',
-    color: '#FFFFFF',
-    label: '\u25CF Scheduled',
-  },
-  processing: {
-    backgroundColor: '#FB8C00',
-    color: '#FFFFFF',
-    label: '\u25CF Processing',
-  },
-  'out for delivery': {
-    backgroundColor: '#8E24AA',
-    color: '#FFFFFF',
-    label: '\u25CF Out for Delivery',
-  },
-  delivered: {
-    backgroundColor: '#43A047',
-    color: '#FFFFFF',
-    label: '\u25CF Delivered',
-  },
-  rejected: {
-    backgroundColor: '#E53935',
-    color: '#FFFFFF',
-    label: '\u25CF Rejected',
-  },
-  cancelled: {
-    backgroundColor: '#E53935',
-    color: '#FFFFFF',
-    label: '\u25CF Cancelled',
-  },
-  canceled: {
-    backgroundColor: '#E53935',
-    color: '#FFFFFF',
-    label: '\u25CF Cancelled',
-  },
-};
-
-const normalizeStatus = (status) =>
-  (status || '')
-    .toString()
-    .trim()
-    .replace(/([a-z])([A-Z])/g, '$1 $2')
-    .toLowerCase()
-    .replace(/[_-]+/g, ' ')
-    .replace(/\s+/g, ' ');
-
-const getStatusBadge = (status) => {
-  const statusText = status || 'Pending';
-  const normalizedStatus = normalizeStatus(statusText);
-
-  return (
-    STATUS_BADGES[normalizedStatus] || {
-      backgroundColor: BLUE_LIGHT,
-      color: BLUE,
-      label: statusText,
-    }
-  );
-};
 
 const formatAmount = (amount) => {
   if (typeof amount === 'string' && amount.trim()) {
@@ -112,14 +44,13 @@ export default function RequestDetailsModal({
   onClose,
   request,
 }) {
-  const statusBadge = getStatusBadge(request?.status);
   const products = Array.isArray(request?.items)
     ? request.items.map(normalizeProduct)
     : [];
   const topRows = [
     [
       { label: 'Request ID', value: request?.requestId },
-      { label: 'Status', badge: statusBadge },
+      { label: 'Status', status: request?.status },
     ],
     [
       { label: 'Order Date', value: request?.orderDate },
@@ -174,22 +105,8 @@ export default function RequestDetailsModal({
                   {row.map((item) => (
                     <View key={item.label} style={styles.summaryCell}>
                       <Text style={styles.summaryLabel}>{item.label}</Text>
-                      {item.badge ? (
-                        <View
-                          style={[
-                            styles.statusBadge,
-                            { backgroundColor: item.badge.backgroundColor },
-                          ]}
-                        >
-                          <Text
-                            style={[
-                              styles.statusBadgeText,
-                              { color: item.badge.color },
-                            ]}
-                          >
-                            {item.badge.label}
-                          </Text>
-                        </View>
+                      {item.status ? (
+                        <SoftStatusBadge status={item.status} />
                       ) : (
                         <Text style={styles.summaryValue} numberOfLines={2}>
                           {displayValue(item.value)}
@@ -304,11 +221,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     paddingTop: 18,
     paddingBottom: 18,
-    elevation: 10,
-    shadowColor: '#0D47A1',
-    shadowOpacity: 0.18,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 6 },
+    ...createShadow({
+      color: '#0D47A1',
+      elevation: 10,
+      opacity: 0.18,
+      radius: 14,
+      offset: { width: 0, height: 6 },
+    }),
   },
   header: {
     flexDirection: 'row',
@@ -371,17 +290,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
     lineHeight: 17,
-  },
-  statusBadge: {
-    alignSelf: 'flex-start',
-    borderRadius: 999,
-    paddingHorizontal: 9,
-    paddingVertical: 4,
-  },
-  statusBadgeText: {
-    fontSize: 10,
-    fontWeight: 'bold',
-    lineHeight: 13,
   },
   section: {
     marginTop: 14,

@@ -1,21 +1,23 @@
-// firebase.js
-import { initializeApp } from 'firebase/app';
-import { getAuth } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
+import { getFirestore, initializeFirestore } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 
-const firebaseConfig = {
-  apiKey: 'AIzaSyC51lebYaIK8j1GgfchVXik97Ya9BDRPsM',
-  authDomain: 'bluetap-cce88.firebaseapp.com',
-  projectId: 'bluetap-cce88',
-  storageBucket: 'bluetap-cce88.firebasestorage.app',
-  messagingSenderId: '839019297596',
-  appId: '1:839019297596:web:717876951a4b39a1aa7c39',
+import { app } from './firebaseApp';
+import { auth } from './firebaseAuth';
+
+const getConfiguredFirestore = () => {
+  try {
+    return initializeFirestore(app, {
+      experimentalForceLongPolling: true,
+    });
+  } catch (error) {
+    if (error?.code === 'failed-precondition') {
+      return getFirestore(app);
+    }
+
+    throw error;
+  }
 };
 
-const app = initializeApp(firebaseConfig);
-
-// ✅ Auth & Firestore (what you actually need)
-export const auth = getAuth(app);
-export const db = getFirestore(app);
+export const db = getConfiguredFirestore();
 export const storage = getStorage(app);
+export { app, auth };

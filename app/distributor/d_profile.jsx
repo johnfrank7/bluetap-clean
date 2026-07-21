@@ -4,6 +4,7 @@ import {
   Alert,
   Animated,
   Image,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -19,12 +20,14 @@ import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { findLocalUserForAuthRole, saveLocalUser } from '../../localUsers';
 import { normalizeRole, signOutAndClearSessions } from '../../services/authSession';
 import BlueTapHeader from '../../components/BlueTapHeader';
+import { createShadow } from '../../components/shadowStyles';
 
 const BLUE = '#187BCD';
 const BLUE_LIGHT = '#E3F2FD';
 const CARD_BORDER = '#D7ECFF';
 const TEXT_MUTED = '#6F8EA8';
 const TEXT_DARK = '#20384D';
+const USE_NATIVE_DRIVER = Platform.OS !== 'web';
 
 const getProfileObject = (profile) => profile || {};
 
@@ -273,7 +276,7 @@ export default function DistributorProfilePage() {
     Animated.timing(editFadeAnim, {
       toValue: editingProfile ? 1 : 0,
       duration: 180,
-      useNativeDriver: true,
+      useNativeDriver: USE_NATIVE_DRIVER,
     }).start();
   }, [editFadeAnim, editingProfile]);
 
@@ -304,14 +307,14 @@ export default function DistributorProfilePage() {
     Animated.timing(toastAnim, {
       toValue: 1,
       duration: 180,
-      useNativeDriver: true,
+      useNativeDriver: USE_NATIVE_DRIVER,
     }).start();
 
     toastTimerRef.current = setTimeout(() => {
       Animated.timing(toastAnim, {
         toValue: 0,
         duration: 180,
-        useNativeDriver: true,
+        useNativeDriver: USE_NATIVE_DRIVER,
       }).start(({ finished }) => {
         if (finished) setToastVisible(false);
       });
@@ -426,6 +429,7 @@ export default function DistributorProfilePage() {
                   <Image
                     source={require('../../assets/icons/pencil.png')}
                     style={styles.editIcon}
+                    tintColor={BLUE}
                   />
                 </TouchableOpacity>
               )}
@@ -554,6 +558,7 @@ export default function DistributorProfilePage() {
                   <Image
                     source={require('../../assets/icons/bluetapwhitelogo.png')}
                     style={styles.helpIcon}
+                    tintColor="#FFFFFF"
                   />
                 </View>
               </TouchableOpacity>
@@ -575,23 +580,22 @@ export default function DistributorProfilePage() {
 
         <View style={styles.bottomNav}>
           <TouchableOpacity onPress={() => router.replace('/distributor/d_dashboard')}>
-            <Image source={require('../../assets/icons/home.png')} style={styles.navIcon} />
+            <Image source={require('../../assets/icons/home.png')} style={styles.navIcon} tintColor={BLUE} />
           </TouchableOpacity>
           <TouchableOpacity onPress={() => router.replace('/distributor/d_requests')}>
-            <Image source={require('../../assets/icons/ballot.png')} style={styles.navIcon} />
+            <Image source={require('../../assets/icons/ballot.png')} style={styles.navIcon} tintColor={BLUE} />
           </TouchableOpacity>
           <TouchableOpacity onPress={() => router.replace('/distributor/d_scheduled_requests')}>
-            <Image source={require('../../assets/icons/calendar-clock.png')} style={styles.navIcon} />
+            <Image source={require('../../assets/icons/calendar-clock.png')} style={styles.navIcon} tintColor={BLUE} />
           </TouchableOpacity>
           <TouchableOpacity onPress={() => router.replace('/distributor/d_profile')}>
-            <Image source={require('../../assets/icons/user.png')} style={styles.navIconActive} />
+            <Image source={require('../../assets/icons/user.png')} style={styles.navIconActive} tintColor={BLUE} />
           </TouchableOpacity>
         </View>
       </View>
 
       {toastVisible && (
         <Animated.View
-          pointerEvents="none"
           style={[
             styles.successToast,
             {
@@ -644,11 +648,13 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: CARD_BORDER,
     padding: 16,
-    elevation: 6,
-    shadowColor: '#0D47A1',
-    shadowOpacity: 0.1,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 5 },
+    ...createShadow({
+      color: '#0D47A1',
+      elevation: 6,
+      opacity: 0.1,
+      radius: 10,
+      offset: { width: 0, height: 5 },
+    }),
   },
   infoHeader: {
     flexDirection: 'row',
@@ -664,7 +670,6 @@ const styles = StyleSheet.create({
   editIcon: {
     width: 20,
     height: 20,
-    tintColor: BLUE,
   },
   infoDivider: {
     height: 1,
@@ -740,11 +745,13 @@ const styles = StyleSheet.create({
     borderRadius: 13,
     alignItems: 'center',
     justifyContent: 'center',
-    elevation: 4,
-    shadowColor: BLUE,
-    shadowOpacity: 0.22,
-    shadowRadius: 7,
-    shadowOffset: { width: 0, height: 4 },
+    ...createShadow({
+      color: BLUE,
+      elevation: 4,
+      opacity: 0.22,
+      radius: 7,
+      offset: { width: 0, height: 4 },
+    }),
   },
   saveEditText: {
     color: '#FFFFFF',
@@ -759,11 +766,13 @@ const styles = StyleSheet.create({
     backgroundColor: BLUE,
     borderRadius: 20,
     padding: 18,
-    elevation: 5,
-    shadowColor: '#0D47A1',
-    shadowOpacity: 0.12,
-    shadowRadius: 9,
-    shadowOffset: { width: 0, height: 4 },
+    ...createShadow({
+      color: '#0D47A1',
+      elevation: 5,
+      opacity: 0.12,
+      radius: 9,
+      offset: { width: 0, height: 4 },
+    }),
   },
   helpRow: {
     flexDirection: 'row',
@@ -794,7 +803,6 @@ const styles = StyleSheet.create({
   helpIcon: {
     width: 38,
     height: 38,
-    tintColor: '#FFFFFF',
   },
   logoutButton: {
     marginTop: 18,
@@ -831,21 +839,21 @@ const styles = StyleSheet.create({
     paddingHorizontal: 28,
     borderRadius: 22,
     zIndex: 2,
-    elevation: 8,
-    shadowColor: '#000',
-    shadowOpacity: 0.12,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 3 },
+    ...createShadow({
+      color: '#000',
+      elevation: 8,
+      opacity: 0.12,
+      radius: 6,
+      offset: { width: 0, height: 3 },
+    }),
   },
   navIcon: {
     width: 26,
     height: 26,
-    tintColor: BLUE,
   },
   navIconActive: {
     width: 26,
     height: 26,
-    tintColor: BLUE,
   },
   successToast: {
     position: 'absolute',
@@ -859,11 +867,14 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 14,
     zIndex: 10,
-    elevation: 8,
-    shadowColor: '#000',
-    shadowOpacity: 0.14,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 4 },
+    ...createShadow({
+      color: '#000',
+      elevation: 8,
+      opacity: 0.14,
+      radius: 8,
+      offset: { width: 0, height: 4 },
+    }),
+    pointerEvents: 'none',
   },
   successToastText: {
     color: '#FFFFFF',

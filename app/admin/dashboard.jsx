@@ -18,6 +18,7 @@ import { collection, doc, onSnapshot, query, serverTimestamp, setDoc, where } fr
 import { getLocalUsers, subscribeLocalUsers, updateLocalUserStatus } from '../../localUsers';
 import { getLocalRequests } from '../../services/requests';
 import { signOutAndClearSessions } from '../../services/authSession';
+import { createShadow } from '../../components/shadowStyles';
 
 const normalizeApplicationStatus = (status) =>
   (status || 'pending').toString().trim().toLowerCase();
@@ -585,11 +586,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 14,
     paddingBottom: 20,
-    shadowColor: '#000',
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 3,
+    ...createShadow({
+      color: '#000',
+      elevation: 3,
+      opacity: 0.08,
+      radius: 8,
+      offset: { width: 0, height: 2 },
+    }),
   },
   diagramCard: {
     backgroundColor: '#FFFFFF',
@@ -598,11 +601,13 @@ const styles = StyleSheet.create({
     paddingTop: 14,
     paddingBottom: 20,
     marginBottom: 16,
-    shadowColor: '#000',
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 3,
+    ...createShadow({
+      color: '#000',
+      elevation: 3,
+      opacity: 0.08,
+      radius: 8,
+      offset: { width: 0, height: 2 },
+    }),
   },
   cardHeader: {
     flexDirection: 'row',
@@ -660,12 +665,14 @@ const styles = StyleSheet.create({
   },
   removeButton: {
     paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 8,
-    backgroundColor: '#FFEBEE',
+    paddingVertical: 7,
+    borderWidth: 1.5,
+    borderColor: '#FCA5A5',
+    borderRadius: 12,
+    backgroundColor: '#FFFFFF',
   },
   removeButtonText: {
-    color: '#D32F2F',
+    color: '#EF4444',
     fontSize: 13,
     fontWeight: '600',
   },

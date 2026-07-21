@@ -20,6 +20,8 @@ import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from '../../firebase';
 import { findLocalUserForAuthRole } from '../../localUsers';
 import RequestDetailsModal from '../../components/RequestDetailsModal';
+import SoftStatusBadge from '../../components/SoftStatusBadge';
+import { createShadow } from '../../components/shadowStyles';
 import { subscribeProducts } from '../../services/products';
 import {
   cancelRequest,
@@ -36,38 +38,6 @@ const CARD_BORDER = '#D7ECFF';
 const TEXT_MUTED = '#6F8EA8';
 const TEXT_DARK = '#20384D';
 const REQUESTER_NAME = 'Requester';
-const STATUS_BADGES = {
-  pending: {
-    backgroundColor: '#FBC02D',
-    color: TEXT_DARK,
-    label: '\u25CF Pending',
-  },
-  accepted: {
-    backgroundColor: '#2196F3',
-    color: '#FFFFFF',
-    label: '\u25CF Accepted',
-  },
-  'out for delivery': {
-    backgroundColor: '#8E24AA',
-    color: '#FFFFFF',
-    label: '\u25CF Out for Delivery',
-  },
-  delivered: {
-    backgroundColor: '#43A047',
-    color: '#FFFFFF',
-    label: '\u25CF Delivered',
-  },
-  cancelled: {
-    backgroundColor: '#E53935',
-    color: '#FFFFFF',
-    label: '\u25CF Cancelled',
-  },
-  canceled: {
-    backgroundColor: '#E53935',
-    color: '#FFFFFF',
-    label: '\u25CF Cancelled',
-  },
-};
 const formatPrice = (price) => `\u20B1${Number(price || 0).toFixed(2)}`;
 const formatDashboardDate = (date) =>
   new Intl.DateTimeFormat('en-US', {
@@ -231,18 +201,6 @@ const getNormalizedStatus = (status) =>
     .replace(/\s+/g, ' ');
 const isPendingRequest = (request) =>
   getNormalizedStatus(request.status) === 'pending';
-const getStatusBadge = (status) => {
-  const statusText = status || 'Pending';
-  const normalizedStatus = getNormalizedStatus(statusText);
-
-  return (
-    STATUS_BADGES[normalizedStatus] || {
-      backgroundColor: BLUE_LIGHT,
-      color: BLUE,
-      label: statusText,
-    }
-  );
-};
 const getProductGallons = (product) =>
   product.capacity ||
   product.gallons ||
@@ -627,7 +585,6 @@ export default function RequesterDashboard() {
                 </View>
               ) : (
                 currentRequests.map((request, index) => {
-                  const statusBadge = getStatusBadge(request.status);
                   const isRequestPending = isPendingRequest(request);
 
                   return (
@@ -642,21 +599,7 @@ export default function RequesterDashboard() {
                         <Text style={styles.requestId} numberOfLines={1}>
                           Request ID: {request.request_id || request.id}
                         </Text>
-                        <View
-                          style={[
-                            styles.statusBadge,
-                            { backgroundColor: statusBadge.backgroundColor },
-                          ]}
-                        >
-                          <Text
-                            style={[
-                              styles.statusBadgeText,
-                              { color: statusBadge.color },
-                            ]}
-                          >
-                            {statusBadge.label}
-                          </Text>
-                        </View>
+                        <SoftStatusBadge status={request.status} />
                       </View>
 
                       <View style={styles.requestDetailsGrid}>
@@ -857,11 +800,13 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
-    elevation: 6,
-    shadowColor: '#000',
-    shadowOpacity: 0.12,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 5 },
+    ...createShadow({
+      color: '#000',
+      elevation: 6,
+      opacity: 0.12,
+      radius: 10,
+      offset: { width: 0, height: 5 },
+    }),
   },
   productCard: {
     flex: 1,
@@ -872,11 +817,13 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
     position: 'relative',
     justifyContent: 'space-between',
-    elevation: 6,
-    shadowColor: '#000',
-    shadowOpacity: 0.13,
-    shadowRadius: 9,
-    shadowOffset: { width: 0, height: 5 },
+    ...createShadow({
+      color: '#000',
+      elevation: 6,
+      opacity: 0.13,
+      radius: 9,
+      offset: { width: 0, height: 5 },
+    }),
   },
   priceBadge: {
     position: 'absolute',
@@ -982,11 +929,13 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     padding: 15,
     position: 'relative',
-    elevation: 6,
-    shadowColor: '#0D47A1',
-    shadowOpacity: 0.12,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 5 },
+    ...createShadow({
+      color: '#0D47A1',
+      elevation: 6,
+      opacity: 0.12,
+      radius: 10,
+      offset: { width: 0, height: 5 },
+    }),
   },
   currentRequestCardGap: {
     marginTop: 12,
@@ -1006,17 +955,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: 'bold',
     lineHeight: 18,
-  },
-  statusBadge: {
-    flexShrink: 0,
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-  },
-  statusBadgeText: {
-    fontSize: 11,
-    fontWeight: 'bold',
-    lineHeight: 14,
   },
   requestDetailsGrid: {
     paddingTop: 13,
@@ -1062,31 +1000,33 @@ const styles = StyleSheet.create({
     minHeight: 42,
     backgroundColor: '#FFFFFF',
     borderWidth: 1.5,
-    borderColor: BLUE,
-    borderRadius: 13,
+    borderColor: '#2563EB',
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 10,
   },
   viewDetailsText: {
-    color: BLUE,
+    color: '#2563EB',
     fontSize: 12,
-    fontWeight: 'bold',
+    fontWeight: '600',
     textAlign: 'center',
   },
   cancelRequestButton: {
     flex: 1,
     minHeight: 42,
-    backgroundColor: '#E53935',
-    borderRadius: 13,
+    backgroundColor: '#EF4444',
+    borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 10,
-    elevation: 4,
-    shadowColor: '#E53935',
-    shadowOpacity: 0.2,
-    shadowRadius: 7,
-    shadowOffset: { width: 0, height: 4 },
+    ...createShadow({
+      color: '#EF4444',
+      elevation: 4,
+      opacity: 0.18,
+      radius: 10,
+      offset: { width: 0, height: 4 },
+    }),
   },
   cancelRequestText: {
     color: '#FFFFFF',
@@ -1103,11 +1043,13 @@ const styles = StyleSheet.create({
     borderColor: CARD_BORDER,
     borderRadius: 20,
     padding: 16,
-    elevation: 4,
-    shadowColor: '#0D47A1',
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 4 },
+    ...createShadow({
+      color: '#0D47A1',
+      elevation: 4,
+      opacity: 0.08,
+      radius: 8,
+      offset: { width: 0, height: 4 },
+    }),
   },
   emptyRequestTitle: {
     color: BLUE,

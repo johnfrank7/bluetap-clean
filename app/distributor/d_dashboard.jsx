@@ -11,21 +11,14 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import BlueTapHeader from '../../components/BlueTapHeader';
 import RequestDetailsModal from '../../components/RequestDetailsModal';
+import SoftStatusBadge from '../../components/SoftStatusBadge';
+import { createShadow } from '../../components/shadowStyles';
 
 const BLUE = '#187BCD';
 const BLUE_LIGHT = '#E3F2FD';
 const CARD_BORDER = '#D7ECFF';
 const TEXT_MUTED = '#6F8EA8';
 const TEXT_DARK = '#20384D';
-const STATUS_COLORS = {
-  pending: '#FBC02D',
-  scheduled: '#2196F3',
-  processing: '#FB8C00',
-  outForDelivery: '#8E24AA',
-  delivered: '#43A047',
-  rejected: '#E53935',
-  cancelled: '#757575',
-};
 
 const DISTRIBUTOR_NAME = 'Distributor';
 
@@ -78,66 +71,6 @@ const normalizeStatus = (status) =>
 
 const getStatusActionLabel = (status) =>
   STATUS_ACTIONS[normalizeStatus(status)] || 'Update Request';
-
-const STATUS_STYLES = {
-  pending: {
-    backgroundColor: STATUS_COLORS.pending,
-    color: TEXT_DARK,
-    label: '\u25CF Pending',
-  },
-  accepted: {
-    backgroundColor: STATUS_COLORS.scheduled,
-    color: '#FFFFFF',
-    label: '\u25CF Scheduled',
-  },
-  scheduled: {
-    backgroundColor: STATUS_COLORS.scheduled,
-    color: '#FFFFFF',
-    label: '\u25CF Scheduled',
-  },
-  processing: {
-    backgroundColor: STATUS_COLORS.processing,
-    color: '#FFFFFF',
-    label: '\u25CF Processing',
-  },
-  'out for delivery': {
-    backgroundColor: STATUS_COLORS.outForDelivery,
-    color: '#FFFFFF',
-    label: '\u25CF Out for Delivery',
-  },
-  delivered: {
-    backgroundColor: STATUS_COLORS.delivered,
-    color: '#FFFFFF',
-    label: '\u25CF Delivered',
-  },
-  rejected: {
-    backgroundColor: STATUS_COLORS.rejected,
-    color: '#FFFFFF',
-    label: '\u25CF Rejected',
-  },
-  cancelled: {
-    backgroundColor: STATUS_COLORS.cancelled,
-    color: '#FFFFFF',
-    label: '\u25CF Cancelled',
-  },
-  canceled: {
-    backgroundColor: STATUS_COLORS.cancelled,
-    color: '#FFFFFF',
-    label: '\u25CF Cancelled',
-  },
-};
-
-const getStatusStyle = (status) => {
-  const normalizedStatus = normalizeStatus(status);
-
-  return (
-    STATUS_STYLES[normalizedStatus] || {
-      backgroundColor: BLUE_LIGHT,
-      color: BLUE,
-      label: status || 'Status',
-    }
-  );
-};
 
 const formatAmountDue = (amount) =>
   `\u20B1${Number(amount || 0).toFixed(2)}`;
@@ -218,9 +151,6 @@ export default function DistributorDashboard() {
   const primaryActionLabel = activeRequest
     ? getStatusActionLabel(activeRequest.status)
     : '';
-  const activeStatusStyle = activeRequest
-    ? getStatusStyle(activeRequest.status)
-    : null;
   const detailsRequestData = activeRequest
     ? {
         requestId: activeRequest.requestId,
@@ -295,21 +225,7 @@ export default function DistributorDashboard() {
                       Request ID: {activeRequest.requestId}
                     </Text>
                   </View>
-                  <View
-                    style={[
-                      styles.statusPill,
-                      { backgroundColor: activeStatusStyle.backgroundColor },
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.statusPillText,
-                        { color: activeStatusStyle.color },
-                      ]}
-                    >
-                      {activeStatusStyle.label}
-                    </Text>
-                  </View>
+                  <SoftStatusBadge status={activeRequest.status} />
                 </View>
 
                 <View style={styles.compactRequestBody}>
@@ -422,6 +338,7 @@ export default function DistributorDashboard() {
             <Image
               source={require('../../assets/icons/home.png')}
               style={styles.navIcon}
+              tintColor={BLUE}
             />
           </TouchableOpacity>
 
@@ -429,6 +346,7 @@ export default function DistributorDashboard() {
             <Image
               source={require('../../assets/icons/ballot.png')}
               style={styles.navIcon}
+              tintColor={BLUE}
             />
           </TouchableOpacity>
 
@@ -436,6 +354,7 @@ export default function DistributorDashboard() {
             <Image
               source={require('../../assets/icons/calendar-clock.png')}
               style={styles.navIcon}
+              tintColor={BLUE}
             />
           </TouchableOpacity>
 
@@ -443,6 +362,7 @@ export default function DistributorDashboard() {
             <Image
               source={require('../../assets/icons/user.png')}
               style={styles.navIcon}
+              tintColor={BLUE}
             />
           </TouchableOpacity>
         </View>
@@ -538,11 +458,13 @@ const styles = StyleSheet.create({
     borderColor: CARD_BORDER,
     borderRadius: 20,
     padding: 16,
-    elevation: 6,
-    shadowColor: '#0D47A1',
-    shadowOpacity: 0.12,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 5 },
+    ...createShadow({
+      color: '#0D47A1',
+      elevation: 6,
+      opacity: 0.12,
+      radius: 10,
+      offset: { width: 0, height: 5 },
+    }),
   },
   requestCardHeader: {
     flexDirection: 'row',
@@ -559,16 +481,6 @@ const styles = StyleSheet.create({
   requestId: {
     color: BLUE,
     fontSize: 15,
-    fontWeight: 'bold',
-  },
-  statusPill: {
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    flexShrink: 0,
-  },
-  statusPillText: {
-    fontSize: 11,
     fontWeight: 'bold',
   },
   compactRequestBody: {
@@ -621,28 +533,30 @@ const styles = StyleSheet.create({
     height: 44,
     backgroundColor: '#FFFFFF',
     borderWidth: 1.5,
-    borderColor: BLUE,
-    borderRadius: 13,
+    borderColor: '#2563EB',
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },
   viewDetailsText: {
-    color: BLUE,
+    color: '#2563EB',
     fontSize: 13,
-    fontWeight: 'bold',
+    fontWeight: '600',
   },
   primaryActionButton: {
     flex: 1,
     height: 44,
     backgroundColor: BLUE,
-    borderRadius: 13,
+    borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
-    elevation: 4,
-    shadowColor: BLUE,
-    shadowOpacity: 0.22,
-    shadowRadius: 7,
-    shadowOffset: { width: 0, height: 4 },
+    ...createShadow({
+      color: BLUE,
+      elevation: 4,
+      opacity: 0.18,
+      radius: 10,
+      offset: { width: 0, height: 4 },
+    }),
   },
   primaryActionText: {
     color: '#FFFFFF',
@@ -655,11 +569,13 @@ const styles = StyleSheet.create({
     borderColor: CARD_BORDER,
     borderRadius: 20,
     padding: 16,
-    elevation: 4,
-    shadowColor: '#0D47A1',
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 4 },
+    ...createShadow({
+      color: '#0D47A1',
+      elevation: 4,
+      opacity: 0.08,
+      radius: 8,
+      offset: { width: 0, height: 4 },
+    }),
   },
   emptyRequestTitle: {
     color: BLUE,
@@ -768,15 +684,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 28,
     borderRadius: 22,
     zIndex: 2,
-    elevation: 8,
-    shadowColor: '#000',
-    shadowOpacity: 0.12,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 3 },
+    ...createShadow({
+      color: '#000',
+      elevation: 8,
+      opacity: 0.12,
+      radius: 6,
+      offset: { width: 0, height: 3 },
+    }),
   },
   navIcon: {
     width: 26,
     height: 26,
-    tintColor: BLUE,
   },
 });

@@ -2,7 +2,9 @@ import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
+import { createShadow } from '../../components/shadowStyles';
 
 export default function RequesterNotification() {
   const router = useRouter();
@@ -12,15 +14,21 @@ export default function RequesterNotification() {
   };
 
   return (
-    <SafeAreaView edges={['left', 'right', 'bottom']} style={styles.container}>
-      <StatusBar style="light" />
+    <LinearGradient
+      colors={['#187BCD', '#42A5F5']}
+      style={styles.gradient}
+      start={{ x: 0, y: 0 }}
+      end={{ x: 0, y: 1 }}
+    >
+      <SafeAreaView edges={['left', 'right', 'bottom']} style={styles.container}>
+        <StatusBar style="light" />
 
-      <View style={styles.phoneWrapper}>
-        {/* Main notification card */}
-        <ScrollView
-          contentContainerStyle={styles.scrollContent}
-          showsVerticalScrollIndicator={false}
-        >
+        <View style={styles.phoneWrapper}>
+          {/* Main notification card */}
+          <ScrollView
+            contentContainerStyle={styles.scrollContent}
+            showsVerticalScrollIndicator={false}
+          >
           <TouchableOpacity
             style={styles.backButton}
             activeOpacity={0.85}
@@ -54,17 +62,23 @@ export default function RequesterNotification() {
           </View>
 
           <View style={{ height: 140 }} />
-        </ScrollView>
+          </ScrollView>
 
-      </View>
-    </SafeAreaView>
+        </View>
+      </SafeAreaView>
+    </LinearGradient>
   );
 }
 
 const styles = StyleSheet.create({
+  gradient: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   container: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
+    width: '100%',
   },
   phoneWrapper: {
     flex: 1,
@@ -81,7 +95,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   backIcon: {
-    color: '#187BCD',
+    color: '#FFFFFF',
     fontSize: 22,
     fontWeight: 'bold',
   },
@@ -89,7 +103,15 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: '#187BCD',
     borderRadius: 4,
+    backgroundColor: '#FFFFFF',
     overflow: 'hidden',
+    ...createShadow({
+      color: '#0D47A1',
+      elevation: 6,
+      opacity: 0.12,
+      radius: 10,
+      offset: { width: 0, height: 5 },
+    }),
   },
   cardHeader: {
     backgroundColor: '#187BCD',

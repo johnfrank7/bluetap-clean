@@ -3,6 +3,7 @@ import { View, StyleSheet, TouchableOpacity, Image } from 'react-native';
 import { Stack, usePathname, useRouter } from 'expo-router';
 import RequesterHeader from '../../components/RequesterHeader';
 import RoleGate from '../../components/RoleGate';
+import { createShadow } from '../../components/shadowStyles';
 
 const dashboardRoutes = ['/requester/r_dashboard'];
 const requestsRoutes = ['/requester/r_request', '/requester/r_notification'];
@@ -32,22 +33,31 @@ export default function RequesterLayout() {
           />
         </View>
 
-        <View style={styles.navOverlay} pointerEvents="box-none">
-          <View style={styles.navFrame} pointerEvents="box-none">
+        <View style={styles.navOverlay}>
+          <View style={styles.navFrame}>
             <View style={[styles.bottomNav, isDashboard && styles.dashboardBottomNav]}>
               <TouchableOpacity onPress={() => router.replace('/requester/r_dashboard')}>
-                <Image source={require('../../assets/icons/home.png')} style={styles.navIcon} />
+                <Image
+                  source={require('../../assets/icons/home.png')}
+                  style={styles.navIcon}
+                  tintColor="#187BCD"
+                />
               </TouchableOpacity>
 
               <TouchableOpacity onPress={() => router.replace(getMiddleRoute(pathname))}>
                 <Image
                   source={require('../../assets/icons/square-plus.png')}
                   style={styles.navIcon}
+                  tintColor="#187BCD"
                 />
               </TouchableOpacity>
 
               <TouchableOpacity onPress={() => router.replace('/requester/r_profile')}>
-                <Image source={require('../../assets/icons/user.png')} style={styles.navIcon} />
+                <Image
+                  source={require('../../assets/icons/user.png')}
+                  style={styles.navIcon}
+                  tintColor="#187BCD"
+                />
               </TouchableOpacity>
             </View>
           </View>
@@ -72,11 +82,13 @@ const styles = StyleSheet.create({
     left: 0,
     alignItems: 'center',
     zIndex: 20,
+    pointerEvents: 'box-none',
   },
   navFrame: {
     width: '100%',
     maxWidth: 375,
     flex: 1,
+    pointerEvents: 'box-none',
   },
   bottomNav: {
     position: 'absolute',
@@ -90,11 +102,13 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     paddingHorizontal: 28,
     borderRadius: 22,
-    elevation: 8,
-    shadowColor: '#000',
-    shadowOpacity: 0.12,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 3 },
+    ...createShadow({
+      color: '#000',
+      elevation: 8,
+      opacity: 0.12,
+      radius: 6,
+      offset: { width: 0, height: 3 },
+    }),
   },
   dashboardBottomNav: {
     left: 34,
@@ -104,6 +118,5 @@ const styles = StyleSheet.create({
   navIcon: {
     width: 26,
     height: 26,
-    tintColor: '#187BCD',
   },
 });

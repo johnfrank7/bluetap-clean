@@ -13,6 +13,7 @@ import {
   FlatList,
   Image,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -23,13 +24,15 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import BlueTapHeader from '../../components/BlueTapHeader';
+import SoftStatusBadge from '../../components/SoftStatusBadge';
+import { createShadow } from '../../components/shadowStyles';
 
 const BLUE = '#187BCD';
 const BLUE_LIGHT = '#E3F2FD';
 const TEXT_MUTED = '#6F8EA8';
 const TEXT_DARK = '#20384D';
-const STATUS_PENDING = '#FBC02D';
 const DAY_MS = 24 * 60 * 60 * 1000;
+const USE_NATIVE_DRIVER = Platform.OS !== 'web';
 
 const TIME_SLOTS = [
   '08:00',
@@ -147,7 +150,7 @@ const PendingRequestCard = memo(function PendingRequestCard({
       duration: 240,
       delay: index * 70,
       easing: Easing.out(Easing.cubic),
-      useNativeDriver: true,
+      useNativeDriver: USE_NATIVE_DRIVER,
     }).start();
   }, [fadeAnim, index, request.id]);
 
@@ -163,8 +166,8 @@ const PendingRequestCard = memo(function PendingRequestCard({
     >
       <View style={styles.requestCardHeader}>
         <Text style={styles.requestId}>Request ID: {request.id}</Text>
-        <Animated.View style={[styles.pendingBadge, { opacity: fadeAnim }]}>
-          <Text style={styles.pendingBadgeText}>{'\u25CF'} Pending</Text>
+        <Animated.View style={{ opacity: fadeAnim }}>
+          <SoftStatusBadge status="Pending" />
         </Animated.View>
       </View>
 
@@ -341,7 +344,7 @@ export default function DistributorRequests() {
       toValue: 1,
       duration: 180,
       easing: Easing.out(Easing.cubic),
-      useNativeDriver: true,
+      useNativeDriver: USE_NATIVE_DRIVER,
     }).start();
 
     successTimer.current = setTimeout(() => {
@@ -349,7 +352,7 @@ export default function DistributorRequests() {
         toValue: 0,
         duration: 180,
         easing: Easing.in(Easing.cubic),
-        useNativeDriver: true,
+        useNativeDriver: USE_NATIVE_DRIVER,
       }).start(({ finished }) => {
         if (finished) setSuccessVisible(false);
       });
@@ -364,7 +367,7 @@ export default function DistributorRequests() {
         toValue: 0,
         duration: 210,
         easing: Easing.in(Easing.cubic),
-        useNativeDriver: true,
+        useNativeDriver: USE_NATIVE_DRIVER,
       }).start(({ finished }) => {
         if (finished) {
           setScheduleSheetVisible(false);
@@ -394,7 +397,7 @@ export default function DistributorRequests() {
           toValue: 1,
           duration: 260,
           easing: Easing.out(Easing.cubic),
-          useNativeDriver: true,
+          useNativeDriver: USE_NATIVE_DRIVER,
         }).start();
       });
     },
@@ -560,26 +563,25 @@ export default function DistributorRequests() {
 
         <View style={styles.bottomNav}>
           <TouchableOpacity onPress={() => router.replace('/distributor/d_dashboard')}>
-            <Image source={require('../../assets/icons/home.png')} style={styles.navIcon} />
+            <Image source={require('../../assets/icons/home.png')} style={styles.navIcon} tintColor={BLUE} />
           </TouchableOpacity>
 
           <TouchableOpacity onPress={() => router.replace('/distributor/d_requests')}>
-            <Image source={require('../../assets/icons/ballot.png')} style={styles.navIconActive} />
+            <Image source={require('../../assets/icons/ballot.png')} style={styles.navIconActive} tintColor={BLUE} />
           </TouchableOpacity>
 
           <TouchableOpacity onPress={() => router.replace('/distributor/d_scheduled_requests')}>
-            <Image source={require('../../assets/icons/calendar-clock.png')} style={styles.navIcon} />
+            <Image source={require('../../assets/icons/calendar-clock.png')} style={styles.navIcon} tintColor={BLUE} />
           </TouchableOpacity>
 
           <TouchableOpacity onPress={() => router.replace('/distributor/d_profile')}>
-            <Image source={require('../../assets/icons/user.png')} style={styles.navIcon} />
+            <Image source={require('../../assets/icons/user.png')} style={styles.navIcon} tintColor={BLUE} />
           </TouchableOpacity>
         </View>
       </View>
 
       {successVisible && (
         <Animated.View
-          pointerEvents="none"
           style={[
             styles.successToast,
             {
@@ -861,11 +863,13 @@ const styles = StyleSheet.create({
     marginBottom: 14,
     borderWidth: 1,
     borderColor: '#D7ECFF',
-    elevation: 6,
-    shadowColor: '#0D47A1',
-    shadowOpacity: 0.12,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 5 },
+    ...createShadow({
+      color: '#0D47A1',
+      elevation: 6,
+      opacity: 0.12,
+      radius: 10,
+      offset: { width: 0, height: 5 },
+    }),
   },
   requestCardHeader: {
     flexDirection: 'row',
@@ -880,17 +884,6 @@ const styles = StyleSheet.create({
     flex: 1,
     color: BLUE,
     fontSize: 15,
-    fontWeight: 'bold',
-  },
-  pendingBadge: {
-    backgroundColor: STATUS_PENDING,
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-  },
-  pendingBadgeText: {
-    color: TEXT_DARK,
-    fontSize: 11,
     fontWeight: 'bold',
   },
   cardBody: {
@@ -946,29 +939,31 @@ const styles = StyleSheet.create({
     flex: 1,
     minHeight: 44,
     borderWidth: 1.5,
-    borderColor: BLUE,
+    borderColor: '#2563EB',
     backgroundColor: '#FFFFFF',
-    borderRadius: 13,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },
   secondaryActionText: {
-    color: BLUE,
+    color: '#2563EB',
     fontSize: 13,
-    fontWeight: 'bold',
+    fontWeight: '600',
   },
   primaryActionButton: {
     flex: 1,
     minHeight: 44,
     backgroundColor: BLUE,
-    borderRadius: 13,
+    borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
-    elevation: 4,
-    shadowColor: BLUE,
-    shadowOpacity: 0.22,
-    shadowRadius: 7,
-    shadowOffset: { width: 0, height: 4 },
+    ...createShadow({
+      color: BLUE,
+      elevation: 4,
+      opacity: 0.18,
+      radius: 10,
+      offset: { width: 0, height: 4 },
+    }),
   },
   primaryActionText: {
     color: '#FFFFFF',
@@ -984,11 +979,13 @@ const styles = StyleSheet.create({
     padding: 18,
     borderWidth: 1,
     borderColor: '#D7ECFF',
-    elevation: 4,
-    shadowColor: '#0D47A1',
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 4 },
+    ...createShadow({
+      color: '#0D47A1',
+      elevation: 4,
+      opacity: 0.08,
+      radius: 8,
+      offset: { width: 0, height: 4 },
+    }),
   },
   emptyTitle: {
     color: BLUE,
@@ -1014,21 +1011,21 @@ const styles = StyleSheet.create({
     paddingHorizontal: 28,
     borderRadius: 22,
     zIndex: 2,
-    elevation: 8,
-    shadowColor: '#000',
-    shadowOpacity: 0.12,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 3 },
+    ...createShadow({
+      color: '#000',
+      elevation: 8,
+      opacity: 0.12,
+      radius: 6,
+      offset: { width: 0, height: 3 },
+    }),
   },
   navIcon: {
     width: 26,
     height: 26,
-    tintColor: BLUE,
   },
   navIconActive: {
     width: 26,
     height: 26,
-    tintColor: BLUE,
   },
   modalBackdrop: {
     flex: 1,
@@ -1271,30 +1268,32 @@ const styles = StyleSheet.create({
   sheetCancelButton: {
     flex: 1,
     height: 46,
-    borderRadius: 13,
+    borderRadius: 12,
     borderWidth: 1.5,
-    borderColor: BLUE,
+    borderColor: '#2563EB',
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#FFFFFF',
   },
   sheetCancelText: {
-    color: BLUE,
+    color: '#2563EB',
     fontSize: 14,
-    fontWeight: 'bold',
+    fontWeight: '600',
   },
   sheetConfirmButton: {
     flex: 1,
     height: 46,
-    borderRadius: 13,
+    borderRadius: 16,
     backgroundColor: BLUE,
     alignItems: 'center',
     justifyContent: 'center',
-    elevation: 4,
-    shadowColor: BLUE,
-    shadowOpacity: 0.22,
-    shadowRadius: 7,
-    shadowOffset: { width: 0, height: 4 },
+    ...createShadow({
+      color: BLUE,
+      elevation: 4,
+      opacity: 0.18,
+      radius: 10,
+      offset: { width: 0, height: 4 },
+    }),
   },
   sheetConfirmText: {
     color: '#FFFFFF',
@@ -1313,11 +1312,14 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 14,
     zIndex: 10,
-    elevation: 8,
-    shadowColor: '#000',
-    shadowOpacity: 0.14,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 4 },
+    ...createShadow({
+      color: '#000',
+      elevation: 8,
+      opacity: 0.14,
+      radius: 8,
+      offset: { width: 0, height: 4 },
+    }),
+    pointerEvents: 'none',
   },
   successToastText: {
     color: '#FFFFFF',

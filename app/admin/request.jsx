@@ -26,6 +26,7 @@ import {
 } from 'firebase/firestore';
 import { getLocalUsers, subscribeLocalUsers, updateLocalUserStatus } from '../../localUsers';
 import { signOutAndClearSessions } from '../../services/authSession';
+import { createShadow } from '../../components/shadowStyles';
 
 const normalizeApplicationStatus = (status) =>
   (status || 'pending').toString().trim().toLowerCase();
@@ -527,11 +528,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 14,
     paddingBottom: 20,
-    shadowColor: '#000',
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 3,
+    ...createShadow({
+      color: '#000',
+      elevation: 3,
+      opacity: 0.08,
+      radius: 8,
+      offset: { width: 0, height: 2 },
+    }),
   },
   cardHeader: {
     flexDirection: 'row',
@@ -546,12 +549,14 @@ const styles = StyleSheet.create({
   },
   removeButton: {
     paddingHorizontal: 16,
-    paddingVertical: 6,
+    paddingVertical: 7,
+    borderWidth: 1.5,
+    borderColor: '#FCA5A5',
     borderRadius: 12,
-    backgroundColor: '#E3F2FD',
+    backgroundColor: '#FFFFFF',
   },
   removeButtonText: {
-    color: '#187BCD',
+    color: '#EF4444',
     fontSize: 13,
     fontWeight: '600',
   },
@@ -604,25 +609,35 @@ const styles = StyleSheet.create({
   rejectButton: {
     minWidth: 58,
     paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 8,
-    backgroundColor: '#EEEEEE',
+    paddingVertical: 7,
+    borderWidth: 1.5,
+    borderColor: '#FCA5A5',
+    borderRadius: 12,
+    backgroundColor: '#FFFFFF',
     marginRight: 8,
     alignItems: 'center',
     justifyContent: 'center',
   },
   rejectText: {
-    color: '#757575',
+    color: '#EF4444',
     fontSize: 13,
+    fontWeight: '600',
   },
   acceptButton: {
     minWidth: 72,
     paddingHorizontal: 16,
-    paddingVertical: 6,
-    borderRadius: 8,
+    paddingVertical: 7,
+    borderRadius: 14,
     backgroundColor: '#187BCD',
     alignItems: 'center',
     justifyContent: 'center',
+    ...createShadow({
+      color: '#187BCD',
+      elevation: 3,
+      opacity: 0.16,
+      radius: 8,
+      offset: { width: 0, height: 4 },
+    }),
   },
   acceptText: {
     color: '#FFFFFF',
@@ -691,27 +706,30 @@ const styles = StyleSheet.create({
   },
   modalCancelButton: {
     flex: 1,
-    borderWidth: 1,
-    borderColor: '#187BCD',
-    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: '#2563EB',
+    borderRadius: 12,
     paddingVertical: 12,
     alignItems: 'center',
     marginRight: 8,
+    backgroundColor: '#FFFFFF',
   },
   modalCancelButtonText: {
-    color: '#187BCD',
-    fontWeight: 'bold',
+    color: '#2563EB',
+    fontWeight: '600',
   },
   modalRejectButton: {
     flex: 1,
-    backgroundColor: '#187BCD',
-    borderRadius: 10,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1.5,
+    borderColor: '#FCA5A5',
+    borderRadius: 12,
     paddingVertical: 12,
     alignItems: 'center',
     marginLeft: 8,
   },
   modalRejectButtonText: {
-    color: '#FFFFFF',
-    fontWeight: 'bold',
+    color: '#EF4444',
+    fontWeight: '600',
   },
 });

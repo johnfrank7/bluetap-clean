@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, Image, TouchableOpacity, ScrollView } from 'rea
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import BlueTapHeader from '../../components/BlueTapHeader';
+import { createShadow } from '../../components/shadowStyles';
 
 export default function DistributorNotification() {
   const router = useRouter();
@@ -43,16 +44,16 @@ export default function DistributorNotification() {
         {/* Bottom navigation bar */}
         <View style={styles.bottomNav}>
           <TouchableOpacity onPress={() => router.replace('/distributor/d_dashboard')}>
-            <Image source={require('../../assets/icons/home.png')} style={styles.navIcon} />
+            <Image source={require('../../assets/icons/home.png')} style={styles.navIcon} tintColor="#187BCD" />
           </TouchableOpacity>
           <TouchableOpacity onPress={() => router.replace('/distributor/d_requests')}>
-            <Image source={require('../../assets/icons/ballot.png')} style={styles.navIcon} />
+            <Image source={require('../../assets/icons/ballot.png')} style={styles.navIcon} tintColor="#187BCD" />
           </TouchableOpacity>
           <TouchableOpacity onPress={() => router.replace('/distributor/d_scheduled_requests')}>
-            <Image source={require('../../assets/icons/calendar-clock.png')} style={styles.navIcon} />
+            <Image source={require('../../assets/icons/calendar-clock.png')} style={styles.navIcon} tintColor="#187BCD" />
           </TouchableOpacity>
           <TouchableOpacity onPress={() => router.replace('/distributor/d_profile')}>
-            <Image source={require('../../assets/icons/user.png')} style={styles.navIcon} />
+            <Image source={require('../../assets/icons/user.png')} style={styles.navIcon} tintColor="#187BCD" />
           </TouchableOpacity>
         </View>
       </View>
@@ -143,15 +144,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 28,
     borderRadius: 22,
     zIndex: 2,
-    elevation: 8,
-    shadowColor: '#000',
-    shadowOpacity: 0.12,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 3 },
+    ...createShadow({
+      color: '#000',
+      elevation: 8,
+      opacity: 0.12,
+      radius: 6,
+      offset: { width: 0, height: 3 },
+    }),
   },
   navIcon: {
     width: 26,
     height: 26,
-    tintColor: '#187BCD',
   },
 });

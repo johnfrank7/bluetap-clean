@@ -2,17 +2,25 @@ import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
+import { createShadow } from '../../components/shadowStyles';
 
 export default function BlueTapAIPage() {
   const router = useRouter();
 
   return (
-    <SafeAreaView edges={['left', 'right', 'bottom']} style={styles.container}>
-      <StatusBar style="light" />
+    <LinearGradient
+      colors={['#187BCD', '#42A5F5']}
+      style={styles.gradient}
+      start={{ x: 0, y: 0 }}
+      end={{ x: 0, y: 1 }}
+    >
+      <SafeAreaView edges={['left', 'right', 'bottom']} style={styles.container}>
+        <StatusBar style="light" />
 
-      <View style={styles.phoneWrapper}>
-        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        <View style={styles.phoneWrapper}>
+          <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
           <View style={styles.aiTitleRow}>
             <Text style={styles.aiTitle}>BlueTap AI</Text>
 
@@ -61,17 +69,23 @@ export default function BlueTapAIPage() {
           </View>
 
           <View style={{ height: 120 }} />
-        </ScrollView>
+          </ScrollView>
 
-      </View>
-    </SafeAreaView>
+        </View>
+      </SafeAreaView>
+    </LinearGradient>
   );
 }
 
 const styles = StyleSheet.create({
+  gradient: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   container: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
+    width: '100%',
   },
   phoneWrapper: {
     flex: 1,
@@ -92,50 +106,58 @@ const styles = StyleSheet.create({
   aiTitle: {
     fontSize: 22,
     fontWeight: 'bold',
-    color: '#187BCD',
+    color: '#FFFFFF',
   },
   closeIcon: {
     fontSize: 20,
-    color: '#187BCD',
+    color: '#FFFFFF',
   },
   sectionTitle: {
     marginTop: 24,
     fontSize: 16,
     fontWeight: 'bold',
-    color: '#187BCD',
+    color: '#FFFFFF',
   },
   sectionDivider: {
     marginTop: 4,
     height: 1,
-    backgroundColor: '#E0ECF8',
+    backgroundColor: 'rgba(255,255,255,0.45)',
   },
   bulletList: {
     marginTop: 12,
   },
   bulletItem: {
-    color: '#187BCD',
+    color: '#FFFFFF',
     fontSize: 14,
     marginBottom: 4,
   },
   chip: {
     alignSelf: 'center',
     marginTop: 20,
-    backgroundColor: '#187BCD',
+    backgroundColor: '#FFFFFF',
     paddingHorizontal: 24,
     paddingVertical: 8,
     borderRadius: 20,
   },
   chipText: {
-    color: '#FFFFFF',
+    color: '#187BCD',
     fontSize: 13,
     fontWeight: 'bold',
   },
   responseCard: {
     marginTop: 24,
     borderWidth: 1.5,
-    borderColor: '#187BCD',
+    borderColor: '#FFFFFF',
+    backgroundColor: '#FFFFFF',
     borderRadius: 14,
     padding: 14,
+    ...createShadow({
+      color: '#0D47A1',
+      elevation: 5,
+      opacity: 0.12,
+      radius: 10,
+      offset: { width: 0, height: 5 },
+    }),
   },
   responseTitle: {
     color: '#187BCD',
@@ -156,7 +178,8 @@ const styles = StyleSheet.create({
   input: {
     flex: 1,
     borderWidth: 1,
-    borderColor: '#187BCD',
+    borderColor: '#FFFFFF',
+    backgroundColor: '#FFFFFF',
     borderRadius: 14,
     paddingHorizontal: 12,
     paddingVertical: 8,
@@ -165,7 +188,7 @@ const styles = StyleSheet.create({
   },
   sendButton: {
     marginLeft: 8,
-    backgroundColor: '#187BCD',
+    backgroundColor: '#FFFFFF',
     width: 36,
     height: 36,
     borderRadius: 10,
@@ -173,7 +196,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   sendIcon: {
-    color: '#FFFFFF',
+    color: '#187BCD',
     fontSize: 16,
   },
 });

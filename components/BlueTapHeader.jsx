@@ -35,6 +35,7 @@ const BlueTapHeader = memo(function BlueTapHeader({
             <Image
               source={require('../assets/icons/bluetapwhitelogo.png')}
               style={styles.brandLogo}
+              tintColor="#FFFFFF"
             />
             <Text style={styles.appName}>BlueTap</Text>
           </TouchableOpacity>
@@ -50,6 +51,7 @@ const BlueTapHeader = memo(function BlueTapHeader({
               <Image
                 source={require('../assets/icons/notif.png')}
                 style={styles.notifIcon}
+                tintColor="#FFFFFF"
               />
             </TouchableOpacity>
           </View>
@@ -86,7 +88,6 @@ const styles = StyleSheet.create({
   brandLogo: {
     width: 24,
     height: 24,
-    tintColor: '#FFFFFF',
     marginRight: 8,
   },
   appName: {
@@ -103,6 +104,5 @@ const styles = StyleSheet.create({
   notifIcon: {
     width: 22,
     height: 22,
-    tintColor: '#FFFFFF',
   },
 });

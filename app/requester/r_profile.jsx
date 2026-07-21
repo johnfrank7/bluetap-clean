@@ -4,6 +4,7 @@ import {
   ActivityIndicator,
   Animated,
   Image,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -12,18 +13,22 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
+import { StatusBar } from 'expo-status-bar';
 import { useRouter } from 'expo-router';
 
 import { auth, db } from '../../firebase';
 import { doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
 import { findLocalUserForAuthRole, saveLocalUser } from '../../localUsers';
 import { normalizeRole, signOutAndClearSessions } from '../../services/authSession';
+import { createShadow } from '../../components/shadowStyles';
 
 const BLUE = '#187BCD';
 const BLUE_LIGHT = '#E3F2FD';
 const CARD_BORDER = '#D7ECFF';
 const TEXT_MUTED = '#6F8EA8';
 const TEXT_DARK = '#20384D';
+const USE_NATIVE_DRIVER = Platform.OS !== 'web';
 
 const PROFILE_CACHE_TTL_MS = 60000;
 
@@ -196,7 +201,7 @@ export default function ProfilePage() {
     Animated.timing(editFadeAnim, {
       toValue: editingProfile ? 1 : 0,
       duration: 180,
-      useNativeDriver: true,
+      useNativeDriver: USE_NATIVE_DRIVER,
     }).start();
   }, [editFadeAnim, editingProfile]);
 
@@ -302,12 +307,20 @@ export default function ProfilePage() {
   };
 
   return (
-    <SafeAreaView edges={['left', 'right', 'bottom']} style={styles.container}>
-      <View style={styles.phoneWrapper}>
-        <ScrollView
-          contentContainerStyle={styles.scrollContent}
-          showsVerticalScrollIndicator={false}
-        >
+    <LinearGradient
+      colors={['#187BCD', '#42A5F5']}
+      style={styles.gradient}
+      start={{ x: 0, y: 0 }}
+      end={{ x: 0, y: 1 }}
+    >
+      <SafeAreaView edges={['left', 'right', 'bottom']} style={styles.container}>
+        <StatusBar style="light" />
+
+        <View style={styles.phoneWrapper}>
+          <ScrollView
+            contentContainerStyle={styles.scrollContent}
+            showsVerticalScrollIndicator={false}
+          >
           <Text style={styles.profileTitle}>PROFILE</Text>
 
           <View style={styles.infoSection}>
@@ -322,6 +335,7 @@ export default function ProfilePage() {
                   <Image
                     source={require('../../assets/icons/pencil.png')}
                     style={styles.editIcon}
+                    tintColor={BLUE}
                   />
                 </TouchableOpacity>
               )}
@@ -431,6 +445,7 @@ export default function ProfilePage() {
                   <Image
                     source={require('../../assets/icons/bluetapwhitelogo.png')}
                     style={styles.helpIcon}
+                    tintColor="#FFFFFF"
                   />
                 </View>
               </TouchableOpacity>
@@ -449,17 +464,23 @@ export default function ProfilePage() {
 
           <View style={{ height: 130 }} />
 
-        </ScrollView>
+          </ScrollView>
 
-      </View>
-    </SafeAreaView>
+        </View>
+      </SafeAreaView>
+    </LinearGradient>
   );
 }
 
 const styles = StyleSheet.create({
+  gradient: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   container: {
     flex: 1,
-    backgroundColor: '#F4FAFF',
+    width: '100%',
   },
   phoneWrapper: {
     width: '100%',
@@ -474,7 +495,7 @@ const styles = StyleSheet.create({
   profileTitle: {
     fontSize: 26,
     fontWeight: 'bold',
-    color: BLUE,
+    color: '#FFFFFF',
     letterSpacing: 0,
   },
   infoSection: {
@@ -484,11 +505,13 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: CARD_BORDER,
     padding: 16,
-    elevation: 6,
-    shadowColor: '#0D47A1',
-    shadowOpacity: 0.1,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 5 },
+    ...createShadow({
+      color: '#0D47A1',
+      elevation: 6,
+      opacity: 0.1,
+      radius: 10,
+      offset: { width: 0, height: 5 },
+    }),
   },
   infoHeader: {
     flexDirection: 'row',
@@ -504,7 +527,6 @@ const styles = StyleSheet.create({
   editIcon: {
     width: 20,
     height: 20,
-    tintColor: BLUE,
   },
   infoDivider: {
     height: 1,
@@ -580,11 +602,13 @@ const styles = StyleSheet.create({
     borderRadius: 13,
     alignItems: 'center',
     justifyContent: 'center',
-    elevation: 4,
-    shadowColor: BLUE,
-    shadowOpacity: 0.22,
-    shadowRadius: 7,
-    shadowOffset: { width: 0, height: 4 },
+    ...createShadow({
+      color: BLUE,
+      elevation: 4,
+      opacity: 0.22,
+      radius: 7,
+      offset: { width: 0, height: 4 },
+    }),
   },
   saveEditText: {
     color: '#FFFFFF',
@@ -599,11 +623,13 @@ const styles = StyleSheet.create({
     backgroundColor: BLUE,
     borderRadius: 20,
     padding: 18,
-    elevation: 5,
-    shadowColor: '#0D47A1',
-    shadowOpacity: 0.12,
-    shadowRadius: 9,
-    shadowOffset: { width: 0, height: 4 },
+    ...createShadow({
+      color: '#0D47A1',
+      elevation: 5,
+      opacity: 0.12,
+      radius: 9,
+      offset: { width: 0, height: 4 },
+    }),
   },
   helpRow: {
     flexDirection: 'row',
@@ -634,7 +660,6 @@ const styles = StyleSheet.create({
   helpIcon: {
     width: 38,
     height: 38,
-    tintColor: '#FFFFFF',
   },
   logoutButton: {
     marginTop: 18,
