@@ -266,7 +266,7 @@ export default function AdminDashboard() {
       }
       return;
     }
-
+//hi
     Alert.alert(
       'Remove distributor',
       `Remove ${fullName}?`,
