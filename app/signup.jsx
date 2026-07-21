@@ -8,7 +8,10 @@ import {
   TouchableOpacity,
   TextInput,
   ScrollView,
+  Dimensions,
+  Keyboard,
   Modal,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -107,10 +110,37 @@ const validateSignupFields = (values) => {
     nextErrors.password = 'Password must be at least 8 characters.';
   }
 
+  if (!values.confirmPassword) {
+    nextErrors.confirmPassword = 'Confirm password is required.';
+  } else if (values.password !== values.confirmPassword) {
+    nextErrors.confirmPassword = 'Passwords do not match.';
+  }
+
   return nextErrors;
 };
 
 const hasValidationErrors = (errors) => Object.keys(errors).length > 0;
+const BASE_SCROLL_PADDING_BOTTOM = 20;
+const DEFAULT_KEYBOARD_GAP = 24;
+const LOWER_FORM_KEYBOARD_GAP = 112;
+const lowerFormFields = ['password', 'confirmPassword'];
+
+const getKeyboardTop = (keyboardFrame) => {
+  const windowHeight = Dimensions.get('window').height;
+
+  if (typeof keyboardFrame?.screenY === 'number') {
+    return keyboardFrame.screenY;
+  }
+
+  if (typeof keyboardFrame?.height === 'number') {
+    return windowHeight - keyboardFrame.height;
+  }
+
+  return windowHeight;
+};
+
+const getFieldKeyboardGap = (field) =>
+  lowerFormFields.includes(field) ? LOWER_FORM_KEYBOARD_GAP : DEFAULT_KEYBOARD_GAP;
 
 export default function SignupPage() {
   const router = useRouter();
@@ -124,11 +154,106 @@ export default function SignupPage() {
   const [phone, setPhone] = React.useState('');
   const [barangay, setBarangay] = React.useState('');
   const [password, setPassword] = React.useState('');
+  const [confirmPassword, setConfirmPassword] = React.useState('');
   const [showBarangays, setShowBarangays] = React.useState(false);
   const [hasAttemptedSubmit, setHasAttemptedSubmit] = React.useState(false);
   const [formErrors, setFormErrors] = React.useState({});
   const [notification, setNotification] = React.useState(null);
+  const [keyboardBottomInset, setKeyboardBottomInset] = React.useState(0);
+  const scrollViewRef = React.useRef(null);
+  const inputRefs = React.useRef({});
+  const activeFieldRef = React.useRef(null);
+  const keyboardFrameRef = React.useRef(null);
+  const keyboardVisibleRef = React.useRef(false);
+  const scrollOffsetRef = React.useRef(0);
+  const focusScrollTimeoutRef = React.useRef(null);
   const passwordMeetsMinimum = password.trim().length >= 8;
+
+  const clearFocusScrollTimeout = React.useCallback(() => {
+    if (focusScrollTimeoutRef.current) {
+      clearTimeout(focusScrollTimeoutRef.current);
+      focusScrollTimeoutRef.current = null;
+    }
+  }, []);
+
+  const scrollFocusedInputIntoView = React.useCallback((field, keyboardFrame) => {
+    if (!field) return;
+
+    const inputRef = inputRefs.current[field];
+
+    if (!inputRef?.measureInWindow) return;
+
+    requestAnimationFrame(() => {
+      inputRef.measureInWindow((x, y, width, height) => {
+        const keyboardTop = getKeyboardTop(keyboardFrame || keyboardFrameRef.current);
+        const requiredGap = getFieldKeyboardGap(field);
+        const inputBottom = y + height;
+        const overlap = inputBottom + requiredGap - keyboardTop;
+
+        if (overlap > 0) {
+          scrollViewRef.current?.scrollTo({
+            y: Math.max(scrollOffsetRef.current + overlap, 0),
+            animated: true,
+          });
+          return;
+        }
+
+        const topGap = 12;
+
+        if (y < topGap) {
+          scrollViewRef.current?.scrollTo({
+            y: Math.max(scrollOffsetRef.current - (topGap - y), 0),
+            animated: true,
+          });
+        }
+      });
+    });
+  }, []);
+
+  React.useEffect(() => {
+    const handleKeyboardFrame = (event) => {
+      Keyboard.scheduleLayoutAnimation?.(event);
+      keyboardVisibleRef.current = true;
+      keyboardFrameRef.current = event.endCoordinates || null;
+      setKeyboardBottomInset(Math.max(event.endCoordinates?.height || 0, 0));
+      clearFocusScrollTimeout();
+
+      focusScrollTimeoutRef.current = setTimeout(() => {
+        scrollFocusedInputIntoView(activeFieldRef.current, event.endCoordinates);
+      }, Platform.OS === 'ios' ? 80 : 120);
+    };
+
+    const handleKeyboardHide = (event) => {
+      Keyboard.scheduleLayoutAnimation?.(event);
+      keyboardVisibleRef.current = false;
+      keyboardFrameRef.current = null;
+      setKeyboardBottomInset(0);
+      clearFocusScrollTimeout();
+      scrollViewRef.current?.scrollTo({ y: 0, animated: true });
+    };
+
+    const keyboardSubscriptions = [
+      Keyboard.addListener(
+        Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
+        handleKeyboardFrame
+      ),
+      Keyboard.addListener(
+        Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
+        handleKeyboardHide
+      ),
+    ];
+
+    if (Platform.OS === 'ios') {
+      keyboardSubscriptions.push(
+        Keyboard.addListener('keyboardWillChangeFrame', handleKeyboardFrame)
+      );
+    }
+
+    return () => {
+      clearFocusScrollTimeout();
+      keyboardSubscriptions.forEach((subscription) => subscription.remove());
+    };
+  }, [clearFocusScrollTimeout, scrollFocusedInputIntoView]);
 
   const showNotification = (title, message, onConfirm) => {
     setNotification({ title, message, onConfirm });
@@ -147,6 +272,7 @@ export default function SignupPage() {
     phone,
     barangay,
     password,
+    confirmPassword,
     ...overrides,
   });
 
@@ -177,6 +303,19 @@ export default function SignupPage() {
 
   const fieldBorderStyle = (field) =>
     getVisibleError(field) ? styles.inputError : null;
+
+  const assignInputRef = (field) => (node) => {
+    inputRefs.current[field] = node;
+  };
+
+  const handleInputFocus = (field) => {
+    activeFieldRef.current = field;
+    clearFocusScrollTimeout();
+
+    focusScrollTimeoutRef.current = setTimeout(() => {
+      scrollFocusedInputIntoView(field);
+    }, keyboardVisibleRef.current ? 60 : 320);
+  };
 
   const selectBarangay = (selectedBarangay) => {
     setBarangay(selectedBarangay);
@@ -317,7 +456,23 @@ export default function SignupPage() {
       <SafeAreaView style={styles.container}>
         <StatusBar style="light" />
         <View style={styles.phoneWrapper}>
-          <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+          <ScrollView
+            ref={scrollViewRef}
+            contentContainerStyle={[
+              styles.scrollContent,
+              keyboardBottomInset > 0 && {
+                paddingBottom: BASE_SCROLL_PADDING_BOTTOM + keyboardBottomInset,
+              },
+            ]}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+            nestedScrollEnabled
+            scrollEventThrottle={16}
+            onScroll={(event) => {
+              scrollOffsetRef.current = event.nativeEvent.contentOffset.y;
+            }}
+          >
 
             <View style={styles.dripContainer}>
               <Image source={require('../assets/icons/meltdrop.png')} style={styles.dripImage} resizeMode="cover" />
@@ -332,11 +487,13 @@ export default function SignupPage() {
               <View style={styles.inputContainer}>
                 <View style={styles.fieldGroup}>
                   <TextInput
+                    ref={assignInputRef('firstName')}
                     style={[styles.input, fieldBorderStyle('firstName')]}
                     placeholder="Enter first name"
                     placeholderTextColor="#FFFFFF"
                     value={firstName}
                     onBlur={() => handleFieldBlur('firstName')}
+                    onFocus={() => handleInputFocus('firstName')}
                     onChangeText={(value) => handleFieldChange('firstName', value, setFirstName)}
                   />
                   {!!getVisibleError('firstName') && (
@@ -346,11 +503,13 @@ export default function SignupPage() {
 
                 <View style={styles.fieldGroup}>
                   <TextInput
+                    ref={assignInputRef('lastName')}
                     style={[styles.input, fieldBorderStyle('lastName')]}
                     placeholder="Enter last name"
                     placeholderTextColor="#FFFFFF"
                     value={lastName}
                     onBlur={() => handleFieldBlur('lastName')}
+                    onFocus={() => handleInputFocus('lastName')}
                     onChangeText={(value) => handleFieldChange('lastName', value, setLastName)}
                   />
                   {!!getVisibleError('lastName') && (
@@ -360,6 +519,7 @@ export default function SignupPage() {
 
                 <View style={styles.fieldGroup}>
                   <TextInput
+                    ref={assignInputRef('email')}
                     style={[styles.input, fieldBorderStyle('email')]}
                     placeholder="Enter email"
                     placeholderTextColor="#FFFFFF"
@@ -367,6 +527,7 @@ export default function SignupPage() {
                     autoCapitalize="none"
                     value={email}
                     onBlur={() => handleFieldBlur('email')}
+                    onFocus={() => handleInputFocus('email')}
                     onChangeText={(value) => handleFieldChange('email', value, setEmail)}
                   />
                   {!!getVisibleError('email') && (
@@ -376,12 +537,14 @@ export default function SignupPage() {
 
                 <View style={styles.fieldGroup}>
                   <TextInput
+                    ref={assignInputRef('phone')}
                     style={[styles.input, fieldBorderStyle('phone')]}
                     placeholder="Enter phone number"
                     placeholderTextColor="#FFFFFF"
                     keyboardType="phone-pad"
                     value={phone}
                     onBlur={() => handleFieldBlur('phone')}
+                    onFocus={() => handleInputFocus('phone')}
                     onChangeText={(value) => handleFieldChange('phone', value, setPhone)}
                   />
                   {!!getVisibleError('phone') && (
@@ -423,6 +586,7 @@ export default function SignupPage() {
 
                 <View style={styles.fieldGroup}>
                   <TextInput
+                    ref={assignInputRef('password')}
                     style={[
                       styles.input,
                       getVisibleError('password') && styles.inputError,
@@ -436,6 +600,7 @@ export default function SignupPage() {
                     secureTextEntry
                     value={password}
                     onBlur={() => handleFieldBlur('password')}
+                    onFocus={() => handleInputFocus('password')}
                     onChangeText={(value) => handleFieldChange('password', value, setPassword)}
                   />
                   {!!getVisibleError('password') && password.length === 0 && (
@@ -449,6 +614,35 @@ export default function SignupPage() {
                   {hasAttemptedSubmit && passwordMeetsMinimum && (
                     <Text style={styles.validationSuccessText}>
                       {'\u2705'} Password meets the minimum requirement.
+                    </Text>
+                  )}
+                </View>
+
+                <View style={styles.fieldGroup}>
+                  <TextInput
+                    ref={assignInputRef('confirmPassword')}
+                    style={[
+                      styles.input,
+                      fieldBorderStyle('confirmPassword'),
+                      hasAttemptedSubmit &&
+                        confirmPassword.length > 0 &&
+                        passwordMeetsMinimum &&
+                        password === confirmPassword &&
+                        styles.inputValid,
+                    ]}
+                    placeholder="Confirm password"
+                    placeholderTextColor="#FFFFFF"
+                    secureTextEntry
+                    value={confirmPassword}
+                    onBlur={() => handleFieldBlur('confirmPassword')}
+                    onFocus={() => handleInputFocus('confirmPassword')}
+                    onChangeText={(value) =>
+                      handleFieldChange('confirmPassword', value, setConfirmPassword)
+                    }
+                  />
+                  {!!getVisibleError('confirmPassword') && (
+                    <Text style={styles.validationText}>
+                      {getVisibleError('confirmPassword')}
                     </Text>
                   )}
                 </View>
@@ -531,7 +725,7 @@ const styles = StyleSheet.create({
   gradient: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   container: { flex: 1, width: '100%' },
   phoneWrapper: { width: '100%', maxWidth: 375, alignSelf: 'center', flex: 1 },
-  scrollContent: { flexGrow: 1, paddingBottom: 20 },
+  scrollContent: { flexGrow: 1, paddingBottom: BASE_SCROLL_PADDING_BOTTOM },
   dripContainer: { width: '100%', height: 120, alignItems: 'center', overflow: 'hidden' },
   dripImage: { width: '100%', height: '100%' },
   logoSection: { alignItems: 'center', justifyContent: 'center', paddingVertical: 20, marginBottom: 20 },

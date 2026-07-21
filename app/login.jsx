@@ -8,7 +8,10 @@ import {
   TouchableOpacity,
   TextInput,
   ScrollView,
+  Dimensions,
+  Keyboard,
   Modal,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -82,10 +85,37 @@ const getApplicationStatus = (profile, defaultStatus = 'pending') =>
   normalizeApprovalStatus(
     profile?.status || profile?.approvalStatus || profile?.accountStatus || defaultStatus
   );
+const BASE_SCROLL_PADDING_BOTTOM = 20;
+const DEFAULT_KEYBOARD_GAP = 24;
+const PASSWORD_KEYBOARD_GAP = 112;
+
+const getKeyboardTop = (keyboardFrame) => {
+  const windowHeight = Dimensions.get('window').height;
+
+  if (typeof keyboardFrame?.screenY === 'number') {
+    return keyboardFrame.screenY;
+  }
+
+  if (typeof keyboardFrame?.height === 'number') {
+    return windowHeight - keyboardFrame.height;
+  }
+
+  return windowHeight;
+};
+
+const getFieldKeyboardGap = (field) =>
+  field === 'password' ? PASSWORD_KEYBOARD_GAP : DEFAULT_KEYBOARD_GAP;
 
 export default function LoginPage() {
   const router = useRouter();
+  const emailInputRef = React.useRef(null);
   const passwordInputRef = React.useRef(null);
+  const scrollViewRef = React.useRef(null);
+  const activeFieldRef = React.useRef(null);
+  const keyboardFrameRef = React.useRef(null);
+  const keyboardVisibleRef = React.useRef(false);
+  const scrollOffsetRef = React.useRef(0);
+  const focusScrollTimeoutRef = React.useRef(null);
 
   const [email, setEmail] = React.useState('');
   const [password, setPassword] = React.useState('');
@@ -96,7 +126,94 @@ export default function LoginPage() {
   const [resetEmailError, setResetEmailError] = React.useState('');
   const [resetLoading, setResetLoading] = React.useState(false);
   const [notification, setNotification] = React.useState(null);
+  const [keyboardBottomInset, setKeyboardBottomInset] = React.useState(0);
   const isLoginSuccessVisible = notification?.title === 'Successfully logged in';
+
+  const clearFocusScrollTimeout = React.useCallback(() => {
+    if (focusScrollTimeoutRef.current) {
+      clearTimeout(focusScrollTimeoutRef.current);
+      focusScrollTimeoutRef.current = null;
+    }
+  }, []);
+
+  const scrollFocusedInputIntoView = React.useCallback((field, keyboardFrame) => {
+    if (!field) return;
+
+    const inputRef = field === 'password' ? passwordInputRef.current : emailInputRef.current;
+
+    if (!inputRef?.measureInWindow) return;
+
+    requestAnimationFrame(() => {
+      inputRef.measureInWindow((x, y, width, height) => {
+        const keyboardTop = getKeyboardTop(keyboardFrame || keyboardFrameRef.current);
+        const requiredGap = getFieldKeyboardGap(field);
+        const inputBottom = y + height;
+        const overlap = inputBottom + requiredGap - keyboardTop;
+
+        if (overlap > 0) {
+          scrollViewRef.current?.scrollTo({
+            y: Math.max(scrollOffsetRef.current + overlap, 0),
+            animated: true,
+          });
+          return;
+        }
+
+        const topGap = 12;
+
+        if (y < topGap) {
+          scrollViewRef.current?.scrollTo({
+            y: Math.max(scrollOffsetRef.current - (topGap - y), 0),
+            animated: true,
+          });
+        }
+      });
+    });
+  }, []);
+
+  React.useEffect(() => {
+    const handleKeyboardFrame = (event) => {
+      Keyboard.scheduleLayoutAnimation?.(event);
+      keyboardVisibleRef.current = true;
+      keyboardFrameRef.current = event.endCoordinates || null;
+      setKeyboardBottomInset(Math.max(event.endCoordinates?.height || 0, 0));
+      clearFocusScrollTimeout();
+
+      focusScrollTimeoutRef.current = setTimeout(() => {
+        scrollFocusedInputIntoView(activeFieldRef.current, event.endCoordinates);
+      }, Platform.OS === 'ios' ? 80 : 120);
+    };
+
+    const handleKeyboardHide = (event) => {
+      Keyboard.scheduleLayoutAnimation?.(event);
+      keyboardVisibleRef.current = false;
+      keyboardFrameRef.current = null;
+      setKeyboardBottomInset(0);
+      clearFocusScrollTimeout();
+      scrollViewRef.current?.scrollTo({ y: 0, animated: true });
+    };
+
+    const keyboardSubscriptions = [
+      Keyboard.addListener(
+        Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
+        handleKeyboardFrame
+      ),
+      Keyboard.addListener(
+        Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
+        handleKeyboardHide
+      ),
+    ];
+
+    if (Platform.OS === 'ios') {
+      keyboardSubscriptions.push(
+        Keyboard.addListener('keyboardWillChangeFrame', handleKeyboardFrame)
+      );
+    }
+
+    return () => {
+      clearFocusScrollTimeout();
+      keyboardSubscriptions.forEach((subscription) => subscription.remove());
+    };
+  }, [clearFocusScrollTimeout, scrollFocusedInputIntoView]);
 
   const showNotification = (title, message, onConfirm) => {
     setNotification({ title, message, onConfirm });
@@ -118,6 +235,15 @@ export default function LoginPage() {
     const onConfirm = notification?.onConfirm;
     setNotification(null);
     onConfirm?.();
+  };
+
+  const handleInputFocus = (field) => {
+    activeFieldRef.current = field;
+    clearFocusScrollTimeout();
+
+    focusScrollTimeoutRef.current = setTimeout(() => {
+      scrollFocusedInputIntoView(field);
+    }, keyboardVisibleRef.current ? 60 : 320);
   };
 
   const navigateToRoleHome = (role) => {
@@ -365,6 +491,8 @@ export default function LoginPage() {
   };
 
   const openForgotPassword = () => {
+    activeFieldRef.current = null;
+    clearFocusScrollTimeout();
     setResetEmail(email.trim().toLowerCase());
     setResetEmailError('');
     setForgotPasswordVisible(true);
@@ -422,8 +550,20 @@ export default function LoginPage() {
         <StatusBar style="light" />
         <View style={styles.phoneWrapper}>
           <ScrollView
-            contentContainerStyle={styles.scrollContent}
+            ref={scrollViewRef}
+            contentContainerStyle={[
+              styles.scrollContent,
+              keyboardBottomInset > 0 && {
+                paddingBottom: BASE_SCROLL_PADDING_BOTTOM + keyboardBottomInset,
+              },
+            ]}
             showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+            scrollEventThrottle={16}
+            onScroll={(event) => {
+              scrollOffsetRef.current = event.nativeEvent.contentOffset.y;
+            }}
           >
             <View style={styles.dripContainer}>
               <Image
@@ -446,6 +586,7 @@ export default function LoginPage() {
             <View style={styles.formContainer}>
               <View style={styles.inputContainer}>
                 <TextInput
+                  ref={emailInputRef}
                   style={styles.input}
                   placeholder="Enter email"
                   placeholderTextColor="#FFFFFF"
@@ -453,6 +594,7 @@ export default function LoginPage() {
                   autoCapitalize="none"
                   value={email}
                   onChangeText={setEmail}
+                  onFocus={() => handleInputFocus('email')}
                   returnKeyType="next"
                   onSubmitEditing={() => passwordInputRef.current?.focus()}
                 />
@@ -464,6 +606,7 @@ export default function LoginPage() {
                   secureTextEntry
                   value={password}
                   onChangeText={setPassword}
+                  onFocus={() => handleInputFocus('password')}
                   returnKeyType="done"
                   onSubmitEditing={handleLogin}
                 />
@@ -496,7 +639,7 @@ export default function LoginPage() {
 
             <View style={styles.signupContainer}>
               <Text style={styles.signupText}>
-                No account?{' '}
+                Need an account?{' '}
                 <Text
                   style={styles.signupLink}
                   onPress={() => router.push('/signup')}
@@ -624,7 +767,7 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     flexGrow: 1,
-    paddingBottom: 20,
+    paddingBottom: BASE_SCROLL_PADDING_BOTTOM,
   },
   dripContainer: {
     width: '100%',
