@@ -411,35 +411,53 @@ export default function RequestFormPage() {
                 ) : (
                   syncedOrderItems.map((item) => (
                     <View style={styles.selectedItemRow} key={item.product_id}>
-                      <View style={styles.selectedItemTextWrap}>
-                        <Text style={styles.selectedItemName} numberOfLines={2}>
-                          {item.product_name}
-                        </Text>
-                        <Text style={styles.selectedItemMeta}>
-                          {formatPrice(item.product_price)} x {item.quantity} ={' '}
-                          {formatPrice(item.line_total)}
-                        </Text>
-                      </View>
-
-                      <View style={styles.quantityRow}>
-                        <TouchableOpacity
-                          style={styles.squareButton}
-                          onPress={() => updateItemQuantity(item.product_id, 1)}
-                        >
-                          <Text style={styles.squareButtonText}>+</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                          style={styles.squareButton}
-                          onPress={() => updateItemQuantity(item.product_id, -1)}
-                        >
-                          <Text style={styles.squareButtonText}>-</Text>
-                        </TouchableOpacity>
+                      <View style={styles.selectedItemHeader}>
+                        <View style={styles.selectedItemTextWrap}>
+                          <Text style={styles.selectedItemName} numberOfLines={2}>
+                            {item.product_name}
+                          </Text>
+                        </View>
                         <TouchableOpacity
                           style={styles.removeItemButton}
                           onPress={() => removeItem(item.product_id)}
                         >
                           <Text style={styles.removeItemText}>Remove</Text>
                         </TouchableOpacity>
+                      </View>
+
+                      <View style={styles.selectedItemActions}>
+                        <View style={styles.selectedMetricRow}>
+                          <View style={styles.selectedMetric}>
+                            <Text style={styles.selectedMetricLabel}>Quantity</Text>
+                            <Text style={styles.selectedMetricValue}>{item.quantity}</Text>
+                          </View>
+                          <View style={styles.selectedMetric}>
+                            <Text style={styles.selectedMetricLabel}>Unit Price</Text>
+                            <Text style={styles.selectedMetricValue}>
+                              {formatPrice(item.product_price)}
+                            </Text>
+                          </View>
+                          <View style={styles.selectedMetricLast}>
+                            <Text style={styles.selectedMetricLabel}>Subtotal</Text>
+                            <Text style={styles.selectedMetricValue}>
+                              {formatPrice(item.line_total)}
+                            </Text>
+                          </View>
+                        </View>
+                        <View style={styles.quantityRow}>
+                          <TouchableOpacity
+                            style={styles.squareButton}
+                            onPress={() => updateItemQuantity(item.product_id, 1)}
+                          >
+                            <Text style={styles.squareButtonText}>+</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={styles.squareButton}
+                            onPress={() => updateItemQuantity(item.product_id, -1)}
+                          >
+                            <Text style={styles.squareButtonText}>-</Text>
+                          </TouchableOpacity>
+                        </View>
                       </View>
                     </View>
                   ))
@@ -452,6 +470,7 @@ export default function RequestFormPage() {
                 onPress={() => setShowContainers((isVisible) => !isVisible)}
               >
                 <Text style={styles.selectorText}>{container}</Text>
+                <Text style={styles.selectorArrow}>{showContainers ? '^' : 'v'}</Text>
               </TouchableOpacity>
               {showContainers && (
                 <View style={styles.optionsBox}>
@@ -476,6 +495,7 @@ export default function RequestFormPage() {
                 onPress={() => setShowStations((isVisible) => !isVisible)}
               >
                 <Text style={styles.selectorText}>{waterStation || 'Choose station'}</Text>
+                <Text style={styles.selectorArrow}>{showStations ? '^' : 'v'}</Text>
               </TouchableOpacity>
               {showStations && (
                 <View style={styles.optionsBox}>
@@ -495,7 +515,7 @@ export default function RequestFormPage() {
               )}
 
               <View style={styles.inlineRow}>
-                <Text style={styles.fieldLabel}>Delivery Date</Text>
+                <Text style={styles.fieldLabel}>Expected Delivery Date</Text>
                 <Text style={styles.dateText}>{deliveryDate}</Text>
               </View>
               <View style={styles.sectionDivider} />
@@ -689,20 +709,66 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(255,255,255,0.22)',
   },
+  selectedItemHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 8,
+  },
   selectedItemTextWrap: {
-    marginBottom: 6,
+    flex: 1,
+    paddingRight: 8,
   },
   selectedItemName: {
     color: '#FFFFFF',
     fontSize: 13,
     fontWeight: 'bold',
   },
-  selectedItemMeta: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    marginTop: 2,
+  selectedItemActions: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
   },
-  quantityRow: { flexDirection: 'row', alignItems: 'center' },
+  selectedMetricRow: {
+    flex: 1,
+    flexDirection: 'row',
+    marginRight: 6,
+  },
+  selectedMetric: {
+    flex: 1,
+    minWidth: 0,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.35)',
+    borderRadius: 6,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    paddingHorizontal: 7,
+    paddingVertical: 6,
+    marginRight: 6,
+  },
+  selectedMetricLast: {
+    flex: 1,
+    minWidth: 0,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.35)',
+    borderRadius: 6,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    paddingHorizontal: 7,
+    paddingVertical: 6,
+  },
+  selectedMetricLabel: {
+    color: '#FFFFFF',
+    fontSize: 9,
+    fontWeight: 'bold',
+    marginBottom: 4,
+  },
+  selectedMetricValue: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: 'bold',
+  },
+  quantityRow: {
+    flexDirection: 'column',
+    alignItems: 'center',
+  },
   squareButton: {
     width: 26,
     height: 22,
@@ -710,7 +776,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 4,
+    marginBottom: 4,
   },
   squareButtonText: { color: '#187BCD', fontSize: 14, fontWeight: 'bold' },
   removeItemButton: {
@@ -732,10 +798,17 @@ const styles = StyleSheet.create({
     borderColor: '#FFFFFF',
     borderRadius: 3,
     height: 28,
-    justifyContent: 'center',
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     paddingHorizontal: 8,
   },
   selectorText: { color: '#FFFFFF', fontSize: 13 },
+  selectorArrow: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
   optionsBox: {
     marginTop: 4,
     borderWidth: 1,

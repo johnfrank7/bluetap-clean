@@ -201,14 +201,24 @@ const getNormalizedStatus = (status) =>
     .replace(/\s+/g, ' ');
 const isPendingRequest = (request) =>
   getNormalizedStatus(request.status) === 'pending';
-const getProductGallons = (product) =>
-  product.capacity ||
-  product.gallons ||
-  product.gallon ||
-  product.volume ||
-  product.size ||
-  product.product_name ||
-  '';
+const getProductGallons = (product) => {
+  const sizeText =
+    product.capacity ||
+    product.gallons ||
+    product.gallon ||
+    product.volume ||
+    product.size ||
+    '';
+
+  if (!sizeText) return '';
+
+  const normalizedSizeText = String(sizeText).trim().toLowerCase();
+  const normalizedProductName = String(product.product_name || '')
+    .trim()
+    .toLowerCase();
+
+  return normalizedSizeText === normalizedProductName ? '' : String(sizeText);
+};
 const getProductStockText = (product) => {
   const statusText =
     product.stockAvailability ||
@@ -395,6 +405,7 @@ export default function RequesterDashboard() {
   const renderProductCard = useCallback(
     ({ item: product }) => {
       const stockText = getProductStockText(product);
+      const productGallons = getProductGallons(product);
 
       return (
         <View style={styles.productCarouselItem}>
@@ -425,9 +436,11 @@ export default function RequesterDashboard() {
               <Text style={styles.productName} numberOfLines={2}>
                 {product.product_name}
               </Text>
-              <Text style={styles.productGallons} numberOfLines={1}>
-                {getProductGallons(product)}
-              </Text>
+              {!!productGallons && (
+                <Text style={styles.productGallons} numberOfLines={1}>
+                  {productGallons}
+                </Text>
+              )}
               {!!stockText && (
                 <Text
                   style={[
@@ -831,13 +844,14 @@ const styles = StyleSheet.create({
     left: 14,
     backgroundColor: '#187BCD',
     borderRadius: 999,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
+    paddingHorizontal: 9,
+    paddingVertical: 4,
     zIndex: 1,
   },
   priceBadgeText: {
     color: '#FFFFFF',
-    fontSize: 10,
+    fontSize: 15,
+    lineHeight: 14,
     fontWeight: 'bold',
   },
   productImageWrap: {

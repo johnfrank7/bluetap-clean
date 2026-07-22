@@ -5,15 +5,6 @@ import RequesterHeader from '../../components/RequesterHeader';
 import RoleGate from '../../components/RoleGate';
 import { createShadow } from '../../components/shadowStyles';
 
-const dashboardRoutes = ['/requester/r_dashboard'];
-const requestsRoutes = ['/requester/r_request', '/requester/r_notification'];
-
-const getMiddleRoute = (pathname) =>
-  requestsRoutes.some((route) => pathname.startsWith(route)) ||
-  dashboardRoutes.some((route) => pathname.startsWith(route))
-    ? '/requester/r_request'
-    : '/requester/requestform';
-
 export default function RequesterLayout() {
   const router = useRouter();
   const pathname = usePathname();
@@ -44,7 +35,7 @@ export default function RequesterLayout() {
                 />
               </TouchableOpacity>
 
-              <TouchableOpacity onPress={() => router.replace(getMiddleRoute(pathname))}>
+              <TouchableOpacity onPress={() => router.replace('/requester/r_request')}>
                 <Image
                   source={require('../../assets/icons/square-plus.png')}
                   style={styles.navIcon}
