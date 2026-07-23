@@ -582,21 +582,6 @@ export default function DistributorProfilePage() {
 
           <View style={{ height: 130 }} />
         </ScrollView>
-
-        <View style={styles.bottomNav}>
-          <TouchableOpacity onPress={() => router.replace('/distributor/d_dashboard')}>
-            <Image source={require('../../assets/icons/home.png')} style={styles.navIcon} tintColor={BLUE} />
-          </TouchableOpacity>
-          <TouchableOpacity onPress={() => router.replace('/distributor/d_requests')}>
-            <Image source={require('../../assets/icons/ballot.png')} style={styles.navIcon} tintColor={BLUE} />
-          </TouchableOpacity>
-          <TouchableOpacity onPress={() => router.replace('/distributor/d_scheduled_requests')}>
-            <Image source={require('../../assets/icons/calendar-clock.png')} style={styles.navIcon} tintColor={BLUE} />
-          </TouchableOpacity>
-          <TouchableOpacity onPress={() => router.replace('/distributor/d_profile')}>
-            <Image source={require('../../assets/icons/user.png')} style={styles.navIconActive} tintColor={BLUE} />
-          </TouchableOpacity>
-        </View>
       </View>
 
       {toastVisible && (
@@ -830,35 +815,6 @@ const styles = StyleSheet.create({
     color: BLUE,
     fontWeight: 'bold',
     fontSize: 14,
-  },
-  bottomNav: {
-    position: 'absolute',
-    bottom: 24,
-    left: 20,
-    right: 20,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    paddingVertical: 14,
-    paddingHorizontal: 28,
-    borderRadius: 22,
-    zIndex: 2,
-    ...createShadow({
-      color: '#000',
-      elevation: 8,
-      opacity: 0.12,
-      radius: 6,
-      offset: { width: 0, height: 3 },
-    }),
-  },
-  navIcon: {
-    width: 26,
-    height: 26,
-  },
-  navIconActive: {
-    width: 26,
-    height: 26,
   },
   successToast: {
     position: 'absolute',

@@ -29,8 +29,11 @@ const ROLE_CONFIG = {
 export const normalizeUniqueIdRole = (role) =>
   role?.toString().trim().toLowerCase() || '';
 
-export const getProfileUniqueId = (profile = {}) =>
-  (profile.unique_id || profile.uniqueId || '').toString().trim();
+export const getProfileUniqueId = (profile = {}) => {
+  const safeProfile = profile || {};
+
+  return (safeProfile.unique_id || safeProfile.uniqueId || '').toString().trim();
+};
 
 export const getUniqueIdConfig = (role) =>
   ROLE_CONFIG[normalizeUniqueIdRole(role)] || null;
@@ -176,30 +179,34 @@ export const saveUserProfileWithUniqueId = async (uid, role, profileData = {}) =
 };
 
 export const ensureUserUniqueId = async (user, profile = {}) => {
-  const uid = typeof user === 'string' ? user : user?.uid || profile.uid || profile.id;
-  const role = normalizeUniqueIdRole(profile.role);
+  const safeProfile = profile || {};
+  const uid =
+    typeof user === 'string'
+      ? user
+      : user?.uid || safeProfile.uid || safeProfile.id;
+  const role = normalizeUniqueIdRole(safeProfile.role);
 
   if (!uid || !getUniqueIdConfig(role)) {
-    return profile;
+    return safeProfile;
   }
 
-  const existingUniqueId = getProfileUniqueId(profile);
+  const existingUniqueId = getProfileUniqueId(safeProfile);
 
   if (existingUniqueId) {
     return {
-      ...profile,
+      ...safeProfile,
       unique_id: existingUniqueId,
     };
   }
 
   try {
     return await saveUserProfileWithUniqueId(uid, role, {
-      ...profile,
+      ...safeProfile,
       uid,
       role,
     });
   } catch (error) {
     console.log('Unique ID assignment error:', error.message);
-    return profile;
+    return safeProfile;
   }
 };

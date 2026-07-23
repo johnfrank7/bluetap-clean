@@ -1,27 +1,26 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  TextInput,
-  TouchableOpacity,
-  ScrollView,
-  Image,
   ActivityIndicator,
   Alert,
+  Image,
   Modal,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { StatusBar } from 'expo-status-bar';
-import { useRouter } from 'expo-router';
+
 import {
   createProduct,
   deleteProduct,
   subscribeProducts,
   updateProduct,
 } from '../../services/products';
-import { signOutAndClearSessions } from '../../services/authSession';
-import { createShadow } from '../../components/shadowStyles';
+import AdminShell, {
+  ADMIN_COLORS,
+  AdminWaterDrop,
+} from '../../components/AdminShell';
 
 const emptyForm = {
   product_name: '',
@@ -34,7 +33,6 @@ const emptyForm = {
 const formatPrice = (price) => `\u20B1${Number(price || 0).toFixed(2)}`;
 
 export default function AdminProductsPage() {
-  const router = useRouter();
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
@@ -69,11 +67,6 @@ export default function AdminProductsPage() {
       product.product_name.toLowerCase().includes(normalizedSearch)
     );
   }, [products, search]);
-
-  const handleLogout = async () => {
-    await signOutAndClearSessions();
-    router.replace('/login');
-  };
 
   const openAddModal = () => {
     setEditingProduct(null);
@@ -234,168 +227,112 @@ export default function AdminProductsPage() {
   };
 
   return (
-    <SafeAreaView style={styles.root}>
-      <StatusBar style="dark" />
-      <View style={styles.container}>
-        {/* Sidebar */}
-        <View style={styles.sidebar}>
-          <View style={styles.stationHeader}>
-            <Image
-              source={require('../../assets/icons/bluetaplogo.png')}
-              style={styles.logoImage}
-              resizeMode="contain"
-            />
-            <Text style={styles.stationName}>Station Name</Text>
-          </View>
-
-          <TouchableOpacity
-            style={styles.navItem}
-            onPress={() => router.replace('/admin/dashboard')}
-          >
-            <Text style={styles.navItemText}>Dashboard</Text>
+    <AdminShell
+      active="products"
+      title="Products"
+      subtitle="Manage refill sizes and pricing"
+      searchValue={search}
+      onSearchChange={setSearch}
+      searchPlaceholder="Search products..."
+    >
+      <View style={styles.card}>
+        <View style={styles.cardHeader}>
+          <Text style={styles.cardTitle}>Product catalog</Text>
+          <TouchableOpacity activeOpacity={0.85} style={styles.addButton} onPress={openAddModal}>
+            <Text style={styles.addButtonText}>+ Add product</Text>
           </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.navItem, styles.navItemActive]}
-            onPress={() => router.replace('/admin/products')}
-          >
-            <Text style={[styles.navItemText, styles.navItemTextActive]}>Products</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.navItem}
-            onPress={() => router.replace('/admin/request')}
-          >
-            <Text style={styles.navItemText}>Request</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.navItem}>
-            <Text style={styles.navItemText}>Profile</Text>
-          </TouchableOpacity>
-
-          <View style={styles.sidebarFooter}>
-            <Text style={styles.footerBrand}>BlueTap</Text>
-          </View>
         </View>
 
-        {/* Main content */}
-        <View style={styles.main}>
-          {/* Top bar */}
-          <View style={styles.topBar}>
-            <View style={styles.searchContainer}>
-              <TextInput
-                style={styles.searchInput}
-                placeholder="Search"
-                placeholderTextColor="#B0BEC5"
-                value={search}
-                onChangeText={setSearch}
-              />
-              <TouchableOpacity style={styles.searchButton}>
-                <Text style={styles.searchIcon}>{'\u{1F50D}'}</Text>
-              </TouchableOpacity>
-            </View>
+        <View style={[styles.tableRow, styles.tableHeadRow]}>
+          <Text style={[styles.th, styles.productCol]}>PRODUCT</Text>
+          <Text style={[styles.th, styles.priceCol]}>PRICE</Text>
+          <Text style={[styles.th, styles.actionsCol]}>ACTIONS</Text>
+        </View>
 
-            <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
-              <Text style={styles.logoutText}>LOGOUT</Text>
-            </TouchableOpacity>
+        {loading ? (
+          <View style={styles.emptyState}>
+            <ActivityIndicator color={ADMIN_COLORS.blue} size="small" />
           </View>
+        ) : filteredProducts.length === 0 ? (
+          <View style={styles.emptyState}>
+            <Text style={styles.emptyText}>No products yet.</Text>
+            {!!loadError && <Text style={styles.errorText}>Firestore: {loadError}</Text>}
+          </View>
+        ) : (
+          filteredProducts.map((product, index) => {
+            const isDeleting = deletingId === product.id;
+            const dropColor =
+              index % 3 === 0
+                ? ADMIN_COLORS.blue
+                : index % 3 === 1
+                  ? ADMIN_COLORS.cyan
+                  : ADMIN_COLORS.green;
 
-          {/* Product list table */}
-          <ScrollView contentContainerStyle={styles.cardScroll} showsVerticalScrollIndicator={false}>
-            <View style={styles.card}>
-              <View style={styles.cardHeader}>
-                <Text style={styles.cardTitle}>Products</Text>
-                <TouchableOpacity style={styles.addButton} onPress={openAddModal}>
-                  <Text style={styles.addButtonText}>Add Product</Text>
-                </TouchableOpacity>
-              </View>
-
-              <View style={[styles.row, styles.tableHeaderRow]}>
-                <Text style={[styles.cell, styles.cellImageHeader]}>Product Image</Text>
-                <Text style={[styles.cell, styles.cellNameHeader]}>Product Name</Text>
-                <Text style={[styles.cell, styles.cellPriceHeader]}>Price</Text>
-                <Text style={[styles.cell, styles.cellActionsHeader]}>Actions</Text>
-              </View>
-
-              {loading ? (
-                <View style={styles.emptyState}>
-                  <ActivityIndicator size="small" color="#187BCD" />
-                </View>
-              ) : filteredProducts.length === 0 ? (
-                <View style={styles.emptyState}>
-                  <Text style={styles.emptyText}>No products yet.</Text>
-                  {!!loadError && (
-                    <Text style={styles.errorText}>Firestore: {loadError}</Text>
-                  )}
-                </View>
-              ) : (
-                filteredProducts.map((product, idx) => {
-                  const isDeleting = deletingId === product.id;
-
-                  return (
-                    <View
-                      key={product.id}
-                      style={[styles.row, idx % 2 === 1 && styles.rowStriped]}
-                    >
-                      <View style={[styles.cell, styles.cellImage]}>
-                        {product.image ? (
-                          <Image
-                            source={{ uri: product.image }}
-                            style={styles.productImage}
-                            resizeMode="cover"
-                          />
-                        ) : (
-                          <View style={styles.productImagePlaceholder}>
-                            <Text style={styles.productImagePlaceholderText}>No image</Text>
-                          </View>
-                        )}
-                      </View>
-                      <Text style={[styles.cell, styles.cellName]}>
-                        {product.product_name}
-                      </Text>
-                      <Text style={[styles.cell, styles.cellPrice]}>
-                        {formatPrice(product.price)}
-                      </Text>
-                      <View style={[styles.cell, styles.cellActions]}>
-                        <TouchableOpacity
-                          style={[styles.editButton, isDeleting && styles.actionDisabled]}
-                          onPress={() => openEditModal(product)}
-                          disabled={isDeleting}
-                        >
-                          <Text style={styles.editButtonText}>Edit</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                          style={[styles.deleteButton, isDeleting && styles.actionDisabled]}
-                          onPress={() => confirmDeleteProduct(product)}
-                          disabled={isDeleting}
-                        >
-                          <Text style={styles.deleteButtonText}>
-                            {isDeleting ? 'Deleting...' : 'Delete'}
-                          </Text>
-                        </TouchableOpacity>
-                      </View>
+            return (
+              <View key={product.id} style={styles.tableRow}>
+                <View style={[styles.productCell, styles.productCol]}>
+                  {product.image ? (
+                    <Image
+                      source={{ uri: product.image }}
+                      style={styles.productImage}
+                      resizeMode="cover"
+                    />
+                  ) : (
+                    <View style={styles.dropWrap}>
+                      <AdminWaterDrop color={dropColor} size={22} />
                     </View>
-                  );
-                })
-              )}
-            </View>
-          </ScrollView>
-        </View>
+                  )}
+                  <Text style={styles.productName} numberOfLines={1}>
+                    {product.product_name}
+                  </Text>
+                </View>
+
+                <Text style={[styles.priceText, styles.priceCol]}>
+                  {formatPrice(product.price)}
+                </Text>
+
+                <View style={[styles.actionsCell, styles.actionsCol]}>
+                  <TouchableOpacity
+                    activeOpacity={0.82}
+                    style={[styles.editButton, isDeleting && styles.actionDisabled]}
+                    onPress={() => openEditModal(product)}
+                    disabled={isDeleting}
+                  >
+                    <Text style={styles.editButtonText}>Edit</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    activeOpacity={0.82}
+                    style={[styles.deleteButton, isDeleting && styles.actionDisabled]}
+                    onPress={() => confirmDeleteProduct(product)}
+                    disabled={isDeleting}
+                  >
+                    <Text style={styles.deleteButtonText}>
+                      {isDeleting ? 'Deleting...' : 'Delete'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            );
+          })
+        )}
       </View>
 
-      <Modal visible={modalVisible} transparent animationType="slide">
+      <Modal visible={modalVisible} transparent animationType="fade">
         <View style={styles.modalBackground}>
-          <View style={styles.modalContainer}>
+          <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>
-              {editingProduct ? 'Edit Product' : 'Add Product'}
+              {editingProduct ? 'Edit product' : 'Add product'}
             </Text>
 
-            <Text style={styles.inputLabel}>Product Name</Text>
+            <Text style={styles.inputLabel}>Product name</Text>
             <TextInput
               style={styles.modalInput}
               value={form.product_name}
               onChangeText={(value) =>
                 setForm((currentForm) => ({ ...currentForm, product_name: value }))
               }
-              placeholder="Product Name"
-              placeholderTextColor="#B0BEC5"
+              placeholder="Product name"
+              placeholderTextColor="#95A6B8"
             />
 
             <Text style={styles.inputLabel}>Price</Text>
@@ -406,13 +343,13 @@ export default function AdminProductsPage() {
                 setForm((currentForm) => ({ ...currentForm, price: value }))
               }
               placeholder="Price"
-              placeholderTextColor="#B0BEC5"
+              placeholderTextColor="#95A6B8"
               keyboardType="decimal-pad"
             />
 
-            <Text style={styles.inputLabel}>Upload Image</Text>
-            <TouchableOpacity style={styles.uploadButton} onPress={chooseImage}>
-              <Text style={styles.uploadButtonText}>Choose Image</Text>
+            <Text style={styles.inputLabel}>Product image</Text>
+            <TouchableOpacity activeOpacity={0.85} style={styles.uploadButton} onPress={chooseImage}>
+              <Text style={styles.uploadButtonText}>Choose image</Text>
             </TouchableOpacity>
 
             {!!form.imagePreview && (
@@ -425,6 +362,7 @@ export default function AdminProductsPage() {
 
             <View style={styles.modalActions}>
               <TouchableOpacity
+                activeOpacity={0.82}
                 style={[styles.cancelButton, saving && styles.actionDisabled]}
                 onPress={closeModal}
                 disabled={saving}
@@ -432,6 +370,7 @@ export default function AdminProductsPage() {
                 <Text style={styles.cancelButtonText}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
+                activeOpacity={0.85}
                 style={[styles.saveButton, saving && styles.actionDisabled]}
                 onPress={saveProduct}
                 disabled={saving}
@@ -444,352 +383,231 @@ export default function AdminProductsPage() {
           </View>
         </View>
       </Modal>
-    </SafeAreaView>
+    </AdminShell>
   );
 }
 
 const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-    backgroundColor: '#F2F4F7',
-  },
-  container: {
-    flex: 1,
-    flexDirection: 'row',
-  },
-
-  /* Sidebar */
-  sidebar: {
-    width: 260,
-    backgroundColor: '#187BCD',
-    paddingTop: 24,
-    paddingHorizontal: 20,
-  },
-  stationHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 32,
-  },
-  logoImage: {
-    width: 32,
-    height: 32,
-    marginRight: 10,
-  },
-  stationName: {
-    color: '#FFFFFF',
-    fontSize: 18,
-    fontWeight: '600',
-  },
-
-  navItem: {
-    paddingVertical: 12,
-    paddingHorizontal: 10,
-    borderRadius: 4,
-    marginBottom: 6,
-  },
-  navItemActive: {
-    backgroundColor: 'rgba(255, 255, 255, 0.18)',
-  },
-  navItemText: {
-    color: '#E3F2FD',
-    fontSize: 14,
-  },
-  navItemTextActive: {
-    fontWeight: 'bold',
-  },
-
-  sidebarFooter: {
-    marginTop: 'auto',
-    paddingVertical: 16,
-  },
-  footerBrand: {
-    color: '#FFFFFF',
-    fontSize: 14,
-  },
-
-  /* Main area */
-  main: {
-    flex: 1,
-    paddingHorizontal: 24,
-    paddingTop: 20,
-  },
-  topBar: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  searchContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-    maxWidth: 420,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 20,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: '#E0E0E0',
-  },
-  searchInput: {
-    flex: 1,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    fontSize: 14,
-    color: '#455A64',
-  },
-  searchButton: {
-    width: 44,
-    height: '100%',
-    backgroundColor: '#187BCD',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  searchIcon: {
-    color: '#FFFFFF',
-    fontSize: 18,
-  },
-
-  logoutButton: {
-    marginLeft: 16,
-    paddingHorizontal: 20,
-    paddingVertical: 8,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: '#187BCD',
-    backgroundColor: '#FFFFFF',
-  },
-  logoutText: {
-    color: '#187BCD',
-    fontWeight: '600',
-    fontSize: 13,
-  },
-
-  cardScroll: {
-    paddingBottom: 24,
-  },
   card: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: ADMIN_COLORS.card,
+    borderWidth: 1,
+    borderColor: ADMIN_COLORS.border,
     borderRadius: 8,
     paddingHorizontal: 20,
-    paddingTop: 14,
+    paddingTop: 18,
     paddingBottom: 20,
-    ...createShadow({
-      color: '#000',
-      elevation: 3,
-      opacity: 0.08,
-      radius: 8,
-      offset: { width: 0, height: 2 },
-    }),
   },
   cardHeader: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 12,
+    justifyContent: 'space-between',
+    marginBottom: 18,
   },
   cardTitle: {
-    color: '#187BCD',
+    color: ADMIN_COLORS.text,
     fontSize: 16,
     fontWeight: 'bold',
   },
   addButton: {
+    borderRadius: 20,
+    backgroundColor: ADMIN_COLORS.blue,
     paddingHorizontal: 16,
-    paddingVertical: 6,
-    borderRadius: 12,
-    backgroundColor: '#E3F2FD',
+    paddingVertical: 9,
   },
   addButtonText: {
-    color: '#187BCD',
-    fontSize: 13,
-    fontWeight: '600',
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: 'bold',
   },
-
-  row: {
+  tableRow: {
+    minHeight: 55,
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 8,
     borderBottomWidth: 1,
-    borderBottomColor: '#F1F1F1',
+    borderBottomColor: ADMIN_COLORS.border,
   },
-  tableHeaderRow: {
-    borderBottomWidth: 1,
-    borderBottomColor: '#E0E0E0',
+  tableHeadRow: {
+    minHeight: 38,
   },
-  rowStriped: {
-    backgroundColor: '#FAFAFA',
+  th: {
+    color: ADMIN_COLORS.muted,
+    fontSize: 11,
+    fontWeight: 'bold',
   },
-  cell: {
-    fontSize: 14,
-    color: '#455A64',
+  productCol: {
+    flex: 2.2,
   },
-  cellImageHeader: { flex: 1.2, fontWeight: 'bold' },
-  cellNameHeader: { flex: 2, fontWeight: 'bold' },
-  cellPriceHeader: { flex: 1, fontWeight: 'bold' },
-  cellActionsHeader: { flex: 1.5, fontWeight: 'bold', textAlign: 'right' },
-  cellImage: { flex: 1.2 },
-  cellName: { flex: 2 },
-  cellPrice: { flex: 1 },
-  cellActions: {
-    flex: 1.5,
+  priceCol: {
+    flex: 1,
+  },
+  actionsCol: {
+    flex: 1,
+    textAlign: 'right',
+  },
+  productCell: {
     flexDirection: 'row',
-    justifyContent: 'flex-end',
+    alignItems: 'center',
+    minWidth: 0,
   },
   productImage: {
-    width: 48,
-    height: 48,
+    width: 28,
+    height: 28,
     borderRadius: 6,
-    backgroundColor: '#F2F4F7',
+    backgroundColor: '#EEF5FB',
+    marginRight: 14,
   },
-  productImagePlaceholder: {
-    width: 48,
-    height: 48,
-    borderRadius: 6,
-    backgroundColor: '#F2F4F7',
+  dropWrap: {
+    width: 34,
     alignItems: 'center',
-    justifyContent: 'center',
-  },
-  productImagePlaceholderText: {
-    color: '#90A4AE',
-    fontSize: 10,
-    textAlign: 'center',
-  },
-  editButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderWidth: 1.5,
-    borderColor: '#2563EB',
-    borderRadius: 12,
-    backgroundColor: '#FFFFFF',
     marginRight: 8,
   },
+  productName: {
+    flex: 1,
+    color: ADMIN_COLORS.text,
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  priceText: {
+    color: ADMIN_COLORS.text,
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  actionsCell: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 8,
+  },
+  editButton: {
+    borderRadius: 999,
+    backgroundColor: '#E1F8F6',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
   editButtonText: {
-    color: '#2563EB',
-    fontSize: 13,
-    fontWeight: '600',
+    color: ADMIN_COLORS.blue,
+    fontSize: 12,
+    fontWeight: 'bold',
   },
   deleteButton: {
+    borderRadius: 999,
+    backgroundColor: '#FFE9E9',
     paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderWidth: 1.5,
-    borderColor: '#FCA5A5',
-    borderRadius: 12,
-    backgroundColor: '#FFFFFF',
+    paddingVertical: 6,
   },
   deleteButtonText: {
-    color: '#EF4444',
-    fontSize: 13,
-    fontWeight: '600',
+    color: ADMIN_COLORS.red,
+    fontSize: 12,
+    fontWeight: 'bold',
   },
   actionDisabled: {
     opacity: 0.6,
   },
   emptyState: {
-    paddingVertical: 24,
+    minHeight: 96,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   emptyText: {
-    color: '#757575',
-    fontSize: 14,
+    color: ADMIN_COLORS.muted,
+    fontSize: 13,
+    fontWeight: '600',
   },
   errorText: {
-    color: '#D32F2F',
+    color: ADMIN_COLORS.red,
     fontSize: 12,
     marginTop: 8,
-    textAlign: 'center',
   },
   modalBackground: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.45)',
+    backgroundColor: 'rgba(6, 36, 71, 0.46)',
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
   },
-  modalContainer: {
+  modalCard: {
     width: '90%',
-    maxWidth: 420,
-    backgroundColor: '#FFFFFF',
+    maxWidth: 430,
     borderRadius: 8,
-    padding: 20,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: ADMIN_COLORS.border,
+    padding: 22,
   },
   modalTitle: {
-    color: '#187BCD',
-    fontSize: 16,
+    color: ADMIN_COLORS.text,
+    fontSize: 18,
     fontWeight: 'bold',
-    marginBottom: 14,
+    marginBottom: 18,
   },
   inputLabel: {
-    color: '#455A64',
-    fontSize: 13,
-    fontWeight: '600',
+    color: ADMIN_COLORS.muted,
+    fontSize: 12,
+    fontWeight: 'bold',
     marginBottom: 6,
   },
   modalInput: {
+    minHeight: 42,
     borderWidth: 1,
-    borderColor: '#E0E0E0',
+    borderColor: ADMIN_COLORS.border,
     borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 9,
-    color: '#455A64',
+    color: ADMIN_COLORS.text,
     fontSize: 14,
-    marginBottom: 12,
+    paddingHorizontal: 12,
+    marginBottom: 14,
+    outlineStyle: 'none',
   },
   uploadButton: {
     alignSelf: 'flex-start',
-    paddingHorizontal: 16,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: ADMIN_COLORS.blue,
+    paddingHorizontal: 14,
     paddingVertical: 8,
-    borderWidth: 1.5,
-    borderColor: '#2563EB',
-    borderRadius: 12,
-    backgroundColor: '#FFFFFF',
     marginBottom: 12,
   },
   uploadButtonText: {
-    color: '#2563EB',
-    fontSize: 13,
-    fontWeight: '600',
+    color: ADMIN_COLORS.blue,
+    fontSize: 12,
+    fontWeight: 'bold',
   },
   imagePreview: {
     width: 120,
-    height: 90,
+    height: 86,
     borderRadius: 8,
-    backgroundColor: '#F2F4F7',
-    marginBottom: 14,
+    backgroundColor: '#EEF5FB',
+    marginBottom: 16,
   },
   modalActions: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
-    marginTop: 4,
+    gap: 10,
   },
   cancelButton: {
-    paddingHorizontal: 16,
-    paddingVertical: 9,
-    borderWidth: 1.5,
-    borderColor: '#2563EB',
-    borderRadius: 12,
+    minWidth: 92,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: ADMIN_COLORS.blue,
     backgroundColor: '#FFFFFF',
-    marginRight: 8,
   },
   cancelButtonText: {
-    color: '#2563EB',
+    color: ADMIN_COLORS.blue,
     fontSize: 13,
-    fontWeight: '600',
+    fontWeight: 'bold',
   },
   saveButton: {
-    paddingHorizontal: 18,
-    paddingVertical: 9,
-    borderRadius: 14,
-    backgroundColor: '#187BCD',
-    ...createShadow({
-      color: '#187BCD',
-      elevation: 3,
-      opacity: 0.16,
-      radius: 8,
-      offset: { width: 0, height: 4 },
-    }),
+    minWidth: 92,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 20,
+    backgroundColor: ADMIN_COLORS.blue,
   },
   saveButtonText: {
     color: '#FFFFFF',
     fontSize: 13,
-    fontWeight: '600',
+    fontWeight: 'bold',
   },
 });

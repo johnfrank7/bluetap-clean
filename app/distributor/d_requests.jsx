@@ -11,11 +11,9 @@ import {
   Animated,
   Easing,
   FlatList,
-  Image,
   Modal,
   Platform,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -24,6 +22,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import BlueTapHeader from '../../components/BlueTapHeader';
+import RequestDetailsModal from '../../components/RequestDetailsModal';
 import SoftStatusBadge from '../../components/SoftStatusBadge';
 import { createShadow } from '../../components/shadowStyles';
 
@@ -136,6 +135,75 @@ const formatTimeLabel = (timeValue) => {
   return `${displayHours}:${String(minutes).padStart(2, '0')} ${suffix}`;
 };
 
+const normalizeStatus = (status) =>
+  String(status || '').trim().toLowerCase().replace(/[_-]+/g, ' ');
+
+const getAmountNumber = (amount) => {
+  if (amount === undefined || amount === null || amount === '') return undefined;
+
+  const parsedAmount = Number(String(amount).replace(/[^\d.]/g, ''));
+  return Number.isFinite(parsedAmount) ? parsedAmount : undefined;
+};
+
+const getQuantityNumber = (quantity) => {
+  const match = String(quantity || '').match(/\d+(\.\d+)?/);
+  return Number(match?.[0] || 0);
+};
+
+const getDetailsRequestData = (request) => {
+  if (!request) return null;
+
+  const status = request.status || 'Pending';
+  const isPending = normalizeStatus(status) === 'pending';
+  const totalAmount = getAmountNumber(
+    request.totalAmount ?? request.total_amount ?? request.total_cost
+  );
+  const productPrice = getAmountNumber(
+    request.productPrice ?? request.product_price ?? request.price
+  );
+  const quantity = getQuantityNumber(request.quantity);
+  const unitPrice =
+    productPrice ?? (quantity > 0 && totalAmount !== undefined
+      ? totalAmount / quantity
+      : undefined);
+  const distributorName = isPending
+    ? ''
+    : request.distributor || request.distributor_name || '';
+  const distributorUniqueId = isPending
+    ? ''
+    : request.distributorId || request.distributor_unique_id || '';
+
+  return {
+    requestId: request.id,
+    status,
+    orderDate: 'Not set',
+    deliveryDate: request.deliveryDate || request.delivery_date,
+    product: request.productName || request.product_name,
+    containerType: request.container,
+    quantity: request.quantity,
+    totalAmount,
+    waterStation: request.waterStation || request.water_station,
+    paymentMethod: request.paymentMethod || request.payment_method,
+    requesterName: request.requester || request.requester_name,
+    requesterUniqueId: request.requesterId || request.requester_unique_id || '',
+    customerName: request.requester || request.requester_name,
+    distributorName,
+    distributorUniqueId,
+    contactNumber: request.contact || request.contact_number,
+    deliveryAddress: request.address || request.deliveryAddress,
+    items: [
+      {
+        id: request.id,
+        productName: request.productName || request.product_name,
+        quantity: request.quantity,
+        unitPrice,
+        subtotal: totalAmount,
+      },
+    ],
+    grandTotalAmount: totalAmount,
+  };
+};
+
 const PendingRequestCard = memo(function PendingRequestCard({
   index,
   isProcessing,
@@ -207,10 +275,10 @@ const PendingRequestCard = memo(function PendingRequestCard({
             </Text>
 
             <Text style={[styles.compactLabel, styles.compactLabelGap]}>
-              Distributor ID
+              Requested Delivery
             </Text>
             <Text style={styles.compactValue} numberOfLines={1}>
-              {request.distributorId || request.distributor_unique_id || 'Not set'}
+              {request.deliveryDate || request.delivery_date || 'Not set'}
             </Text>
 
             <Text style={[styles.compactLabel, styles.compactLabelGap]}>
@@ -314,6 +382,7 @@ export default function DistributorRequests() {
   const [processingRequestId, setProcessingRequestId] = useState('');
   const [scheduledRequests, setScheduledRequests] = useState({});
   const [successVisible, setSuccessVisible] = useState(false);
+  const selectedDetailsRequest = getDetailsRequestData(detailsRequest);
 
   const pendingRequests = useMemo(
     () =>
@@ -580,24 +649,6 @@ export default function DistributorRequests() {
           }
           extraData={processingRequestId}
         />
-
-        <View style={styles.bottomNav}>
-          <TouchableOpacity onPress={() => router.replace('/distributor/d_dashboard')}>
-            <Image source={require('../../assets/icons/home.png')} style={styles.navIcon} tintColor={BLUE} />
-          </TouchableOpacity>
-
-          <TouchableOpacity onPress={() => router.replace('/distributor/d_requests')}>
-            <Image source={require('../../assets/icons/ballot.png')} style={styles.navIconActive} tintColor={BLUE} />
-          </TouchableOpacity>
-
-          <TouchableOpacity onPress={() => router.replace('/distributor/d_scheduled_requests')}>
-            <Image source={require('../../assets/icons/calendar-clock.png')} style={styles.navIcon} tintColor={BLUE} />
-          </TouchableOpacity>
-
-          <TouchableOpacity onPress={() => router.replace('/distributor/d_profile')}>
-            <Image source={require('../../assets/icons/user.png')} style={styles.navIcon} tintColor={BLUE} />
-          </TouchableOpacity>
-        </View>
       </View>
 
       {successVisible && (
@@ -623,87 +674,11 @@ export default function DistributorRequests() {
         </Animated.View>
       )}
 
-      <Modal
+      <RequestDetailsModal
         visible={!!detailsRequest}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setDetailsRequest(null)}
-      >
-        <View style={styles.modalBackdrop}>
-          <Pressable
-            style={StyleSheet.absoluteFillObject}
-            onPress={() => setDetailsRequest(null)}
-          />
-          <View style={styles.detailsModal}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Request Details</Text>
-              <TouchableOpacity
-                activeOpacity={0.75}
-                onPress={() => setDetailsRequest(null)}
-              >
-                <Text style={styles.modalCloseText}>Close</Text>
-              </TouchableOpacity>
-            </View>
-
-            <View style={styles.modalDivider} />
-
-            {detailsRequest && (
-              <ScrollView
-                style={styles.modalDetailsList}
-                showsVerticalScrollIndicator={false}
-              >
-                {[
-                  ['Request ID', detailsRequest.id],
-                  ['Customer Name', detailsRequest.requester],
-                  ['Requester ID', detailsRequest.requesterId || detailsRequest.requester_unique_id || 'Not set'],
-                  ['Distributor Name', detailsRequest.distributor || detailsRequest.distributor_name || 'Not set'],
-                  ['Distributor ID', detailsRequest.distributorId || detailsRequest.distributor_unique_id || 'Not set'],
-                  ['Contact Number', detailsRequest.contact],
-                  ['Delivery Address', detailsRequest.address],
-                  ['Product', detailsRequest.productName],
-                  ['Quantity', detailsRequest.quantity],
-                  ['Container Type', detailsRequest.container],
-                  ['Requested Delivery Date', detailsRequest.deliveryDate],
-                  [
-                    'Product Price',
-                    detailsRequest.productPrice ??
-                      detailsRequest.product_price ??
-                      'Not set',
-                  ],
-                  [
-                    'Delivery Fee',
-                    detailsRequest.deliveryFee ??
-                      detailsRequest.delivery_fee ??
-                      'Not set',
-                  ],
-                  [
-                    'Total Amount to Pay',
-                    detailsRequest.totalAmount ??
-                      detailsRequest.total_amount ??
-                      detailsRequest.total_cost ??
-                      'Not set',
-                  ],
-                  detailsRequest.customerNotes || detailsRequest.customer_notes
-                    ? [
-                        'Customer Notes',
-                        detailsRequest.customerNotes ??
-                          detailsRequest.customer_notes,
-                      ]
-                    : null,
-                  ['Current Status', detailsRequest.status || 'Pending'],
-                ]
-                  .filter(Boolean)
-                  .map(([label, value]) => (
-                    <View key={label} style={styles.modalDetailRow}>
-                      <Text style={styles.modalDetailLabel}>{label}</Text>
-                      <Text style={styles.modalDetailValue}>{value}</Text>
-                    </View>
-                  ))}
-              </ScrollView>
-            )}
-          </View>
-        </View>
-      </Modal>
+        onClose={() => setDetailsRequest(null)}
+        request={selectedDetailsRequest}
+      />
 
       <Modal
         visible={scheduleSheetVisible}
@@ -1020,35 +995,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 18,
     marginTop: 5,
-  },
-  bottomNav: {
-    position: 'absolute',
-    bottom: 24,
-    left: 20,
-    right: 20,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    paddingVertical: 14,
-    paddingHorizontal: 28,
-    borderRadius: 22,
-    zIndex: 2,
-    ...createShadow({
-      color: '#000',
-      elevation: 8,
-      opacity: 0.12,
-      radius: 6,
-      offset: { width: 0, height: 3 },
-    }),
-  },
-  navIcon: {
-    width: 26,
-    height: 26,
-  },
-  navIconActive: {
-    width: 26,
-    height: 26,
   },
   modalBackdrop: {
     flex: 1,

@@ -1,9 +1,8 @@
 import React from 'react';
-import { View, Text, StyleSheet, Image, TouchableOpacity, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import BlueTapHeader from '../../components/BlueTapHeader';
-import { createShadow } from '../../components/shadowStyles';
 
 export default function DistributorNotification() {
   const router = useRouter();
@@ -40,22 +39,6 @@ export default function DistributorNotification() {
 
           <View style={{ height: 140 }} />
         </ScrollView>
-
-        {/* Bottom navigation bar */}
-        <View style={styles.bottomNav}>
-          <TouchableOpacity onPress={() => router.replace('/distributor/d_dashboard')}>
-            <Image source={require('../../assets/icons/home.png')} style={styles.navIcon} tintColor="#187BCD" />
-          </TouchableOpacity>
-          <TouchableOpacity onPress={() => router.replace('/distributor/d_requests')}>
-            <Image source={require('../../assets/icons/ballot.png')} style={styles.navIcon} tintColor="#187BCD" />
-          </TouchableOpacity>
-          <TouchableOpacity onPress={() => router.replace('/distributor/d_scheduled_requests')}>
-            <Image source={require('../../assets/icons/calendar-clock.png')} style={styles.navIcon} tintColor="#187BCD" />
-          </TouchableOpacity>
-          <TouchableOpacity onPress={() => router.replace('/distributor/d_profile')}>
-            <Image source={require('../../assets/icons/user.png')} style={styles.navIcon} tintColor="#187BCD" />
-          </TouchableOpacity>
-        </View>
       </View>
     </SafeAreaView>
   );
@@ -130,30 +113,5 @@ const styles = StyleSheet.create({
     height: 1,
     backgroundColor: '#90CAF9',
     marginTop: 14,
-  },
-  bottomNav: {
-    position: 'absolute',
-    bottom: 24,
-    left: 20,
-    right: 20,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    paddingVertical: 14,
-    paddingHorizontal: 28,
-    borderRadius: 22,
-    zIndex: 2,
-    ...createShadow({
-      color: '#000',
-      elevation: 8,
-      opacity: 0.12,
-      radius: 6,
-      offset: { width: 0, height: 3 },
-    }),
-  },
-  navIcon: {
-    width: 26,
-    height: 26,
   },
 });

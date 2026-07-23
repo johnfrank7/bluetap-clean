@@ -41,11 +41,15 @@ const getLocalRequesterProfile = (user) => {
   return findLocalUserForAuthRole(user, 'requester');
 };
 
-const buildProfileData = (profile = {}, user = null) => ({
-  ...profile,
-  uid: user?.uid || profile.uid || profile.id || '',
-  email: profile.email || user?.email || '',
-});
+const buildProfileData = (profile = {}, user = null) => {
+  const safeProfile = profile || {};
+
+  return {
+    ...safeProfile,
+    uid: user?.uid || safeProfile.uid || safeProfile.id || '',
+    email: safeProfile.email || user?.email || '',
+  };
+};
 
 const cacheProfile = (profile) => {
   cachedRequesterProfile = profile;

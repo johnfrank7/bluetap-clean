@@ -1,12 +1,11 @@
 import React from 'react';
-import { View, StyleSheet, TouchableOpacity, Image } from 'react-native';
-import { Stack, usePathname, useRouter } from 'expo-router';
+import { View, StyleSheet } from 'react-native';
+import { Stack, usePathname } from 'expo-router';
+import { RequesterBottomNav } from '../../components/AppBottomNav';
 import RequesterHeader from '../../components/RequesterHeader';
 import RoleGate from '../../components/RoleGate';
-import { createShadow } from '../../components/shadowStyles';
 
 export default function RequesterLayout() {
-  const router = useRouter();
   const pathname = usePathname();
   const isDashboard = pathname.startsWith('/requester/r_dashboard');
 
@@ -26,31 +25,7 @@ export default function RequesterLayout() {
 
         <View style={styles.navOverlay}>
           <View style={styles.navFrame}>
-            <View style={[styles.bottomNav, isDashboard && styles.dashboardBottomNav]}>
-              <TouchableOpacity onPress={() => router.replace('/requester/r_dashboard')}>
-                <Image
-                  source={require('../../assets/icons/home.png')}
-                  style={styles.navIcon}
-                  tintColor="#187BCD"
-                />
-              </TouchableOpacity>
-
-              <TouchableOpacity onPress={() => router.replace('/requester/r_request')}>
-                <Image
-                  source={require('../../assets/icons/square-plus.png')}
-                  style={styles.navIcon}
-                  tintColor="#187BCD"
-                />
-              </TouchableOpacity>
-
-              <TouchableOpacity onPress={() => router.replace('/requester/r_profile')}>
-                <Image
-                  source={require('../../assets/icons/user.png')}
-                  style={styles.navIcon}
-                  tintColor="#187BCD"
-                />
-              </TouchableOpacity>
-            </View>
+            <RequesterBottomNav dashboardVariant={isDashboard} />
           </View>
         </View>
       </View>
@@ -80,34 +55,5 @@ const styles = StyleSheet.create({
     maxWidth: 375,
     flex: 1,
     pointerEvents: 'box-none',
-  },
-  bottomNav: {
-    position: 'absolute',
-    bottom: 24,
-    left: 20,
-    right: 20,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    paddingVertical: 14,
-    paddingHorizontal: 28,
-    borderRadius: 22,
-    ...createShadow({
-      color: '#000',
-      elevation: 8,
-      opacity: 0.12,
-      radius: 6,
-      offset: { width: 0, height: 3 },
-    }),
-  },
-  dashboardBottomNav: {
-    left: 34,
-    right: 34,
-    borderRadius: 24,
-  },
-  navIcon: {
-    width: 26,
-    height: 26,
   },
 });

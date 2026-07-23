@@ -1,20 +1,14 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  TextInput,
-  TouchableOpacity,
-  ScrollView,
-  Image,
   ActivityIndicator,
   Alert,
   Modal,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { StatusBar } from 'expo-status-bar';
-import { useRouter } from 'expo-router';
-import { db } from '../../firebase';
 import {
   collection,
   doc,
@@ -24,13 +18,19 @@ import {
   setDoc,
   where,
 } from 'firebase/firestore';
+
+import { db } from '../../firebase';
 import { getLocalUsers, subscribeLocalUsers, updateLocalUserStatus } from '../../localUsers';
-import { signOutAndClearSessions } from '../../services/authSession';
 import { getProfileUniqueId, saveUserProfileWithUniqueId } from '../../services/uniqueIds';
-import { createShadow } from '../../components/shadowStyles';
+import AdminShell, {
+  ADMIN_COLORS,
+  AdminPill,
+} from '../../components/AdminShell';
 
 const normalizeApplicationStatus = (status) =>
   (status || 'pending').toString().trim().toLowerCase();
+
+const normalizeRole = (role) => (role || '').toString().trim().toLowerCase();
 
 const toApplicationStatus = (status) => {
   const normalizedStatus = normalizeApplicationStatus(status);
@@ -53,7 +53,7 @@ const getPendingLocalDistributors = (firestoreDistributors = []) =>
   getLocalUsers()
     .filter(
       (user) =>
-        user.role === 'distributor' &&
+        normalizeRole(user.role) === 'distributor' &&
         getDistributorApplicationStatus(user) === 'pending'
     )
     .map((user) => ({ ...user, id: user.uid, isLocal: true }))
@@ -65,6 +65,16 @@ const getPendingLocalDistributors = (firestoreDistributors = []) =>
             firestoreUser.email === localUser.email
         )
     );
+
+const getFullName = (user = {}) =>
+  `${user.firstName || ''} ${user.lastName || ''}`.trim() ||
+  user.full_name ||
+  user.fullName ||
+  user.email ||
+  'Unnamed user';
+
+const getBarangay = (user = {}) =>
+  (user.barangay || user.address || 'Not set').toString().trim() || 'Not set';
 
 const buildDistributorUpdate = (distributor, approvalStatus, rejectionReason = '') => {
   const uid = distributor.uid || distributor.id;
@@ -94,11 +104,11 @@ const buildDistributorUpdate = (distributor, approvalStatus, rejectionReason = '
 };
 
 export default function AdminRequestPage() {
-  const router = useRouter();
   const [pendingDistributors, setPendingDistributors] = useState([]);
   const [loading, setLoading] = useState(true);
   const [updatingId, setUpdatingId] = useState(null);
   const [loadError, setLoadError] = useState('');
+  const [search, setSearch] = useState('');
   const [rejectingDistributor, setRejectingDistributor] = useState(null);
   const [rejectionReason, setRejectionReason] = useState('');
   const [rejectionReasonError, setRejectionReasonError] = useState('');
@@ -150,10 +160,24 @@ export default function AdminRequestPage() {
     };
   }, []);
 
-  const handleLogout = async () => {
-    await signOutAndClearSessions();
-    router.replace('/login');
-  };
+  const filteredDistributors = useMemo(() => {
+    const normalizedSearch = search.trim().toLowerCase();
+
+    if (!normalizedSearch) return pendingDistributors;
+
+    return pendingDistributors.filter((distributor) =>
+      [
+        getFullName(distributor),
+        getProfileUniqueId(distributor),
+        distributor.phone,
+        distributor.email,
+        getBarangay(distributor),
+      ]
+        .join(' ')
+        .toLowerCase()
+        .includes(normalizedSearch)
+    );
+  }, [pendingDistributors, search]);
 
   const updateDistributorStatus = async (distributor, approvalStatus, reason = '') => {
     const id = distributor.uid || distributor.id;
@@ -248,141 +272,94 @@ export default function AdminRequestPage() {
   const isSavingRejection = !!rejectingDistributorId && updatingId === rejectingDistributorId;
 
   return (
-    <SafeAreaView style={styles.root}>
-      <StatusBar style="dark" />
-      <View style={styles.container}>
-        {/* Sidebar */}
-        <View style={styles.sidebar}>
-          <View style={styles.stationHeader}>
-            <Image
-              source={require('../../assets/icons/bluetaplogo.png')}
-              style={styles.logoImage}
-              resizeMode="contain"
-            />
-            <Text style={styles.stationName}>Station Name</Text>
-          </View>
-
-          <TouchableOpacity
-            style={styles.navItem}
-            onPress={() => router.replace('/admin/dashboard')}
-          >
-            <Text style={styles.navItemText}>Dashboard</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.navItem}
-            onPress={() => router.replace('/admin/products')}
-          >
-            <Text style={styles.navItemText}>Products</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.navItem, styles.navItemActive]}
-            onPress={() => router.replace('/admin/request')}
-          >
-            <Text style={[styles.navItemText, styles.navItemTextActive]}>Request</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.navItem}>
-            <Text style={styles.navItemText}>Profile</Text>
-          </TouchableOpacity>
-
-          <View style={styles.sidebarFooter}>
-            <Text style={styles.footerBrand}>BlueTap</Text>
-          </View>
+    <AdminShell
+      active="requests"
+      title="Requests"
+      subtitle="Pending distributor approvals"
+      searchValue={search}
+      onSearchChange={setSearch}
+    >
+      <View style={styles.card}>
+        <View style={styles.cardHeader}>
+          <Text style={styles.cardTitle}>
+            Pending approvals ({pendingDistributors.length})
+          </Text>
         </View>
 
-        {/* Main content */}
-        <View style={styles.main}>
-          {/* Top bar */}
-          <View style={styles.topBar}>
-            <View style={styles.searchContainer}>
-              <TextInput
-                style={styles.searchInput}
-                placeholder="Search"
-                placeholderTextColor="#B0BEC5"
-              />
-              <TouchableOpacity style={styles.searchButton}>
-                <Text style={styles.searchIcon}>🔍</Text>
-              </TouchableOpacity>
-            </View>
-
-            <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
-              <Text style={styles.logoutText}>LOGOUT</Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* Pending distributors table */}
-          <ScrollView contentContainerStyle={styles.cardScroll} showsVerticalScrollIndicator={false}>
-            <View style={styles.card}>
-              <View style={styles.cardHeader}>
-                <Text style={styles.cardTitle}>Pending Distributors</Text>
-                
-              </View>
-
-              {/* Table header */}
-              <View style={[styles.row, styles.tableHeaderRow]}>
-                <Text style={[styles.cell, styles.cellNameHeader]}>Name</Text>
-                <Text style={[styles.cell, styles.cellIdHeader]}>Unique ID</Text>
-                <Text style={[styles.cell, styles.cellPhoneHeader]}>Contact Number</Text>
-                <Text style={[styles.cell, styles.cellEmailHeader]}>Email Address</Text>
-                <Text style={[styles.cell, styles.cellActionsHeader]}>Actions</Text>
-              </View>
-
-              {loading ? (
-                <View style={styles.emptyState}>
-                  <ActivityIndicator size="small" color="#187BCD" />
-                </View>
-              ) : pendingDistributors.length === 0 ? (
-                <View style={styles.emptyState}>
-                  <Text style={styles.emptyText}>No pending distributors.</Text>
-                  {!!loadError && (
-                    <Text style={styles.errorText}>Firestore: {loadError}</Text>
-                  )}
-                </View>
-              ) : (
-                pendingDistributors.map((d, idx) => {
-                  const fullName = `${d.firstName || ''} ${d.lastName || ''}`.trim() || 'Unnamed distributor';
-                  const distributorId = d.uid || d.id;
-                  const isUpdating = updatingId === distributorId;
-
-                  return (
-                    <View
-                      key={d.id}
-                      style={[styles.row, idx % 2 === 1 && styles.rowStriped]}
-                    >
-                      <Text style={[styles.cell, styles.cellName]}>{fullName}</Text>
-                      <Text style={[styles.cell, styles.cellId]}>
-                        {getProfileUniqueId(d) || 'Not set'}
-                      </Text>
-                      <Text style={[styles.cell, styles.cellPhone]}>{d.phone || 'Not set'}</Text>
-                      <Text style={[styles.cell, styles.cellEmail]}>{d.email || 'Not set'}</Text>
-                      <View style={[styles.cell, styles.cellActions]}>
-                        <TouchableOpacity
-                          style={[styles.rejectButton, isUpdating && styles.actionDisabled]}
-                          onPress={() => openRejectModal(d)}
-                          disabled={isUpdating}
-                        >
-                          <Text style={styles.rejectText}>Reject</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                          style={[styles.acceptButton, isUpdating && styles.actionDisabled]}
-                          onPress={() => updateDistributorStatus(d, 'approved')}
-                          disabled={isUpdating}
-                        >
-                          <Text style={styles.acceptText}>Accept</Text>
-                        </TouchableOpacity>
-                      </View>
-                    </View>
-                  );
-                })
-              )}
-            </View>
-          </ScrollView>
+        <View style={[styles.tableRow, styles.tableHeadRow]}>
+          <Text style={[styles.th, styles.nameCol]}>NAME</Text>
+          <Text style={[styles.th, styles.idCol]}>UNIQUE ID</Text>
+          <Text style={[styles.th, styles.contactCol]}>CONTACT</Text>
+          <Text style={[styles.th, styles.emailCol]}>EMAIL</Text>
+          <Text style={[styles.th, styles.barangayCol]}>BARANGAY</Text>
+          <Text style={[styles.th, styles.roleCol]}>ROLE</Text>
+          <Text style={[styles.th, styles.actionsCol]}>ACTIONS</Text>
         </View>
+
+        {loading ? (
+          <View style={styles.emptyState}>
+            <ActivityIndicator color={ADMIN_COLORS.blue} size="small" />
+          </View>
+        ) : filteredDistributors.length === 0 ? (
+          <View style={styles.emptyState}>
+            <Text style={styles.emptyText}>No pending distributors.</Text>
+            {!!loadError && <Text style={styles.errorText}>Firestore: {loadError}</Text>}
+          </View>
+        ) : (
+          filteredDistributors.map((distributor) => {
+            const distributorId = distributor.uid || distributor.id;
+            const isUpdating = updatingId === distributorId;
+
+            return (
+              <View key={distributorId || distributor.email} style={styles.tableRow}>
+                <Text style={[styles.tdName, styles.nameCol]} numberOfLines={1}>
+                  {getFullName(distributor)}
+                </Text>
+                <Text style={[styles.td, styles.idCol]} numberOfLines={1}>
+                  {getProfileUniqueId(distributor) || 'Pending'}
+                </Text>
+                <Text style={[styles.td, styles.contactCol]} numberOfLines={1}>
+                  {distributor.phone || 'Not set'}
+                </Text>
+                <Text style={[styles.tdLink, styles.emailCol]} numberOfLines={1}>
+                  {distributor.email || 'Not set'}
+                </Text>
+                <Text style={[styles.td, styles.barangayCol]} numberOfLines={1}>
+                  {getBarangay(distributor)}
+                </Text>
+                <View style={[styles.roleCell, styles.roleCol]}>
+                  <AdminPill tone="cyan">Distributor</AdminPill>
+                </View>
+                <View style={[styles.actionButtons, styles.actionsCol]}>
+                  <TouchableOpacity
+                    activeOpacity={0.82}
+                    style={[styles.acceptButton, isUpdating && styles.actionDisabled]}
+                    onPress={() => updateDistributorStatus(distributor, 'approved')}
+                    disabled={isUpdating}
+                  >
+                    <Text style={styles.acceptButtonText}>
+                      {isUpdating ? 'Saving...' : 'Accept'}
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    activeOpacity={0.82}
+                    style={[styles.rejectButton, isUpdating && styles.actionDisabled]}
+                    onPress={() => openRejectModal(distributor)}
+                    disabled={isUpdating}
+                  >
+                    <Text style={styles.rejectButtonText}>Reject</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            );
+          })
+        )}
       </View>
 
       <Modal visible={!!rejectingDistributor} transparent animationType="fade">
         <View style={styles.modalBackground}>
-          <View style={styles.modalContainer}>
-            <Text style={styles.modalTitle}>Reject Application</Text>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Reject application</Text>
             <Text style={styles.modalMessage}>
               Enter the reason this distributor application is being rejected.
             </Text>
@@ -392,8 +369,8 @@ export default function AdminRequestPage() {
                 styles.reasonInput,
                 !!rejectionReasonError && styles.reasonInputError,
               ]}
-              placeholder="Example: Unable to verify your identity (Unverified Personnel)"
-              placeholderTextColor="#90A4AE"
+              placeholder="Reason"
+              placeholderTextColor="#95A6B8"
               value={rejectionReason}
               onChangeText={(value) => {
                 setRejectionReason(value);
@@ -410,14 +387,15 @@ export default function AdminRequestPage() {
 
             <View style={styles.modalActions}>
               <TouchableOpacity
+                activeOpacity={0.82}
                 style={styles.modalCancelButton}
                 onPress={closeRejectModal}
                 disabled={isSavingRejection}
               >
-                <Text style={styles.modalCancelButtonText}>Cancel</Text>
+                <Text style={styles.modalCancelText}>Cancel</Text>
               </TouchableOpacity>
-
               <TouchableOpacity
+                activeOpacity={0.82}
                 style={[
                   styles.modalRejectButton,
                   isSavingRejection && styles.actionDisabled,
@@ -425,347 +403,217 @@ export default function AdminRequestPage() {
                 onPress={submitRejection}
                 disabled={isSavingRejection}
               >
-                <Text style={styles.modalRejectButtonText}>
-                  {isSavingRejection ? 'Saving...' : 'Save Rejection'}
+                <Text style={styles.modalRejectText}>
+                  {isSavingRejection ? 'Saving...' : 'Save rejection'}
                 </Text>
               </TouchableOpacity>
             </View>
           </View>
         </View>
       </Modal>
-    </SafeAreaView>
+    </AdminShell>
   );
 }
 
 const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-    backgroundColor: '#F2F4F7',
-  },
-  container: {
-    flex: 1,
-    flexDirection: 'row',
-  },
-
-  /* Sidebar */
-  sidebar: {
-    width: 260,
-    backgroundColor: '#187BCD',
-    paddingTop: 24,
-    paddingHorizontal: 20,
-  },
-  stationHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 32,
-  },
-  logoImage: {
-    width: 32,
-    height: 32,
-    marginRight: 10,
-  },
-  stationName: {
-    color: '#FFFFFF',
-    fontSize: 18,
-    fontWeight: '600',
-  },
-
-  navItem: {
-    paddingVertical: 12,
-    paddingHorizontal: 10,
-    borderRadius: 4,
-    marginBottom: 6,
-  },
-  navItemActive: {
-    backgroundColor: 'rgba(255, 255, 255, 0.18)',
-  },
-  navItemText: {
-    color: '#E3F2FD',
-    fontSize: 14,
-  },
-  navItemTextActive: {
-    fontWeight: 'bold',
-  },
-
-  sidebarFooter: {
-    marginTop: 'auto',
-    paddingVertical: 16,
-  },
-  footerBrand: {
-    color: '#FFFFFF',
-    fontSize: 14,
-  },
-
-  /* Main area */
-  main: {
-    flex: 1,
-    paddingHorizontal: 24,
-    paddingTop: 20,
-  },
-  topBar: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  searchContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-    maxWidth: 420,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 20,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: '#E0E0E0',
-  },
-  searchInput: {
-    flex: 1,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    fontSize: 14,
-    color: '#455A64',
-  },
-  searchButton: {
-    width: 44,
-    height: '100%',
-    backgroundColor: '#187BCD',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  searchIcon: {
-    color: '#FFFFFF',
-    fontSize: 18,
-  },
-
-  logoutButton: {
-    marginLeft: 16,
-    paddingHorizontal: 20,
-    paddingVertical: 8,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: '#187BCD',
-    backgroundColor: '#FFFFFF',
-  },
-  logoutText: {
-    color: '#187BCD',
-    fontWeight: '600',
-    fontSize: 13,
-  },
-
-  cardScroll: {
-    paddingBottom: 24,
-  },
   card: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: ADMIN_COLORS.card,
+    borderWidth: 1,
+    borderColor: ADMIN_COLORS.border,
     borderRadius: 8,
     paddingHorizontal: 20,
-    paddingTop: 14,
+    paddingTop: 20,
     paddingBottom: 20,
-    ...createShadow({
-      color: '#000',
-      elevation: 3,
-      opacity: 0.08,
-      radius: 8,
-      offset: { width: 0, height: 2 },
-    }),
   },
   cardHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 18,
   },
   cardTitle: {
-    color: '#187BCD',
+    color: ADMIN_COLORS.text,
     fontSize: 16,
     fontWeight: 'bold',
   },
-  removeButton: {
-    paddingHorizontal: 16,
-    paddingVertical: 7,
-    borderWidth: 1.5,
-    borderColor: '#FCA5A5',
-    borderRadius: 12,
-    backgroundColor: '#FFFFFF',
+  tableRow: {
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderBottomWidth: 1,
+    borderBottomColor: ADMIN_COLORS.border,
   },
-  removeButtonText: {
-    color: '#EF4444',
+  tableHeadRow: {
+    minHeight: 38,
+  },
+  th: {
+    color: ADMIN_COLORS.muted,
+    fontSize: 11,
+    fontWeight: 'bold',
+  },
+  td: {
+    color: ADMIN_COLORS.muted,
     fontSize: 13,
     fontWeight: '600',
   },
-
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F1F1F1',
+  tdName: {
+    color: ADMIN_COLORS.text,
+    fontSize: 13,
+    fontWeight: 'bold',
   },
-  tableHeaderRow: {
-    borderBottomWidth: 1,
-    borderBottomColor: '#E0E0E0',
-  },
-  rowStriped: {
-    backgroundColor: '#FAFAFA',
-  },
-  cell: {
-    fontSize: 14,
-    color: '#455A64',
-  },
-  cellNameHeader: { flex: 1.5, fontWeight: 'bold' },
-  cellIdHeader: { flex: 1.1, fontWeight: 'bold' },
-  cellPhoneHeader: { flex: 1.3, fontWeight: 'bold' },
-  cellEmailHeader: { flex: 2, fontWeight: 'bold' },
-  cellActionsHeader: { flex: 1.6, fontWeight: 'bold', textAlign: 'center' },
-  cellName: { flex: 1.5 },
-  cellId: { flex: 1.1 },
-  cellPhone: { flex: 1.3 },
-  cellEmail: { flex: 2 },
-  cellActions: {
-    flex: 1.6,
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  emptyState: {
-    paddingVertical: 24,
-    alignItems: 'center',
-  },
-  emptyText: {
-    color: '#757575',
-    fontSize: 14,
-  },
-  errorText: {
-    color: '#D32F2F',
-    fontSize: 12,
-    marginTop: 8,
-    textAlign: 'center',
-  },
-  rejectButton: {
-    minWidth: 58,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderWidth: 1.5,
-    borderColor: '#FCA5A5',
-    borderRadius: 12,
-    backgroundColor: '#FFFFFF',
-    marginRight: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  rejectText: {
-    color: '#EF4444',
+  tdLink: {
+    color: ADMIN_COLORS.blue,
     fontSize: 13,
     fontWeight: '600',
+  },
+  nameCol: {
+    flex: 1.35,
+  },
+  idCol: {
+    flex: 1,
+  },
+  contactCol: {
+    flex: 1,
+  },
+  emailCol: {
+    flex: 1.65,
+  },
+  barangayCol: {
+    flex: 1,
+  },
+  roleCol: {
+    flex: 0.9,
+  },
+  actionsCol: {
+    flex: 1.15,
+    textAlign: 'right',
+  },
+  roleCell: {
+    alignItems: 'flex-start',
+  },
+  actionButtons: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 8,
   },
   acceptButton: {
-    minWidth: 72,
-    paddingHorizontal: 16,
-    paddingVertical: 7,
-    borderRadius: 14,
-    backgroundColor: '#187BCD',
-    alignItems: 'center',
-    justifyContent: 'center',
-    ...createShadow({
-      color: '#187BCD',
-      elevation: 3,
-      opacity: 0.16,
-      radius: 8,
-      offset: { width: 0, height: 4 },
-    }),
+    borderRadius: 999,
+    backgroundColor: '#E3F8EF',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
   },
-  acceptText: {
-    color: '#FFFFFF',
-    fontSize: 13,
-    fontWeight: '600',
+  acceptButtonText: {
+    color: ADMIN_COLORS.green,
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  rejectButton: {
+    borderRadius: 999,
+    backgroundColor: '#FFE9E9',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  rejectButtonText: {
+    color: ADMIN_COLORS.red,
+    fontSize: 12,
+    fontWeight: 'bold',
   },
   actionDisabled: {
     opacity: 0.6,
   },
+  emptyState: {
+    minHeight: 96,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emptyText: {
+    color: ADMIN_COLORS.muted,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  errorText: {
+    color: ADMIN_COLORS.red,
+    fontSize: 12,
+    marginTop: 8,
+  },
   modalBackground: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    backgroundColor: 'rgba(6, 36, 71, 0.46)',
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: 20,
-  },
-  modalContainer: {
-    width: '85%',
-    maxWidth: 420,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 20,
     padding: 20,
-    alignItems: 'center',
+  },
+  modalCard: {
+    width: '90%',
+    maxWidth: 430,
+    borderRadius: 8,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: ADMIN_COLORS.border,
+    padding: 22,
   },
   modalTitle: {
-    color: '#187BCD',
+    color: ADMIN_COLORS.text,
     fontSize: 18,
     fontWeight: 'bold',
-    marginBottom: 12,
   },
   modalMessage: {
-    width: '100%',
-    color: '#455A64',
-    fontSize: 14,
-    lineHeight: 20,
-    textAlign: 'center',
+    color: ADMIN_COLORS.muted,
+    fontSize: 13,
+    lineHeight: 19,
+    marginTop: 8,
     marginBottom: 14,
   },
   reasonInput: {
-    width: '100%',
-    minHeight: 96,
+    minHeight: 104,
     borderWidth: 1,
-    borderColor: '#BBDEFB',
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    color: '#455A64',
+    borderColor: ADMIN_COLORS.border,
+    borderRadius: 8,
+    color: ADMIN_COLORS.text,
     fontSize: 14,
-    lineHeight: 20,
-    marginBottom: 8,
+    lineHeight: 19,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    outlineStyle: 'none',
   },
   reasonInputError: {
-    borderColor: '#D32F2F',
-    backgroundColor: '#FFEBEE',
+    borderColor: ADMIN_COLORS.red,
+    backgroundColor: '#FFF7F7',
   },
   reasonErrorText: {
-    width: '100%',
-    color: '#D32F2F',
+    color: ADMIN_COLORS.red,
     fontSize: 12,
-    marginBottom: 8,
+    marginTop: 7,
   },
   modalActions: {
-    width: '100%',
     flexDirection: 'row',
-    marginTop: 4,
+    justifyContent: 'flex-end',
+    gap: 10,
+    marginTop: 16,
   },
   modalCancelButton: {
-    flex: 1,
-    borderWidth: 1.5,
-    borderColor: '#2563EB',
-    borderRadius: 12,
-    paddingVertical: 12,
+    minWidth: 92,
+    height: 40,
     alignItems: 'center',
-    marginRight: 8,
+    justifyContent: 'center',
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: ADMIN_COLORS.blue,
     backgroundColor: '#FFFFFF',
   },
-  modalCancelButtonText: {
-    color: '#2563EB',
-    fontWeight: '600',
+  modalCancelText: {
+    color: ADMIN_COLORS.blue,
+    fontSize: 13,
+    fontWeight: 'bold',
   },
   modalRejectButton: {
-    flex: 1,
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1.5,
-    borderColor: '#FCA5A5',
-    borderRadius: 12,
-    paddingVertical: 12,
+    minWidth: 122,
+    height: 40,
     alignItems: 'center',
-    marginLeft: 8,
+    justifyContent: 'center',
+    borderRadius: 20,
+    backgroundColor: '#FFE9E9',
   },
-  modalRejectButtonText: {
-    color: '#EF4444',
-    fontWeight: '600',
+  modalRejectText: {
+    color: ADMIN_COLORS.red,
+    fontSize: 13,
+    fontWeight: 'bold',
   },
 });

@@ -1,8 +1,5 @@
 import React, { useState } from 'react';
 import {
-  Image,
-  Modal,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -12,6 +9,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import BlueTapHeader from '../../components/BlueTapHeader';
+import RequestDetailsModal from '../../components/RequestDetailsModal';
 import SoftStatusBadge from '../../components/SoftStatusBadge';
 import { createShadow } from '../../components/shadowStyles';
 
@@ -56,57 +54,52 @@ const HISTORY_REQUESTS = [
   },
 ];
 
-const DetailModal = ({ request, onClose }) => (
-  <Modal
-    visible={!!request}
-    transparent
-    animationType="fade"
-    onRequestClose={onClose}
-  >
-    <View style={styles.modalBackdrop}>
-      <Pressable style={StyleSheet.absoluteFillObject} onPress={onClose} />
-      <View style={styles.detailsModal}>
-        <View style={styles.modalHeader}>
-          <Text style={styles.modalTitle}>Request Details</Text>
-          <TouchableOpacity activeOpacity={0.75} onPress={onClose}>
-            <Text style={styles.modalCloseText}>Close</Text>
-          </TouchableOpacity>
-        </View>
+const getAmountNumber = (amount) =>
+  Number(String(amount || '').replace(/[^\d.]/g, '')) || 0;
 
-        <View style={styles.modalDivider} />
+const getQuantityNumber = (quantity) => {
+  const match = String(quantity || '').match(/\d+(\.\d+)?/);
+  return Number(match?.[0] || 0);
+};
 
-        {request && (
-          <ScrollView
-            style={styles.modalDetailsList}
-            showsVerticalScrollIndicator={false}
-          >
-            {[
-              ['Request ID', request.id],
-              ['Customer Name', request.requester],
-              ['Requester ID', request.requesterId || request.requester_unique_id || 'Not set'],
-              ['Distributor Name', request.distributor || request.distributor_name || 'Not set'],
-              ['Distributor ID', request.distributorId || request.distributor_unique_id || 'Not set'],
-              ['Contact Number', request.contact],
-              ['Delivery Address', request.address],
-              ['Product', request.productName],
-              ['Quantity', request.quantity],
-              ['Container Type', request.container],
-              ['Scheduled Date', request.scheduledDateTime],
-              ['Delivered Date', request.deliveredDateTime],
-              ['Amount Paid', request.amountPaid || 'Not set'],
-              ['Status', request.status || 'Delivered'],
-            ].map(([label, value]) => (
-              <View key={label} style={styles.modalDetailRow}>
-                <Text style={styles.modalDetailLabel}>{label}</Text>
-                <Text style={styles.modalDetailValue}>{value}</Text>
-              </View>
-            ))}
-          </ScrollView>
-        )}
-      </View>
-    </View>
-  </Modal>
-);
+const getDetailsRequestData = (request) => {
+  if (!request) return null;
+
+  const totalAmount = getAmountNumber(request.amountPaid);
+  const quantity = getQuantityNumber(request.quantity);
+  const unitPrice = quantity > 0 ? totalAmount / quantity : totalAmount;
+
+  return {
+    requestId: request.id,
+    status: request.status || 'Delivered',
+    orderDate: request.scheduledDateTime,
+    deliveryDate: request.deliveredDateTime,
+    product: request.productName,
+    containerType: request.container,
+    quantity: request.quantity,
+    totalAmount,
+    waterStation: 'Not set',
+    paymentMethod: 'Not set',
+    requesterName: request.requester,
+    requesterUniqueId: request.requesterId || request.requester_unique_id || '',
+    customerName: request.requester,
+    distributorName: request.distributor || request.distributor_name || '',
+    distributorUniqueId:
+      request.distributorId || request.distributor_unique_id || '',
+    contactNumber: request.contact,
+    deliveryAddress: request.address,
+    items: [
+      {
+        id: request.id,
+        productName: request.productName,
+        quantity: request.quantity,
+        unitPrice,
+        subtotal: totalAmount,
+      },
+    ],
+    grandTotalAmount: totalAmount,
+  };
+};
 
 const HistoryRequestCard = ({ request, onViewDetails }) => {
   return (
@@ -188,6 +181,7 @@ const HistoryRequestCard = ({ request, onViewDetails }) => {
 export default function DistributorHistory() {
   const router = useRouter();
   const [selectedRequest, setSelectedRequest] = useState(null);
+  const selectedDetailsRequest = getDetailsRequestData(selectedRequest);
 
   return (
     <SafeAreaView edges={['left', 'right', 'bottom']} style={styles.container}>
@@ -229,27 +223,13 @@ export default function DistributorHistory() {
             />
           ))}
         </ScrollView>
-
-        <View style={styles.bottomNav}>
-          <TouchableOpacity onPress={() => router.replace('/distributor/d_dashboard')}>
-            <Image source={require('../../assets/icons/home.png')} style={styles.navIcon} tintColor={BLUE} />
-          </TouchableOpacity>
-
-          <TouchableOpacity onPress={() => router.replace('/distributor/d_requests')}>
-            <Image source={require('../../assets/icons/ballot.png')} style={styles.navIcon} tintColor={BLUE} />
-          </TouchableOpacity>
-
-          <TouchableOpacity onPress={() => router.replace('/distributor/d_scheduled_requests')}>
-            <Image source={require('../../assets/icons/calendar-clock.png')} style={styles.navIconActive} tintColor={BLUE} />
-          </TouchableOpacity>
-
-          <TouchableOpacity onPress={() => router.replace('/distributor/d_profile')}>
-            <Image source={require('../../assets/icons/user.png')} style={styles.navIcon} tintColor={BLUE} />
-          </TouchableOpacity>
-        </View>
       </View>
 
-      <DetailModal request={selectedRequest} onClose={() => setSelectedRequest(null)} />
+      <RequestDetailsModal
+        visible={!!selectedRequest}
+        onClose={() => setSelectedRequest(null)}
+        request={selectedDetailsRequest}
+      />
     </SafeAreaView>
   );
 }
@@ -396,89 +376,5 @@ const styles = StyleSheet.create({
     color: '#2563EB',
     fontSize: 13,
     fontWeight: '600',
-  },
-  modalBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(8, 31, 51, 0.46)',
-    justifyContent: 'flex-end',
-    alignItems: 'center',
-  },
-  detailsModal: {
-    width: '100%',
-    maxWidth: 375,
-    backgroundColor: '#FFFFFF',
-    borderTopLeftRadius: 22,
-    borderTopRightRadius: 22,
-    paddingHorizontal: 20,
-    paddingTop: 18,
-    paddingBottom: 30,
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  modalTitle: {
-    color: BLUE,
-    fontSize: 18,
-    fontWeight: 'bold',
-  },
-  modalCloseText: {
-    color: BLUE,
-    fontSize: 13,
-    fontWeight: 'bold',
-  },
-  modalDivider: {
-    height: 1,
-    backgroundColor: BLUE_LIGHT,
-    marginTop: 12,
-    marginBottom: 12,
-  },
-  modalDetailsList: {
-    maxHeight: 520,
-  },
-  modalDetailRow: {
-    marginBottom: 11,
-  },
-  modalDetailLabel: {
-    color: TEXT_MUTED,
-    fontSize: 12,
-    fontWeight: 'bold',
-    marginBottom: 2,
-  },
-  modalDetailValue: {
-    color: TEXT_DARK,
-    fontSize: 14,
-    fontWeight: '700',
-    lineHeight: 18,
-  },
-  bottomNav: {
-    position: 'absolute',
-    bottom: 24,
-    left: 20,
-    right: 20,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    paddingVertical: 14,
-    paddingHorizontal: 28,
-    borderRadius: 22,
-    zIndex: 2,
-    ...createShadow({
-      color: '#000',
-      elevation: 8,
-      opacity: 0.12,
-      radius: 6,
-      offset: { width: 0, height: 3 },
-    }),
-  },
-  navIcon: {
-    width: 26,
-    height: 26,
-  },
-  navIconActive: {
-    width: 26,
-    height: 26,
   },
 });

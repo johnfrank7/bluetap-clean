@@ -17,6 +17,10 @@ const TEXT_MUTED = '#6F8EA8';
 const TEXT_DARK = '#20384D';
 
 const formatAmount = (amount) => {
+  if (amount === undefined || amount === null || amount === '') {
+    return 'Not set';
+  }
+
   if (typeof amount === 'string' && amount.trim()) {
     return amount.trim().startsWith('\u20B1')
       ? amount.trim()
@@ -31,12 +35,15 @@ const displayValue = (value) => {
   return String(value);
 };
 
+const normalizeAmount = (value) =>
+  value === undefined || value === null || value === '' ? undefined : Number(value);
+
 const normalizeProduct = (item = {}, index) => ({
   id: item.id || item.product_id || `${item.productName || item.product_name || 'product'}-${index}`,
   productName: item.productName || item.product_name || 'Product',
   quantity: displayValue(item.quantity),
-  unitPrice: Number(item.unitPrice ?? item.product_price ?? item.price ?? 0),
-  subtotal: Number(item.subtotal ?? item.line_total ?? 0),
+  unitPrice: normalizeAmount(item.unitPrice ?? item.product_price ?? item.price),
+  subtotal: normalizeAmount(item.subtotal ?? item.line_total),
 });
 
 export default function RequestDetailsModal({

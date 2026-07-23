@@ -1,21 +1,17 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
   Animated,
   Easing,
   Platform,
   StyleSheet,
   Text,
-  TouchableOpacity,
   View,
 } from 'react-native';
-import { collection, doc, onSnapshot, query, serverTimestamp, setDoc, where } from 'firebase/firestore';
+import { collection, onSnapshot } from 'firebase/firestore';
 
 import { db } from '../../firebase';
-import { getLocalUsers, subscribeLocalUsers, updateLocalUserStatus } from '../../localUsers';
+import { getLocalUsers, subscribeLocalUsers } from '../../localUsers';
 import { getLocalRequests } from '../../services/requests';
-import { getProfileUniqueId } from '../../services/uniqueIds';
 import AdminShell, {
   ADMIN_COLORS,
   AdminPill,
@@ -28,53 +24,29 @@ import {
   useReducedMotionPreference,
 } from '../../components/adminAnimationHooks';
 
-const normalizeApplicationStatus = (status) =>
-  (status || 'pending').toString().trim().toLowerCase();
-
-const normalizeRole = (role) => (role || '').toString().trim().toLowerCase();
-
-const getDistributorApplicationStatus = (distributor) =>
-  normalizeApplicationStatus(
-    distributor.status ||
-      distributor.approvalStatus ||
-      distributor.accountStatus ||
-      'pending'
-  );
-
-const getRegisteredLocalDistributors = (firestoreDistributors = []) =>
-  getLocalUsers()
-    .filter(
-      (user) =>
-        normalizeRole(user.role) === 'distributor' &&
-        getDistributorApplicationStatus(user) === 'approved'
-    )
-    .map((user) => ({ ...user, id: user.uid, isLocal: true }))
-    .filter(
-      (localUser) =>
-        !firestoreDistributors.some(
-          (firestoreUser) =>
-            firestoreUser.uid === localUser.uid ||
-            firestoreUser.email === localUser.email
-        )
-    );
-
-const defaultStations = ['aquabea', 'bluetap'];
 const BLUE_DARK = '#0D47A1';
 const BLUE = '#187BCD';
 const BLUE_MID = '#42A5F5';
 const BLUE_LIGHT = '#E3F2FD';
+const DEFAULT_STATIONS = ['aquabea', 'bluetap'];
 const LINE_THICKNESS = 3;
 const BARANGAY_DONUT_LIMIT = 8;
 
-const getRequestQuantity = (request) => {
-  if (Array.isArray(request.items) && request.items.length > 0) {
-    return request.items.reduce(
-      (sum, item) => sum + Number(item.quantity || 0),
-      0
-    );
-  }
+const normalizeRole = (role) => (role || '').toString().trim().toLowerCase();
 
-  return Number(request.quantity || 0);
+const normalizeStation = (station) =>
+  (station || '').toString().trim().toLowerCase();
+
+const formatStationName = (station) => {
+  const normalized = normalizeStation(station);
+
+  if (normalized === 'bluetap') return 'BlueTap';
+  if (normalized === 'aquabea') return 'Aquabea';
+
+  return station
+    .toString()
+    .trim()
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
 };
 
 const mergeByIdentity = (items) => {
@@ -90,12 +62,16 @@ const mergeByIdentity = (items) => {
   return Array.from(itemMap.values());
 };
 
-const getFullName = (user = {}) =>
-  `${user.firstName || ''} ${user.lastName || ''}`.trim() ||
-  user.full_name ||
-  user.fullName ||
-  user.email ||
-  'Unnamed user';
+const getRequestQuantity = (request) => {
+  if (Array.isArray(request.items) && request.items.length > 0) {
+    return request.items.reduce(
+      (sum, item) => sum + Number(item.quantity || 0),
+      0
+    );
+  }
+
+  return Number(request.quantity || 0);
+};
 
 const getBarangay = (user = {}) =>
   (user.barangay || user.address || 'Not set').toString().trim() || 'Not set';
@@ -157,32 +133,18 @@ const prepareBarangayDonutRows = (rows = []) => {
   }));
 };
 
-const getJoinedLabel = (user = {}) => {
-  const value = user.createdAt || user.created_at || user.joinedAt || user.joined;
+const buildTrend = (totalSales) => {
+  const sales = Math.max(Number(totalSales || 0), 0);
+  const factors = [0.52, 0.6, 0.56, 0.68, 0.76, 1];
 
-  if (!value) return 'Not set';
-
-  let date = null;
-
-  if (typeof value?.toDate === 'function') {
-    date = value.toDate();
-  } else if (typeof value?.toMillis === 'function') {
-    date = new Date(value.toMillis());
-  } else if (value.seconds) {
-    date = new Date(value.seconds * 1000);
-  } else {
-    date = new Date(value);
-  }
-
-  if (!date || Number.isNaN(date.getTime())) return String(value);
-
-  return new Intl.DateTimeFormat('en-US', {
-    month: 'short',
-    year: 'numeric',
-  }).format(date);
+  return ['Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul'].map((month, index) => ({
+    month,
+    value: sales > 0 ? Math.round(sales * factors[index]) : 0,
+  }));
 };
 
-const buildBarangayRows = (users = []) => {
+const buildBarangayRows = (users = [], search = '') => {
+  const normalizedSearch = search.trim().toLowerCase();
   const counts = new Map();
 
   users.forEach((user) => {
@@ -191,27 +153,56 @@ const buildBarangayRows = (users = []) => {
     counts.set(barangay, (counts.get(barangay) || 0) + 1);
   });
 
-  const rows = Array.from(counts.entries())
+  return Array.from(counts.entries())
     .map(([label, value]) => ({ label, value }))
+    .filter((row) => row.label.toLowerCase().includes(normalizedSearch))
     .sort((left, right) => right.value - left.value);
-
-  return rows.length > 0
-    ? rows
-    : [
-        { label: 'Downtown', value: 0 },
-        { label: 'San Jose', value: 0 },
-        { label: 'Others', value: 0 },
-      ];
 };
 
-const buildTrend = (totalSales) => {
-  const safeSales = Math.max(Number(totalSales || 0), 0);
-  const factors = [0.52, 0.6, 0.56, 0.68, 0.76, 1];
+const buildStationRows = (requests = []) => {
+  const stationMap = new Map();
 
-  return ['Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul'].map((month, index) => ({
-    month,
-    value: safeSales > 0 ? Math.round(safeSales * factors[index]) : 0,
-  }));
+  DEFAULT_STATIONS.forEach((station, index) => {
+    stationMap.set(normalizeStation(station), {
+      active: true,
+      gallons: 0,
+      label: formatStationName(station),
+      order: index,
+    });
+  });
+
+  requests.forEach((request) => {
+    const rawStation =
+      request.water_station ||
+      request.waterStation ||
+      request.station ||
+      request.station_name;
+    const normalized = normalizeStation(rawStation);
+
+    if (!normalized) return;
+
+    const existing = stationMap.get(normalized) || {
+      active: true,
+      gallons: 0,
+      label: formatStationName(rawStation),
+      order: stationMap.size,
+    };
+
+    stationMap.set(normalized, {
+      ...existing,
+      active: true,
+      gallons: existing.gallons + getRequestQuantity(request),
+    });
+  });
+
+  return Array.from(stationMap.values())
+    .sort((left, right) => left.order - right.order)
+    .map((station, index) => ({
+      ...station,
+      id: `${station.label}-${index}`,
+      name: `Station ${String.fromCharCode(65 + index)} - ${station.label}`,
+      sales: `${formatAdminNumber(station.gallons)} gal sold`,
+    }));
 };
 
 const getNiceMax = (value) => {
@@ -730,72 +721,52 @@ const BarangayPanel = ({ progress, rows }) => {
   );
 };
 
-const StationsPanel = ({ progress, stations }) => {
-  const stationRows = stations.map((station, index) => ({
-    id: station,
-    name: `Station ${String.fromCharCode(65 + index)} - ${station}`,
-    gallons:
-      index === 0 ? '5,200 gal sold' : index === 1 ? '3,230 gal sold' : '0 gal sold',
-    active: index < stations.length,
-  }));
+const StationsPanel = ({ progress, rows }) => (
+  <PanelSurface progress={progress} style={styles.stationsPanel}>
+    <Text style={styles.panelTitle}>Stations</Text>
+    <View style={styles.stationList}>
+      {rows.map((station, index) => {
+        const translateX = progress.interpolate({
+          inputRange: [0, 1],
+          outputRange: [16, 0],
+        });
 
-  return (
-    <PanelSurface progress={progress} style={styles.stationsPanel}>
-      <Text style={styles.panelTitle}>Stations</Text>
-      <View style={styles.stationList}>
-        {stationRows.map((station, index) => {
-          const translateX = progress.interpolate({
-            inputRange: [0, 1],
-            outputRange: [16, 0],
-          });
+        return (
+          <Animated.View
+            key={station.id}
+            style={[
+              styles.stationRow,
+              {
+                opacity: progress,
+                transform: [{ translateX }],
+              },
+            ]}
+          >
+            <AdminWaterDrop
+              color={index % 2 === 0 ? BLUE : BLUE_MID}
+              outline={!station.active}
+              size={28}
+            />
+            <View style={styles.stationTextBlock}>
+              <Text style={styles.stationName}>{station.name}</Text>
+              <Text style={styles.stationSales}>{station.sales}</Text>
+            </View>
+            <AdminPill tone={station.active ? 'green' : 'red'}>
+              {station.active ? 'Active' : 'Offline'}
+            </AdminPill>
+          </Animated.View>
+        );
+      })}
+    </View>
+  </PanelSurface>
+);
 
-          return (
-            <Animated.View
-              key={station.id}
-              style={[
-                styles.stationRow,
-                {
-                  opacity: progress,
-                  transform: [{ translateX }],
-                },
-              ]}
-            >
-              <AdminWaterDrop
-                color={index % 2 === 0 ? BLUE : BLUE_MID}
-                outline={!station.active}
-                size={28}
-              />
-              <View style={styles.stationTextBlock}>
-                <Text style={styles.stationName}>{station.name}</Text>
-                <Text style={styles.stationSales}>{station.gallons}</Text>
-              </View>
-              <AdminPill tone={station.active ? 'green' : 'red'}>
-                {station.active ? 'Active' : 'Offline'}
-              </AdminPill>
-            </Animated.View>
-          );
-        })}
-      </View>
-    </PanelSurface>
-  );
-};
-
-export default function AdminDashboard() {
-  const [registeredDistributors, setRegisteredDistributors] = useState([]);
-  const [allUsers, setAllUsers] = useState([]);
+export default function AdminAnalyticsPage() {
   const [search, setSearch] = useState('');
-  const [accountsTab, setAccountsTab] = useState('distributors');
-  const [dashboardStats, setDashboardStats] = useState({
-    registeredUsers: 0,
-    registeredDistributors: 0,
-    registeredRequesters: 0,
-    productSales: 0,
-    stations: defaultStations.length,
-  });
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState('');
-  const [removingId, setRemovingId] = useState(null);
-  const [statsReady, setStatsReady] = useState(false);
+  const [users, setUsers] = useState([]);
+  const [requests, setRequests] = useState([]);
+  const [productSales, setProductSales] = useState(0);
+  const [dataReady, setDataReady] = useState(false);
   const reducedMotion = useReducedMotionPreference();
   const cardProgresses = useRef(
     Array.from({ length: 5 }, () => new Animated.Value(0))
@@ -814,77 +785,10 @@ export default function AdminDashboard() {
   const hasAnimated = useRef(false);
 
   useEffect(() => {
-    let firestoreRegistered = [];
-    let hasResolvedFirestore = false;
-
-    const refreshRegisteredDistributors = (
-      nextFirestoreRegistered = firestoreRegistered,
-      options = {}
-    ) => {
-      firestoreRegistered = nextFirestoreRegistered;
-
-      if (!hasResolvedFirestore && !options.allowBeforeFirestore) {
-        return;
-      }
-
-      setRegisteredDistributors([
-        ...firestoreRegistered,
-        ...getRegisteredLocalDistributors(firestoreRegistered),
-      ]);
-      setLoading(false);
-    };
-
-    const unsubscribeLocalUsers = subscribeLocalUsers(() =>
-      refreshRegisteredDistributors()
-    );
-
-    const registeredQuery = query(
-      collection(db, 'users'),
-      where('role', '==', 'distributor')
-    );
-
-    const unsubscribe = onSnapshot(
-      registeredQuery,
-      (snapshot) => {
-        const firestoreDistributors = snapshot.docs
-          .map((item) => ({
-            id: item.id,
-            uid: item.id,
-            ...item.data(),
-          }))
-          .filter((item) => getDistributorApplicationStatus(item) === 'approved');
-
-        hasResolvedFirestore = true;
-        refreshRegisteredDistributors(firestoreDistributors);
-        setLoadError('');
-      },
-      (error) => {
-        console.log('Registered distributors error:', error.message);
-        setLoadError(error.message);
-        hasResolvedFirestore = true;
-        refreshRegisteredDistributors(firestoreRegistered, {
-          allowBeforeFirestore: true,
-        });
-      }
-    );
-
-    return () => {
-      unsubscribe();
-      unsubscribeLocalUsers();
-    };
-  }, []);
-
-  useEffect(() => {
     let firestoreUsers = [];
     let firestoreRequests = [];
-    let usersReady = false;
-    let requestsReady = false;
 
-    const refreshDashboardStats = () => {
-      if (!usersReady || !requestsReady) {
-        return;
-      }
-
+    const refreshAnalytics = () => {
       const mergedUsers = mergeByIdentity([
         ...firestoreUsers,
         ...getLocalUsers(),
@@ -895,35 +799,17 @@ export default function AdminDashboard() {
         ...firestoreRequests,
         ...localRequests.filter((item) => !requestIds.has(item.id)),
       ];
-      const stationNames = new Set(defaultStations);
-      const registeredRequesters = mergedUsers.filter(
-        (user) => normalizeRole(user.role) === 'requester'
-      ).length;
-      const registeredDistributorCount = mergedUsers.filter(
-        (user) => normalizeRole(user.role) === 'distributor'
-      ).length;
 
-      allRequests.forEach((request) => {
-        if (request.water_station) {
-          stationNames.add(String(request.water_station).trim().toLowerCase());
-        }
-      });
-
-      setAllUsers(mergedUsers);
-      setDashboardStats({
-        registeredUsers: mergedUsers.length,
-        registeredDistributors: registeredDistributorCount,
-        registeredRequesters,
-        productSales: allRequests.reduce(
-          (sum, request) => sum + getRequestQuantity(request),
-          0
-        ),
-        stations: stationNames.size,
-      });
-      setStatsReady(true);
+      setUsers(mergedUsers);
+      setRequests(allRequests);
+      setProductSales(
+        allRequests.reduce((sum, request) => sum + getRequestQuantity(request), 0)
+      );
+      setDataReady(true);
     };
 
-    const unsubscribeLocalUsers = subscribeLocalUsers(refreshDashboardStats);
+    refreshAnalytics();
+    const unsubscribeLocalUsers = subscribeLocalUsers(refreshAnalytics);
 
     const unsubscribeUsers = onSnapshot(
       collection(db, 'users'),
@@ -933,13 +819,11 @@ export default function AdminDashboard() {
           uid: item.id,
           ...item.data(),
         }));
-        usersReady = true;
-        refreshDashboardStats();
+        refreshAnalytics();
       },
       (error) => {
-        console.log('Dashboard users metric error:', error.message);
-        usersReady = true;
-        refreshDashboardStats();
+        console.log('Analytics users error:', error.message);
+        refreshAnalytics();
       }
     );
 
@@ -950,13 +834,11 @@ export default function AdminDashboard() {
           id: item.id,
           ...item.data(),
         }));
-        requestsReady = true;
-        refreshDashboardStats();
+        refreshAnalytics();
       },
       (error) => {
-        console.log('Dashboard requests metric error:', error.message);
-        requestsReady = true;
-        refreshDashboardStats();
+        console.log('Analytics requests error:', error.message);
+        refreshAnalytics();
       }
     );
 
@@ -967,60 +849,8 @@ export default function AdminDashboard() {
     };
   }, []);
 
-  const filteredDistributors = useMemo(() => {
-    const normalizedSearch = search.trim().toLowerCase();
-
-    if (!normalizedSearch) return registeredDistributors;
-
-    return registeredDistributors.filter((distributor) =>
-      [
-        getFullName(distributor),
-        getProfileUniqueId(distributor),
-        distributor.email,
-        distributor.phone,
-        getBarangay(distributor),
-      ]
-        .join(' ')
-        .toLowerCase()
-        .includes(normalizedSearch)
-    );
-  }, [registeredDistributors, search]);
-  const registeredRequesters = useMemo(
-    () =>
-      allUsers.filter((user) => normalizeRole(user.role) === 'requester'),
-    [allUsers]
-  );
-  const filteredRequesters = useMemo(() => {
-    const normalizedSearch = search.trim().toLowerCase();
-
-    if (!normalizedSearch) return registeredRequesters;
-
-    return registeredRequesters.filter((requester) =>
-      [
-        getFullName(requester),
-        getProfileUniqueId(requester),
-        requester.email,
-        requester.phone,
-        getBarangay(requester),
-      ]
-        .join(' ')
-        .toLowerCase()
-        .includes(normalizedSearch)
-    );
-  }, [registeredRequesters, search]);
-  const activeAccounts =
-    accountsTab === 'requesters' ? filteredRequesters : filteredDistributors;
-  const activeAccountsLabel =
-    accountsTab === 'requesters' ? 'requesters' : 'distributors';
-
-  const barangayRows = useMemo(() => buildBarangayRows(allUsers), [allUsers]);
-  const trendData = useMemo(
-    () => buildTrend(dashboardStats.productSales),
-    [dashboardStats.productSales]
-  );
-
   useEffect(() => {
-    if (!statsReady || hasAnimated.current) return;
+    if (!dataReady || hasAnimated.current) return;
 
     hasAnimated.current = true;
     const values = [
@@ -1070,138 +900,98 @@ export default function AdminDashboard() {
     areaProgress,
     barProgress,
     cardProgresses,
+    dataReady,
     legendProgresses,
     lineProgress,
     panelProgress,
     pointProgresses,
     reducedMotion,
     stationProgress,
-    statsReady,
   ]);
 
-  const removeDistributor = async (distributor) => {
-    const id = distributor.uid || distributor.id;
-
-    try {
-      setRemovingId(id);
-      updateLocalUserStatus(id, 'rejected');
-      setRegisteredDistributors((current) =>
-        current.filter((item) => item.uid !== id && item.id !== id)
-      );
-
-      try {
-        const uniqueId = getProfileUniqueId(distributor);
-        const removePayload = {
-          uid: id,
-          firstName: distributor.firstName || '',
-          lastName: distributor.lastName || '',
-          email: distributor.email || '',
-          phone: distributor.phone || '',
-          barangay: distributor.barangay || distributor.address || '',
-          address: distributor.address || distributor.barangay || '',
-          role: 'distributor',
-          approvalStatus: 'rejected',
-          status: 'Rejected',
-          rejectionReason: distributor.rejectionReason || null,
-          removedAt: serverTimestamp(),
-        };
-
-        if (uniqueId) {
-          removePayload.unique_id = uniqueId;
-        }
-
-        await setDoc(doc(db, 'users', id), removePayload, { merge: true });
-      } catch (error) {
-        console.log('Distributor Firestore remove error:', error.message);
-        Alert.alert(
-          'Saved locally',
-          'The distributor was removed on this device, but Firestore did not accept the change.'
-        );
-      }
-    } catch (error) {
-      console.log('Distributor remove error:', error.message);
-      Alert.alert('Remove failed', error.message);
-    } finally {
-      setRemovingId(null);
-    }
-  };
-
-  const confirmRemoveDistributor = (distributor, fullName) => {
-    if (globalThis.confirm) {
-      if (globalThis.confirm(`Remove ${fullName}?`)) {
-        removeDistributor(distributor);
-      }
-      return;
-    }
-
-    Alert.alert('Remove distributor', `Remove ${fullName}?`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Remove',
-        style: 'destructive',
-        onPress: () => removeDistributor(distributor),
-      },
-    ]);
-  };
+  const distributorCount = users.filter(
+    (user) => normalizeRole(user.role) === 'distributor'
+  ).length;
+  const requesterCount = users.filter(
+    (user) => normalizeRole(user.role) === 'requester'
+  ).length;
+  const totalUsers = users.length;
+  const distributorShare =
+    totalUsers > 0 ? Math.round((distributorCount / totalUsers) * 100) : 0;
+  const requesterShare =
+    totalUsers > 0 ? Math.round((requesterCount / totalUsers) * 100) : 0;
+  const trendData = useMemo(() => buildTrend(productSales), [productSales]);
+  const barangayRows = useMemo(
+    () => buildBarangayRows(users, search),
+    [search, users]
+  );
+  const stationRows = useMemo(() => buildStationRows(requests), [requests]);
+  const onlineStations = stationRows.filter((station) => station.active).length;
+  const offlineStations = Math.max(stationRows.length - onlineStations, 0);
 
   return (
     <AdminShell
-      active="dashboard"
-      title="Data overview"
-      subtitle="BlueTap network - updated just now"
+      active="analytics"
+      title="Analytics"
+      subtitle="Sales, users, and barangay breakdowns"
       searchValue={search}
       onSearchChange={setSearch}
+      searchPlaceholder="Search barangay..."
     >
       <View style={styles.metricGrid}>
         <MetricCard
-          label="OVERALL REGISTERED USERS"
-          value={dashboardStats.registeredUsers}
-          helper="+18 this month"
           accent={BLUE}
           delay={0}
-          enabled={statsReady}
+          enabled={dataReady}
+          helper={`${totalUsers} total accounts`}
+          label="OVERALL REGISTERED USERS"
           progress={cardProgresses[0]}
           reducedMotion={reducedMotion}
+          value={totalUsers}
         />
         <MetricCard
-          label="REGISTERED DISTRIBUTORS"
-          value={dashboardStats.registeredDistributors}
-          helper="Approved and pending"
           accent={BLUE_DARK}
           delay={120}
-          enabled={statsReady}
+          enabled={dataReady}
+          helper={`${distributorShare}% of user base`}
+          label="REGISTERED DISTRIBUTORS"
           progress={cardProgresses[1]}
           reducedMotion={reducedMotion}
+          value={distributorCount}
         />
         <MetricCard
-          label="REGISTERED REQUESTERS"
-          value={dashboardStats.registeredRequesters}
-          helper="Active user base"
           accent={BLUE_MID}
           delay={240}
-          enabled={statsReady}
+          enabled={dataReady}
+          helper={`${requesterShare}% of user base`}
+          label="REGISTERED REQUESTERS"
           progress={cardProgresses[2]}
           reducedMotion={reducedMotion}
+          value={requesterCount}
         />
         <MetricCard
-          label="PRODUCT SALES (GALLONS)"
-          value={dashboardStats.productSales}
-          helper="+22% vs last month"
           accent={BLUE}
           delay={360}
-          enabled={statsReady}
+          enabled={dataReady}
+          helper="Total ordered"
+          label="PRODUCT SALES (GALLONS)"
           progress={cardProgresses[3]}
           reducedMotion={reducedMotion}
+          value={productSales}
         />
         <MetricCard
-          label="STATIONS ONLINE"
-          value={`${dashboardStats.stations} / ${dashboardStats.stations}`}
-          helper="All stations active"
-          accent={BLUE_MID}
+          accent={offlineStations > 0 ? ADMIN_COLORS.red : BLUE_MID}
           delay={480}
-          enabled={statsReady}
+          enabled={dataReady}
+          helper={
+            offlineStations > 0
+              ? `${offlineStations} station offline`
+              : 'All stations active'
+          }
+          label="STATIONS ONLINE"
           progress={cardProgresses[4]}
           reducedMotion={reducedMotion}
+          value={`${onlineStations} / ${stationRows.length}`}
         />
       </View>
 
@@ -1219,130 +1009,12 @@ export default function AdminDashboard() {
 
       <View style={styles.panelGrid}>
         <CompositionPanel
-          distributors={dashboardStats.registeredDistributors}
+          distributors={distributorCount}
           legendProgresses={legendProgresses}
           panelProgress={panelProgress}
-          requesters={dashboardStats.registeredRequesters}
+          requesters={requesterCount}
         />
-        <StationsPanel
-          progress={stationProgress}
-          stations={Array.from(new Set(defaultStations))}
-        />
-      </View>
-
-      <View style={styles.tableCard}>
-        <View style={styles.tableHeader}>
-          <Text style={styles.tableTitle}>Registered accounts</Text>
-          <View style={styles.tableTabs}>
-            <TouchableOpacity
-              activeOpacity={0.82}
-              style={
-                accountsTab === 'distributors'
-                  ? styles.tableTabActive
-                  : styles.tableTab
-              }
-              onPress={() => setAccountsTab('distributors')}
-            >
-              <Text
-                style={
-                  accountsTab === 'distributors'
-                    ? styles.tableTabActiveText
-                    : styles.tableTabText
-                }
-              >
-                Distributors {registeredDistributors.length}
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              activeOpacity={0.82}
-              style={
-                accountsTab === 'requesters'
-                  ? styles.tableTabActive
-                  : styles.tableTab
-              }
-              onPress={() => setAccountsTab('requesters')}
-            >
-              <Text
-                style={
-                  accountsTab === 'requesters'
-                    ? styles.tableTabActiveText
-                    : styles.tableTabText
-                }
-              >
-                Requesters {dashboardStats.registeredRequesters}
-              </Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        <View style={[styles.tableRow, styles.tableHeadRow]}>
-          <Text style={[styles.th, styles.nameCol]}>NAME</Text>
-          <Text style={[styles.th, styles.idCol]}>UNIQUE ID</Text>
-          <Text style={[styles.th, styles.contactCol]}>CONTACT</Text>
-          <Text style={[styles.th, styles.emailCol]}>EMAIL</Text>
-          <Text style={[styles.th, styles.barangayCol]}>BARANGAY</Text>
-          <Text style={[styles.th, styles.joinedCol]}>JOINED</Text>
-          <Text style={[styles.th, styles.actionsCol]}>ACTIONS</Text>
-        </View>
-
-        {loading ? (
-          <View style={styles.emptyState}>
-            <ActivityIndicator color={ADMIN_COLORS.blue} size="small" />
-          </View>
-        ) : activeAccounts.length === 0 ? (
-          <View style={styles.emptyState}>
-            <Text style={styles.emptyText}>
-              No registered {activeAccountsLabel} yet.
-            </Text>
-            {!!loadError && <Text style={styles.errorText}>Firestore: {loadError}</Text>}
-          </View>
-        ) : (
-          activeAccounts.map((account) => {
-            const fullName = getFullName(account);
-            const accountId = account.uid || account.id;
-            const isDistributorRow = accountsTab === 'distributors';
-            const isRemoving = removingId === accountId;
-
-            return (
-              <View key={accountId || account.email} style={styles.tableRow}>
-                <Text style={[styles.tdName, styles.nameCol]} numberOfLines={1}>
-                  {fullName}
-                </Text>
-                <Text style={[styles.td, styles.idCol]} numberOfLines={1}>
-                  {getProfileUniqueId(account) || 'Not set'}
-                </Text>
-                <Text style={[styles.td, styles.contactCol]} numberOfLines={1}>
-                  {account.phone || 'Not set'}
-                </Text>
-                <Text style={[styles.tdLink, styles.emailCol]} numberOfLines={1}>
-                  {account.email || 'Not set'}
-                </Text>
-                <Text style={[styles.td, styles.barangayCol]} numberOfLines={1}>
-                  {getBarangay(account)}
-                </Text>
-                <Text style={[styles.td, styles.joinedCol]} numberOfLines={1}>
-                  {getJoinedLabel(account)}
-                </Text>
-                <View style={[styles.actionsCell, styles.actionsCol]}>
-                  {isDistributorRow ? (
-                    <TouchableOpacity
-                      activeOpacity={0.82}
-                      style={[styles.removeButton, isRemoving && styles.actionDisabled]}
-                      onPress={() => confirmRemoveDistributor(account, fullName)}
-                      disabled={isRemoving}
-                    >
-                      <Text style={styles.removeButtonText}>
-                        {isRemoving ? 'Removing...' : 'Remove'}
-                      </Text>
-                    </TouchableOpacity>
-                  ) : (
-                    <Text style={styles.noActionText}>View only</Text>
-                  )}
-                </View>
-              </View>
-            );
-          })
-        )}
+        <StationsPanel progress={stationProgress} rows={stationRows} />
       </View>
     </AdminShell>
   );
@@ -1677,140 +1349,5 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
     marginTop: 4,
-  },
-  tableCard: {
-    backgroundColor: ADMIN_COLORS.card,
-    borderWidth: 1,
-    borderColor: ADMIN_COLORS.border,
-    borderRadius: 8,
-    padding: 20,
-  },
-  tableHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 16,
-  },
-  tableTitle: {
-    color: ADMIN_COLORS.text,
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
-  tableTabs: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  tableTabActive: {
-    borderRadius: 20,
-    backgroundColor: ADMIN_COLORS.blue,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-  },
-  tableTabActiveText: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: 'bold',
-  },
-  tableTab: {
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: ADMIN_COLORS.border,
-    backgroundColor: '#FFFFFF',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-  },
-  tableTabText: {
-    color: ADMIN_COLORS.muted,
-    fontSize: 12,
-    fontWeight: 'bold',
-  },
-  tableRow: {
-    minHeight: 42,
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderBottomWidth: 1,
-    borderBottomColor: ADMIN_COLORS.border,
-  },
-  tableHeadRow: {
-    minHeight: 38,
-  },
-  th: {
-    color: ADMIN_COLORS.muted,
-    fontSize: 11,
-    fontWeight: 'bold',
-  },
-  td: {
-    color: ADMIN_COLORS.muted,
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  tdName: {
-    color: ADMIN_COLORS.text,
-    fontSize: 13,
-    fontWeight: 'bold',
-  },
-  tdLink: {
-    color: ADMIN_COLORS.blue,
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  nameCol: {
-    flex: 1.35,
-  },
-  idCol: {
-    flex: 1.05,
-  },
-  contactCol: {
-    flex: 1.05,
-  },
-  emailCol: {
-    flex: 1.65,
-  },
-  barangayCol: {
-    flex: 1,
-  },
-  joinedCol: {
-    flex: 0.85,
-  },
-  actionsCol: {
-    flex: 0.8,
-    textAlign: 'right',
-  },
-  actionsCell: {
-    alignItems: 'flex-end',
-  },
-  removeButton: {
-    borderRadius: 999,
-    backgroundColor: '#FFE9E9',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-  },
-  removeButtonText: {
-    color: ADMIN_COLORS.red,
-    fontSize: 12,
-    fontWeight: 'bold',
-  },
-  noActionText: {
-    color: ADMIN_COLORS.muted,
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  actionDisabled: {
-    opacity: 0.6,
-  },
-  emptyState: {
-    minHeight: 86,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  emptyText: {
-    color: ADMIN_COLORS.muted,
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  errorText: {
-    color: ADMIN_COLORS.red,
-    fontSize: 12,
-    marginTop: 8,
   },
 });
