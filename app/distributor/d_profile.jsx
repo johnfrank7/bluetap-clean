@@ -563,7 +563,7 @@ export default function DistributorProfilePage() {
                   <Image
                     source={require('../../assets/icons/bluetapwhitelogo.png')}
                     style={styles.helpIcon}
-                    tintColor="#FFFFFF"
+                    tintColor={BLUE}
                   />
                 </View>
               </TouchableOpacity>
@@ -753,15 +753,17 @@ const styles = StyleSheet.create({
   },
   helpCard: {
     marginTop: 22,
-    backgroundColor: BLUE,
+    backgroundColor: '#FFFFFF',
     borderRadius: 20,
+    borderWidth: 1,
+    borderColor: CARD_BORDER,
     padding: 18,
     ...createShadow({
       color: '#0D47A1',
-      elevation: 5,
-      opacity: 0.12,
-      radius: 9,
-      offset: { width: 0, height: 4 },
+      elevation: 6,
+      opacity: 0.1,
+      radius: 10,
+      offset: { width: 0, height: 5 },
     }),
   },
   helpRow: {
@@ -774,19 +776,19 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   helpTitle: {
-    color: '#FFFFFF',
+    color: BLUE,
     fontSize: 19,
     fontWeight: 'bold',
   },
   helpSubtitle: {
-    color: '#EAF4FF',
+    color: TEXT_DARK,
     fontSize: 13,
     lineHeight: 17,
     marginTop: 6,
   },
   helpIconWrapper: {
     borderWidth: 2,
-    borderColor: '#FFFFFF',
+    borderColor: BLUE,
     borderRadius: 999,
     padding: 6,
   },
@@ -799,20 +801,20 @@ const styles = StyleSheet.create({
     minHeight: 44,
     borderWidth: 1.5,
     borderColor: BLUE,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: BLUE,
     borderRadius: 13,
     alignItems: 'center',
     justifyContent: 'center',
     flexDirection: 'row',
   },
   logoutIcon: {
-    color: BLUE,
+    color: '#FFFFFF',
     fontSize: 15,
     fontWeight: 'bold',
     marginRight: 8,
   },
   logoutText: {
-    color: BLUE,
+    color: '#FFFFFF',
     fontWeight: 'bold',
     fontSize: 14,
   },

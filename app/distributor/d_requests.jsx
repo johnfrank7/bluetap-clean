@@ -996,61 +996,6 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     marginTop: 5,
   },
-  modalBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(8, 31, 51, 0.46)',
-    justifyContent: 'flex-end',
-    alignItems: 'center',
-  },
-  detailsModal: {
-    width: '100%',
-    maxWidth: 375,
-    backgroundColor: '#FFFFFF',
-    borderTopLeftRadius: 22,
-    borderTopRightRadius: 22,
-    paddingHorizontal: 20,
-    paddingTop: 18,
-    paddingBottom: 30,
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  modalTitle: {
-    color: BLUE,
-    fontSize: 18,
-    fontWeight: 'bold',
-  },
-  modalCloseText: {
-    color: BLUE,
-    fontSize: 13,
-    fontWeight: 'bold',
-  },
-  modalDivider: {
-    height: 1,
-    backgroundColor: BLUE_LIGHT,
-    marginTop: 12,
-    marginBottom: 12,
-  },
-  modalDetailsList: {
-    maxHeight: 520,
-  },
-  modalDetailRow: {
-    marginBottom: 11,
-  },
-  modalDetailLabel: {
-    color: TEXT_MUTED,
-    fontSize: 12,
-    fontWeight: 'bold',
-    marginBottom: 2,
-  },
-  modalDetailValue: {
-    color: TEXT_DARK,
-    fontSize: 14,
-    fontWeight: '700',
-    lineHeight: 18,
-  },
   sheetRoot: {
     flex: 1,
     justifyContent: 'flex-end',
