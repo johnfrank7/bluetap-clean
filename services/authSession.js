@@ -3,6 +3,7 @@ import { doc, getDoc } from 'firebase/firestore';
 
 import { auth, db } from '../firebase';
 import { saveLocalUser } from '../localUsers';
+import { ensureUserUniqueId } from './uniqueIds';
 
 const ACTIVE_SESSION_KEY = 'bluetapActiveAuthSession';
 const MODULE_SESSIONS_KEY = 'bluetapModuleAuthSessions';
@@ -209,7 +210,11 @@ export const fetchFirestoreUserProfile = async (user) => {
     return null;
   }
 
-  const profile = buildFirestoreProfile(user, snapshot.data());
+  let profile = buildFirestoreProfile(user, snapshot.data());
+
+  if (profile.role === 'requester' || profile.role === 'distributor') {
+    profile = await ensureUserUniqueId(user, profile);
+  }
 
   if (profile.role) {
     saveLocalUser(profile);

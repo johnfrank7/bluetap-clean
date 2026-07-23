@@ -24,13 +24,17 @@ import {
   signInWithEmailAndPassword,
   signOut,
 } from 'firebase/auth';
-import { doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
+import { doc, getDoc, serverTimestamp } from 'firebase/firestore';
 import { findLocalUserByEmail, saveLocalUser } from '../localUsers';
 import {
   clearAllAuthSessions,
   saveAdminSession,
   saveRoleSession,
 } from '../services/authSession';
+import {
+  ensureUserUniqueId,
+  saveUserProfileWithUniqueId,
+} from '../services/uniqueIds';
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const applicationPendingTitle = 'Application Pending';
@@ -355,15 +359,21 @@ export default function LoginPage() {
             return;
           }
 
+          let savedLocalProfile = localProfileData;
+
           try {
-            await setDoc(
-              doc(db, 'users', user.uid),
+            const syncedProfile = await saveUserProfileWithUniqueId(
+              user.uid,
+              localRole,
               {
                 ...localProfileData,
                 updatedAt: serverTimestamp(),
-              },
-              { merge: true }
+              }
             );
+            savedLocalProfile = {
+              ...localProfileData,
+              unique_id: syncedProfile.unique_id,
+            };
           } catch (error) {
             console.log('Local profile Firestore sync error:', error.message);
             clearAllAuthSessions();
@@ -372,7 +382,8 @@ export default function LoginPage() {
             return;
           }
 
-          finishSuccessfulLogin(localProfileData);
+          saveLocalUser(savedLocalProfile);
+          finishSuccessfulLogin(savedLocalProfile);
           return;
         }
 
@@ -391,7 +402,7 @@ export default function LoginPage() {
         userData,
         profileRole === 'distributor' ? 'pending' : 'approved'
       );
-      const profileData = {
+      let profileData = {
         uid: user.uid,
         ...userData,
         role: profileRole,
@@ -406,6 +417,10 @@ export default function LoginPage() {
         await signOut(auth);
         showNotification('Login failed', 'This account has no valid role.');
         return;
+      }
+
+      if (profileRole === 'requester' || profileRole === 'distributor') {
+        profileData = await ensureUserUniqueId(user, profileData);
       }
 
       if (profileRole === 'distributor' && profileApplicationStatus !== 'approved') {
@@ -439,7 +454,7 @@ export default function LoginPage() {
     try {
       setLoading(true);
 
-      const localUserData = {
+      let localUserData = {
         uid: pendingUser.uid,
         firstName: '',
         lastName: '',
@@ -453,18 +468,24 @@ export default function LoginPage() {
         rejectionReason: null,
       };
 
-      saveLocalUser(localUserData);
-
       try {
-        await setDoc(doc(db, 'users', pendingUser.uid), {
+        const savedProfile = await saveUserProfileWithUniqueId(
+          pendingUser.uid,
+          role,
+          {
+            ...localUserData,
+            createdAt: serverTimestamp(),
+          }
+        );
+
+        localUserData = {
           ...localUserData,
-          createdAt: serverTimestamp(),
-        });
+          unique_id: savedProfile.unique_id,
+        };
+        saveLocalUser(localUserData);
       } catch (error) {
         console.log('Profile setup Firestore error:', error.message);
-        if (role === 'requester') {
-          throw error;
-        }
+        throw error;
       }
 
       setPendingUser(null);

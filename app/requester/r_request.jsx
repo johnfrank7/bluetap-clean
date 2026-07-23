@@ -194,7 +194,14 @@ const getDetailsRequestData = (request) =>
         waterStation: request.water_station || 'Not set',
         paymentMethod:
           request.payment_method || request.paymentMethod || 'Not set',
+        requesterName: request.requester_name || 'Not set',
+        requesterUniqueId:
+          request.requester_unique_id ||
+          findLocalUserForAuthRole(auth.currentUser, 'requester')?.unique_id ||
+          '',
         customerName: request.requester_name || 'Not set',
+        distributorName: request.distributor_name || '',
+        distributorUniqueId: request.distributor_unique_id || '',
         contactNumber: request.contact_number || 'Not set',
         deliveryAddress: request.address || 'Not set',
         items: getRequestItems(request),

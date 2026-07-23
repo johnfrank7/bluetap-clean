@@ -44,6 +44,13 @@ export default function RequestDetailsModal({
   onClose,
   request,
 }) {
+  const requesterUniqueId =
+    request?.requesterUniqueId || request?.requester_unique_id || '';
+  const distributorName =
+    request?.distributorName || request?.distributor_name || '';
+  const distributorUniqueId =
+    request?.distributorUniqueId || request?.distributor_unique_id || '';
+  const hasDistributorInfo = !!(distributorName || distributorUniqueId);
   const products = Array.isArray(request?.items)
     ? request.items.map(normalizeProduct)
     : [];
@@ -68,6 +75,21 @@ export default function RequestDetailsModal({
       { label: 'Water Station', value: request?.waterStation },
       { label: 'Payment Method', value: request?.paymentMethod },
     ],
+  ];
+  const customerRows = [
+    [
+      { label: 'Requester Name', value: request?.requesterName || request?.customerName },
+      { label: 'Requester ID', value: requesterUniqueId },
+    ],
+    ...(hasDistributorInfo
+      ? [
+          [
+            { label: 'Distributor Name', value: distributorName },
+            { label: 'Distributor ID', value: distributorUniqueId },
+          ],
+        ]
+      : []),
+    [{ label: 'Contact Number', value: request?.contactNumber }],
   ];
 
   return (
@@ -121,21 +143,24 @@ export default function RequestDetailsModal({
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>Customer Information</Text>
               <View style={styles.customerGrid}>
-                <View style={styles.customerRow}>
-                  <View style={styles.customerCell}>
-                    <Text style={styles.summaryLabel}>Customer Name</Text>
-                    <Text style={styles.summaryValue} numberOfLines={2}>
-                      {displayValue(request?.customerName)}
-                    </Text>
+                {customerRows.map((row, rowIndex) => (
+                  <View
+                    key={`customer-row-${rowIndex}`}
+                    style={[
+                      styles.customerRow,
+                      rowIndex > 0 && styles.customerRowDivider,
+                    ]}
+                  >
+                    {row.map((item) => (
+                      <View key={item.label} style={styles.customerCell}>
+                        <Text style={styles.summaryLabel}>{item.label}</Text>
+                        <Text style={styles.summaryValue} numberOfLines={2}>
+                          {displayValue(item.value)}
+                        </Text>
+                      </View>
+                    ))}
                   </View>
-
-                  <View style={styles.customerCell}>
-                    <Text style={styles.summaryLabel}>Contact Number</Text>
-                    <Text style={styles.summaryValue} numberOfLines={2}>
-                      {displayValue(request?.contactNumber)}
-                    </Text>
-                  </View>
-                </View>
+                ))}
 
                 <View style={[styles.customerCell, styles.addressCell]}>
                   <Text style={styles.summaryLabel}>Delivery Address</Text>
@@ -309,6 +334,10 @@ const styles = StyleSheet.create({
   },
   customerRow: {
     flexDirection: 'row',
+  },
+  customerRowDivider: {
+    borderTopWidth: 1,
+    borderTopColor: BLUE_LIGHT,
   },
   customerCell: {
     flex: 1,

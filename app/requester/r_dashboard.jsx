@@ -498,7 +498,14 @@ export default function RequesterDashboard() {
           detailsRequest.payment_method ||
           detailsRequest.paymentMethod ||
           'Not set',
+        requesterName: detailsRequest.requester_name || 'Not set',
+        requesterUniqueId:
+          detailsRequest.requester_unique_id ||
+          findLocalUserForAuthRole(auth.currentUser, 'requester')?.unique_id ||
+          '',
         customerName: detailsRequest.requester_name || 'Not set',
+        distributorName: detailsRequest.distributor_name || '',
+        distributorUniqueId: detailsRequest.distributor_unique_id || '',
         contactNumber: detailsRequest.contact_number || 'Not set',
         deliveryAddress: detailsRequest.address || 'Not set',
         items: getRequestItems(detailsRequest),

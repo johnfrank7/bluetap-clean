@@ -17,11 +17,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 
-import { auth, db } from '../firebase';
+import { auth } from '../firebase';
 import { createUserWithEmailAndPassword, deleteUser, signOut } from 'firebase/auth';
-import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { serverTimestamp } from 'firebase/firestore';
 import { saveLocalUser } from '../localUsers';
 import { clearAllAuthSessions, saveRoleSession } from '../services/authSession';
+import { saveUserProfileWithUniqueId } from '../services/uniqueIds';
 
 const barangayOptions = [
   'Awihao',
@@ -401,23 +402,19 @@ export default function SignupPage() {
         rejectionReason: null,
       };
 
-      saveLocalUser(userData);
+      const savedProfile = await saveUserProfileWithUniqueId(user.uid, type, {
+        ...userData,
+        createdAt: serverTimestamp(),
+      });
+      const savedUserData = {
+        ...userData,
+        unique_id: savedProfile.unique_id,
+      };
 
-      try {
-        await setDoc(doc(db, 'users', user.uid), {
-          ...userData,
-          createdAt: serverTimestamp(),
-        });
-      } catch (error) {
-        console.log('Signup profile save error:', error.message);
-
-        if (!isDistributor) {
-          throw error;
-        }
-      }
+      saveLocalUser(savedUserData);
 
       if (type === 'requester') {
-        saveRoleSession(userData);
+        saveRoleSession(savedUserData);
         router.replace('/requester/r_dashboard');
       } else {
         clearAllAuthSessions();
@@ -433,11 +430,16 @@ export default function SignupPage() {
     } catch (error) {
       console.log('Signup error:', error.message);
       clearAllAuthSessions();
-      if (createdUser && type !== 'distributor') {
+      if (createdUser) {
         try {
           await deleteUser(createdUser);
         } catch (deleteError) {
           console.log('Signup cleanup error:', deleteError.message);
+          try {
+            await signOut(auth);
+          } catch (signOutError) {
+            console.log('Signup sign out cleanup error:', signOutError.message);
+          }
         }
       }
       showNotification('Signup failed', getAuthErrorMessage(error));

@@ -21,6 +21,7 @@ import { auth, db } from '../../firebase';
 import { doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
 import { findLocalUserForAuthRole, saveLocalUser } from '../../localUsers';
 import { normalizeRole, signOutAndClearSessions } from '../../services/authSession';
+import { ensureUserUniqueId, getProfileUniqueId } from '../../services/uniqueIds';
 import { createShadow } from '../../components/shadowStyles';
 
 const BLUE = '#187BCD';
@@ -129,6 +130,7 @@ export default function ProfilePage() {
       const hasFreshCache =
         cachedRequesterProfile &&
         cachedRequesterProfileUid === profileUid &&
+        getProfileUniqueId(cachedRequesterProfile) &&
         Date.now() - cachedRequesterProfileFetchedAt < PROFILE_CACHE_TTL_MS;
 
       if (hasFreshCache) {
@@ -167,13 +169,14 @@ export default function ProfilePage() {
             return;
           }
 
-          const nextProfile = buildProfileData(
+          let nextProfile = buildProfileData(
             {
               ...localProfile,
               ...firestoreProfile,
             },
             user
           );
+          nextProfile = await ensureUserUniqueId(user, nextProfile);
 
           cacheProfile(nextProfile);
 
@@ -208,6 +211,7 @@ export default function ProfilePage() {
   const profileDisplay = useMemo(
     () => ({
       fullName: getFullName(userData),
+      uniqueId: getProfileUniqueId(userData),
       phone: userData?.phone || '',
       email: userData?.email || auth.currentUser?.email || '',
       address: userData?.address || '',
@@ -349,6 +353,11 @@ export default function ProfilePage() {
               </View>
             ) : (
               <>
+                <ProfileField
+                  label="Unique ID"
+                  value={profileDisplay.uniqueId}
+                />
+
                 <ProfileField
                   label="Full Name"
                   value={editingProfile ? profileDraft.fullName : profileDisplay.fullName}

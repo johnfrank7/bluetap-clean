@@ -60,6 +60,9 @@ const PENDING_REQUESTS = [
     productName: 'Purified Mineral Water',
     container: 'New Container',
     requester: 'Jeanne Ortega',
+    requesterId: 'REQ-000001',
+    distributor: 'Distributor',
+    distributorId: 'DIS-000001',
     contact: '09123456789',
     address: 'Poblacion, Toledo City',
     deliveryDate: 'Jan 25, 2026',
@@ -70,6 +73,9 @@ const PENDING_REQUESTS = [
     productName: 'Purified Mineral Water',
     container: 'Exchange Container',
     requester: 'Franz Caliguid',
+    requesterId: 'REQ-000002',
+    distributor: 'Distributor',
+    distributorId: 'DIS-000001',
     contact: '09123456789',
     address: 'Tajao, Pinamungajan',
     deliveryDate: 'Jan 25, 2026',
@@ -180,6 +186,13 @@ const PendingRequestCard = memo(function PendingRequestCard({
             </Text>
 
             <Text style={[styles.compactLabel, styles.compactLabelGap]}>
+              Requester ID
+            </Text>
+            <Text style={styles.compactValue} numberOfLines={1}>
+              {request.requesterId || request.requester_unique_id || 'Not set'}
+            </Text>
+
+            <Text style={[styles.compactLabel, styles.compactLabelGap]}>
               Contact Number
             </Text>
             <Text style={styles.compactValue} numberOfLines={1}>
@@ -191,6 +204,13 @@ const PendingRequestCard = memo(function PendingRequestCard({
             <Text style={styles.compactLabel}>Product Ordered</Text>
             <Text style={styles.compactPrimaryValue} numberOfLines={1}>
               {request.productName}
+            </Text>
+
+            <Text style={[styles.compactLabel, styles.compactLabelGap]}>
+              Distributor ID
+            </Text>
+            <Text style={styles.compactValue} numberOfLines={1}>
+              {request.distributorId || request.distributor_unique_id || 'Not set'}
             </Text>
 
             <Text style={[styles.compactLabel, styles.compactLabelGap]}>
@@ -635,6 +655,9 @@ export default function DistributorRequests() {
                 {[
                   ['Request ID', detailsRequest.id],
                   ['Customer Name', detailsRequest.requester],
+                  ['Requester ID', detailsRequest.requesterId || detailsRequest.requester_unique_id || 'Not set'],
+                  ['Distributor Name', detailsRequest.distributor || detailsRequest.distributor_name || 'Not set'],
+                  ['Distributor ID', detailsRequest.distributorId || detailsRequest.distributor_unique_id || 'Not set'],
                   ['Contact Number', detailsRequest.contact],
                   ['Delivery Address', detailsRequest.address],
                   ['Product', detailsRequest.productName],

@@ -18,6 +18,7 @@ import { collection, doc, onSnapshot, query, serverTimestamp, setDoc, where } fr
 import { getLocalUsers, subscribeLocalUsers, updateLocalUserStatus } from '../../localUsers';
 import { getLocalRequests } from '../../services/requests';
 import { signOutAndClearSessions } from '../../services/authSession';
+import { getProfileUniqueId } from '../../services/uniqueIds';
 import { createShadow } from '../../components/shadowStyles';
 
 const normalizeApplicationStatus = (status) =>
@@ -227,22 +228,29 @@ export default function AdminDashboard() {
       );
 
       try {
+        const uniqueId = getProfileUniqueId(distributor);
+        const removePayload = {
+          uid: id,
+          firstName: distributor.firstName || '',
+          lastName: distributor.lastName || '',
+          email: distributor.email || '',
+          phone: distributor.phone || '',
+          barangay: distributor.barangay || distributor.address || '',
+          address: distributor.address || distributor.barangay || '',
+          role: 'distributor',
+          approvalStatus: 'rejected',
+          status: 'Rejected',
+          rejectionReason: distributor.rejectionReason || null,
+          removedAt: serverTimestamp(),
+        };
+
+        if (uniqueId) {
+          removePayload.unique_id = uniqueId;
+        }
+
         await setDoc(
           doc(db, 'users', id),
-          {
-            uid: id,
-            firstName: distributor.firstName || '',
-            lastName: distributor.lastName || '',
-            email: distributor.email || '',
-            phone: distributor.phone || '',
-            barangay: distributor.barangay || distributor.address || '',
-            address: distributor.address || distributor.barangay || '',
-            role: 'distributor',
-            approvalStatus: 'rejected',
-            status: 'Rejected',
-            rejectionReason: distributor.rejectionReason || null,
-            removedAt: serverTimestamp(),
-          },
+          removePayload,
           { merge: true }
         );
       } catch (error) {
@@ -408,6 +416,7 @@ export default function AdminDashboard() {
               {/* Table header */}
               <View style={[styles.row, styles.tableHeaderRow]}>
                 <Text style={[styles.cell, styles.cellNameHeader]}>Name</Text>
+                <Text style={[styles.cell, styles.cellIdHeader]}>Unique ID</Text>
                 <Text style={[styles.cell, styles.cellPhoneHeader]}>Contact Number</Text>
                 <Text style={[styles.cell, styles.cellEmailHeader]}>Email Address</Text>
                 <Text style={[styles.cell, styles.cellActionsHeader]}>Actions</Text>
@@ -436,6 +445,9 @@ export default function AdminDashboard() {
                       style={[styles.row, idx % 2 === 1 && styles.rowStriped]}
                     >
                       <Text style={[styles.cell, styles.cellName]}>{fullName}</Text>
+                      <Text style={[styles.cell, styles.cellId]}>
+                        {getProfileUniqueId(d) || 'Not set'}
+                      </Text>
                       <Text style={[styles.cell, styles.cellPhone]}>{d.phone || 'Not set'}</Text>
                       <Text style={[styles.cell, styles.cellEmail]}>{d.email || 'Not set'}</Text>
                       <View style={[styles.cell, styles.cellActions]}>
@@ -695,11 +707,13 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#455A64',
   },
-  cellNameHeader: { flex: 2, fontWeight: 'bold' },
+  cellNameHeader: { flex: 1.7, fontWeight: 'bold' },
+  cellIdHeader: { flex: 1.1, fontWeight: 'bold' },
   cellPhoneHeader: { flex: 1.4, fontWeight: 'bold' },
   cellEmailHeader: { flex: 2, fontWeight: 'bold' },
   cellActionsHeader: { flex: 1, fontWeight: 'bold', textAlign: 'right' },
-  cellName: { flex: 2 },
+  cellName: { flex: 1.7 },
+  cellId: { flex: 1.1 },
   cellPhone: { flex: 1.4 },
   cellEmail: { flex: 2 },
   cellActions: {

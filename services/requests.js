@@ -73,7 +73,15 @@ const normalizeRequest = (id, data = {}) => {
     id,
     request_id: data.request_id || '',
     requester_id: (data.requester_id || '').toString().trim(),
+    requester_unique_id:
+      (data.requester_unique_id || data.requesterUniqueId || '').toString().trim(),
     requester_name: data.requester_name || '',
+    distributor_id: (data.distributor_id || data.distributorId || '').toString().trim(),
+    distributor_unique_id:
+      (data.distributor_unique_id || data.distributorUniqueId || '')
+        .toString()
+        .trim(),
+    distributor_name: data.distributor_name || data.distributorName || '',
     contact_number: data.contact_number || '',
     address: data.address || '',
     product_id: data.product_id || items[0]?.product_id || '',
@@ -407,7 +415,20 @@ export const createRequest = async (requestData) => {
   const requestPayload = {
     request_id: createRequestNumber(),
     requester_id: requesterId,
+    requester_unique_id:
+      (requestData.requester_unique_id || requestData.requesterUniqueId || '')
+        .toString()
+        .trim(),
     requester_name: requestData.requester_name,
+    distributor_id:
+      (requestData.distributor_id || requestData.distributorId || '')
+        .toString()
+        .trim(),
+    distributor_unique_id:
+      (requestData.distributor_unique_id || requestData.distributorUniqueId || '')
+        .toString()
+        .trim(),
+    distributor_name: requestData.distributor_name || requestData.distributorName || '',
     contact_number: requestData.contact_number,
     address: requestData.address,
     product_id: firstItem.product_id || requestData.product_id || '',

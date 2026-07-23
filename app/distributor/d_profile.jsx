@@ -19,6 +19,7 @@ import { auth, db } from '../../firebase';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { findLocalUserForAuthRole, saveLocalUser } from '../../localUsers';
 import { normalizeRole, signOutAndClearSessions } from '../../services/authSession';
+import { ensureUserUniqueId, getProfileUniqueId } from '../../services/uniqueIds';
 import BlueTapHeader from '../../components/BlueTapHeader';
 import { createShadow } from '../../components/shadowStyles';
 
@@ -87,6 +88,7 @@ const getDistributorId = (profile) => {
   const safeProfile = getProfileObject(profile);
 
   return (
+    getProfileUniqueId(safeProfile) ||
     safeProfile.distributor_id ||
     safeProfile.distributorId ||
     safeProfile.uid ||
@@ -245,12 +247,15 @@ export default function DistributorProfilePage() {
         const snap = await getDoc(doc(db, 'users', user.uid));
 
         if (snap.exists()) {
-          const profile = buildProfileData(snap.data(), user);
+          let profile = buildProfileData(snap.data(), user);
 
           if (normalizeRole(profile.role) !== 'distributor') {
             router.replace('/login');
             return;
           }
+
+          profile = await ensureUserUniqueId(user, profile);
+          saveLocalUser(profile);
 
           if (isMounted) {
             setUserData(profile);
@@ -287,7 +292,7 @@ export default function DistributorProfilePage() {
       email: userData?.email || auth.currentUser?.email || '',
       address: getAddress(userData),
       waterStation: getWaterStation(userData) || 'Not Assigned',
-      distributorId: getDistributorId(userData) || auth.currentUser?.uid || 'Not set',
+      distributorId: getDistributorId(userData) || 'Not set',
       role: getRoleLabel(userData?.role || 'distributor'),
     }),
     [userData]
@@ -484,7 +489,7 @@ export default function DistributorProfilePage() {
                 />
 
                 <ProfileField
-                  label="Distributor ID"
+                  label="Unique ID"
                   value={profileDisplay.distributorId}
                 />
 

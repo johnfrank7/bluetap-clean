@@ -20,6 +20,7 @@ import { findLocalUserForAuthRole } from '../../localUsers';
 import { normalizeRole } from '../../services/authSession';
 import { createRequest } from '../../services/requests';
 import { subscribeProducts } from '../../services/products';
+import { ensureUserUniqueId, getProfileUniqueId } from '../../services/uniqueIds';
 
 const containerOptions = ['New Container', 'Exchange'];
 const waterStationOptions = ['aquabea', 'bluetap'];
@@ -50,6 +51,7 @@ const getDefaultDeliveryDate = () => {
 
 const emptyRequesterInfo = {
   id: '',
+  uniqueId: '',
   fullName: 'Not set',
   phone: 'Not set',
   address: 'Not set',
@@ -138,6 +140,7 @@ export default function RequestFormPage() {
           uid: user.uid,
           email: user.email || profile?.email || '',
         };
+        profile = await ensureUserUniqueId(user, profile);
       } else {
         router.replace('/login');
         return;
@@ -150,6 +153,7 @@ export default function RequestFormPage() {
 
       setRequesterInfo({
         id: profile?.uid || '',
+        uniqueId: getProfileUniqueId(profile),
         fullName,
         phone: profile?.phone || 'Not set',
         address: profile?.address || 'Not set',
@@ -234,6 +238,14 @@ export default function RequestFormPage() {
       return false;
     }
 
+    if (!requesterInfo.uniqueId) {
+      Alert.alert(
+        'Missing requester ID',
+        'Please wait for your Unique ID to finish loading before submitting a request.'
+      );
+      return false;
+    }
+
     if (syncedOrderItems.length === 0) {
       Alert.alert('Choose product', 'Please add at least one product to your order.');
       return false;
@@ -266,6 +278,7 @@ export default function RequestFormPage() {
 
       await createRequest({
         requester_id: requesterInfo.id,
+        requester_unique_id: requesterInfo.uniqueId,
         requester_name: requesterInfo.fullName,
         contact_number: requesterInfo.phone,
         address: requesterInfo.address,
@@ -327,6 +340,10 @@ export default function RequestFormPage() {
               <View style={styles.infoRow}>
                 <Text style={styles.fieldLabel}>Full Name</Text>
                 <Text style={styles.infoValue}>{requesterInfo.fullName}</Text>
+              </View>
+              <View style={styles.infoRow}>
+                <Text style={styles.fieldLabel}>Requester ID</Text>
+                <Text style={styles.infoValue}>{requesterInfo.uniqueId || 'Not set'}</Text>
               </View>
               <View style={styles.infoRow}>
                 <Text style={styles.fieldLabel}>Contact Number</Text>
@@ -555,6 +572,9 @@ export default function RequestFormPage() {
               <Text style={styles.modalTitle}>Order Summary</Text>
 
               <Text style={styles.summaryText}>Requester: {requesterInfo.fullName}</Text>
+              <Text style={styles.summaryText}>
+                Requester ID: {requesterInfo.uniqueId || 'Not set'}
+              </Text>
               <Text style={styles.summaryText}>Container: {container}</Text>
               <Text style={styles.summaryText}>Water Station: {waterStation}</Text>
               <Text style={styles.summaryText}>Delivery Date: {deliveryDate}</Text>

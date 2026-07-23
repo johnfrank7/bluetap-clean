@@ -26,6 +26,7 @@ import {
 } from 'firebase/firestore';
 import { getLocalUsers, subscribeLocalUsers, updateLocalUserStatus } from '../../localUsers';
 import { signOutAndClearSessions } from '../../services/authSession';
+import { getProfileUniqueId, saveUserProfileWithUniqueId } from '../../services/uniqueIds';
 import { createShadow } from '../../components/shadowStyles';
 
 const normalizeApplicationStatus = (status) =>
@@ -68,8 +69,9 @@ const getPendingLocalDistributors = (firestoreDistributors = []) =>
 const buildDistributorUpdate = (distributor, approvalStatus, rejectionReason = '') => {
   const uid = distributor.uid || distributor.id;
   const isRejected = approvalStatus === 'rejected';
+  const uniqueId = getProfileUniqueId(distributor);
 
-  return {
+  const update = {
     uid,
     firstName: distributor.firstName || '',
     lastName: distributor.lastName || '',
@@ -83,6 +85,12 @@ const buildDistributorUpdate = (distributor, approvalStatus, rejectionReason = '
     rejectionReason: isRejected ? rejectionReason : null,
     reviewedAt: serverTimestamp(),
   };
+
+  if (uniqueId) {
+    update.unique_id = uniqueId;
+  }
+
+  return update;
 };
 
 export default function AdminRequestPage() {
@@ -158,6 +166,21 @@ export default function AdminRequestPage() {
 
     try {
       setUpdatingId(id);
+      let distributorWithUniqueId = distributor;
+
+      try {
+        distributorWithUniqueId = await saveUserProfileWithUniqueId(
+          id,
+          'distributor',
+          {
+            uid: id,
+            role: 'distributor',
+          }
+        );
+      } catch (error) {
+        console.log('Distributor Unique ID review error:', error.message);
+      }
+
       updateLocalUserStatus(id, approvalStatus, { rejectionReason });
       setPendingDistributors((current) =>
         current.filter((distributor) => distributor.uid !== id && distributor.id !== id)
@@ -166,7 +189,14 @@ export default function AdminRequestPage() {
       try {
         await setDoc(
           doc(db, 'users', id),
-          buildDistributorUpdate(distributor, approvalStatus, rejectionReason),
+          buildDistributorUpdate(
+            {
+              ...distributor,
+              ...distributorWithUniqueId,
+            },
+            approvalStatus,
+            rejectionReason
+          ),
           { merge: true }
         );
       } catch (error) {
@@ -290,6 +320,7 @@ export default function AdminRequestPage() {
               {/* Table header */}
               <View style={[styles.row, styles.tableHeaderRow]}>
                 <Text style={[styles.cell, styles.cellNameHeader]}>Name</Text>
+                <Text style={[styles.cell, styles.cellIdHeader]}>Unique ID</Text>
                 <Text style={[styles.cell, styles.cellPhoneHeader]}>Contact Number</Text>
                 <Text style={[styles.cell, styles.cellEmailHeader]}>Email Address</Text>
                 <Text style={[styles.cell, styles.cellActionsHeader]}>Actions</Text>
@@ -318,6 +349,9 @@ export default function AdminRequestPage() {
                       style={[styles.row, idx % 2 === 1 && styles.rowStriped]}
                     >
                       <Text style={[styles.cell, styles.cellName]}>{fullName}</Text>
+                      <Text style={[styles.cell, styles.cellId]}>
+                        {getProfileUniqueId(d) || 'Not set'}
+                      </Text>
                       <Text style={[styles.cell, styles.cellPhone]}>{d.phone || 'Not set'}</Text>
                       <Text style={[styles.cell, styles.cellEmail]}>{d.email || 'Not set'}</Text>
                       <View style={[styles.cell, styles.cellActions]}>
@@ -579,11 +613,13 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#455A64',
   },
-  cellNameHeader: { flex: 1.7, fontWeight: 'bold' },
+  cellNameHeader: { flex: 1.5, fontWeight: 'bold' },
+  cellIdHeader: { flex: 1.1, fontWeight: 'bold' },
   cellPhoneHeader: { flex: 1.3, fontWeight: 'bold' },
   cellEmailHeader: { flex: 2, fontWeight: 'bold' },
   cellActionsHeader: { flex: 1.6, fontWeight: 'bold', textAlign: 'center' },
-  cellName: { flex: 1.7 },
+  cellName: { flex: 1.5 },
+  cellId: { flex: 1.1 },
   cellPhone: { flex: 1.3 },
   cellEmail: { flex: 2 },
   cellActions: {

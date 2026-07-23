@@ -41,8 +41,11 @@ const CURRENT_REQUEST = {
   requestId: 'BT-01245',
   orderDate: 'Jan 25, 2026',
   customerName: 'Jeanne Ortega',
+  requesterUniqueId: 'REQ-000001',
   contactNumber: '09123456789',
   deliveryAddress: 'Poblacion, Toledo City',
+  distributorName: DISTRIBUTOR_NAME,
+  distributorUniqueId: 'DIS-000001',
   productsOrdered: 'Purified Mineral Water',
   quantity: '3 Gallons',
   containerType: 'New Container',
@@ -166,7 +169,18 @@ export default function DistributorDashboard() {
           activeRequest.paymentMethod ||
           activeRequest.payment_method ||
           'Not set',
+        requesterName: activeRequest.customerName || activeRequest.requester_name || 'Not set',
+        requesterUniqueId:
+          activeRequest.requesterUniqueId ||
+          activeRequest.requester_unique_id ||
+          '',
         customerName: activeRequest.customerName || activeRequest.requester_name || 'Not set',
+        distributorName:
+          activeRequest.distributorName || activeRequest.distributor_name || '',
+        distributorUniqueId:
+          activeRequest.distributorUniqueId ||
+          activeRequest.distributor_unique_id ||
+          '',
         contactNumber: activeRequest.contactNumber || activeRequest.contact_number || 'Not set',
         deliveryAddress:
           activeRequest.deliveryAddress || activeRequest.address || 'Not set',
@@ -238,12 +252,28 @@ export default function DistributorDashboard() {
                       >
                         {activeRequest.customerName}
                       </Text>
+                      <Text style={[styles.infoGridLabel, styles.infoGridLabelGap]}>
+                        Requester ID
+                      </Text>
+                      <Text style={styles.infoGridValue} numberOfLines={1}>
+                        {activeRequest.requesterUniqueId ||
+                          activeRequest.requester_unique_id ||
+                          'Not set'}
+                      </Text>
                     </View>
 
                     <View style={styles.infoGridColumn}>
                       <Text style={styles.infoGridLabel}>Amount Due</Text>
                       <Text style={styles.infoGridValue} numberOfLines={1}>
                         {formatAmountDue(activeRequest.total_cost)}
+                      </Text>
+                      <Text style={[styles.infoGridLabel, styles.infoGridLabelGap]}>
+                        Distributor ID
+                      </Text>
+                      <Text style={styles.infoGridValue} numberOfLines={1}>
+                        {activeRequest.distributorUniqueId ||
+                          activeRequest.distributor_unique_id ||
+                          'Not set'}
                       </Text>
                     </View>
                   </View>
@@ -503,6 +533,9 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: 'bold',
     marginBottom: 3,
+  },
+  infoGridLabelGap: {
+    marginTop: 8,
   },
   infoGridPrimaryValue: {
     color: BLUE,
