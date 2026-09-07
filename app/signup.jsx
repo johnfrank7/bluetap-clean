@@ -3,7 +3,6 @@ import React from 'react';
 import {
   View,
   Text,
-  Image,
   StyleSheet,
   TouchableOpacity,
   TextInput,
@@ -476,10 +475,6 @@ export default function SignupPage() {
             }}
           >
 
-            <View style={styles.dripContainer}>
-              <Image source={require('../assets/icons/meltdrop.png')} style={styles.dripImage} resizeMode="cover" />
-            </View>
-
             <View style={styles.logoSection}>
               <Text style={styles.appName}>BlueTap</Text>
               <Text style={styles.tagline}>Water Within Reach</Text>
@@ -728,9 +723,7 @@ const styles = StyleSheet.create({
   container: { flex: 1, width: '100%' },
   phoneWrapper: { width: '100%', maxWidth: 480, alignSelf: 'center', flex: 1 },
   scrollContent: { flexGrow: 1, paddingBottom: BASE_SCROLL_PADDING_BOTTOM },
-  dripContainer: { width: '100%', height: 120, alignItems: 'center', overflow: 'hidden' },
-  dripImage: { width: '100%', height: '100%' },
-  logoSection: { alignItems: 'center', justifyContent: 'center', paddingVertical: 20, marginBottom: 20 },
+  logoSection: { alignItems: 'center', justifyContent: 'center', paddingTop: 48, paddingBottom: 20, marginBottom: 20 },
   appName: { color: '#FFFFFF', fontSize: 36, fontWeight: 'bold', marginBottom: 6 },
   tagline: { color: '#FFFFFF', fontSize: 16, fontWeight: '300' },
   formContainer: { width: '100%', paddingHorizontal: 24, marginBottom: 16 },

@@ -586,14 +586,6 @@ export default function LoginPage() {
               scrollOffsetRef.current = event.nativeEvent.contentOffset.y;
             }}
           >
-            <View style={styles.dripContainer}>
-              <Image
-                source={require('../assets/icons/meltdrop.png')}
-                style={styles.dripImage}
-                resizeMode="cover"
-              />
-            </View>
-
             <View style={styles.logoSection}>
               <Image
                 source={require('../assets/icons/bluetapwhitelogo.png')}
@@ -790,20 +782,11 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     paddingBottom: BASE_SCROLL_PADDING_BOTTOM,
   },
-  dripContainer: {
-    width: '100%',
-    height: 120,
-    alignItems: 'center',
-    overflow: 'hidden',
-  },
-  dripImage: {
-    width: '100%',
-    height: '100%',
-  },
   logoSection: {
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 20,
+    paddingTop: 48,
+    paddingBottom: 20,
     marginBottom: 20,
   },
   logo: {
