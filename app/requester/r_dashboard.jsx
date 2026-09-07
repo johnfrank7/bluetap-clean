@@ -28,7 +28,7 @@ import {
   subscribeRequesterCurrentRequests,
 } from '../../services/requests';
 
-const PHONE_MAX_WIDTH = 375;
+const REQUESTER_APP_MAX_WIDTH = 480;
 const DASHBOARD_HORIZONTAL_PADDING = 34;
 const PRODUCT_CARD_WIDTH_RATIO = 0.88;
 const PRODUCT_CAROUSEL_HEIGHT = 226;
@@ -269,7 +269,11 @@ export default function RequesterDashboard() {
   const [requestToCancel, setRequestToCancel] = useState(null);
   const [detailsRequest, setDetailsRequest] = useState(null);
   const [notification, setNotification] = useState(null);
-  const productCarouselWidth = Math.max(1, Math.min(windowWidth, PHONE_MAX_WIDTH));
+  const productCarouselWidth = Math.max(
+    1,
+    Math.min(windowWidth, REQUESTER_APP_MAX_WIDTH) -
+      DASHBOARD_HORIZONTAL_PADDING * 2
+  );
   const productCarouselItemWidth = Math.max(
     1,
     Math.round(productCarouselWidth * PRODUCT_CARD_WIDTH_RATIO)
@@ -557,7 +561,6 @@ export default function RequesterDashboard() {
                       {
                         width: productCarouselWidth,
                         height: PRODUCT_CAROUSEL_HEIGHT,
-                        marginLeft: -DASHBOARD_HORIZONTAL_PADDING,
                       },
                     ]}
                     itemWidth={productCarouselItemWidth}

@@ -14,8 +14,6 @@ import { createShadow } from './shadowStyles';
 const BLUE = '#187BCD';
 const ICON_SIZE = 26;
 const ACTIVE_SCALE = 1.1;
-const INDICATOR_WIDTH = 28;
-const NAV_BUTTON_WIDTH = 36;
 const NAV_HORIZONTAL_PADDING = 28;
 const ANIMATION_DURATION = 250;
 
@@ -115,16 +113,6 @@ function useReduceMotion() {
   return reduceMotion;
 }
 
-function getIndicatorX(width, index, itemCount) {
-  if (!width || index < 0) return 0;
-
-  const firstCenter = NAV_HORIZONTAL_PADDING + NAV_BUTTON_WIDTH / 2;
-  const lastCenter = width - NAV_HORIZONTAL_PADDING - NAV_BUTTON_WIDTH / 2;
-  const step = itemCount > 1 ? (lastCenter - firstCenter) / (itemCount - 1) : 0;
-
-  return firstCenter + step * index - INDICATOR_WIDTH / 2;
-}
-
 function normalizePath(path = '') {
   const normalizedPath = path.split('?')[0].replace(/\/+$/, '');
   return normalizedPath || '/';
@@ -209,10 +197,6 @@ function BottomNav({ dashboardVariant = false, items }) {
   const router = useRouter();
   const segments = useSegments();
   const reduceMotion = useReduceMotion();
-  const [navWidth, setNavWidth] = useState(0);
-  const indicatorX = useRef(new Animated.Value(0)).current;
-  const indicatorOpacity = useRef(new Animated.Value(0)).current;
-  const hasPositionedIndicator = useRef(false);
 
   const activeIndex = useMemo(
     () =>
@@ -220,62 +204,10 @@ function BottomNav({ dashboardVariant = false, items }) {
     [items, pathname, segments]
   );
 
-  useEffect(() => {
-    if (!navWidth || activeIndex < 0) {
-      Animated.timing(indicatorOpacity, {
-        toValue: 0,
-        duration: reduceMotion ? 0 : ANIMATION_DURATION,
-        easing: Easing.out(Easing.cubic),
-        useNativeDriver: true,
-      }).start();
-      return;
-    }
-
-    const targetX = getIndicatorX(navWidth, activeIndex, items.length);
-
-    if (!hasPositionedIndicator.current || reduceMotion) {
-      indicatorX.setValue(targetX);
-      hasPositionedIndicator.current = true;
-    } else {
-      Animated.timing(indicatorX, {
-        toValue: targetX,
-        duration: ANIMATION_DURATION,
-        easing: Easing.out(Easing.cubic),
-        useNativeDriver: true,
-      }).start();
-    }
-
-    Animated.timing(indicatorOpacity, {
-      toValue: 1,
-      duration: reduceMotion ? 0 : ANIMATION_DURATION,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: true,
-    }).start();
-  }, [
-    activeIndex,
-    indicatorOpacity,
-    indicatorX,
-    items.length,
-    navWidth,
-    reduceMotion,
-  ]);
-
   return (
     <View
       style={[styles.bottomNav, dashboardVariant && styles.dashboardBottomNav]}
-      onLayout={(event) => setNavWidth(event.nativeEvent.layout.width)}
     >
-      <Animated.View
-        pointerEvents="none"
-        style={[
-          styles.activeIndicator,
-          {
-            opacity: indicatorOpacity,
-            transform: [{ translateX: indicatorX }],
-          },
-        ]}
-      />
-
       {items.map((item, index) => {
         const isActive = index === activeIndex;
 
@@ -338,15 +270,6 @@ const styles = StyleSheet.create({
     left: 34,
     right: 34,
     borderRadius: 24,
-  },
-  activeIndicator: {
-    position: 'absolute',
-    top: 7,
-    left: 0,
-    width: INDICATOR_WIDTH,
-    height: 4,
-    borderRadius: 999,
-    backgroundColor: BLUE,
   },
   navButton: {
     width: 36,
