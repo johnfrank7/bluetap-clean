@@ -3,6 +3,7 @@ import { doc, getDoc } from 'firebase/firestore';
 
 import { auth, db } from '../firebase';
 import { saveLocalUser } from '../localUsers';
+import { normalizeFaceVerification } from './faceVerification';
 import { ensureUserUniqueId } from './uniqueIds';
 
 const ACTIVE_SESSION_KEY = 'bluetapActiveAuthSession';
@@ -186,7 +187,7 @@ export const subscribeAuthSessionChanges = (listener) => {
 const normalizeApprovalStatus = (status) =>
   (status || 'pending').toString().trim().toLowerCase();
 
-const getDistributorApplicationStatus = (profile = {}) =>
+export const getDistributorApplicationStatus = (profile = {}) =>
   normalizeApprovalStatus(
     profile.approvalStatus ||
       profile.status ||
@@ -210,10 +211,18 @@ export const fetchFirestoreUserProfile = async (user) => {
     return null;
   }
 
-  let profile = buildFirestoreProfile(user, snapshot.data());
+  let profile = {
+    ...buildFirestoreProfile(user, snapshot.data()),
+    faceVerification: normalizeFaceVerification(snapshot.data()),
+  };
 
   if (profile.role === 'requester' || profile.role === 'distributor') {
-    profile = await ensureUserUniqueId(user, profile);
+    const { faceVerification, ...profileWithoutFaceVerification } = profile;
+    const profileWithUniqueId = await ensureUserUniqueId(user, profileWithoutFaceVerification);
+    profile = {
+      ...profileWithUniqueId,
+      faceVerification,
+    };
   }
 
   if (profile.role) {
@@ -302,6 +311,17 @@ export const validateRoleAccess = async (expectedRole) => {
       redirectTo: getRoleHomePath(profile.role),
       clearRole: expected,
       actualRole: profile.role,
+    };
+  }
+
+  if (
+    (profile.role === 'requester' || profile.role === 'distributor') &&
+    normalizeFaceVerification(profile).status !== 'verified'
+  ) {
+    return {
+      status: 'verification-required',
+      message: 'Identity verification is required.',
+      redirectTo: '/verification',
     };
   }
 

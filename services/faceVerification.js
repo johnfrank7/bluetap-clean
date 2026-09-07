@@ -1,0 +1,110 @@
+import { doc, getDoc, onSnapshot } from 'firebase/firestore';
+
+import { db } from '../firebase';
+
+// Keep this false in production. A real verification provider/backend must own
+// the transition to `verified` and any temporary selfie/video handling.
+export const DEV_FACE_VERIFICATION = false;
+
+const FACE_VERIFICATION_STATUSES = new Set([
+  'unverified',
+  'pending',
+  'verified',
+  'review_required',
+  'failed',
+]);
+
+const DUPLICATE_CHECK_STATUSES = new Set(['unknown', 'clear', 'flagged']);
+
+export const createUnverifiedFaceVerification = () => ({
+  status: 'unverified',
+  verifiedAt: null,
+  verificationId: null,
+  livenessPassed: null,
+  duplicateCheck: 'unknown',
+  failureReason: null,
+});
+
+/**
+ * Normalizes profile data from Firestore without storing or deriving biometric data.
+ * A flagged duplicate check always requires review, regardless of another status.
+ */
+export const normalizeFaceVerification = (profile = {}) => {
+  const value = profile?.faceVerification || profile || {};
+  const requestedStatus = (value.status || 'unverified').toString().trim().toLowerCase();
+  const duplicateCheck = (value.duplicateCheck || 'unknown').toString().trim().toLowerCase();
+  const safeDuplicateCheck = DUPLICATE_CHECK_STATUSES.has(duplicateCheck)
+    ? duplicateCheck
+    : 'unknown';
+  const safeStatus = FACE_VERIFICATION_STATUSES.has(requestedStatus)
+    ? requestedStatus
+    : 'unverified';
+
+  return {
+    status: safeDuplicateCheck === 'flagged' ? 'review_required' : safeStatus,
+    verifiedAt: value.verifiedAt || null,
+    verificationId: value.verificationId || null,
+    livenessPassed:
+      typeof value.livenessPassed === 'boolean' ? value.livenessPassed : null,
+    duplicateCheck: safeDuplicateCheck,
+    failureReason: value.failureReason || null,
+  };
+};
+
+/**
+ * Backend-ready provider entry point. No biometric capture or verification occurs
+ * in this client. With the production flag disabled, this intentionally does not
+ * write to Firestore or claim that a user has been verified.
+ */
+export const startFaceVerification = async (user) => {
+  if (!user?.uid) {
+    return { started: false, reason: 'unauthenticated' };
+  }
+
+  if (!DEV_FACE_VERIFICATION) {
+    return { started: false, reason: 'not-configured' };
+  }
+
+  // DEVELOPMENT ONLY: retain the integration shape without auto-verifying or
+  // writing any biometric-related profile fields from the client.
+  return { started: false, reason: 'development-adapter-not-configured' };
+};
+
+export const getFaceVerificationStatus = async (uid) => {
+  if (!uid) return createUnverifiedFaceVerification();
+
+  const snapshot = await getDoc(doc(db, 'users', uid));
+  return snapshot.exists()
+    ? normalizeFaceVerification(snapshot.data())
+    : createUnverifiedFaceVerification();
+};
+
+export const subscribeFaceVerification = (uid, listener, onError) => {
+  if (!uid) {
+    listener?.(createUnverifiedFaceVerification());
+    return () => {};
+  }
+
+  return onSnapshot(
+    doc(db, 'users', uid),
+    (snapshot) => {
+      listener?.(
+        snapshot.exists()
+          ? normalizeFaceVerification(snapshot.data())
+          : createUnverifiedFaceVerification()
+      );
+    },
+    (error) => {
+      console.log('Face verification status subscription error:', error.message);
+      onError?.(error);
+    }
+  );
+};
+
+/**
+ * Reserved for a trusted backend/provider handoff. This client deliberately does
+ * not write `pending`, `verified`, liveness, duplicate-check, or timestamp fields.
+ * Production Firestore rules should allow those faceVerification fields to be
+ * written only by trusted server-side code.
+ */
+export const markVerificationPending = async (uid) => getFaceVerificationStatus(uid);

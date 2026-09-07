@@ -35,6 +35,10 @@ import {
   ensureUserUniqueId,
   saveUserProfileWithUniqueId,
 } from '../services/uniqueIds';
+import {
+  createUnverifiedFaceVerification,
+  normalizeFaceVerification,
+} from '../services/faceVerification';
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const applicationPendingTitle = 'Application Pending';
@@ -275,8 +279,16 @@ export default function LoginPage() {
     }, keyboardVisibleRef.current ? 60 : 320);
   };
 
-  const navigateToRoleHome = (role) => {
-    const normalizedRole = normalizeRole(role);
+  const navigateToRoleHome = (profile) => {
+    const normalizedRole = normalizeRole(profile?.role || profile);
+
+    if (
+      (normalizedRole === 'requester' || normalizedRole === 'distributor') &&
+      normalizeFaceVerification(profile).status !== 'verified'
+    ) {
+      router.replace('/verification');
+      return;
+    }
 
     if (normalizedRole === 'admin') {
       router.replace('/admin/dashboard');
@@ -301,7 +313,7 @@ export default function LoginPage() {
     showNotification(
       'Successfully logged in',
       'You have successfully logged in.',
-      () => navigateToRoleHome(role)
+      () => navigateToRoleHome(profile)
     );
   };
 
@@ -374,6 +386,43 @@ export default function LoginPage() {
             return;
           }
 
+          // A missing Firestore profile has no trusted provider result. Never use a
+          // locally cached value to bypass verification or write a verified status.
+          const localFaceVerification = createUnverifiedFaceVerification();
+
+          if (localFaceVerification.status !== 'verified') {
+            let verificationProfile = {
+              ...localProfileData,
+              faceVerification: localFaceVerification,
+            };
+
+            try {
+              const syncedProfile = await saveUserProfileWithUniqueId(
+                user.uid,
+                localRole,
+                {
+                  ...verificationProfile,
+                  updatedAt: serverTimestamp(),
+                }
+              );
+              verificationProfile = {
+                ...verificationProfile,
+                unique_id: syncedProfile.unique_id,
+                faceVerification: normalizeFaceVerification(syncedProfile),
+              };
+            } catch (error) {
+              console.log('Local verification profile Firestore sync error:', error.message);
+              clearAllAuthSessions();
+              await signOut(auth);
+              showNotification('Login failed', getAuthErrorMessage(error));
+              return;
+            }
+
+            saveLocalUser(verificationProfile);
+            finishSuccessfulLogin(verificationProfile);
+            return;
+          }
+
           if (localRole === 'distributor' && localApplicationStatus !== 'approved') {
             clearAllAuthSessions();
             await signOut(auth);
@@ -435,6 +484,7 @@ export default function LoginPage() {
         approvalStatus: profileApplicationStatus,
         status: toApplicationStatus(profileApplicationStatus),
         rejectionReason: userData.rejectionReason || null,
+        faceVerification: normalizeFaceVerification(userData),
       };
 
       if (!['admin', 'requester', 'distributor'].includes(profileRole)) {
@@ -445,7 +495,21 @@ export default function LoginPage() {
       }
 
       if (profileRole === 'requester' || profileRole === 'distributor') {
-        profileData = await ensureUserUniqueId(user, profileData);
+        const { faceVerification, ...profileWithoutFaceVerification } = profileData;
+        const profileWithUniqueId = await ensureUserUniqueId(user, profileWithoutFaceVerification);
+        profileData = {
+          ...profileWithUniqueId,
+          faceVerification,
+        };
+      }
+
+      if (
+        (profileRole === 'requester' || profileRole === 'distributor') &&
+        normalizeFaceVerification(profileData).status !== 'verified'
+      ) {
+        saveLocalUser(profileData);
+        finishSuccessfulLogin(profileData);
+        return;
       }
 
       if (profileRole === 'distributor' && profileApplicationStatus !== 'approved') {
@@ -491,6 +555,7 @@ export default function LoginPage() {
         approvalStatus: role === 'distributor' ? 'pending' : 'approved',
         status: role === 'distributor' ? 'Pending' : 'Approved',
         rejectionReason: null,
+        faceVerification: createUnverifiedFaceVerification(),
       };
 
       try {

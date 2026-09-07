@@ -21,6 +21,7 @@ import { createUserWithEmailAndPassword, deleteUser, signOut } from 'firebase/au
 import { serverTimestamp } from 'firebase/firestore';
 import { saveLocalUser } from '../localUsers';
 import { clearAllAuthSessions, saveRoleSession } from '../services/authSession';
+import { createUnverifiedFaceVerification } from '../services/faceVerification';
 import { saveUserProfileWithUniqueId } from '../services/uniqueIds';
 
 const barangayOptions = [
@@ -392,6 +393,7 @@ export default function SignupPage() {
         approvalStatus: isDistributor ? 'pending' : 'approved',
         status: isDistributor ? 'Pending' : 'Approved',
         rejectionReason: null,
+        faceVerification: createUnverifiedFaceVerification(),
       };
 
       const savedProfile = await saveUserProfileWithUniqueId(user.uid, type, {
@@ -407,7 +409,7 @@ export default function SignupPage() {
 
       if (type === 'requester') {
         saveRoleSession(savedUserData);
-        router.replace('/requester/r_dashboard');
+        router.replace('/verification');
       } else {
         clearAllAuthSessions();
         await signOut(auth);
