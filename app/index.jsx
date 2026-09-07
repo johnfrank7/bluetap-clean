@@ -392,7 +392,7 @@ function WebLanding({ router, width }) {
               )}
               <ActionButton
                 label="Get Started"
-                onPress={() => router.push('/signup')}
+                onPress={() => router.push('/login?signup=true')}
                 isDark={isDark}
                 style={[styles.navGetStarted, !isDesktop && styles.navGetStartedCompact]}
               />
@@ -421,13 +421,13 @@ function WebLanding({ router, width }) {
               <View style={[styles.heroActions, !isDesktop && styles.heroActionsCompact]}>
                 <ActionButton
                   label="Order Water"
-                  onPress={() => router.push('/signup')}
+                  onPress={() => router.push('/login?signup=true')}
                   isDark={isDark}
                   style={!isDesktop && styles.heroActionCompact}
                 />
                 <ActionButton
                   label="Become a Distributor"
-                  onPress={() => router.push('/signup')}
+                  onPress={() => router.push('/login?signup=true')}
                   variant="outline"
                   isDark={isDark}
                   style={!isDesktop && styles.heroActionCompact}
@@ -532,7 +532,7 @@ function WebLanding({ router, width }) {
               </View>
               <ActionButton
                 label="Apply as Distributor"
-                onPress={() => router.push('/signup')}
+                onPress={() => router.push('/login?signup=true')}
                 isDark={isDark}
                 style={styles.distributorAction}
               />
@@ -558,7 +558,7 @@ function WebLanding({ router, width }) {
             <View style={[styles.ctaActions, !isDesktop && styles.ctaActionsCompact]}>
               <ActionButton
                 label="Get Started"
-                onPress={() => router.push('/signup')}
+                onPress={() => router.push('/login?signup=true')}
                 variant="light"
                 style={!isDesktop && styles.ctaActionCompact}
               />
@@ -627,7 +627,7 @@ function NativeLanding({ router, width }) {
           <View style={styles.nativeActions}>
             <ActionButton
               label="Get Started"
-              onPress={() => router.push('/signup')}
+              onPress={() => router.push('/login?signup=true')}
               variant="light"
               style={styles.nativeActionButton}
             />

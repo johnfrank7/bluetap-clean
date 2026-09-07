@@ -15,7 +15,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 
 import { auth, db } from '../firebase';
 import {
@@ -112,6 +112,7 @@ const getFieldKeyboardGap = (field) =>
 
 export default function LoginPage() {
   const router = useRouter();
+  const { signup } = useLocalSearchParams();
   const emailInputRef = React.useRef(null);
   const passwordInputRef = React.useRef(null);
   const scrollViewRef = React.useRef(null);
@@ -125,6 +126,7 @@ export default function LoginPage() {
   const [password, setPassword] = React.useState('');
   const [loading, setLoading] = React.useState(false);
   const [pendingUser, setPendingUser] = React.useState(null);
+  const [signupOptionsVisible, setSignupOptionsVisible] = React.useState(false);
   const [forgotPasswordVisible, setForgotPasswordVisible] = React.useState(false);
   const [resetEmail, setResetEmail] = React.useState('');
   const [resetEmailError, setResetEmailError] = React.useState('');
@@ -132,6 +134,12 @@ export default function LoginPage() {
   const [notification, setNotification] = React.useState(null);
   const [keyboardBottomInset, setKeyboardBottomInset] = React.useState(0);
   const isLoginSuccessVisible = notification?.title === 'Successfully logged in';
+
+  React.useEffect(() => {
+    if (signup === 'true') {
+      setSignupOptionsVisible(true);
+    }
+  }, [signup]);
 
   const clearFocusScrollTimeout = React.useCallback(() => {
     if (focusScrollTimeoutRef.current) {
@@ -239,6 +247,23 @@ export default function LoginPage() {
     const onConfirm = notification?.onConfirm;
     setNotification(null);
     onConfirm?.();
+  };
+
+  const openSignupOptions = () => {
+    setSignupOptionsVisible(true);
+  };
+
+  const closeSignupOptions = () => {
+    setSignupOptionsVisible(false);
+
+    if (signup === 'true') {
+      router.replace('/login');
+    }
+  };
+
+  const startSignup = (role) => {
+    setSignupOptionsVisible(false);
+    router.push({ pathname: '/signup', params: { role } });
   };
 
   const handleInputFocus = (field) => {
@@ -655,7 +680,7 @@ export default function LoginPage() {
                 Need an account?{' '}
                 <Text
                   style={styles.signupLink}
-                  onPress={() => router.push('/signup')}
+                  onPress={openSignupOptions}
                 >
                   Click here to sign up.
                 </Text>
@@ -663,6 +688,38 @@ export default function LoginPage() {
             </View>
           </ScrollView>
         </View>
+
+        <Modal visible={signupOptionsVisible} transparent animationType="slide">
+          <View style={styles.modalBackground}>
+            <View style={styles.modalContainer}>
+              <Text style={styles.modalTitle}>Choose Account Type</Text>
+
+              <TouchableOpacity
+                style={styles.modalButton}
+                onPress={() => startSignup('requester')}
+                disabled={loading}
+              >
+                <Text style={styles.modalButtonText}>Requester</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.modalButton}
+                onPress={() => startSignup('distributor')}
+                disabled={loading}
+              >
+                <Text style={styles.modalButtonText}>Distributor</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.modalCancel}
+                onPress={closeSignupOptions}
+                disabled={loading}
+              >
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
 
         <Modal visible={!!pendingUser} transparent animationType="slide">
           <View style={styles.modalBackground}>
@@ -883,12 +940,14 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.5)',
     justifyContent: 'center',
     alignItems: 'center',
+    paddingHorizontal: 20,
   },
   modalContainer: {
-    width: '85%',
+    width: '100%',
+    maxWidth: 420,
     backgroundColor: '#fff',
     borderRadius: 20,
-    padding: 20,
+    padding: 24,
     alignItems: 'center',
   },
   modalTitle: {

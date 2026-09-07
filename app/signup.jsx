@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 
 import { auth } from '../firebase';
 import { createUserWithEmailAndPassword, deleteUser, signOut } from 'firebase/auth';
@@ -144,8 +144,8 @@ const getFieldKeyboardGap = (field) =>
 
 export default function SignupPage() {
   const router = useRouter();
-  const [modalVisible, setModalVisible] = React.useState(true);
-  const [selectedAccountType, setSelectedAccountType] = React.useState(null);
+  const { role } = useLocalSearchParams();
+  const selectedAccountType = role === 'requester' || role === 'distributor' ? role : null;
   const [loading, setLoading] = React.useState(false);
 
   const [firstName, setFirstName] = React.useState('');
@@ -168,6 +168,12 @@ export default function SignupPage() {
   const scrollOffsetRef = React.useRef(0);
   const focusScrollTimeoutRef = React.useRef(null);
   const passwordMeetsMinimum = password.trim().length >= 8;
+
+  React.useEffect(() => {
+    if (!selectedAccountType) {
+      router.replace('/login?signup=true');
+    }
+  }, [router, selectedAccountType]);
 
   const clearFocusScrollTimeout = React.useCallback(() => {
     if (focusScrollTimeoutRef.current) {
@@ -342,24 +348,11 @@ export default function SignupPage() {
     }
 
     if (!selectedAccountType) {
-      setModalVisible(true);
+      router.replace('/login?signup=true');
       return;
     }
 
     await registerAccount(selectedAccountType);
-  };
-
-  const handleAccountType = (type) => {
-    setSelectedAccountType(type);
-    setModalVisible(false);
-  };
-
-  const closeAccountTypeSelection = () => {
-    setModalVisible(false);
-
-    if (!selectedAccountType) {
-      router.replace('/login');
-    }
   };
 
   const registerAccount = async (type) => {
@@ -474,6 +467,17 @@ export default function SignupPage() {
               scrollOffsetRef.current = event.nativeEvent.contentOffset.y;
             }}
           >
+            <View style={styles.backButtonContainer}>
+              <TouchableOpacity
+                style={styles.backButton}
+                onPress={() => router.replace('/login?signup=true')}
+                disabled={loading}
+                accessibilityRole="button"
+                accessibilityLabel="Back to account type selection"
+              >
+                <Text style={styles.backButtonText}>{'‹ Back'}</Text>
+              </TouchableOpacity>
+            </View>
 
             <View style={styles.logoSection}>
               <Text style={styles.appName}>BlueTap</Text>
@@ -670,35 +674,6 @@ export default function SignupPage() {
           </ScrollView>
         </View>
 
-        <Modal visible={modalVisible} transparent animationType="slide">
-          <View style={styles.modalBackground}>
-            <View style={styles.modalContainer}>
-              <Text style={styles.modalTitle}>Choose Account Type</Text>
-
-              <TouchableOpacity
-                style={styles.modalButton}
-                onPress={() => handleAccountType('requester')}
-                disabled={loading}
-              >
-                <Text style={styles.modalButtonText}>Requester</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.modalButton}
-                onPress={() => handleAccountType('distributor')}
-                disabled={loading}
-              >
-                <Text style={styles.modalButtonText}>Distributor</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity style={styles.modalCancel} onPress={closeAccountTypeSelection}>
-                <Text style={styles.modalCancelText}>Cancel</Text>
-              </TouchableOpacity>
-
-            </View>
-          </View>
-        </Modal>
-
         <Modal visible={!!notification} transparent animationType="fade">
           <View style={styles.modalBackground}>
             <View style={styles.modalContainer}>
@@ -723,6 +698,21 @@ const styles = StyleSheet.create({
   container: { flex: 1, width: '100%' },
   phoneWrapper: { width: '100%', maxWidth: 480, alignSelf: 'center', flex: 1 },
   scrollContent: { flexGrow: 1, paddingBottom: BASE_SCROLL_PADDING_BOTTOM },
+  backButtonContainer: {
+    width: '100%',
+    paddingHorizontal: 24,
+    paddingTop: 16,
+  },
+  backButton: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 4,
+    paddingVertical: 6,
+  },
+  backButtonText: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '700',
+  },
   logoSection: { alignItems: 'center', justifyContent: 'center', paddingTop: 48, paddingBottom: 20, marginBottom: 20 },
   appName: { color: '#FFFFFF', fontSize: 36, fontWeight: 'bold', marginBottom: 6 },
   tagline: { color: '#FFFFFF', fontSize: 16, fontWeight: '300' },
