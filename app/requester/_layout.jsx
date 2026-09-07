@@ -52,7 +52,7 @@ const styles = StyleSheet.create({
   },
   navFrame: {
     width: '100%',
-    maxWidth: 375,
+    maxWidth: 480,
     flex: 1,
     pointerEvents: 'box-none',
   },

@@ -6,6 +6,7 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
@@ -88,7 +89,9 @@ export default function AdminShell({
   title,
 }) {
   const router = useRouter();
+  const { width } = useWindowDimensions();
   const [internalSearch, setInternalSearch] = useState('');
+  const isCompactLayout = width < 768;
   const visibleSearchValue = searchValue ?? internalSearch;
   const handleSearchChange = onSearchChange || setInternalSearch;
 
@@ -97,12 +100,33 @@ export default function AdminShell({
     router.replace('/login');
   };
 
+  const navigationItems = NAV_ITEMS.map((item) => {
+    const isActive = active === item.key;
+
+    return (
+      <TouchableOpacity
+        key={item.key}
+        activeOpacity={0.85}
+        style={[
+          styles.navItem,
+          isCompactLayout && styles.navItemCompact,
+          isActive && styles.navItemActive,
+        ]}
+        onPress={() => router.replace(item.path)}
+      >
+        <Text style={[styles.navText, isActive && styles.navTextActive]}>
+          {item.label}
+        </Text>
+      </TouchableOpacity>
+    );
+  });
+
   return (
     <SafeAreaView style={styles.root}>
       <StatusBar style="dark" />
-      <View style={styles.layout}>
-        <View style={styles.sidebar}>
-          <View style={styles.brand}>
+      <View style={[styles.layout, isCompactLayout && styles.layoutCompact]}>
+        <View style={[styles.sidebar, isCompactLayout && styles.sidebarCompact]}>
+          <View style={[styles.brand, isCompactLayout && styles.brandCompact]}>
             <Image
               source={require('../assets/icons/bluetapwhitelogo.png')}
               style={styles.brandIcon}
@@ -112,39 +136,34 @@ export default function AdminShell({
             <Text style={styles.brandText}>BlueTap</Text>
           </View>
 
-          <View style={styles.navList}>
-            {NAV_ITEMS.map((item) => {
-              const isActive = active === item.key;
+          {isCompactLayout ? (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.navListCompact}
+            >
+              {navigationItems}
+            </ScrollView>
+          ) : (
+            <View style={styles.navList}>{navigationItems}</View>
+          )}
 
-              return (
-                <TouchableOpacity
-                  key={item.key}
-                  activeOpacity={0.85}
-                  style={[styles.navItem, isActive && styles.navItemActive]}
-                  onPress={() => router.replace(item.path)}
-                >
-                  <Text style={[styles.navText, isActive && styles.navTextActive]}>
-                    {item.label}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-
-          <View style={styles.sidebarFooter}>
-            <Text style={styles.footerText}>BlueTap Admin v2</Text>
-          </View>
+          {!isCompactLayout && (
+            <View style={styles.sidebarFooter}>
+              <Text style={styles.footerText}>BlueTap Admin v2</Text>
+            </View>
+          )}
         </View>
 
         <View style={styles.main}>
-          <View style={styles.topbar}>
-            <View style={styles.titleBlock}>
+          <View style={[styles.topbar, isCompactLayout && styles.topbarCompact]}>
+            <View style={[styles.titleBlock, isCompactLayout && styles.titleBlockCompact]}>
               <Text style={styles.pageTitle}>{title}</Text>
               {!!subtitle && <Text style={styles.pageSubtitle}>{subtitle}</Text>}
             </View>
 
-            <View style={styles.topbarActions}>
-              <View style={styles.searchBox}>
+            <View style={[styles.topbarActions, isCompactLayout && styles.topbarActionsCompact]}>
+              <View style={[styles.searchBox, isCompactLayout && styles.searchBoxCompact]}>
                 <TextInput
                   style={styles.searchInput}
                   placeholder={searchPlaceholder}
@@ -156,7 +175,10 @@ export default function AdminShell({
 
               <TouchableOpacity
                 activeOpacity={0.85}
-                style={styles.logoutButton}
+                style={[
+                  styles.logoutButton,
+                  isCompactLayout && styles.logoutButtonCompact,
+                ]}
                 onPress={handleLogout}
               >
                 <Text style={styles.logoutText}>Logout</Text>
@@ -165,7 +187,10 @@ export default function AdminShell({
           </View>
 
           <ScrollView
-            contentContainerStyle={styles.content}
+            contentContainerStyle={[
+              styles.content,
+              isCompactLayout && styles.contentCompact,
+            ]}
             showsVerticalScrollIndicator={false}
           >
             {children}
@@ -186,11 +211,18 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     backgroundColor: ADMIN_COLORS.bg,
   },
+  layoutCompact: {
+    flexDirection: 'column',
+  },
   sidebar: {
     width: 230,
     backgroundColor: ADMIN_COLORS.navy,
     borderRightWidth: 1,
     borderRightColor: 'rgba(255,255,255,0.08)',
+  },
+  sidebarCompact: {
+    width: '100%',
+    borderRightWidth: 0,
   },
   brand: {
     height: 74,
@@ -199,6 +231,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 28,
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(255,255,255,0.08)',
+  },
+  brandCompact: {
+    height: 56,
+    paddingHorizontal: 20,
   },
   brandIcon: {
     width: 26,
@@ -214,6 +250,10 @@ const styles = StyleSheet.create({
     paddingTop: 14,
     paddingHorizontal: 14,
   },
+  navListCompact: {
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
   navItem: {
     minHeight: 44,
     justifyContent: 'center',
@@ -222,6 +262,12 @@ const styles = StyleSheet.create({
     marginBottom: 4,
     borderWidth: 1,
     borderColor: 'transparent',
+  },
+  navItemCompact: {
+    minHeight: 36,
+    paddingHorizontal: 13,
+    marginRight: 6,
+    marginBottom: 0,
   },
   navItemActive: {
     backgroundColor: 'rgba(255,255,255,0.18)',
@@ -259,10 +305,19 @@ const styles = StyleSheet.create({
     paddingTop: 18,
     paddingBottom: 12,
   },
+  topbarCompact: {
+    alignItems: 'stretch',
+    flexDirection: 'column',
+    paddingHorizontal: 16,
+    paddingTop: 16,
+  },
   titleBlock: {
     flex: 1,
     minWidth: 0,
     paddingRight: 20,
+  },
+  titleBlockCompact: {
+    paddingRight: 0,
   },
   pageTitle: {
     color: ADMIN_COLORS.text,
@@ -280,6 +335,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
   },
+  topbarActionsCompact: {
+    width: '100%',
+    marginTop: 14,
+  },
   searchBox: {
     width: 230,
     height: 40,
@@ -289,6 +348,10 @@ const styles = StyleSheet.create({
     borderColor: ADMIN_COLORS.border,
     backgroundColor: '#FFFFFF',
     paddingHorizontal: 15,
+  },
+  searchBoxCompact: {
+    flex: 1,
+    width: undefined,
   },
   searchInput: {
     color: ADMIN_COLORS.text,
@@ -307,6 +370,10 @@ const styles = StyleSheet.create({
     marginLeft: 10,
     paddingHorizontal: 18,
   },
+  logoutButtonCompact: {
+    minWidth: 72,
+    paddingHorizontal: 14,
+  },
   logoutText: {
     color: ADMIN_COLORS.blue,
     fontSize: 13,
@@ -315,6 +382,10 @@ const styles = StyleSheet.create({
   content: {
     paddingHorizontal: 28,
     paddingBottom: 30,
+  },
+  contentCompact: {
+    paddingHorizontal: 16,
+    paddingBottom: 24,
   },
   drop: {
     transform: [{ rotate: '45deg' }],

@@ -726,7 +726,7 @@ export default function SignupPage() {
 const styles = StyleSheet.create({
   gradient: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   container: { flex: 1, width: '100%' },
-  phoneWrapper: { width: '100%', maxWidth: 375, alignSelf: 'center', flex: 1 },
+  phoneWrapper: { width: '100%', maxWidth: 480, alignSelf: 'center', flex: 1 },
   scrollContent: { flexGrow: 1, paddingBottom: BASE_SCROLL_PADDING_BOTTOM },
   dripContainer: { width: '100%', height: 120, alignItems: 'center', overflow: 'hidden' },
   dripImage: { width: '100%', height: '100%' },

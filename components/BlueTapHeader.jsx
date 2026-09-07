@@ -70,7 +70,7 @@ const styles = StyleSheet.create({
   },
   frame: {
     width: '100%',
-    maxWidth: 375,
+    maxWidth: 480,
     alignSelf: 'center',
   },
   header: {

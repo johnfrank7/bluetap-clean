@@ -617,7 +617,7 @@ export default function RequestFormPage() {
 const styles = StyleSheet.create({
   gradient: { flex: 1 },
   container: { flex: 1 },
-  phoneWrapper: { width: '100%', maxWidth: 375, alignSelf: 'center', flex: 1 },
+  phoneWrapper: { width: '100%', maxWidth: 480, alignSelf: 'center', flex: 1 },
   scrollContent: {
     flexGrow: 1,
     paddingHorizontal: 20,

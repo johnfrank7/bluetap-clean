@@ -25,7 +25,8 @@
       "softwareKeyboardLayoutMode": "resize"
     },
     "web": {
-      "favicon": "./assets/icons/bluetaplogo.png"
+      "favicon": "./assets/icons/bluetaplogo.png",
+      "output": "single"
     },
     "plugins": [
       "expo-router"

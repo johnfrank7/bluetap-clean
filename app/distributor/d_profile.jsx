@@ -617,7 +617,7 @@ const styles = StyleSheet.create({
   },
   phoneWrapper: {
     width: '100%',
-    maxWidth: 375,
+    maxWidth: 480,
     alignSelf: 'center',
     flex: 1,
   },

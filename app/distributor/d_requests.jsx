@@ -830,7 +830,7 @@ const styles = StyleSheet.create({
   },
   phoneWrapper: {
     width: '100%',
-    maxWidth: 375,
+    maxWidth: 480,
     alignSelf: 'center',
     flex: 1,
   },
@@ -1007,7 +1007,7 @@ const styles = StyleSheet.create({
   },
   bottomSheet: {
     width: '100%',
-    maxWidth: 375,
+    maxWidth: 480,
     backgroundColor: '#FFFFFF',
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
