@@ -52,17 +52,17 @@ const steps = [
   {
     number: '01',
     title: 'Choose Your Water',
-    text: 'Browse available products from participating water stations.',
+    text: 'Browse the available products from your water provider.',
   },
   {
     number: '02',
     title: 'Send Your Request',
-    text: 'Choose your quantity, container, station, and delivery date.',
+    text: 'Choose your quantity, container, and delivery date.',
   },
   {
     number: '03',
     title: 'Track Your Order',
-    text: 'Stay updated as your request moves from the station to your doorstep.',
+    text: 'Stay updated as your order moves from your water provider to your doorstep.',
   },
 ];
 
@@ -74,8 +74,8 @@ const features = [
   },
   {
     icon: '⌂',
-    title: 'Trusted Local Stations',
-    text: 'Connect with participating water providers in your area.',
+    title: 'Trusted Water Provider',
+    text: 'Order directly from the water business you trust.',
   },
   {
     icon: '≡',
@@ -203,7 +203,7 @@ function PhoneMockup() {
           <View style={styles.deliveryProgress}>
             <View style={styles.deliveryProgressActive} />
           </View>
-          <Text style={styles.deliveryText}>Your station is preparing your order.</Text>
+          <Text style={styles.deliveryText}>Your order is being prepared.</Text>
         </View>
       </View>
 
@@ -213,7 +213,7 @@ function PhoneMockup() {
         </View>
         <View>
           <Text style={styles.floatingStatusTitle}>Request accepted</Text>
-          <Text style={styles.floatingStatusText}>Your station was notified</Text>
+          <Text style={styles.floatingStatusText}>Your water provider was notified</Text>
         </View>
       </View>
 
@@ -235,7 +235,7 @@ function DistributorMockup() {
     <View style={styles.distributorMockup}>
       <View style={styles.distributorTopbar}>
         <View>
-          <Text style={styles.distributorKicker}>BLUE TAP STATION</Text>
+          <Text style={styles.distributorKicker}>BLUE TAP WATER</Text>
           <Text style={styles.distributorTitle}>Today’s requests</Text>
         </View>
         <View style={styles.distributorBadge}>
@@ -414,7 +414,7 @@ function WebLanding({ router, width }) {
               </Text>
 
               <Text style={[styles.heroDescription, { color: theme.muted }, !isDesktop && styles.heroDescriptionCompact]}>
-                Order purified water from trusted local water stations and have it
+                Order purified water directly from your water provider and have it
                 delivered straight to your home.
               </Text>
 
@@ -435,7 +435,7 @@ function WebLanding({ router, width }) {
               </View>
 
               <Text style={[styles.heroTrust, { color: theme.muted }]}>
-                Simple ordering · Local stations · Convenient delivery
+                Simple ordering · Your water provider · Convenient delivery
               </Text>
             </View>
 
@@ -481,7 +481,7 @@ function WebLanding({ router, width }) {
             <SectionHeading
               eyebrow="WHY BLUETAP"
               title="Why choose BlueTap?"
-              text="A clearer, more convenient way for households and local water stations to connect."
+              text="A clearer, more convenient way for households and water businesses to connect."
               theme={theme}
               align="center"
             />
@@ -512,7 +512,7 @@ function WebLanding({ router, width }) {
             <View style={[styles.distributorCopy, !isDesktop && styles.distributorCopyCompact]}>
               <SectionHeading
                 eyebrow="FOR WATER DISTRIBUTORS"
-                title="Grow your water station with BlueTap"
+                title="Grow your water business with BlueTap"
                 text="Receive customer requests digitally and manage your water delivery workflow through one convenient platform."
                 theme={theme}
               />
@@ -552,7 +552,7 @@ function WebLanding({ router, width }) {
                 Ready to make water ordering easier?
               </Text>
               <Text style={styles.ctaText}>
-                Join BlueTap and connect with local water stations in a simpler way.
+                Join BlueTap for simpler water ordering and delivery.
               </Text>
             </View>
             <View style={[styles.ctaActions, !isDesktop && styles.ctaActionsCompact]}>
@@ -621,7 +621,7 @@ function NativeLanding({ router, width }) {
             Clean Water,{"\n"}Within Reach.
           </Text>
           <Text style={styles.nativeDescription}>
-            Order purified water from local stations in a few simple steps.
+            Order purified water in a few simple steps.
           </Text>
 
           <View style={styles.nativeActions}>
