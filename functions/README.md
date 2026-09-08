@@ -1,5 +1,9 @@
 # BlueTap email OTP Functions
 
+**Legacy implementation, inactive in the app.** OTP now runs on Vercel under
+`api/auth/`. See `server/README.md` for the current setup. Do not deploy this
+Cloud Functions backend for the Spark/Vercel setup. It is retained for reference.
+
 This isolated Firebase Functions backend owns email OTP generation and verification.
 
 ## Required Firebase secrets
@@ -7,9 +11,9 @@ This isolated Firebase Functions backend owns email OTP generation and verificat
 Set these against the Firebase project before deploying:
 
 ```powershell
-npx firebase-tools functions:secrets:set EMAIL_PROVIDER_API_KEY --project bluetap-cce88
-npx firebase-tools functions:secrets:set EMAIL_FROM_ADDRESS --project bluetap-cce88
-npx firebase-tools functions:secrets:set EMAIL_OTP_HASH_SECRET --project bluetap-cce88
+npx firebase-tools functions:secrets:set EMAIL_PROVIDER_API_KEY --project bluetap-8c98d
+npx firebase-tools functions:secrets:set EMAIL_FROM_ADDRESS --project bluetap-8c98d
+npx firebase-tools functions:secrets:set EMAIL_OTP_HASH_SECRET --project bluetap-8c98d
 ```
 
 - `EMAIL_PROVIDER_API_KEY`: a Resend API key.
@@ -22,7 +26,7 @@ Install and deploy:
 cd functions
 npm install
 cd ..
-npx firebase-tools deploy --only functions --project bluetap-cce88
+npx firebase-tools deploy --only functions --project bluetap-8c98d
 ```
 
 ## Firestore security
@@ -43,7 +47,7 @@ broad wildcard allow rules that would also grant access to this collection befor
 
 Deploying the Expo app to Vercel does not deploy these Firebase Functions.
 Sign in using `npx firebase-tools login` before running the commands above.
-The client calls the default `us-central1` region in project `bluetap-cce88`.
+The client calls the default `us-central1` region in project `bluetap-8c98d`.
 If the function URL returns HTTP 404, deploy the backend to that project and region;
 adding browser CORS workarounds will not create the missing function.
 The Resend API key and verified sender must be configured before any email can be sent.

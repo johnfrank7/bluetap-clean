@@ -54,8 +54,11 @@ const getOtpError = (error) => {
   if (reason === 'provider-unavailable') {
     return 'Verification email could not be sent. Please try again.';
   }
+  if (reason === 'provider-test-recipient') {
+    return 'Email delivery is in test mode and can only send to the Resend account owner. Please contact BlueTap support.';
+  }
   if (reason === 'no-active-code') return 'Please request a new verification code.';
-  if (code === 'functions/internal' || code === 'functions/not-found') {
+  if (reason === 'service-unavailable') {
     return 'The email verification service is currently unavailable. Please try again later or contact BlueTap support.';
   }
   if (code.includes('unauthenticated')) return 'Your session has expired. Please log in again.';
