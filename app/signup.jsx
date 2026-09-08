@@ -3,6 +3,7 @@ import React from 'react';
 import {
   View,
   Text,
+  Image,
   StyleSheet,
   TouchableOpacity,
   TextInput,
@@ -461,7 +462,9 @@ export default function SignupPage() {
               scrollOffsetRef.current = event.nativeEvent.contentOffset.y;
             }}
           >
-            <View style={styles.backButtonContainer}>
+            <View style={styles.authCardFrame}>
+              <View style={styles.authCard}>
+                <View style={styles.backButtonContainer}>
               <TouchableOpacity
                 style={styles.backButton}
                 onPress={() => router.replace('/login?signup=true')}
@@ -474,6 +477,11 @@ export default function SignupPage() {
             </View>
 
             <View style={styles.logoSection}>
+              <Image
+                source={require('../assets/icons/bluetapwhitelogo.png')}
+                style={styles.logo}
+                resizeMode="contain"
+              />
               <Text style={styles.appName}>BlueTap</Text>
               <Text style={styles.tagline}>Water Within Reach</Text>
             </View>
@@ -665,6 +673,8 @@ export default function SignupPage() {
               </Text>
             </View>
 
+              </View>
+            </View>
           </ScrollView>
         </View>
 
@@ -691,11 +701,31 @@ const styles = StyleSheet.create({
   gradient: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   container: { flex: 1, width: '100%' },
   phoneWrapper: { width: '100%', maxWidth: 480, alignSelf: 'center', flex: 1 },
-  scrollContent: { flexGrow: 1, paddingBottom: BASE_SCROLL_PADDING_BOTTOM },
+  scrollContent: {
+    flexGrow: 1,
+    justifyContent: 'center',
+    paddingVertical: 24,
+    paddingBottom: BASE_SCROLL_PADDING_BOTTOM,
+  },
+  authCardFrame: { width: '100%', paddingHorizontal: 24 },
+  authCard: {
+    width: '100%',
+    maxWidth: 432,
+    alignSelf: 'center',
+    backgroundColor: 'rgba(9, 70, 122, 0.22)',
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.34)',
+    padding: 20,
+    shadowColor: '#07518E',
+    shadowOpacity: 0.22,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 5,
+  },
   backButtonContainer: {
     width: '100%',
-    paddingHorizontal: 24,
-    paddingTop: 16,
+    marginBottom: 8,
   },
   backButton: {
     alignSelf: 'flex-start',
@@ -707,20 +737,23 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '700',
   },
-  logoSection: { alignItems: 'center', justifyContent: 'center', paddingTop: 48, paddingBottom: 20, marginBottom: 20 },
-  appName: { color: '#FFFFFF', fontSize: 36, fontWeight: 'bold', marginBottom: 6 },
+  logoSection: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingTop: 0,
+    paddingBottom: 20,
+    marginBottom: 4,
+  },
+  logo: { width: 72, height: 72, marginBottom: 10 },
+  appName: { color: '#FFFFFF', fontSize: 32, fontWeight: 'bold', marginBottom: 6 },
   tagline: { color: '#FFFFFF', fontSize: 16, fontWeight: '300' },
-  formContainer: { width: '100%', paddingHorizontal: 24, marginBottom: 16 },
+  formContainer: { width: '100%', marginBottom: 16 },
 
   inputContainer: {
     width: '100%',
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    borderRadius: 16,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.2)',
   },
   input: {
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.5)',
     borderRadius: 10,
@@ -776,7 +809,7 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 14,
   },
-  buttonContainer: { width: '100%', paddingHorizontal: 24, marginBottom: 16 },
+  buttonContainer: { width: '100%', marginBottom: 16 },
   continueButton: {
     backgroundColor: '#FFFFFF',
     borderRadius: 10,
@@ -786,7 +819,7 @@ const styles = StyleSheet.create({
   },
   continueButtonText: { color: '#187BCD', fontSize: 16, fontWeight: 'bold' },
   buttonDisabled: { opacity: 0.7 },
-  loginContainer: { alignItems: 'center', paddingHorizontal: 24, marginBottom: 20 },
+  loginContainer: { alignItems: 'center', marginBottom: 2 },
   loginText: { color: 'rgba(255, 255, 255, 0.7)', fontSize: 13 },
   loginLink: { color: '#FFFFFF', fontWeight: 'bold' },
   modalBackground: {
