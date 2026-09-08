@@ -193,7 +193,7 @@ function NavIcon({
   );
 }
 
-function BottomNav({ dashboardVariant = false, items }) {
+function BottomNav({ items }) {
   const pathname = usePathname();
   const router = useRouter();
   const segments = useSegments();
@@ -206,9 +206,7 @@ function BottomNav({ dashboardVariant = false, items }) {
   );
 
   return (
-    <View
-      style={[styles.bottomNav, dashboardVariant && styles.dashboardBottomNav]}
-    >
+    <View style={styles.bottomNav}>
       {items.map((item, index) => {
         const isActive = index === activeIndex;
 
@@ -237,8 +235,8 @@ function BottomNav({ dashboardVariant = false, items }) {
   );
 }
 
-export function RequesterBottomNav({ dashboardVariant = false }) {
-  return <BottomNav dashboardVariant={dashboardVariant} items={requesterItems} />;
+export function RequesterBottomNav() {
+  return <BottomNav items={requesterItems} />;
 }
 
 export function DistributorBottomNav() {
@@ -266,11 +264,6 @@ const styles = StyleSheet.create({
       radius: 6,
       offset: { width: 0, height: 3 },
     }),
-  },
-  dashboardBottomNav: {
-    left: 34,
-    right: 34,
-    borderRadius: 24,
   },
   navButton: {
     width: 36,

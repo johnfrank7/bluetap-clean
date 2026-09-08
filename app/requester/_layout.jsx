@@ -1,14 +1,11 @@
 import React from 'react';
 import { View, StyleSheet } from 'react-native';
-import { Stack, usePathname } from 'expo-router';
+import { Stack } from 'expo-router';
 import { RequesterBottomNav } from '../../components/AppBottomNav';
 import RequesterHeader from '../../components/RequesterHeader';
 import RoleGate from '../../components/RoleGate';
 
 export default function RequesterLayout() {
-  const pathname = usePathname();
-  const isDashboard = pathname.startsWith('/requester/r_dashboard');
-
   return (
     <RoleGate role="requester">
       <View style={styles.root}>
@@ -25,7 +22,7 @@ export default function RequesterLayout() {
 
         <View style={styles.navOverlay}>
           <View style={styles.navFrame}>
-            <RequesterBottomNav dashboardVariant={isDashboard} />
+            <RequesterBottomNav />
           </View>
         </View>
       </View>

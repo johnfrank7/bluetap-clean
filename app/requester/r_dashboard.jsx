@@ -29,7 +29,7 @@ import {
 } from '../../services/requests';
 
 const REQUESTER_APP_MAX_WIDTH = 480;
-const DASHBOARD_HORIZONTAL_PADDING = 34;
+const DASHBOARD_HORIZONTAL_PADDING = 20;
 const PRODUCT_CARD_WIDTH_RATIO = 0.88;
 const PRODUCT_CAROUSEL_HEIGHT = 226;
 const BLUE = '#187BCD';
@@ -780,12 +780,12 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     flexGrow: 1,
-    paddingHorizontal: 34,
-    paddingTop: 0,
-    paddingBottom: 148,
+    paddingHorizontal: DASHBOARD_HORIZONTAL_PADDING,
+    paddingTop: 20,
+    paddingBottom: 150,
   },
   welcomeSection: {
-    marginTop: 18,
+    marginTop: 0,
   },
   welcomeText: {
     color: '#FFFFFF',
@@ -806,7 +806,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   productsSection: {
-    marginTop: 24,
+    marginTop: 20,
   },
   productCarousel: {
     alignSelf: 'flex-start',
@@ -938,7 +938,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
   },
   currentRequestSection: {
-    marginTop: 8,
+    marginTop: 16,
   },
   currentRequestLabel: {
     color: '#FFFFFF',
@@ -951,7 +951,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: CARD_BORDER,
     borderRadius: 20,
-    padding: 15,
+    padding: 16,
     position: 'relative',
     ...createShadow({
       color: '#0D47A1',
@@ -962,14 +962,14 @@ const styles = StyleSheet.create({
     }),
   },
   currentRequestCardGap: {
-    marginTop: 12,
+    marginTop: 14,
   },
   requestCardHeader: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     justifyContent: 'space-between',
     gap: 10,
-    paddingBottom: 11,
+    paddingBottom: 12,
     borderBottomWidth: 1,
     borderBottomColor: BLUE_LIGHT,
   },
@@ -981,7 +981,7 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   requestDetailsGrid: {
-    paddingTop: 13,
+    paddingTop: 12,
   },
   requestInfoRow: {
     flexDirection: 'row',
@@ -1017,7 +1017,7 @@ const styles = StyleSheet.create({
   cardActionsRow: {
     flexDirection: 'row',
     gap: 10,
-    marginTop: 15,
+    marginTop: 16,
   },
   viewDetailsButton: {
     flex: 1,
