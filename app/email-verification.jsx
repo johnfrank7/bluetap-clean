@@ -1,169 +1,287 @@
 import React from 'react';
 import {
   ActivityIndicator,
+  Image,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import {
-  onAuthStateChanged,
-  reload,
-  sendEmailVerification,
-  signOut,
-} from 'firebase/auth';
-import { serverTimestamp } from 'firebase/firestore';
+import { onAuthStateChanged, reload, signOut } from 'firebase/auth';
 
 import { BLUETAP_LOGIN_GRADIENT } from '../constants/bluetapTheme';
 import { auth } from '../firebase';
-import { saveLocalUser } from '../localUsers';
-import { clearAllAuthSessions, fetchFirestoreUserProfile } from '../services/authSession';
-import { saveUserProfileWithUniqueId } from '../services/uniqueIds';
+import { clearAllAuthSessions } from '../services/authSession';
+import { requestEmailOtp, verifyEmailOtp } from '../services/emailVerification';
 
-const getVerificationErrorMessage = (error) => {
-  if (error?.code === 'auth/too-many-requests') {
-    return 'Too many emails were requested. Please wait a few minutes before trying again.';
+const OTP_LENGTH = 6;
+const OTP_EXPIRY_MS = 10 * 60 * 1000;
+
+const firstParam = (value) => (Array.isArray(value) ? value[0] : value);
+const positiveNumber = (value) => {
+  const number = Number(firstParam(value));
+  return Number.isFinite(number) && number > 0 ? number : 0;
+};
+const formatTime = (seconds) =>
+  String(Math.floor(seconds / 60)).padStart(2, '0') +
+  ':' +
+  String(seconds % 60).padStart(2, '0');
+
+const getOtpError = (error) => {
+  const details = error?.details && typeof error.details === 'object' ? error.details : {};
+  const reason = details.reason;
+  const code = String(error?.code || '');
+
+  if (reason === 'incorrect-code') return 'The verification code you entered is incorrect.';
+  if (reason === 'code-expired') {
+    return 'This verification code has expired. Please request a new code.';
   }
-
-  if (error?.code === 'auth/network-request-failed') {
-    return 'We could not reach the verification service. Check your connection and try again.';
+  if (reason === 'attempt-limit-reached') {
+    return 'Too many incorrect attempts. Please request a new verification code.';
   }
-
-  return 'We could not send the verification email. Please try again.';
+  if (reason === 'resend-too-soon') {
+    return 'Please wait before requesting another verification code.';
+  }
+  if (reason === 'resend-limit-reached') {
+    return 'Too many verification codes have been requested. Please try again later.';
+  }
+  if (reason === 'provider-unavailable') {
+    return 'Verification email could not be sent. Please try again.';
+  }
+  if (reason === 'no-active-code') return 'Please request a new verification code.';
+  if (code.includes('unauthenticated')) return 'Your session has expired. Please log in again.';
+  if (code.includes('unavailable') || code.includes('network')) {
+    return 'Verification email could not be sent. Please check your connection and try again.';
+  }
+  return 'We could not complete email verification. Please try again.';
 };
 
 export default function EmailVerificationPage() {
   const router = useRouter();
-  const { sent } = useLocalSearchParams();
+  const params = useLocalSearchParams();
+  const { width } = useWindowDimensions();
+  const sent = firstParam(params.sent);
+  const automaticRequestRef = React.useRef(false);
+  const completionTimeoutRef = React.useRef(null);
+
   const [user, setUser] = React.useState(auth.currentUser);
-  const [isLoading, setIsLoading] = React.useState(true);
-  const [isChecking, setIsChecking] = React.useState(false);
-  const [isSending, setIsSending] = React.useState(false);
+  const [loading, setLoading] = React.useState(true);
+  const [sending, setSending] = React.useState(false);
+  const [verifying, setVerifying] = React.useState(false);
+  const [verified, setVerified] = React.useState(false);
+  const [otp, setOtp] = React.useState('');
+  const [expiresAt, setExpiresAt] = React.useState(positiveNumber(params.expiresAt));
+  const [cooldownEndsAt, setCooldownEndsAt] = React.useState(() => {
+    const seconds = positiveNumber(params.resendAfterSeconds);
+    return seconds ? Date.now() + seconds * 1000 : 0;
+  });
+  const [now, setNow] = React.useState(Date.now());
   const [message, setMessage] = React.useState(
-    sent === 'false'
-      ? 'We could not send the first verification email. Use Resend email to try again.'
-      : ''
+    sent === 'false' ? 'Verification email could not be sent. Please try again.' : ''
+  );
+  const [messageType, setMessageType] = React.useState(sent === 'false' ? 'error' : 'info');
+
+  const secondsRemaining = expiresAt ? Math.max(0, Math.ceil((expiresAt - now) / 1000)) : 0;
+  const resendSeconds = cooldownEndsAt
+    ? Math.max(0, Math.ceil((cooldownEndsAt - now) / 1000))
+    : 0;
+  const codeExpired = Boolean(expiresAt) && secondsRemaining === 0;
+
+  React.useEffect(() => {
+    const interval = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  React.useEffect(
+    () => () => {
+      if (completionTimeoutRef.current) clearTimeout(completionTimeoutRef.current);
+    },
+    []
   );
 
-  const completeVerification = React.useCallback(
-    async (account = auth.currentUser, { silent = false } = {}) => {
+  const continueAfterVerification = React.useCallback(
+    async (account = auth.currentUser) => {
       if (!account) {
         router.replace('/login');
         return false;
       }
 
-      setIsChecking(true);
-
       try {
         await reload(account);
         const refreshedUser = auth.currentUser || account;
+        if (!refreshedUser.emailVerified) return false;
 
-        if (!refreshedUser.emailVerified) {
-          if (!silent) {
-            setMessage('We have not confirmed this email yet. Open the verification email, then try again.');
-          }
-          return false;
-        }
-
-        const profile = await fetchFirestoreUserProfile(refreshedUser);
-
-        if (!profile?.role) {
-          setMessage('We could not find your BlueTap profile. Please return to login and try again.');
-          return false;
-        }
-
-        const savedProfile = await saveUserProfileWithUniqueId(refreshedUser.uid, profile.role, {
-          ...profile,
-          emailVerificationRequired: true,
-          emailVerified: true,
-          emailVerifiedAt: serverTimestamp(),
-        });
-
-        saveLocalUser({
-          ...profile,
-          ...savedProfile,
-          emailVerified: true,
-        });
+        await refreshedUser.getIdToken(true);
         clearAllAuthSessions();
         router.replace('/verification');
         return true;
       } catch (error) {
-        console.log('Email verification status error:', error.message);
-
-        if (!silent) {
-          setMessage('We could not confirm your email yet. Please try again.');
-        }
+        console.log('Email OTP account refresh error:', error.message);
+        setMessage('Email verified successfully. We could not continue yet; please log in again.');
+        setMessageType('success');
         return false;
-      } finally {
-        setIsChecking(false);
       }
     },
     [router]
   );
 
-  React.useEffect(() => {
-    let isActive = true;
+  const requestOtp = React.useCallback(
+    async ({ account = auth.currentUser, showSentMessage = true } = {}) => {
+      if (!account || sending || verifying || verified) return null;
 
+      setSending(true);
+      setMessage('');
+
+      try {
+        await reload(account);
+        const currentUser = auth.currentUser || account;
+        if (currentUser.emailVerified) {
+          await continueAfterVerification(currentUser);
+          return { alreadyVerified: true };
+        }
+
+        const response = await requestEmailOtp();
+        if (response.alreadyVerified) {
+          await continueAfterVerification(currentUser);
+          return response;
+        }
+
+        const responseExpiry = Number(response.expiresAt);
+        const nextCooldownSeconds = Number(response.resendAfterSeconds || 60);
+        setExpiresAt(
+          Number.isFinite(responseExpiry) && responseExpiry > Date.now()
+            ? responseExpiry
+            : Date.now() + OTP_EXPIRY_MS
+        );
+        setCooldownEndsAt(Date.now() + Math.max(1, nextCooldownSeconds) * 1000);
+        setOtp('');
+
+        if (showSentMessage) {
+          setMessage('A new 6-digit verification code has been sent to your email.');
+          setMessageType('info');
+        }
+        return response;
+      } catch (error) {
+        const details = error?.details && typeof error.details === 'object' ? error.details : {};
+        const retryAfterSeconds = Number(details.retryAfterSeconds);
+        const activeExpiry = Number(details.expiresAt);
+        if (Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0) {
+          setCooldownEndsAt(Date.now() + retryAfterSeconds * 1000);
+        }
+        if (Number.isFinite(activeExpiry) && activeExpiry > 0) setExpiresAt(activeExpiry);
+
+        console.log('Email OTP request error:', error.message);
+        setMessage(getOtpError(error));
+        setMessageType('error');
+        if (String(error?.code || '').includes('unauthenticated')) router.replace('/login');
+        return null;
+      } finally {
+        setSending(false);
+      }
+    },
+    [continueAfterVerification, router, sending, verified, verifying]
+  );
+
+  React.useEffect(() => {
+    let active = true;
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       if (!currentUser) {
-        if (isActive) router.replace('/login');
+        if (active) router.replace('/login');
         return;
       }
-
-      if (!isActive) return;
+      if (!active) return;
 
       setUser(currentUser);
-      setIsLoading(false);
-      await completeVerification(currentUser, { silent: true });
+      try {
+        await reload(currentUser);
+        const refreshedUser = auth.currentUser || currentUser;
+        if (refreshedUser.emailVerified) {
+          await continueAfterVerification(refreshedUser);
+          return;
+        }
+      } catch (error) {
+        console.log('Email OTP initial refresh error:', error.message);
+      } finally {
+        if (active) setLoading(false);
+      }
+
+      // A fresh signup has already requested a code. A direct return or refresh
+      // has no route parameters, so ask the backend; its cooldown remains authoritative.
+      if (sent === undefined && !automaticRequestRef.current && active) {
+        automaticRequestRef.current = true;
+        await requestOtp({ account: currentUser, showSentMessage: false });
+      }
     });
 
     return () => {
-      isActive = false;
+      active = false;
       unsubscribe();
     };
-  }, [completeVerification, router]);
+  }, [continueAfterVerification, requestOtp, router, sent]);
 
-  const resendVerification = async () => {
+  const changeOtp = (value) => {
+    setOtp(value.replace(/\D/g, '').slice(0, OTP_LENGTH));
+    if (messageType === 'error') {
+      setMessage('');
+      setMessageType('info');
+    }
+  };
+
+  const verify = async () => {
     const account = auth.currentUser || user;
+    if (!account || otp.length !== OTP_LENGTH || sending || verifying || codeExpired) return;
 
-    if (!account || isSending || isChecking) return;
-
-    setIsSending(true);
+    setVerifying(true);
     setMessage('');
-
     try {
+      const response = await verifyEmailOtp(otp);
+      if (!response.verified) throw new Error('Email verification did not complete.');
+
       await reload(account);
+      const refreshedUser = auth.currentUser || account;
+      if (!refreshedUser.emailVerified) throw new Error('Email verification did not complete.');
 
-      if ((auth.currentUser || account).emailVerified) {
-        await completeVerification(auth.currentUser || account);
-        return;
-      }
-
-      await sendEmailVerification(auth.currentUser || account);
-      setMessage('A new verification email has been sent. Check your inbox and spam folder.');
+      await refreshedUser.getIdToken(true);
+      setVerified(true);
+      setMessage('Email verified successfully.');
+      setMessageType('success');
+      completionTimeoutRef.current = setTimeout(() => {
+        clearAllAuthSessions();
+        router.replace('/verification');
+      }, 500);
     } catch (error) {
-      console.log('Resend verification email error:', error.message);
-      setMessage(getVerificationErrorMessage(error));
+      const reason = error?.details?.reason;
+      if (reason === 'code-expired' || reason === 'attempt-limit-reached') {
+        setExpiresAt(0);
+        setOtp('');
+      }
+      console.log('Email OTP verification error:', error.message);
+      setMessage(getOtpError(error));
+      setMessageType('error');
+      if (String(error?.code || '').includes('unauthenticated')) router.replace('/login');
     } finally {
-      setIsSending(false);
+      setVerifying(false);
     }
   };
 
   const returnToLogin = async () => {
     clearAllAuthSessions();
-
     try {
       await signOut(auth);
     } catch (error) {
-      console.log('Email verification sign out error:', error.message);
+      console.log('Email OTP sign out error:', error.message);
     }
-
     router.replace('/login');
   };
+
+  const verifyDisabled = otp.length !== OTP_LENGTH || sending || verifying || codeExpired || verified;
+  const resendDisabled = resendSeconds > 0 || sending || verifying || verified;
 
   return (
     <LinearGradient
@@ -173,64 +291,143 @@ export default function EmailVerificationPage() {
       end={{ x: 0, y: 1 }}
     >
       <SafeAreaView style={styles.safeArea}>
-        <ScrollView contentContainerStyle={styles.scrollContent}>
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
           <View style={styles.brand}>
+            <Image
+              source={require('../assets/icons/bluetapwhitelogo.png')}
+              style={styles.logo}
+              resizeMode="contain"
+            />
             <Text style={styles.brandName}>BlueTap</Text>
             <Text style={styles.tagline}>Water Within Reach</Text>
           </View>
 
-          <View style={styles.card}>
-            {isLoading ? (
-              <View style={styles.stateContent}>
+          <View style={[styles.card, { maxWidth: width >= 768 ? 460 : 430 }]}>
+            {loading ? (
+              <View style={styles.loadingState}>
                 <ActivityIndicator size="large" color="#187BCD" />
-                <Text style={styles.stateText}>Preparing email verification…</Text>
+                <Text style={styles.loadingText}>Preparing email verification...</Text>
               </View>
             ) : (
-              <View style={styles.stateContent}>
-                <View style={styles.emailIcon}>
-                  <Text style={styles.emailIconText}>@</Text>
+              <>
+                <View style={styles.emailIcon} accessibilityElementsHidden>
+                  <Text style={styles.emailIconText}>✉</Text>
                 </View>
                 <Text style={styles.title}>Verify your email</Text>
-                <Text style={styles.description}>
-                  We sent a verification link to
-                </Text>
+                <Text style={styles.description}>We've sent a 6-digit verification code to</Text>
                 <Text style={styles.emailAddress}>{user?.email || 'your email address'}</Text>
                 <Text style={styles.instructions}>
-                  Open the email and select the verification link. Then return here to continue with identity verification.
+                  Enter the code below to confirm your email address.
                 </Text>
 
-                {!!message && <Text style={styles.notice}>{message}</Text>}
+                <View style={styles.otpInputArea}>
+                  <View pointerEvents="none" style={styles.otpBoxes}>
+                    {Array.from({ length: OTP_LENGTH }, (_, index) => {
+                      const digit = otp[index] || '';
+                      const active = !verified && index === otp.length;
+                      return (
+                        <View
+                          key={index}
+                          style={[
+                            styles.otpBox,
+                            active && styles.otpBoxActive,
+                            digit && styles.otpBoxFilled,
+                          ]}
+                        >
+                          <Text style={styles.otpDigit}>{digit}</Text>
+                        </View>
+                      );
+                    })}
+                  </View>
+                  <TextInput
+                    accessibilityLabel="Six digit email verification code"
+                    autoComplete="one-time-code"
+                    importantForAutofill="yes"
+                    keyboardType="number-pad"
+                    maxLength={OTP_LENGTH}
+                    onChangeText={changeOtp}
+                    onSubmitEditing={verify}
+                    returnKeyType="done"
+                    style={styles.hiddenOtpInput}
+                    textContentType="oneTimeCode"
+                    value={otp}
+                  />
+                </View>
+
+                <Text style={[styles.expiryText, codeExpired && styles.expiredText]}>
+                  {codeExpired
+                    ? 'This verification code has expired. Please request a new code.'
+                    : secondsRemaining > 0
+                      ? 'This code expires in ' + formatTime(secondsRemaining) + '.'
+                      : sent === 'false'
+                        ? 'Request a verification code to continue.'
+                      : 'This code will expire in 10 minutes.'}
+                </Text>
+
+                {!!message && (
+                  <Text
+                    style={[
+                      styles.notice,
+                      messageType === 'error' && styles.noticeError,
+                      messageType === 'success' && styles.noticeSuccess,
+                    ]}
+                    accessibilityLiveRegion="polite"
+                  >
+                    {message}
+                  </Text>
+                )}
 
                 <TouchableOpacity
-                  style={[styles.primaryButton, isChecking && styles.buttonDisabled]}
-                  onPress={() => completeVerification()}
-                  disabled={isChecking || isSending}
+                  accessibilityRole="button"
+                  style={[styles.primaryButton, verifyDisabled && styles.buttonDisabled]}
+                  onPress={verify}
+                  disabled={verifyDisabled}
                 >
-                  {isChecking ? (
+                  {verifying ? (
                     <ActivityIndicator color="#FFFFFF" />
                   ) : (
-                    <Text style={styles.primaryButtonText}>I’VE VERIFIED MY EMAIL</Text>
+                    <Text style={styles.primaryButtonText}>
+                      {verified ? 'EMAIL VERIFIED' : 'VERIFY EMAIL'}
+                    </Text>
                   )}
                 </TouchableOpacity>
 
-                <TouchableOpacity
-                  style={[styles.secondaryButton, isSending && styles.buttonDisabled]}
-                  onPress={resendVerification}
-                  disabled={isSending || isChecking}
-                >
-                  <Text style={styles.secondaryButtonText}>
-                    {isSending ? 'SENDING…' : 'RESEND EMAIL'}
-                  </Text>
-                </TouchableOpacity>
+                <View style={styles.resendSection}>
+                  <Text style={styles.resendPrompt}>Didn't receive the code?</Text>
+                  <TouchableOpacity
+                    accessibilityRole="button"
+                    style={[styles.resendButton, resendDisabled && styles.resendButtonDisabled]}
+                    onPress={() => requestOtp()}
+                    disabled={resendDisabled}
+                  >
+                    <Text
+                      style={[
+                        styles.resendButtonText,
+                        resendDisabled && styles.resendButtonTextDisabled,
+                      ]}
+                    >
+                      {sending
+                        ? 'Sending...'
+                        : resendSeconds > 0
+                          ? 'Resend code in ' + resendSeconds + 's'
+                          : 'Resend code'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
 
                 <TouchableOpacity
+                  accessibilityRole="button"
                   style={styles.loginButton}
                   onPress={returnToLogin}
-                  disabled={isSending || isChecking}
+                  disabled={sending || verifying || verified}
                 >
                   <Text style={styles.loginButtonText}>Back to Login</Text>
                 </TouchableOpacity>
-              </View>
+              </>
             )}
           </View>
         </ScrollView>
@@ -244,97 +441,135 @@ const styles = StyleSheet.create({
   safeArea: { flex: 1 },
   scrollContent: {
     flexGrow: 1,
-    alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 24,
-    paddingVertical: 36,
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 28,
   },
-  brand: { alignItems: 'center', marginBottom: 28 },
-  brandName: { color: '#FFFFFF', fontSize: 34, fontWeight: '800' },
-  tagline: { color: 'rgba(255,255,255,0.86)', fontSize: 15, marginTop: 4 },
+  brand: { alignItems: 'center', marginBottom: 24 },
+  logo: { width: 70, height: 70, marginBottom: 8 },
+  brandName: {
+    color: '#FFFFFF',
+    fontSize: 32,
+    fontWeight: '800',
+    letterSpacing: -0.5,
+  },
+  tagline: { color: 'rgba(255,255,255,0.88)', fontSize: 14, marginTop: 4 },
   card: {
     width: '100%',
-    maxWidth: 440,
+    alignSelf: 'center',
     backgroundColor: '#FFFFFF',
-    borderRadius: 20,
-    padding: 24,
-    shadowColor: '#0B4B82',
-    shadowOpacity: 0.2,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 5,
+    borderRadius: 24,
+    paddingHorizontal: 24,
+    paddingVertical: 28,
+    shadowColor: '#07518E',
+    shadowOpacity: 0.24,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 8,
   },
-  stateContent: { alignItems: 'center' },
-  stateText: { color: '#4D6274', fontSize: 15, marginTop: 16, textAlign: 'center' },
+  loadingState: { minHeight: 300, justifyContent: 'center', alignItems: 'center' },
+  loadingText: { color: '#40617A', fontSize: 15, marginTop: 14 },
   emailIcon: {
     width: 52,
     height: 52,
     borderRadius: 26,
+    alignSelf: 'center',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#EAF6FF',
+    backgroundColor: '#E6F4FF',
     marginBottom: 16,
   },
-  emailIconText: { color: '#187BCD', fontSize: 28, fontWeight: '800' },
+  emailIconText: { color: '#187BCD', fontSize: 28, fontWeight: '700', marginTop: -2 },
   title: {
-    color: '#12304A',
-    fontSize: 24,
+    color: '#17324D',
+    fontSize: 25,
     fontWeight: '800',
     textAlign: 'center',
-    marginBottom: 12,
+    marginBottom: 10,
   },
-  description: { color: '#4D6274', fontSize: 15, textAlign: 'center' },
+  description: { color: '#52708A', fontSize: 15, lineHeight: 21, textAlign: 'center' },
   emailAddress: {
     color: '#187BCD',
     fontSize: 15,
-    fontWeight: '800',
+    fontWeight: '700',
+    lineHeight: 21,
     textAlign: 'center',
-    marginTop: 4,
+    marginTop: 3,
   },
   instructions: {
-    color: '#4D6274',
-    fontSize: 15,
-    lineHeight: 22,
+    color: '#52708A',
+    fontSize: 14,
+    lineHeight: 20,
     textAlign: 'center',
-    marginTop: 18,
+    marginTop: 14,
     marginBottom: 20,
   },
+  otpInputArea: { height: 58, width: '100%', position: 'relative', marginBottom: 14 },
+  otpBoxes: { flex: 1, flexDirection: 'row', justifyContent: 'space-between' },
+  otpBox: {
+    width: '14.5%',
+    height: 56,
+    borderWidth: 1,
+    borderColor: '#BEDAF0',
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F8FCFF',
+  },
+  otpBoxActive: { borderColor: '#187BCD', borderWidth: 2, backgroundColor: '#F3FAFF' },
+  otpBoxFilled: { borderColor: '#63B6EC', backgroundColor: '#EDF8FF' },
+  otpDigit: { color: '#17324D', fontSize: 23, fontWeight: '700' },
+  hiddenOtpInput: {
+    ...StyleSheet.absoluteFillObject,
+    color: 'transparent',
+    opacity: 0.02,
+    fontSize: 1,
+  },
+  expiryText: {
+    color: '#52708A',
+    fontSize: 13,
+    lineHeight: 18,
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  expiredText: { color: '#B45309' },
   notice: {
-    width: '100%',
-    color: '#9A6700',
-    backgroundColor: '#FFF8E6',
+    color: '#40617A',
+    backgroundColor: '#EFF8FF',
     borderRadius: 10,
     fontSize: 13,
-    lineHeight: 19,
-    padding: 12,
-    marginBottom: 16,
+    lineHeight: 18,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
     textAlign: 'center',
+    marginBottom: 16,
   },
+  noticeError: { color: '#A53B12', backgroundColor: '#FFF4E5' },
+  noticeSuccess: { color: '#176B47', backgroundColor: '#EAF9F0' },
   primaryButton: {
     width: '100%',
-    minHeight: 48,
+    minHeight: 52,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#187BCD',
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    marginBottom: 8,
+    paddingHorizontal: 18,
   },
-  primaryButtonText: { color: '#FFFFFF', fontSize: 15, fontWeight: '800' },
-  secondaryButton: {
-    minHeight: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 16,
-    marginBottom: 2,
-  },
-  secondaryButtonText: { color: '#187BCD', fontSize: 15, fontWeight: '800' },
+  primaryButtonText: { color: '#FFFFFF', fontSize: 15, fontWeight: '800', letterSpacing: 0.2 },
+  buttonDisabled: { opacity: 0.48 },
+  resendSection: { alignItems: 'center', marginTop: 20 },
+  resendPrompt: { color: '#52708A', fontSize: 14, marginBottom: 8 },
+  resendButton: { minHeight: 32, justifyContent: 'center', paddingHorizontal: 8 },
+  resendButtonDisabled: { opacity: 0.8 },
+  resendButtonText: { color: '#187BCD', fontSize: 14, fontWeight: '700' },
+  resendButtonTextDisabled: { color: '#6E8AA2' },
   loginButton: {
-    minHeight: 40,
-    alignItems: 'center',
+    alignSelf: 'center',
+    marginTop: 14,
+    minHeight: 36,
     justifyContent: 'center',
-    paddingHorizontal: 16,
+    paddingHorizontal: 12,
   },
-  loginButtonText: { color: '#64748B', fontSize: 14, fontWeight: '700' },
-  buttonDisabled: { opacity: 0.65 },
+  loginButtonText: { color: '#187BCD', fontSize: 14, fontWeight: '700' },
 });

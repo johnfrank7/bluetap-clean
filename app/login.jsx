@@ -21,7 +21,6 @@ import { BLUETAP_LOGIN_GRADIENT } from '../constants/bluetapTheme';
 import { auth, db } from '../firebase';
 import {
   fetchSignInMethodsForEmail,
-  sendEmailVerification,
   sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signOut,
@@ -38,6 +37,7 @@ import {
   saveUserProfileWithUniqueId,
 } from '../services/uniqueIds';
 import { createUnverifiedFaceVerification } from '../services/faceVerification';
+import { requestEmailOtp } from '../services/emailVerification';
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const applicationPendingTitle = 'Application Pending';
@@ -539,19 +539,24 @@ export default function LoginPage() {
       setPendingUser(null);
 
       if (!pendingUser.emailVerified) {
-        let verificationEmailSent = true;
+        let otpRequest = null;
 
         try {
-          await sendEmailVerification(pendingUser);
+          otpRequest = await requestEmailOtp();
         } catch (error) {
-          verificationEmailSent = false;
-          console.log('Missing-profile verification email error:', error.message);
+          console.log('Missing-profile email OTP request error:', error.message);
         }
 
         clearAllAuthSessions();
         router.replace({
           pathname: '/email-verification',
-          params: { sent: verificationEmailSent ? 'true' : 'false' },
+          params: {
+            sent: otpRequest ? 'true' : 'false',
+            expiresAt: otpRequest?.expiresAt ? String(otpRequest.expiresAt) : '',
+            resendAfterSeconds: otpRequest?.resendAfterSeconds
+              ? String(otpRequest.resendAfterSeconds)
+              : '',
+          },
         });
         return;
       }

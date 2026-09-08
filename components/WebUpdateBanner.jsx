@@ -135,7 +135,7 @@ const styles = StyleSheet.create({
   },
   reloadButton: {
     minWidth: 88,
-    backgroundColor: BLUETAP_COLORS.primarySoft,
+    backgroundColor: BLUETAP_COLORS.primaryDeep,
     borderWidth: 2,
     borderColor: BLUETAP_COLORS.white,
     borderRadius: 16,
@@ -150,7 +150,7 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   reloadText: {
-    color: BLUETAP_COLORS.primaryDeep,
+    color: BLUETAP_COLORS.white,
     fontSize: 13,
     fontWeight: '800',
   },

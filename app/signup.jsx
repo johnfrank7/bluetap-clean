@@ -22,12 +22,12 @@ import { auth } from '../firebase';
 import {
   createUserWithEmailAndPassword,
   deleteUser,
-  sendEmailVerification,
   signOut,
 } from 'firebase/auth';
 import { serverTimestamp } from 'firebase/firestore';
 import { saveLocalUser } from '../localUsers';
 import { clearAllAuthSessions } from '../services/authSession';
+import { requestEmailOtp } from '../services/emailVerification';
 import { createUnverifiedFaceVerification } from '../services/faceVerification';
 import { saveUserProfileWithUniqueId } from '../services/uniqueIds';
 
@@ -433,22 +433,27 @@ export default function SignupPage() {
       saveLocalUser(savedUserData);
 
       if (type === 'requester' || type === 'distributor') {
-        let verificationEmailSent = true;
+        let otpRequest = null;
 
         try {
-          await sendEmailVerification(user);
+          otpRequest = await requestEmailOtp();
         } catch (error) {
-          verificationEmailSent = false;
-          console.log('Email verification send error:', error.message);
+          console.log('Email OTP request error:', error.message);
         }
 
         // Do not create a role session until the email and identity checks finish.
-        // Firebase authentication remains active so the email verification screen can
-        // safely check the account that received the verification email.
+        // Firebase authentication remains active so the OTP screen can securely
+        // request and verify a code for the account that just signed up.
         clearAllAuthSessions();
         router.replace({
           pathname: '/email-verification',
-          params: { sent: verificationEmailSent ? 'true' : 'false' },
+          params: {
+            sent: otpRequest ? 'true' : 'false',
+            expiresAt: otpRequest?.expiresAt ? String(otpRequest.expiresAt) : '',
+            resendAfterSeconds: otpRequest?.resendAfterSeconds
+              ? String(otpRequest.resendAfterSeconds)
+              : '',
+          },
         });
       }
 

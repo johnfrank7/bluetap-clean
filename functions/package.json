@@ -1,0 +1,15 @@
+{
+  "name": "bluetap-functions",
+  "private": true,
+  "main": "index.js",
+  "engines": {
+    "node": "20"
+  },
+  "scripts": {
+    "check": "node --check index.js && node --check emailProvider.js"
+  },
+  "dependencies": {
+    "firebase-admin": "^13.0.2",
+    "firebase-functions": "^6.2.0"
+  }
+}
