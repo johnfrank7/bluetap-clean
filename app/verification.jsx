@@ -11,7 +11,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
-import { onAuthStateChanged } from 'firebase/auth';
+import { onAuthStateChanged, reload } from 'firebase/auth';
 
 import { BLUETAP_LOGIN_GRADIENT } from '../constants/bluetapTheme';
 import { auth } from '../firebase';
@@ -96,6 +96,16 @@ export default function VerificationPage() {
         if (!nextProfile || !isVerificationRole(role)) {
           await signOutAndClearSessions();
           if (isActive) router.replace('/login');
+          return;
+        }
+
+        await reload(user);
+
+        if (
+          nextProfile.emailVerificationRequired === true &&
+          !(auth.currentUser || user).emailVerified
+        ) {
+          if (isActive) router.replace('/email-verification');
           return;
         }
 

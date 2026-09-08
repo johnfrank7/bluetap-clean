@@ -21,6 +21,7 @@ import { BLUETAP_LOGIN_GRADIENT } from '../constants/bluetapTheme';
 import { auth, db } from '../firebase';
 import {
   fetchSignInMethodsForEmail,
+  sendEmailVerification,
   sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signOut,
@@ -91,6 +92,7 @@ const getApplicationStatus = (profile, defaultStatus = 'pending') =>
   normalizeApprovalStatus(
     profile?.status || profile?.approvalStatus || profile?.accountStatus || defaultStatus
   );
+const requiresEmailVerification = (profile) => profile?.emailVerificationRequired === true;
 const BASE_SCROLL_PADDING_BOTTOM = 20;
 const DEFAULT_KEYBOARD_GAP = 24;
 const PASSWORD_KEYBOARD_GAP = 112;
@@ -293,6 +295,17 @@ export default function LoginPage() {
 
   const finishSuccessfulLogin = (profile) => {
     const role = normalizeRole(profile?.role || profile);
+
+    if (
+      (role === 'requester' || role === 'distributor') &&
+      requiresEmailVerification(profile) &&
+      !auth.currentUser?.emailVerified
+    ) {
+      clearAllAuthSessions();
+      setLoading(false);
+      router.replace('/email-verification');
+      return;
+    }
 
     saveRoleSession({
       ...(typeof profile === 'object' ? profile : {}),
@@ -498,6 +511,8 @@ export default function LoginPage() {
         approvalStatus: role === 'distributor' ? 'pending' : 'approved',
         status: role === 'distributor' ? 'Pending' : 'Approved',
         rejectionReason: null,
+        emailVerificationRequired: true,
+        emailVerified: Boolean(pendingUser.emailVerified),
         faceVerification: createUnverifiedFaceVerification(),
       };
 
@@ -522,6 +537,24 @@ export default function LoginPage() {
       }
 
       setPendingUser(null);
+
+      if (!pendingUser.emailVerified) {
+        let verificationEmailSent = true;
+
+        try {
+          await sendEmailVerification(pendingUser);
+        } catch (error) {
+          verificationEmailSent = false;
+          console.log('Missing-profile verification email error:', error.message);
+        }
+
+        clearAllAuthSessions();
+        router.replace({
+          pathname: '/email-verification',
+          params: { sent: verificationEmailSent ? 'true' : 'false' },
+        });
+        return;
+      }
 
       if (role === 'distributor') {
         clearAllAuthSessions();

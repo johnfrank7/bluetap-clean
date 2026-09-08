@@ -302,6 +302,19 @@ export const validateRoleAccess = async (expectedRole) => {
     };
   }
 
+  if (
+    (profile.role === 'requester' || profile.role === 'distributor') &&
+    profile.emailVerificationRequired === true &&
+    !currentUser.emailVerified
+  ) {
+    return {
+      status: 'email-unverified',
+      message: 'Verify your email to continue.',
+      redirectTo: '/email-verification',
+      clearRole: expected,
+    };
+  }
+
   if (profile.role !== expected) {
     saveRoleSession(profile);
 

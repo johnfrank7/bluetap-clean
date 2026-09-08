@@ -19,7 +19,12 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 
 import { BLUETAP_LOGIN_GRADIENT } from '../constants/bluetapTheme';
 import { auth } from '../firebase';
-import { createUserWithEmailAndPassword, deleteUser, signOut } from 'firebase/auth';
+import {
+  createUserWithEmailAndPassword,
+  deleteUser,
+  sendEmailVerification,
+  signOut,
+} from 'firebase/auth';
 import { serverTimestamp } from 'firebase/firestore';
 import { saveLocalUser } from '../localUsers';
 import { clearAllAuthSessions } from '../services/authSession';
@@ -392,6 +397,8 @@ export default function SignupPage() {
         approvalStatus: isDistributor ? 'pending' : 'approved',
         status: isDistributor ? 'Pending' : 'Approved',
         rejectionReason: null,
+        emailVerificationRequired: true,
+        emailVerified: false,
         faceVerification: createUnverifiedFaceVerification(),
       };
 
@@ -407,11 +414,23 @@ export default function SignupPage() {
       saveLocalUser(savedUserData);
 
       if (type === 'requester' || type === 'distributor') {
-        // Do not create a role session before the registration verification step.
-        // Firebase authentication remains active so /verification can load the profile.
-        // Distributors stay pending administrator approval after verification.
+        let verificationEmailSent = true;
+
+        try {
+          await sendEmailVerification(user);
+        } catch (error) {
+          verificationEmailSent = false;
+          console.log('Email verification send error:', error.message);
+        }
+
+        // Do not create a role session until the email and identity checks finish.
+        // Firebase authentication remains active so the email verification screen can
+        // safely check the account that received the verification email.
         clearAllAuthSessions();
-        router.replace('/verification');
+        router.replace({
+          pathname: '/email-verification',
+          params: { sent: verificationEmailSent ? 'true' : 'false' },
+        });
       }
 
     } catch (error) {
