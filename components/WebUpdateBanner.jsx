@@ -84,16 +84,18 @@ export default function WebUpdateBanner() {
 
   return (
     <View style={[styles.banner, { paddingTop: Math.max(insets.top, 10) }]}>
-      <Text style={styles.message}>A new version of BlueTap is available.</Text>
-      <TouchableOpacity
-        accessibilityRole="button"
-        accessibilityLabel="Reload BlueTap to update"
-        activeOpacity={0.8}
-        onPress={reloadPage}
-        style={styles.reloadButton}
-      >
-        <Text style={styles.reloadText}>Reload</Text>
-      </TouchableOpacity>
+      <View style={styles.content}>
+        <Text style={styles.message}>A new version of BlueTap is available.</Text>
+        <TouchableOpacity
+          accessibilityRole="button"
+          accessibilityLabel="Reload BlueTap to update"
+          activeOpacity={0.8}
+          onPress={reloadPage}
+          style={styles.reloadButton}
+        >
+          <Text style={styles.reloadText}>Reload</Text>
+        </TouchableOpacity>
+      </View>
     </View>
   );
 }
@@ -106,7 +108,6 @@ const styles = StyleSheet.create({
     right: 0,
     zIndex: 1000,
     minHeight: 54,
-    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: BLUETAP_COLORS.primaryDark,
@@ -119,6 +120,12 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     shadowOffset: { width: 0, height: 3 },
     elevation: 10,
+  },
+  content: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   message: {
     color: '#FFFFFF',
