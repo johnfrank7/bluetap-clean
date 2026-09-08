@@ -55,6 +55,9 @@ const getOtpError = (error) => {
     return 'Verification email could not be sent. Please try again.';
   }
   if (reason === 'no-active-code') return 'Please request a new verification code.';
+  if (code === 'functions/internal' || code === 'functions/not-found') {
+    return 'The email verification service is currently unavailable. Please try again later or contact BlueTap support.';
+  }
   if (code.includes('unauthenticated')) return 'Your session has expired. Please log in again.';
   if (code.includes('unavailable') || code.includes('network')) {
     return 'Verification email could not be sent. Please check your connection and try again.';
@@ -77,6 +80,9 @@ export default function EmailVerificationPage() {
   const [verified, setVerified] = React.useState(false);
   const [otp, setOtp] = React.useState('');
   const [expiresAt, setExpiresAt] = React.useState(positiveNumber(params.expiresAt));
+  const [codeSent, setCodeSent] = React.useState(
+    sent === 'true' && positiveNumber(params.expiresAt) > 0
+  );
   const [cooldownEndsAt, setCooldownEndsAt] = React.useState(() => {
     const seconds = positiveNumber(params.resendAfterSeconds);
     return seconds ? Date.now() + seconds * 1000 : 0;
@@ -161,6 +167,7 @@ export default function EmailVerificationPage() {
         );
         setCooldownEndsAt(Date.now() + Math.max(1, nextCooldownSeconds) * 1000);
         setOtp('');
+        setCodeSent(true);
 
         if (showSentMessage) {
           setMessage('A new 6-digit verification code has been sent to your email.');
@@ -174,7 +181,10 @@ export default function EmailVerificationPage() {
         if (Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0) {
           setCooldownEndsAt(Date.now() + retryAfterSeconds * 1000);
         }
-        if (Number.isFinite(activeExpiry) && activeExpiry > 0) setExpiresAt(activeExpiry);
+        if (Number.isFinite(activeExpiry) && activeExpiry > 0) {
+          setExpiresAt(activeExpiry);
+          setCodeSent(true);
+        }
 
         console.log('Email OTP request error:', error.message);
         setMessage(getOtpError(error));
@@ -318,7 +328,13 @@ export default function EmailVerificationPage() {
                   <Text style={styles.emailIconText}>✉</Text>
                 </View>
                 <Text style={styles.title}>Verify your email</Text>
-                <Text style={styles.description}>We've sent a 6-digit verification code to</Text>
+                <Text style={styles.description}>
+                  {sending
+                    ? 'Sending a verification code to'
+                    : codeSent
+                      ? "We've sent a 6-digit verification code to"
+                      : 'Request a 6-digit verification code for'}
+                </Text>
                 <Text style={styles.emailAddress}>{user?.email || 'your email address'}</Text>
                 <Text style={styles.instructions}>
                   Enter the code below to confirm your email address.
@@ -363,7 +379,7 @@ export default function EmailVerificationPage() {
                     ? 'This verification code has expired. Please request a new code.'
                     : secondsRemaining > 0
                       ? 'This code expires in ' + formatTime(secondsRemaining) + '.'
-                      : sent === 'false'
+                      : !codeSent
                         ? 'Request a verification code to continue.'
                       : 'This code will expire in 10 minutes.'}
                 </Text>

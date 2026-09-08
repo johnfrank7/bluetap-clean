@@ -2,7 +2,7 @@ import { getFunctions, httpsCallable } from 'firebase/functions';
 
 import { app } from '../firebaseApp';
 
-const functions = getFunctions(app);
+const functions = getFunctions(app, 'us-central1');
 const requestEmailOtpCallable = httpsCallable(functions, 'requestEmailOtp');
 const verifyEmailOtpCallable = httpsCallable(functions, 'verifyEmailOtp');
 
@@ -12,7 +12,13 @@ const verifyEmailOtpCallable = httpsCallable(functions, 'verifyEmailOtp');
  */
 export const requestEmailOtp = async () => {
   const response = await requestEmailOtpCallable();
-  return response.data || {};
+  const data = response.data;
+  if (!data?.alreadyVerified && !(Number(data?.expiresAt) > 0)) {
+    const error = new Error('The email verification service returned an invalid response.');
+    error.code = 'functions/internal';
+    throw error;
+  }
+  return data;
 };
 
 /**

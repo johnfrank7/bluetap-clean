@@ -7,9 +7,9 @@ This isolated Firebase Functions backend owns email OTP generation and verificat
 Set these against the Firebase project before deploying:
 
 ```powershell
-firebase functions:secrets:set EMAIL_PROVIDER_API_KEY
-firebase functions:secrets:set EMAIL_FROM_ADDRESS
-firebase functions:secrets:set EMAIL_OTP_HASH_SECRET
+npx firebase-tools functions:secrets:set EMAIL_PROVIDER_API_KEY --project bluetap-cce88
+npx firebase-tools functions:secrets:set EMAIL_FROM_ADDRESS --project bluetap-cce88
+npx firebase-tools functions:secrets:set EMAIL_OTP_HASH_SECRET --project bluetap-cce88
 ```
 
 - `EMAIL_PROVIDER_API_KEY`: a Resend API key.
@@ -36,3 +36,15 @@ match /emailOtpVerifications/{verificationId} {
 ```
 
 The Firebase Admin SDK used by these functions bypasses Firestore rules and retains access.
+An explicit deny does not override another matching allow rule. Remove or narrow any
+broad wildcard allow rules that would also grant access to this collection before deploying.
+
+## Deployment troubleshooting
+
+Deploying the Expo app to Vercel does not deploy these Firebase Functions.
+Sign in using `npx firebase-tools login` before running the commands above.
+The client calls the default `us-central1` region in project `bluetap-cce88`.
+If the function URL returns HTTP 404, deploy the backend to that project and region;
+adding browser CORS workarounds will not create the missing function.
+The Resend API key and verified sender must be configured before any email can be sent.
+The recipient can use Gmail; Gmail is not the outbound email provider in this integration.
