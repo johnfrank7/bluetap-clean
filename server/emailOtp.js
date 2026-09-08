@@ -122,8 +122,8 @@ function createEmailOtpService({ auth, db, sendEmailOtp, hashSecret, now = Date.
     // Refuse a code issued for a different email if the account changed mid-request.
     const current = await userFor(uid);
     if (current.email !== user.email) throw new OtpError(409, 'no-active-code', 'Please request a new verification code.');
-    await auth.updateUser(uid, { emailVerified: true });
-    return { verified: true };
+    const completion = await auth.updateUser(uid, { emailVerified: true });
+    return { verified: true, ...(completion?.registrationResult || {}) };
   }
   return { request, verify };
 }

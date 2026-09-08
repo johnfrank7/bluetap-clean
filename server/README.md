@@ -66,7 +66,35 @@ match /emailOtpVerifications/{document=**} {
 No app collection rules were replaced. Existing face verification, distributor
 approval and admin code remain unchanged. Face verification is a separate existing
 integration; this OTP backend does not configure it or mark faces verified.
-Signup still creates a Firebase account before OTP as required by the ID-token flow.
+## Registration before account creation
 
-Run `node --test server/emailOtp.test.js` for isolated server security tests,
+New signup uses `POST /api/auth/request-registration-otp` with the email only.
+No Auth account or `users` profile is created at this point. Private pending OTP
+records share the locked-down `emailOtpVerifications` collection, keyed by an HMAC
+of the normalized email. Only OTP hashes and delivery/rate-limit metadata are saved.
+A signed, expiring registration challenge is returned; it is kept in memory with
+the form details. Passwords are never persisted to browser storage, URLs, or Firestore.
+Refreshing this screen restarts signup safely, leaving the email available.
+
+`POST /api/auth/complete-registration` validates the challenge, submitted fields,
+and OTP before creating the Firebase user with emailVerified true. Admin saves the
+profile and counter together, then issues a custom login token. Existing unverified
+signups can recover after OTP verification without duplicate accounts; existing role,
+approval and identity status are preserved. Already verified accounts and admin
+profiles must use login/password reset. New distributor approval is always pending.
+If a new profile write fails and the profile is confirmed absent, the newly created
+Auth account is rolled back. Uncertain failures remain recoverable via OTP.
+
+These two registration endpoints intentionally do not require an ID token because
+the account does not exist yet. A correct email OTP plus signed challenge is required
+to complete registration. Email rate limits remain six sends/hour, and public signup
+is additionally limited to 20 send requests/IP/hour using Vercel's forwarded client
+IP. IP identifiers are HMAC hashed; no raw IPs are stored. Existing signed-in users
+continue using the two authenticated email-OTP routes.
+
+Deploy the two new API files and frontend together. No new secrets are required.
+This fixes registration writes through Admin; other app screens still require
+appropriate Firestore rules for their normal client reads and writes.
+
+Run `node --test server/emailOtp.test.js server/registration.test.js` for isolated server security tests,
 and `npm run build` for Expo web compilation. No live emails are sent by the tests.

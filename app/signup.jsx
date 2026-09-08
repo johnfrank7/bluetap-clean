@@ -18,18 +18,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 
 import { BLUETAP_LOGIN_GRADIENT } from '../constants/bluetapTheme';
-import { auth } from '../firebase';
-import {
-  createUserWithEmailAndPassword,
-  deleteUser,
-  signOut,
-} from 'firebase/auth';
-import { serverTimestamp } from 'firebase/firestore';
-import { saveLocalUser } from '../localUsers';
 import { clearAllAuthSessions } from '../services/authSession';
-import { requestEmailOtp } from '../services/emailVerification';
-import { createUnverifiedFaceVerification } from '../services/faceVerification';
-import { saveUserProfileWithUniqueId } from '../services/uniqueIds';
+import { clearPendingRegistration, requestRegistrationOtp, setPendingRegistration } from '../services/emailVerification';
 
 const barangayOptions = [
   'Awihao',
@@ -80,7 +70,6 @@ const authErrorMessages = {
   'auth/invalid-email': 'Please enter a valid email address.',
   'auth/weak-password': 'Password must be at least 8 characters.',
   'auth/network-request-failed': 'Network error. Please check your connection and try again.',
-  'permission-denied': 'The account was created, but Firestore blocked saving the profile. Please check Firestore rules.',
 };
 
 const getAuthErrorMessage = (error) =>
@@ -380,8 +369,6 @@ export default function SignupPage() {
   };
 
   const registerAccount = async (type) => {
-    let createdUser = null;
-
     try {
       setLoading(true);
 
@@ -395,83 +382,27 @@ export default function SignupPage() {
         return;
       }
 
-      const userCredential = await createUserWithEmailAndPassword(
-        auth,
-        normalizedEmail,
-        password
-      );
-
-      const user = userCredential.user;
-      createdUser = user;
-      const isDistributor = type === 'distributor';
       const userData = {
-        uid: user.uid,
         firstName: firstName.trim(),
         lastName: lastName.trim(),
-        email: (user.email || normalizedEmail).trim().toLowerCase(),
+        email: normalizedEmail,
         phone: formatPhilippineMobile(phone),
         barangay: trimmedBarangay,
-        address: trimmedBarangay,
         role: type,
-        approvalStatus: isDistributor ? 'pending' : 'approved',
-        status: isDistributor ? 'Pending' : 'Approved',
-        rejectionReason: null,
-        emailVerificationRequired: true,
-        emailVerified: false,
-        faceVerification: createUnverifiedFaceVerification(),
+        password,
       };
-
-      const savedProfile = await saveUserProfileWithUniqueId(user.uid, type, {
-        ...userData,
-        createdAt: serverTimestamp(),
+      clearPendingRegistration();
+      const result = await requestRegistrationOtp(normalizedEmail);
+      setPendingRegistration(userData, result);
+      clearAllAuthSessions();
+      router.replace({
+        pathname: '/email-verification',
+        params: { registration: 'true', role: type, sent: 'true',
+          expiresAt: String(result.expiresAt), resendAfterSeconds: String(result.resendAfterSeconds) },
       });
-      const savedUserData = {
-        ...userData,
-        unique_id: savedProfile.unique_id,
-      };
-
-      saveLocalUser(savedUserData);
-
-      if (type === 'requester' || type === 'distributor') {
-        let otpRequest = null;
-
-        try {
-          otpRequest = await requestEmailOtp();
-        } catch (error) {
-          console.log('Email OTP request error:', error.message);
-        }
-
-        // Do not create a role session until the email and identity checks finish.
-        // Firebase authentication remains active so the OTP screen can securely
-        // request and verify a code for the account that just signed up.
-        clearAllAuthSessions();
-        router.replace({
-          pathname: '/email-verification',
-          params: {
-            sent: otpRequest ? 'true' : 'false',
-            expiresAt: otpRequest?.expiresAt ? String(otpRequest.expiresAt) : '',
-            resendAfterSeconds: otpRequest?.resendAfterSeconds
-              ? String(otpRequest.resendAfterSeconds)
-              : '',
-          },
-        });
-      }
-
     } catch (error) {
       console.log('Signup error:', error.message);
       clearAllAuthSessions();
-      if (createdUser) {
-        try {
-          await deleteUser(createdUser);
-        } catch (deleteError) {
-          console.log('Signup cleanup error:', deleteError.message);
-          try {
-            await signOut(auth);
-          } catch (signOutError) {
-            console.log('Signup sign out cleanup error:', signOutError.message);
-          }
-        }
-      }
       showNotification('Signup failed', getAuthErrorMessage(error));
     } finally {
       setLoading(false);

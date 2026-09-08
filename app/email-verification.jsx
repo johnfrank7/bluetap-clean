@@ -13,12 +13,13 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { onAuthStateChanged, reload, signOut } from 'firebase/auth';
+import { onAuthStateChanged, reload, signInWithCustomToken, signOut } from 'firebase/auth';
 
 import { BLUETAP_LOGIN_GRADIENT } from '../constants/bluetapTheme';
 import { auth } from '../firebase';
 import { clearAllAuthSessions } from '../services/authSession';
-import { requestEmailOtp, verifyEmailOtp } from '../services/emailVerification';
+import { requestEmailOtp, verifyEmailOtp, getPendingRegistration, clearPendingRegistration,
+  setPendingRegistration, requestRegistrationOtp, completeRegistration } from '../services/emailVerification';
 
 const OTP_LENGTH = 6;
 const OTP_EXPIRY_MS = 10 * 60 * 1000;
@@ -58,6 +59,7 @@ const getOtpError = (error) => {
     return 'Email delivery is in test mode and can only send to the Resend account owner. Please contact BlueTap support.';
   }
   if (reason === 'no-active-code') return 'Please request a new verification code.';
+  if (['registration-expired', 'invalid-registration', 'account-exists'].includes(reason)) return error.message;
   if (reason === 'service-unavailable') {
     return 'The email verification service is currently unavailable. Please try again later or contact BlueTap support.';
   }
@@ -73,10 +75,13 @@ export default function EmailVerificationPage() {
   const params = useLocalSearchParams();
   const { width } = useWindowDimensions();
   const sent = firstParam(params.sent);
+  const registration = firstParam(params.registration) === 'true';
+  const draft = registration ? getPendingRegistration() : null;
   const automaticRequestRef = React.useRef(false);
   const completionTimeoutRef = React.useRef(null);
+  const registrationCompletedRef = React.useRef(false);
 
-  const [user, setUser] = React.useState(auth.currentUser);
+  const [user, setUser] = React.useState(registration ? { email: draft?.profile.email } : auth.currentUser);
   const [loading, setLoading] = React.useState(true);
   const [sending, setSending] = React.useState(false);
   const [verifying, setVerifying] = React.useState(false);
@@ -142,20 +147,28 @@ export default function EmailVerificationPage() {
 
   const requestOtp = React.useCallback(
     async ({ account = auth.currentUser, showSentMessage = true } = {}) => {
-      if (!account || sending || verifying || verified) return null;
+      if ((!registration && !account) || sending || verifying || verified) return null;
 
       setSending(true);
       setMessage('');
 
       try {
-        await reload(account);
+        if (!registration) await reload(account);
         const currentUser = auth.currentUser || account;
-        if (currentUser.emailVerified) {
+        if (!registration && currentUser.emailVerified) {
           await continueAfterVerification(currentUser);
           return { alreadyVerified: true };
         }
 
-        const response = await requestEmailOtp();
+        const currentDraft = registration ? getPendingRegistration() : null;
+        if (registration && !currentDraft) {
+          router.replace('/signup?role=' + (firstParam(params.role) === 'distributor' ? 'distributor' : 'requester'));
+          return null;
+        }
+        const response = registration
+          ? await requestRegistrationOtp(currentDraft.profile.email)
+          : await requestEmailOtp();
+        if (registration) setPendingRegistration(currentDraft.profile, response);
         if (response.alreadyVerified) {
           await continueAfterVerification(currentUser);
           return response;
@@ -198,10 +211,19 @@ export default function EmailVerificationPage() {
         setSending(false);
       }
     },
-    [continueAfterVerification, router, sending, verified, verifying]
+    [continueAfterVerification, router, sending, verified, verifying, registration, params.role]
   );
 
   React.useEffect(() => {
+    if (registration) {
+      if (registrationCompletedRef.current) return;
+      if (!getPendingRegistration()) {
+        router.replace('/signup?role=' + (firstParam(params.role) === 'distributor' ? 'distributor' : 'requester'));
+      } else {
+        setLoading(false);
+      }
+      return;
+    }
     let active = true;
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       if (!currentUser) {
@@ -236,7 +258,7 @@ export default function EmailVerificationPage() {
       active = false;
       unsubscribe();
     };
-  }, [continueAfterVerification, requestOtp, router, sent]);
+  }, [continueAfterVerification, requestOtp, router, sent, registration, params.role]);
 
   const changeOtp = (value) => {
     setOtp(value.replace(/\D/g, '').slice(0, OTP_LENGTH));
@@ -247,14 +269,20 @@ export default function EmailVerificationPage() {
   };
 
   const verify = async () => {
-    const account = auth.currentUser || user;
-    if (!account || otp.length !== OTP_LENGTH || sending || verifying || codeExpired) return;
+    let account = auth.currentUser || user;
+    if ((!registration && !account) || otp.length !== OTP_LENGTH || sending || verifying || codeExpired || verified) return;
 
     setVerifying(true);
     setMessage('');
     try {
-      const response = await verifyEmailOtp(otp);
+      const response = registration ? await completeRegistration(otp) : await verifyEmailOtp(otp);
       if (!response.verified) throw new Error('Email verification did not complete.');
+      if (registration) {
+        const credential = await signInWithCustomToken(auth, response.customToken);
+        account = credential.user;
+        registrationCompletedRef.current = true;
+        clearPendingRegistration();
+      }
 
       await reload(account);
       const refreshedUser = auth.currentUser || account;
@@ -284,6 +312,7 @@ export default function EmailVerificationPage() {
   };
 
   const returnToLogin = async () => {
+    clearPendingRegistration();
     clearAllAuthSessions();
     try {
       await signOut(auth);
