@@ -9,9 +9,10 @@ import {
   View,
 } from 'react-native';
 import { usePathname, useRouter, useSegments } from 'expo-router';
+import { BLUETAP_COLORS } from '../constants/bluetapTheme';
 import { createShadow } from './shadowStyles';
 
-const BLUE = '#187BCD';
+const BLUE = BLUETAP_COLORS.primary;
 const ICON_SIZE = 26;
 const ACTIVE_SCALE = 1.1;
 const NAV_HORIZONTAL_PADDING = 28;

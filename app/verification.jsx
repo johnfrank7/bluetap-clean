@@ -13,6 +13,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { onAuthStateChanged } from 'firebase/auth';
 
+import { BLUETAP_LOGIN_GRADIENT } from '../constants/bluetapTheme';
 import { auth } from '../firebase';
 import {
   fetchFirestoreUserProfile,
@@ -321,7 +322,7 @@ export default function VerificationPage() {
 
   return (
     <LinearGradient
-      colors={['#187BCD', '#42A5F5']}
+      colors={BLUETAP_LOGIN_GRADIENT}
       style={styles.gradient}
       start={{ x: 0, y: 0 }}
       end={{ x: 0, y: 1 }}

@@ -17,6 +17,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 
+import { BLUETAP_LOGIN_GRADIENT } from '../constants/bluetapTheme';
 import { auth, db } from '../firebase';
 import {
   fetchSignInMethodsForEmail,
@@ -35,10 +36,7 @@ import {
   ensureUserUniqueId,
   saveUserProfileWithUniqueId,
 } from '../services/uniqueIds';
-import {
-  createUnverifiedFaceVerification,
-  normalizeFaceVerification,
-} from '../services/faceVerification';
+import { createUnverifiedFaceVerification } from '../services/faceVerification';
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const applicationPendingTitle = 'Application Pending';
@@ -279,16 +277,8 @@ export default function LoginPage() {
     }, keyboardVisibleRef.current ? 60 : 320);
   };
 
-  const navigateToRoleHome = (profile) => {
-    const normalizedRole = normalizeRole(profile?.role || profile);
-
-    if (
-      (normalizedRole === 'requester' || normalizedRole === 'distributor') &&
-      normalizeFaceVerification(profile).status !== 'verified'
-    ) {
-      router.replace('/verification');
-      return;
-    }
+  const navigateToRoleHome = (role) => {
+    const normalizedRole = normalizeRole(role);
 
     if (normalizedRole === 'admin') {
       router.replace('/admin/dashboard');
@@ -313,7 +303,7 @@ export default function LoginPage() {
     showNotification(
       'Successfully logged in',
       'You have successfully logged in.',
-      () => navigateToRoleHome(profile)
+      () => navigateToRoleHome(role)
     );
   };
 
@@ -386,43 +376,6 @@ export default function LoginPage() {
             return;
           }
 
-          // A missing Firestore profile has no trusted provider result. Never use a
-          // locally cached value to bypass verification or write a verified status.
-          const localFaceVerification = createUnverifiedFaceVerification();
-
-          if (localFaceVerification.status !== 'verified') {
-            let verificationProfile = {
-              ...localProfileData,
-              faceVerification: localFaceVerification,
-            };
-
-            try {
-              const syncedProfile = await saveUserProfileWithUniqueId(
-                user.uid,
-                localRole,
-                {
-                  ...verificationProfile,
-                  updatedAt: serverTimestamp(),
-                }
-              );
-              verificationProfile = {
-                ...verificationProfile,
-                unique_id: syncedProfile.unique_id,
-                faceVerification: normalizeFaceVerification(syncedProfile),
-              };
-            } catch (error) {
-              console.log('Local verification profile Firestore sync error:', error.message);
-              clearAllAuthSessions();
-              await signOut(auth);
-              showNotification('Login failed', getAuthErrorMessage(error));
-              return;
-            }
-
-            saveLocalUser(verificationProfile);
-            finishSuccessfulLogin(verificationProfile);
-            return;
-          }
-
           if (localRole === 'distributor' && localApplicationStatus !== 'approved') {
             clearAllAuthSessions();
             await signOut(auth);
@@ -484,7 +437,6 @@ export default function LoginPage() {
         approvalStatus: profileApplicationStatus,
         status: toApplicationStatus(profileApplicationStatus),
         rejectionReason: userData.rejectionReason || null,
-        faceVerification: normalizeFaceVerification(userData),
       };
 
       if (!['admin', 'requester', 'distributor'].includes(profileRole)) {
@@ -501,15 +453,6 @@ export default function LoginPage() {
           ...profileWithUniqueId,
           faceVerification,
         };
-      }
-
-      if (
-        (profileRole === 'requester' || profileRole === 'distributor') &&
-        normalizeFaceVerification(profileData).status !== 'verified'
-      ) {
-        saveLocalUser(profileData);
-        finishSuccessfulLogin(profileData);
-        return;
       }
 
       if (profileRole === 'distributor' && profileApplicationStatus !== 'approved') {
@@ -652,7 +595,7 @@ export default function LoginPage() {
 
   return (
     <LinearGradient
-      colors={['#187BCD', '#42A5F5']}
+      colors={BLUETAP_LOGIN_GRADIENT}
       style={styles.gradient}
       start={{ x: 0, y: 0 }}
       end={{ x: 0, y: 1 }}
@@ -676,80 +619,81 @@ export default function LoginPage() {
               scrollOffsetRef.current = event.nativeEvent.contentOffset.y;
             }}
           >
-            <View style={styles.logoSection}>
-              <Image
-                source={require('../assets/icons/bluetapwhitelogo.png')}
-                style={styles.logo}
-                resizeMode="contain"
-              />
-              <Text style={styles.appName}>BlueTap</Text>
-              <Text style={styles.tagline}>Water Within Reach</Text>
-            </View>
+            <View style={styles.authCardFrame}>
+              <View style={styles.authCard}>
+                <View style={styles.logoSection}>
+                  <Image
+                    source={require('../assets/icons/bluetapwhitelogo.png')}
+                    style={styles.logo}
+                    resizeMode="contain"
+                  />
+                  <Text style={styles.appName}>BlueTap</Text>
+                  <Text style={styles.tagline}>Water Within Reach</Text>
+                </View>
 
-            <View style={styles.formContainer}>
-              <View style={styles.inputContainer}>
-                <TextInput
-                  ref={emailInputRef}
-                  style={styles.input}
-                  placeholder="Enter email"
-                  placeholderTextColor="#FFFFFF"
-                  keyboardType="email-address"
-                  autoCapitalize="none"
-                  value={email}
-                  onChangeText={setEmail}
-                  onFocus={() => handleInputFocus('email')}
-                  returnKeyType="next"
-                  onSubmitEditing={() => passwordInputRef.current?.focus()}
-                />
-                <TextInput
-                  ref={passwordInputRef}
-                  style={styles.input}
-                  placeholder="Enter password"
-                  placeholderTextColor="#FFFFFF"
-                  secureTextEntry
-                  value={password}
-                  onChangeText={setPassword}
-                  onFocus={() => handleInputFocus('password')}
-                  returnKeyType="done"
-                  onSubmitEditing={handleLogin}
-                />
-              </View>
-            </View>
+                <View style={styles.formContainer}>
+                  <View style={styles.inputContainer}>
+                    <TextInput
+                      ref={emailInputRef}
+                      style={styles.input}
+                      placeholder="Enter email"
+                      placeholderTextColor="#FFFFFF"
+                      keyboardType="email-address"
+                      autoCapitalize="none"
+                      value={email}
+                      onChangeText={setEmail}
+                      onFocus={() => handleInputFocus('email')}
+                      returnKeyType="next"
+                      onSubmitEditing={() => passwordInputRef.current?.focus()}
+                    />
+                    <TextInput
+                      ref={passwordInputRef}
+                      style={styles.input}
+                      placeholder="Enter password"
+                      placeholderTextColor="#FFFFFF"
+                      secureTextEntry
+                      value={password}
+                      onChangeText={setPassword}
+                      onFocus={() => handleInputFocus('password')}
+                      returnKeyType="done"
+                      onSubmitEditing={handleLogin}
+                    />
+                  </View>
+                </View>
 
-            <View style={styles.buttonContainer}>
-              <TouchableOpacity
-                style={[styles.loginButton, loading && styles.buttonDisabled]}
-                onPress={handleLogin}
-                disabled={loading}
-              >
-                <Text style={styles.loginButtonText}>
-                  {isLoginSuccessVisible
-                    ? 'SUCCESSFULLY LOGGED IN'
-                    : loading
-                      ? 'PLEASE WAIT...'
-                      : 'LOG IN'}
-                </Text>
-              </TouchableOpacity>
-            </View>
+                <View style={styles.buttonContainer}>
+                  <TouchableOpacity
+                    style={[styles.loginButton, loading && styles.buttonDisabled]}
+                    onPress={handleLogin}
+                    disabled={loading}
+                  >
+                    <Text style={styles.loginButtonText}>
+                      {isLoginSuccessVisible
+                        ? 'SUCCESSFULLY LOGGED IN'
+                        : loading
+                          ? 'PLEASE WAIT...'
+                          : 'LOG IN'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
 
-            <TouchableOpacity
-              style={styles.forgotPasswordContainer}
-              onPress={openForgotPassword}
-              disabled={loading}
-            >
-              <Text style={styles.forgotPasswordText}>Forgot Password?</Text>
-            </TouchableOpacity>
-
-            <View style={styles.signupContainer}>
-              <Text style={styles.signupText}>
-                Need an account?{' '}
-                <Text
-                  style={styles.signupLink}
-                  onPress={openSignupOptions}
+                <TouchableOpacity
+                  style={styles.forgotPasswordContainer}
+                  onPress={openForgotPassword}
+                  disabled={loading}
                 >
-                  Click here to sign up.
-                </Text>
-              </Text>
+                  <Text style={styles.forgotPasswordText}>Forgot Password?</Text>
+                </TouchableOpacity>
+
+                <View style={styles.signupContainer}>
+                  <Text style={styles.signupText}>
+                    Need an account?{' '}
+                    <Text style={styles.signupLink} onPress={openSignupOptions}>
+                      Click here to sign up.
+                    </Text>
+                  </Text>
+                </View>
+              </View>
             </View>
           </ScrollView>
         </View>
@@ -902,14 +846,16 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     flexGrow: 1,
+    justifyContent: 'center',
+    paddingVertical: 24,
     paddingBottom: BASE_SCROLL_PADDING_BOTTOM,
   },
   logoSection: {
     alignItems: 'center',
     justifyContent: 'center',
-    paddingTop: 48,
+    paddingTop: 8,
     paddingBottom: 20,
-    marginBottom: 20,
+    marginBottom: 4,
   },
   logo: {
     width: 100,
@@ -929,21 +875,34 @@ const styles = StyleSheet.create({
     fontWeight: '300',
     textAlign: 'center',
   },
-  formContainer: {
+  authCardFrame: {
     width: '100%',
     paddingHorizontal: 24,
+  },
+  authCard: {
+    width: '100%',
+    maxWidth: 432,
+    alignSelf: 'center',
+    backgroundColor: 'rgba(9, 70, 122, 0.22)',
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.34)',
+    padding: 20,
+    shadowColor: '#07518E',
+    shadowOpacity: 0.22,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 5,
+  },
+  formContainer: {
+    width: '100%',
     marginBottom: 16,
   },
   inputContainer: {
     width: '100%',
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    borderRadius: 16,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.2)',
   },
   input: {
-    backgroundColor: 'transparent',
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.5)',
     borderRadius: 10,
@@ -955,7 +914,6 @@ const styles = StyleSheet.create({
   },
   buttonContainer: {
     width: '100%',
-    paddingHorizontal: 24,
     marginBottom: 16,
   },
   loginButton: {
@@ -975,7 +933,6 @@ const styles = StyleSheet.create({
   },
   forgotPasswordContainer: {
     alignItems: 'center',
-    paddingHorizontal: 24,
     marginTop: -6,
     marginBottom: 14,
   },
@@ -987,8 +944,7 @@ const styles = StyleSheet.create({
   },
   signupContainer: {
     alignItems: 'center',
-    paddingHorizontal: 24,
-    marginBottom: 20,
+    marginBottom: 2,
   },
   signupText: {
     color: 'rgba(255, 255, 255, 0.7)',

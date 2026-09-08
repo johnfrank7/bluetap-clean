@@ -1,3 +1,16 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+:root {
+  --bluetap-primary: #187bcd;
+  --bluetap-primary-dark: #1565c0;
+  --bluetap-primary-light: #42a5f5;
+  --bluetap-primary-soft: #eaf6ff;
+  --bluetap-background: #f4faff;
+}
+
+::selection {
+  background: var(--bluetap-primary);
+  color: #ffffff;
+}

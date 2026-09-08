@@ -16,11 +16,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 
+import { BLUETAP_LOGIN_GRADIENT } from '../constants/bluetapTheme';
 import { auth } from '../firebase';
 import { createUserWithEmailAndPassword, deleteUser, signOut } from 'firebase/auth';
 import { serverTimestamp } from 'firebase/firestore';
 import { saveLocalUser } from '../localUsers';
-import { clearAllAuthSessions, saveRoleSession } from '../services/authSession';
+import { clearAllAuthSessions } from '../services/authSession';
 import { createUnverifiedFaceVerification } from '../services/faceVerification';
 import { saveUserProfileWithUniqueId } from '../services/uniqueIds';
 
@@ -66,9 +67,6 @@ const barangayOptions = [
 ];
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const distributorRegistrationMessage =
-  'Your application has been submitted successfully.\n\nYour account is currently Pending Approval.\n\nPlease wait for the administrator to review and approve your application before you can log in.';
-
 const authErrorMessages = {
   'auth/email-already-in-use': 'This email is already registered. Please log in instead.',
   'auth/invalid-email': 'Please enter a valid email address.',
@@ -407,18 +405,12 @@ export default function SignupPage() {
 
       saveLocalUser(savedUserData);
 
-      if (type === 'requester') {
-        saveRoleSession(savedUserData);
-        router.replace('/verification');
-      } else {
+      if (type === 'requester' || type === 'distributor') {
+        // Do not create a role session before the registration verification step.
+        // Firebase authentication remains active so /verification can load the profile.
+        // Distributors stay pending administrator approval after verification.
         clearAllAuthSessions();
-        await signOut(auth);
-        setLoading(false);
-        showNotification(
-          'Registration Submitted',
-          distributorRegistrationMessage,
-          () => router.replace('/login')
-        );
+        router.replace('/verification');
       }
 
     } catch (error) {
@@ -444,7 +436,7 @@ export default function SignupPage() {
 
   return (
     <LinearGradient
-      colors={['#187BCD', '#42A5F5']}
+      colors={BLUETAP_LOGIN_GRADIENT}
       style={styles.gradient}
       start={{ x: 0, y: 0 }}
       end={{ x: 0, y: 1 }}

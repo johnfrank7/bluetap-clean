@@ -15,11 +15,13 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { StatusBar } from 'expo-status-bar';
 import { useRouter } from 'expo-router';
 
-const BLUE = '#187BCD';
-const BLUE_DARK = '#0B5FA8';
-const BLUE_LIGHT = '#EEF8FF';
-const TEXT_DARK = '#172033';
-const TEXT_MUTED = '#64748B';
+import { BLUETAP_COLORS } from '../constants/bluetapTheme';
+
+const BLUE = BLUETAP_COLORS.primary;
+const BLUE_DARK = BLUETAP_COLORS.primaryDeep;
+const BLUE_LIGHT = BLUETAP_COLORS.primarySoft;
+const TEXT_DARK = BLUETAP_COLORS.text;
+const TEXT_MUTED = BLUETAP_COLORS.muted;
 const CONTENT_MAX_WIDTH = 1180;
 const DESKTOP_BREAKPOINT = 1024;
 const TABLET_BREAKPOINT = 600;
@@ -44,7 +46,7 @@ const DARK_THEME = {
   border: '#294862',
   text: '#F3F8FC',
   muted: '#AEC4D5',
-  accent: '#51BDF4',
+  accent: BLUETAP_COLORS.primaryLight,
   footerText: '#C2D5E3',
 };
 
@@ -107,8 +109,8 @@ function ActionButton({
         : variant === 'inverseOutline'
           ? { backgroundColor: 'transparent', borderColor: 'rgba(255,255,255,0.72)', textColor: '#FFFFFF' }
           : {
-              backgroundColor: isDark ? '#2196DB' : '#187BCD',
-              borderColor: isDark ? '#2196DB' : '#187BCD',
+              backgroundColor: isDark ? BLUETAP_COLORS.primaryLight : BLUE,
+              borderColor: isDark ? BLUETAP_COLORS.primaryLight : BLUE,
               textColor: '#FFFFFF',
             };
 
@@ -421,13 +423,13 @@ function WebLanding({ router, width }) {
               <View style={[styles.heroActions, !isDesktop && styles.heroActionsCompact]}>
                 <ActionButton
                   label="Order Water"
-                  onPress={() => router.push('/login?signup=true')}
+                  onPress={() => router.push({ pathname: '/signup', params: { role: 'requester' } })}
                   isDark={isDark}
                   style={!isDesktop && styles.heroActionCompact}
                 />
                 <ActionButton
                   label="Become a Distributor"
-                  onPress={() => router.push('/login?signup=true')}
+                  onPress={() => router.push({ pathname: '/signup', params: { role: 'distributor' } })}
                   variant="outline"
                   isDark={isDark}
                   style={!isDesktop && styles.heroActionCompact}

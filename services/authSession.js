@@ -315,17 +315,6 @@ export const validateRoleAccess = async (expectedRole) => {
   }
 
   if (
-    (profile.role === 'requester' || profile.role === 'distributor') &&
-    normalizeFaceVerification(profile).status !== 'verified'
-  ) {
-    return {
-      status: 'verification-required',
-      message: 'Identity verification is required.',
-      redirectTo: '/verification',
-    };
-  }
-
-  if (
     profile.role === 'distributor' &&
     getDistributorApplicationStatus(profile) !== 'approved'
   ) {

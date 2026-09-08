@@ -13,16 +13,17 @@ import { StatusBar } from 'expo-status-bar';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 
+import { BLUETAP_COLORS } from '../constants/bluetapTheme';
 import { signOutAndClearSessions } from '../services/authSession';
 
 export const ADMIN_COLORS = {
-  navy: '#187BCD',
-  navyMuted: '#1565C0',
-  blue: '#187BCD',
-  cyan: '#42A5F5',
+  navy: BLUETAP_COLORS.primary,
+  navyMuted: BLUETAP_COLORS.primaryDark,
+  blue: BLUETAP_COLORS.primary,
+  cyan: BLUETAP_COLORS.primaryLight,
   green: '#1B8F4C',
   red: '#FF5B64',
-  bg: '#F4FAFF',
+  bg: BLUETAP_COLORS.background,
   card: '#FFFFFF',
   border: '#D7ECFF',
   text: '#20384D',
