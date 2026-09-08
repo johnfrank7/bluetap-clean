@@ -73,6 +73,8 @@ const barangayOptions = [
 ];
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const PHILIPPINE_COUNTRY_CODE = '+63';
+const philippineMobilePattern = /^9\d{9}$/;
 const authErrorMessages = {
   'auth/email-already-in-use': 'This email is already registered. Please log in instead.',
   'auth/invalid-email': 'Please enter a valid email address.',
@@ -85,6 +87,17 @@ const getAuthErrorMessage = (error) =>
   authErrorMessages[error?.code] || error?.message || 'Something went wrong. Please try again.';
 
 const isValidEmail = (value) => emailPattern.test(value.trim().toLowerCase());
+const isValidPhilippineMobile = (value) => philippineMobilePattern.test(value);
+const normalizePhilippineMobile = (value) => {
+  const digits = value.replace(/\D/g, '');
+
+  if (digits.startsWith('63')) return digits.slice(2, 12);
+  if (digits.startsWith('0')) return digits.slice(1, 11);
+
+  return digits.slice(0, 10);
+};
+const formatPhilippineMobile = (value) =>
+  isValidPhilippineMobile(value) ? `${PHILIPPINE_COUNTRY_CODE}${value}` : '';
 
 const validateSignupFields = (values) => {
   const nextErrors = {};
@@ -102,7 +115,9 @@ const validateSignupFields = (values) => {
   }
 
   if (!values.phone.trim()) {
-    nextErrors.phone = 'Phone number is required.';
+    nextErrors.phone = 'Philippine mobile number is required.';
+  } else if (!isValidPhilippineMobile(values.phone)) {
+    nextErrors.phone = 'Enter a valid Philippine mobile number (9XXXXXXXXX).';
   }
 
   if (!values.barangay.trim()) {
@@ -337,6 +352,10 @@ export default function SignupPage() {
     }
   };
 
+  const handlePhoneChange = (value) => {
+    handleFieldChange('phone', normalizePhilippineMobile(value), setPhone);
+  };
+
   const handleContinue = async () => {
     if (loading) return;
 
@@ -390,7 +409,7 @@ export default function SignupPage() {
         firstName: firstName.trim(),
         lastName: lastName.trim(),
         email: (user.email || normalizedEmail).trim().toLowerCase(),
-        phone: phone.trim(),
+        phone: formatPhilippineMobile(phone),
         barangay: trimmedBarangay,
         address: trimmedBarangay,
         role: type,
@@ -558,17 +577,22 @@ export default function SignupPage() {
                 </View>
 
                 <View style={styles.fieldGroup}>
-                  <TextInput
-                    ref={assignInputRef('phone')}
-                    style={[styles.input, fieldBorderStyle('phone')]}
-                    placeholder="Enter phone number"
-                    placeholderTextColor="#FFFFFF"
-                    keyboardType="phone-pad"
-                    value={phone}
-                    onBlur={() => handleFieldBlur('phone')}
-                    onFocus={() => handleInputFocus('phone')}
-                    onChangeText={(value) => handleFieldChange('phone', value, setPhone)}
-                  />
+                  <View style={[styles.phoneField, fieldBorderStyle('phone')]}>
+                    <Text style={styles.phonePrefix}>{PHILIPPINE_COUNTRY_CODE}</Text>
+                    <TextInput
+                      ref={assignInputRef('phone')}
+                      style={styles.phoneInput}
+                      placeholder="9171234567"
+                      placeholderTextColor="#FFFFFF"
+                      keyboardType="phone-pad"
+                      value={phone}
+                      textContentType="telephoneNumber"
+                      autoComplete="tel"
+                      onBlur={() => handleFieldBlur('phone')}
+                      onFocus={() => handleInputFocus('phone')}
+                      onChangeText={handlePhoneChange}
+                    />
+                  </View>
                   {!!getVisibleError('phone') && (
                     <Text style={styles.validationText}>{getVisibleError('phone')}</Text>
                   )}
@@ -780,6 +804,32 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     fontSize: 15,
     color: '#FFFFFF',
+  },
+  phoneField: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.5)',
+    borderRadius: 10,
+    minHeight: 42,
+    paddingLeft: 16,
+  },
+  phonePrefix: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '700',
+    paddingRight: 10,
+    marginRight: 10,
+    borderRightWidth: 1,
+    borderRightColor: 'rgba(255, 255, 255, 0.35)',
+  },
+  phoneInput: {
+    flex: 1,
+    color: '#FFFFFF',
+    fontSize: 15,
+    paddingVertical: 10,
+    paddingRight: 16,
   },
   fieldGroup: { marginBottom: 12 },
   inputError: {
