@@ -1,6 +1,9 @@
 const { createHmac, randomUUID, timingSafeEqual } = require('node:crypto');
 const { createEmailOtpService } = require('./emailOtp');
 const { OtpError } = require('./otpError');
+const { normalizeUsername } = require('./username');
+
+const RESERVATION_TTL = 15 * 60 * 1000;
 
 function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, now = Date.now }) {
   const digest = (value) => {
@@ -13,8 +16,8 @@ function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, now = D
     }
     return value.trim().toLowerCase();
   };
-  function challengeFor(email) {
-    const payload = Buffer.from(JSON.stringify({ email, expires: now() + 3600000, nonce: randomUUID() })).toString('base64url');
+  function challengeFor(email, usernameNormalized) {
+    const payload = Buffer.from(JSON.stringify({ email, usernameNormalized, expires: now() + RESERVATION_TTL, nonce: randomUUID() })).toString('base64url');
     return `${payload}.${digest('registration:' + payload)}`;
   }
   function readChallenge(challenge) {
@@ -26,7 +29,7 @@ function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, now = D
     let data;
     try { data = JSON.parse(Buffer.from(payload, 'base64url').toString()); } catch { throw invalid(); }
     if (!Number.isFinite(data.expires) || now() >= data.expires) throw invalid();
-    return normalizeEmail(data.email);
+    return { email: normalizeEmail(data.email), usernameNormalized: normalizeUsername(data.usernameNormalized) };
   }
   async function findUser(email) {
     try { return await auth.getUserByEmail(email); }
@@ -53,21 +56,38 @@ function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, now = D
     if (typeof input.password !== 'string' || input.password.trim().length < 8 || input.password.length > 128) {
       throw new OtpError(400, 'invalid-registration', 'Password must be between 8 and 128 characters.');
     }
+    const username = text('username', 20);
+    const usernameNormalized = normalizeUsername(username);
     return { firstName: text('firstName', 100), lastName: text('lastName', 100),
-      barangay: text('barangay', 150), phone, role };
+      barangay: text('barangay', 150), address: text('address', 250), phone, role,
+      username, usernameNormalized };
   }
-  async function saveProfile(user, profile) {
+  async function saveProfile(user, profile, email) {
     const ref = db.collection('users').doc(user.uid);
     const counter = db.collection('counters').doc('unique_ids');
+    const usernameRef = db.collection('usernames').doc(profile.usernameNormalized);
+    const reservationRef = db.collection('usernameReservations').doc(profile.usernameNormalized);
     await db.runTransaction(async (tx) => {
       const existing = (await tx.get(ref)).data();
       const counts = (await tx.get(counter)).data() || {};
+      const claimed = (await tx.get(usernameRef)).data();
+      const reservation = (await tx.get(reservationRef)).data();
+      const ownerHash = digest('email:' + email);
+      if ((claimed?.uid && claimed.uid !== user.uid) || reservation?.ownerHash !== ownerHash || Number(reservation?.expiresAt?.toMillis?.() || reservation?.expiresAt || 0) <= now()) {
+        throw new OtpError(409, 'username-taken', 'This username is already taken.');
+      }
+      tx.set(usernameRef, { uid: user.uid, createdAt: new Date(now()) });
+      tx.delete(reservationRef);
       if (existing) {
         // Recover an unfinished registration without changing permissions or approval.
         if (!['requester', 'distributor'].includes(existing.role)) {
           throw new OtpError(409, 'account-exists', 'This account already exists. Please log in.');
         }
-        tx.update(ref, { emailVerified: true, emailVerifiedAt: new Date(now()) });
+        if (existing.usernameNormalized && existing.usernameNormalized !== profile.usernameNormalized) {
+          throw new OtpError(409, 'account-exists', 'This account already exists. Please log in.');
+        }
+        tx.update(ref, { emailVerified: true, emailVerifiedAt: new Date(now()),
+          updatedAt: new Date(now()), username: profile.username, usernameNormalized: profile.usernameNormalized });
         return;
       }
       const number = Number(counts[profile.role] || 0) + 1;
@@ -75,18 +95,21 @@ function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, now = D
       const pending = profile.role === 'distributor';
       tx.set(counter, { [profile.role]: number }, { merge: true });
       tx.set(ref, {
-        ...profile, uid: user.uid, email: user.email, address: profile.barangay,
+        ...profile, uid: user.uid, email: user.email,
         unique_id: `${prefix}-${String(number).padStart(6, '0')}`,
         approvalStatus: pending ? 'pending' : 'approved', status: pending ? 'Pending' : 'Approved',
         rejectionReason: null, emailVerificationRequired: true, emailVerified: true,
-        createdAt: new Date(now()), emailVerifiedAt: new Date(now()),
+        createdAt: new Date(now()), updatedAt: new Date(now()), emailVerifiedAt: new Date(now()),
         faceVerification: { status: 'unverified', verifiedAt: null, verificationId: null,
           livenessPassed: null, duplicateCheck: 'unknown', failureReason: null },
       });
     });
   }
-  async function finish(email, input) {
+  async function finish(email, usernameNormalized, input) {
     const profile = validateProfile(input);
+    if (profile.usernameNormalized !== usernameNormalized) {
+      throw new OtpError(400, 'invalid-registration', 'Username changed. Please request a new verification code.');
+    }
     let user = await findUser(email);
     const created = !user;
     if (user) {
@@ -96,7 +119,7 @@ function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, now = D
       user = await auth.createUser({ email, password: input.password, emailVerified: true });
     }
     try {
-      await saveProfile(user, profile);
+      await saveProfile(user, profile, email);
     } catch (error) {
       // Only roll back a new account if its profile definitely does not exist.
       if (created) {
@@ -111,14 +134,28 @@ function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, now = D
     }
     return { customToken: await auth.createCustomToken(user.uid) };
   }
-  function otpFor(email, input) {
+  function otpFor(email, usernameNormalized, input) {
     const uid = 'registration-' + digest('email:' + email);
     // Pending identity adapter: no Firebase account exists or is created on request.
     const pending = {
       getUser: async () => ({ uid, email, emailVerified: false }),
-      updateUser: async () => ({ registrationResult: await finish(email, input) }),
+      updateUser: async () => ({ registrationResult: await finish(email, usernameNormalized, input) }),
     };
     return { uid, service: createEmailOtpService({ auth: pending, db, sendEmailOtp, hashSecret, now }) };
+  }
+  async function reserveUsername(email, usernameNormalized) {
+    const registryRef = db.collection('usernames').doc(usernameNormalized);
+    const reservationRef = db.collection('usernameReservations').doc(usernameNormalized);
+    const ownerHash = digest('email:' + email);
+    await db.runTransaction(async (tx) => {
+      const claimed = await tx.get(registryRef);
+      const reservation = (await tx.get(reservationRef)).data();
+      const active = Number(reservation?.expiresAt?.toMillis?.() || reservation?.expiresAt || 0) > now();
+      if (claimed.exists || (active && reservation.ownerHash !== ownerHash)) {
+        throw new OtpError(409, 'username-taken', 'This username is already taken.');
+      }
+      tx.set(reservationRef, { ownerHash, expiresAt: new Date(now() + RESERVATION_TTL), createdAt: new Date(now()) });
+    });
   }
   async function limitIp(ip) {
     const ref = db.collection('emailOtpVerifications').doc('registration-ip-' + digest('ip:' + ip));
@@ -132,18 +169,20 @@ function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, now = D
       tx.set(ref, { count: active ? Number(data.count || 0) + 1 : 1, resetAt: active ? data.resetAt : time + 3600000 });
     });
   }
-  async function request(email, ip) {
+  async function request(email, username, ip) {
     email = normalizeEmail(email);
-    await limitIp(ip);
     await checkExistingAccount(await findUser(email));
-    const otp = otpFor(email);
+    const usernameNormalized = normalizeUsername(username);
+    await limitIp(ip);
+    await reserveUsername(email, usernameNormalized);
+    const otp = otpFor(email, usernameNormalized);
     const result = await otp.service.request(otp.uid);
-    return { ...result, challenge: challengeFor(email) };
+    return { ...result, challenge: challengeFor(email, usernameNormalized) };
   }
   async function complete(challenge, code, input) {
-    const email = readChallenge(challenge);
+    const { email, usernameNormalized } = readChallenge(challenge);
     validateProfile(input);
-    const otp = otpFor(email, input);
+    const otp = otpFor(email, usernameNormalized, input);
     return otp.service.verify(otp.uid, code);
   }
   return { request, complete };

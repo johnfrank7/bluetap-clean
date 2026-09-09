@@ -164,7 +164,7 @@ export default function EmailVerificationPage() {
           return null;
         }
         const response = registration
-          ? await requestRegistrationOtp(currentDraft.profile.email)
+          ? await requestRegistrationOtp(currentDraft.profile.email, currentDraft.profile.username)
           : await requestEmailOtp();
         if (registration) setPendingRegistration(currentDraft.profile, response);
         if (response.alreadyVerified) {
@@ -350,6 +350,12 @@ export default function EmailVerificationPage() {
           </View>
 
           <View style={[styles.card, { maxWidth: width >= 768 ? 460 : 430 }]}>
+            {registration && !loading && (
+              <View style={styles.registrationProgress}>
+                <Text style={styles.registrationStep}>Step 5 of 5 · Verify</Text>
+                <View style={styles.registrationTrack}><View style={styles.registrationTrackComplete} /></View>
+              </View>
+            )}
             {loading ? (
               <View style={styles.loadingState}>
                 <ActivityIndicator size="large" color="#187BCD" />
@@ -477,7 +483,7 @@ export default function EmailVerificationPage() {
                   onPress={returnToLogin}
                   disabled={sending || verifying || verified}
                 >
-                  <Text style={styles.loginButtonText}>Back to Login</Text>
+                  <Text style={styles.loginButtonText}>{registration ? 'Cancel registration' : 'Back to Login'}</Text>
                 </TouchableOpacity>
               </>
             )}
@@ -521,6 +527,10 @@ const styles = StyleSheet.create({
     elevation: 8,
   },
   loadingState: { minHeight: 300, justifyContent: 'center', alignItems: 'center' },
+  registrationProgress: { marginBottom: 20 },
+  registrationStep: { color: '#187BCD', fontSize: 12, fontWeight: '800', textAlign: 'center', marginBottom: 8 },
+  registrationTrack: { height: 4, borderRadius: 2, backgroundColor: '#DCEBF6', overflow: 'hidden' },
+  registrationTrackComplete: { width: '100%', height: '100%', backgroundColor: '#187BCD' },
   loadingText: { color: '#40617A', fontSize: 15, marginTop: 14 },
   emailIcon: {
     width: 52,

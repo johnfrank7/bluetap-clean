@@ -23,6 +23,7 @@ import {
   fetchSignInMethodsForEmail,
   sendPasswordResetEmail,
   signInWithEmailAndPassword,
+  signInWithCustomToken,
   signOut,
 } from 'firebase/auth';
 import { doc, getDoc, serverTimestamp } from 'firebase/firestore';
@@ -38,6 +39,7 @@ import {
 } from '../services/uniqueIds';
 import { createUnverifiedFaceVerification } from '../services/faceVerification';
 import { requestEmailOtp } from '../services/emailVerification';
+import { loginWithUsername } from '../services/usernameAuth';
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const applicationPendingTitle = 'Application Pending';
@@ -130,7 +132,6 @@ export default function LoginPage() {
   const [password, setPassword] = React.useState('');
   const [loading, setLoading] = React.useState(false);
   const [pendingUser, setPendingUser] = React.useState(null);
-  const [signupOptionsVisible, setSignupOptionsVisible] = React.useState(false);
   const [forgotPasswordVisible, setForgotPasswordVisible] = React.useState(false);
   const [resetEmail, setResetEmail] = React.useState('');
   const [resetEmailError, setResetEmailError] = React.useState('');
@@ -141,9 +142,9 @@ export default function LoginPage() {
 
   React.useEffect(() => {
     if (signup === 'true') {
-      setSignupOptionsVisible(true);
+      router.replace('/signup');
     }
-  }, [signup]);
+  }, [router, signup]);
 
   const clearFocusScrollTimeout = React.useCallback(() => {
     if (focusScrollTimeoutRef.current) {
@@ -254,20 +255,7 @@ export default function LoginPage() {
   };
 
   const openSignupOptions = () => {
-    setSignupOptionsVisible(true);
-  };
-
-  const closeSignupOptions = () => {
-    setSignupOptionsVisible(false);
-
-    if (signup === 'true') {
-      router.replace('/login');
-    }
-  };
-
-  const startSignup = (role) => {
-    setSignupOptionsVisible(false);
-    router.push({ pathname: '/signup', params: { role } });
+    router.push('/signup');
   };
 
   const handleInputFocus = (field) => {
@@ -323,7 +311,8 @@ export default function LoginPage() {
   const handleLogin = async () => {
     if (loading) return;
 
-    const normalizedEmail = email.trim().toLowerCase();
+    const loginIdentifier = email.trim();
+    const normalizedEmail = loginIdentifier.toLowerCase();
     const trimmedPassword = password.trim();
 
     if (!normalizedEmail || !trimmedPassword) {
@@ -352,12 +341,11 @@ export default function LoginPage() {
         return;
       }
 
-      // Regular login flow using Firebase Authentication
-      const userCredential = await signInWithEmailAndPassword(
-        auth,
-        normalizedEmail,
-        trimmedPassword
-      );
+      // Legacy accounts may continue signing in with email. New accounts use
+      // the server-side username registry and receive a Firebase custom token.
+      const userCredential = loginIdentifier.includes('@')
+        ? await signInWithEmailAndPassword(auth, normalizedEmail, trimmedPassword)
+        : await signInWithCustomToken(auth, await loginWithUsername(loginIdentifier, trimmedPassword));
 
       const user = userCredential.user;
 
@@ -484,9 +472,10 @@ export default function LoginPage() {
 
     } catch (error) {
       console.log('Login error:', error.message);
+      const usernameAuthError = String(error?.code || '').startsWith('username/');
       showNotification(
-        isWrongLoginError(error) ? 'Wrong username/password' : 'Login failed',
-        getAuthErrorMessage(error)
+        isWrongLoginError(error) || usernameAuthError ? 'Login failed' : 'Login failed',
+        isWrongLoginError(error) || usernameAuthError ? 'Invalid username or password.' : getAuthErrorMessage(error)
       );
     } finally {
       setLoading(false);
@@ -670,13 +659,16 @@ export default function LoginPage() {
                 </View>
 
                 <View style={styles.formContainer}>
+                  <Text style={styles.welcomeTitle}>Welcome back</Text>
+                  <Text style={styles.welcomeSubtitle}>Sign in to continue to BlueTap.</Text>
                   <View style={styles.inputContainer}>
+                    <Text style={styles.inputLabel}>Username or email</Text>
                     <TextInput
                       ref={emailInputRef}
                       style={styles.input}
-                      placeholder="Enter email"
+                      placeholder="Enter username or email"
                       placeholderTextColor="#FFFFFF"
-                      keyboardType="email-address"
+                      keyboardType="default"
                       autoCapitalize="none"
                       value={email}
                       onChangeText={setEmail}
@@ -684,6 +676,7 @@ export default function LoginPage() {
                       returnKeyType="next"
                       onSubmitEditing={() => passwordInputRef.current?.focus()}
                     />
+                    <Text style={styles.inputLabel}>Password</Text>
                     <TextInput
                       ref={passwordInputRef}
                       style={styles.input}
@@ -736,38 +729,6 @@ export default function LoginPage() {
           </ScrollView>
         </View>
 
-        <Modal visible={signupOptionsVisible} transparent animationType="slide">
-          <View style={styles.modalBackground}>
-            <View style={styles.modalContainer}>
-              <Text style={styles.modalTitle}>Choose Account Type</Text>
-
-              <TouchableOpacity
-                style={styles.modalButton}
-                onPress={() => startSignup('requester')}
-                disabled={loading}
-              >
-                <Text style={styles.modalButtonText}>Requester</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.modalButton}
-                onPress={() => startSignup('distributor')}
-                disabled={loading}
-              >
-                <Text style={styles.modalButtonText}>Distributor</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.modalCancel}
-                onPress={closeSignupOptions}
-                disabled={loading}
-              >
-                <Text style={styles.modalCancelText}>Cancel</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </Modal>
-
         <Modal visible={!!pendingUser} transparent animationType="slide">
           <View style={styles.modalBackground}>
             <View style={styles.modalContainer}>
@@ -805,7 +766,7 @@ export default function LoginPage() {
             <View style={styles.modalContainer}>
               <Text style={styles.modalTitle}>Forgot Password?</Text>
               <Text style={styles.resetHelperText}>
-                Enter your registered email to receive a password reset link.
+                Enter the email address associated with your BlueTap account.
               </Text>
 
               <TextInput
@@ -936,6 +897,9 @@ const styles = StyleSheet.create({
     width: '100%',
     marginBottom: 16,
   },
+  welcomeTitle: { color: '#FFFFFF', fontSize: 22, fontWeight: '800', textAlign: 'center', marginBottom: 4 },
+  welcomeSubtitle: { color: 'rgba(255,255,255,0.82)', fontSize: 13, textAlign: 'center', marginBottom: 18 },
+  inputLabel: { color: '#FFFFFF', fontSize: 13, fontWeight: '700', marginBottom: 6 },
   inputContainer: {
     width: '100%',
   },

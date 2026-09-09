@@ -11,7 +11,9 @@ The legacy `functions/` directory and `firebase.json` are not used by Vercel.
 
 Use server-only Vercel values: `GMAIL_USER`, `GMAIL_APP_PASSWORD`,
 `EMAIL_OTP_HASH_SECRET`, `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, and
-`FIREBASE_PRIVATE_KEY`. The service account must belong to the same Firebase
+`FIREBASE_PRIVATE_KEY`, plus `FIREBASE_WEB_API_KEY` for username/password login.
+The Web API key is the public Firebase project configuration value, kept centrally
+in the server environment. The service account must belong to the same Firebase
 project as the client (`bluetap-8c98d`) and have Auth and Firestore access.
 Private key literal newline escapes are normalized on the server.
 Do not put these credentials in Expo public environment variables or files.
@@ -101,5 +103,19 @@ Deploy the two new API files and frontend together. No new secrets are required.
 This fixes registration writes through Admin; other app screens still require
 appropriate Firestore rules for their normal client reads and writes.
 
-Run `node --test server/emailOtp.test.js server/registration.test.js` for isolated server security tests,
+Run `node --test server/emailOtp.test.js server/registration.test.js server/usernameHandler.test.js` for isolated server security tests,
 and `npm run build` for Expo web compilation. No live emails are sent by the tests.
+
+## Usernames
+
+`POST /api/auth/check-username` performs a server-side normalized availability
+check. Registration reserves `usernameReservations/{normalizedUsername}` for 15
+minutes, then the OTP completion transaction creates `usernames/{normalizedUsername}`
+with only `uid` and `createdAt`, writes the profile, and removes the reservation.
+Passwords and emails are never stored in either username collection.
+
+`POST /api/auth/login-with-username` resolves the UID through the registry, obtains
+the Firebase Auth email through Admin, verifies the supplied password through the
+official Firebase `accounts:signInWithPassword` REST endpoint, confirms the UID,
+and returns only a custom token. Login attempts are limited per IP. Existing users
+without username registry records retain temporary email/password login support.

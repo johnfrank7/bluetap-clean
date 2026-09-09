@@ -3,7 +3,8 @@ const assert = require('node:assert/strict');
 const { createRegistrationService } = require('./registration');
 
 const form = { firstName: 'Test', lastName: 'Person', phone: '+639123456789',
-  barangay: 'Awihao', role: 'requester', password: 'test-password-only' };
+  barangay: 'Awihao', address: 'Test Street', username: 'Test_User',
+  role: 'requester', password: 'test-password-only' };
 function fixture() {
   let time = 1800000000000;
   const records = new Map();
@@ -26,8 +27,9 @@ function fixture() {
             writes.push([ref.key, options?.merge ? { ...records.get(ref.key), ...data } : data]);
           },
           update: (ref, data) => writes.push([ref.key, { ...records.get(ref.key), ...data }]),
+          delete: (ref) => writes.push([ref.key, undefined]),
         });
-        for (const [key, data] of writes) records.set(key, data);
+        for (const [key, data] of writes) data === undefined ? records.delete(key) : records.set(key, data);
         return result;
       });
       queue = task.catch(() => {});
@@ -53,7 +55,8 @@ function fixture() {
   const service = createRegistrationService({ auth, db, hashSecret: 'test-signing-key', now: () => time,
     sendEmailOtp: async (message) => { if (failEmail) throw new Error('Test provider outage'); sent.push(message); },
   });
-  return { service, users, records, sent, get creates() { return creates; },
+  const registrationService = { ...service, request: (email, ip, username = form.username) => service.request(email, username, ip) };
+  return { service: registrationService, users, records, sent, get creates() { return creates; },
     advance: (ms) => { time += ms; }, failEmail: () => { failEmail = true; }, failProfile: () => { failProfile = true; } };
 }
 const reason = (expected) => (error) => error.reason === expected;
@@ -90,6 +93,11 @@ test('correct OTP creates verified Auth account and server-owned profile exactly
   assert.equal(profile.uid, 'new-user');
   assert.equal(profile.unique_id, 'REQ-000001');
   assert.equal(profile.faceVerification.status, 'unverified');
+  assert.equal(profile.username, 'Test_User');
+  assert.equal(profile.usernameNormalized, 'test_user');
+  assert.equal(profile.address, 'Test Street');
+  assert.equal(f.records.get('usernames/test_user').uid, 'new-user');
+  assert.equal(f.records.has('usernameReservations/test_user'), false);
   assert.equal(profile.password, undefined);
   assert.equal(completed.verified, true);
   assert.match(completed.customToken, /^test-custom-token/);
@@ -169,9 +177,19 @@ test('expired registration challenge requires restarting and does not create an 
 
 test('public request endpoint rate limits sends across different emails by IP', async () => {
   const f = fixture();
-  for (let i = 0; i < 20; i++) await f.service.request(`test${i}@example.test`, 'one-ip');
-  await assert.rejects(f.service.request('another@example.test', 'one-ip'), reason('resend-limit-reached'));
+  for (let i = 0; i < 20; i++) await f.service.request(`test${i}@example.test`, 'one-ip', `test_user_${i}`);
+  await assert.rejects(f.service.request('another@example.test', 'one-ip', 'another_user'), reason('resend-limit-reached'));
   assert.equal(f.creates, 0);
+});
+
+test('usernames are normalized and reserved without permanent abandoned claims', async () => {
+  const f = fixture();
+  await f.service.request('first@example.test', 'first-ip', 'JohnBlueTap');
+  await assert.rejects(f.service.request('second@example.test', 'second-ip', 'johnbluetap'), reason('username-taken'));
+  assert.equal(f.records.has('usernames/johnbluetap'), false);
+  f.advance(15 * 60 * 1000);
+  await f.service.request('second@example.test', 'second-ip', 'JOHNBLUETAP');
+  assert.equal(f.sent.length, 2);
 });
 
 test('account completed after requesting OTP cannot be overwritten', async () => {

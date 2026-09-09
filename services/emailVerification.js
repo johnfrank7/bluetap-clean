@@ -80,8 +80,8 @@ export const getPendingRegistration = () => {
   if (pendingRegistration?.draftExpiresAt <= Date.now()) clearPendingRegistration();
   return pendingRegistration;
 };
-export const requestRegistrationOtp = async (email) => {
-  const data = await callOtp('/api/auth/request-registration-otp', { email }, false);
+export const requestRegistrationOtp = async (email, username) => {
+  const data = await callOtp('/api/auth/request-registration-otp', { email, username }, false);
   if (typeof data.challenge !== 'string' || !(data.expiresAt > 0)) {
     throw apiError('service-unavailable', 'We could not send a verification code.');
   }

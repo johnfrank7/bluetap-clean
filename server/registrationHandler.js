@@ -21,7 +21,7 @@ function createRegistrationHandler(action) {
         ? String(req.headers['x-forwarded-for'] || 'unknown').split(',')[0].trim()
         : req.socket?.remoteAddress || 'local';
       const result = action === 'request'
-        ? await service.request(body?.email, ip)
+        ? await service.request(body?.email, body?.username, ip)
         : await service.complete(body?.challenge, body?.code, body?.profile);
       return res.status(200).json(result);
     } catch (error) {
