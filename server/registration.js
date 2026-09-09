@@ -32,6 +32,13 @@ function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, now = D
     try { return await auth.getUserByEmail(email); }
     catch (error) { if (error.code === 'auth/user-not-found') return null; throw error; }
   }
+  async function checkExistingAccount(user) {
+    if (!user) return;
+    const existing = (await db.collection('users').doc(user.uid).get()).data();
+    if (user.disabled || user.emailVerified || (existing && !['requester', 'distributor'].includes(existing.role))) {
+      throw new OtpError(409, 'account-exists', 'This email is already registered. Please log in or reset your password.');
+    }
+  }
   function validateProfile(input) {
     const text = (key, limit) => {
       if (typeof input?.[key] !== 'string' || !input[key].trim() || input[key].length > limit) {
@@ -83,10 +90,7 @@ function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, now = D
     let user = await findUser(email);
     const created = !user;
     if (user) {
-      const existing = (await db.collection('users').doc(user.uid).get()).data();
-      if (user.disabled || user.emailVerified || (existing && !['requester', 'distributor'].includes(existing.role))) {
-        throw new OtpError(409, 'account-exists', 'This account already exists. Please log in or reset your password.');
-      }
+      await checkExistingAccount(user);
     } else {
       // This is reached only after the OTP hash was successfully checked and consumed.
       user = await auth.createUser({ email, password: input.password, emailVerified: true });
@@ -122,13 +126,16 @@ function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, now = D
       const data = (await tx.get(ref)).data() || {};
       const time = now();
       const active = Number(data.resetAt) > time;
-      if (active && data.count >= 20) throw new OtpError(429, 'resend-limit-reached', 'Too many signup requests. Please try again later.');
+      if (active && data.count >= 20) throw new OtpError(429, 'resend-limit-reached', 'Too many signup requests. Please wait before trying again.', {
+        retryAfterSeconds: Math.ceil((Number(data.resetAt) - time) / 1000),
+      });
       tx.set(ref, { count: active ? Number(data.count || 0) + 1 : 1, resetAt: active ? data.resetAt : time + 3600000 });
     });
   }
   async function request(email, ip) {
     email = normalizeEmail(email);
     await limitIp(ip);
+    await checkExistingAccount(await findUser(email));
     const otp = otpFor(email);
     const result = await otp.service.request(otp.uid);
     return { ...result, challenge: challengeFor(email) };

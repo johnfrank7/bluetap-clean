@@ -143,8 +143,8 @@ test('verified accounts and admin profiles cannot be overwritten by registration
     const f = fixture();
     f.users.set('old', { uid: 'old', email: 'old@example.test', emailVerified: !admin });
     if (admin) f.records.set('users/old', { role: 'admin' });
-    const result = await f.service.request('old@example.test', 'test-ip');
-    await assert.rejects(f.service.complete(result.challenge, f.sent[0].code, form), reason('account-exists'));
+    await assert.rejects(f.service.request(' OLD@example.test ', 'test-ip'), reason('account-exists'));
+    assert.equal(f.sent.length, 0);
     assert.equal(f.creates, 0);
     assert.equal(f.users.get('old').password, undefined);
   }
@@ -172,4 +172,30 @@ test('public request endpoint rate limits sends across different emails by IP', 
   for (let i = 0; i < 20; i++) await f.service.request(`test${i}@example.test`, 'one-ip');
   await assert.rejects(f.service.request('another@example.test', 'one-ip'), reason('resend-limit-reached'));
   assert.equal(f.creates, 0);
+});
+
+test('account completed after requesting OTP cannot be overwritten', async () => {
+  const f = fixture();
+  const result = await f.service.request('old@example.test', 'test-ip');
+  f.users.set('old', { uid: 'old', email: 'old@example.test', emailVerified: true });
+  await assert.rejects(f.service.complete(result.challenge, f.sent[0].code, form), reason('account-exists'));
+  assert.equal(f.creates, 0);
+  assert.equal(f.users.get('old').password, undefined);
+});
+
+test('email send limit returns remaining wait and permits requests after window ends', async () => {
+  const f = fixture();
+  for (let i = 0; i < 6; i++) {
+    await f.service.request('new@example.test', 'test-ip');
+    f.advance(60000);
+  }
+  await assert.rejects(f.service.request('new@example.test', 'test-ip'), (error) => {
+    assert.equal(error.reason, 'resend-limit-reached');
+    assert.equal(error.details.retryAfterSeconds, 3240);
+    return true;
+  });
+  assert.equal(f.sent.length, 6);
+  f.advance(3240000);
+  await f.service.request('new@example.test', 'test-ip');
+  assert.equal(f.sent.length, 7);
 });

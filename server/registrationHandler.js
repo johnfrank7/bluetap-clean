@@ -26,6 +26,7 @@ function createRegistrationHandler(action) {
       return res.status(200).json(result);
     } catch (error) {
       const known = error instanceof OtpError;
+      if (known && error.details.retryAfterSeconds) res.setHeader('Retry-After', String(error.details.retryAfterSeconds));
       const duplicate = error.code === 'auth/email-already-exists';
       return res.status(known ? error.status : duplicate ? 409 : 500).json({ error: {
         reason: known ? error.reason : duplicate ? 'account-exists' : 'service-unavailable',

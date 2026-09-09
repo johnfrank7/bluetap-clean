@@ -156,6 +156,16 @@ export default function SignupPage() {
   const { role } = useLocalSearchParams();
   const selectedAccountType = role === 'requester' || role === 'distributor' ? role : null;
   const [loading, setLoading] = React.useState(false);
+  const submissionRef = React.useRef(false);
+  const [retryAt, setRetryAt] = React.useState(0);
+  const [retrySeconds, setRetrySeconds] = React.useState(0);
+  React.useEffect(() => {
+    if (!retryAt) return;
+    const tick = () => setRetrySeconds(Math.max(0, Math.ceil((retryAt - Date.now()) / 1000)));
+    tick();
+    const timer = setInterval(tick, 1000);
+    return () => clearInterval(timer);
+  }, [retryAt]);
 
   const [firstName, setFirstName] = React.useState('');
   const [lastName, setLastName] = React.useState('');
@@ -346,7 +356,7 @@ export default function SignupPage() {
   };
 
   const handleContinue = async () => {
-    if (loading) return;
+    if (loading || submissionRef.current || Date.now() < retryAt) return;
 
     setHasAttemptedSubmit(true);
 
@@ -369,6 +379,8 @@ export default function SignupPage() {
   };
 
   const registerAccount = async (type) => {
+    if (submissionRef.current) return;
+    submissionRef.current = true;
     try {
       setLoading(true);
 
@@ -403,8 +415,16 @@ export default function SignupPage() {
     } catch (error) {
       console.log('Signup error:', error.message);
       clearAllAuthSessions();
-      showNotification('Signup failed', getAuthErrorMessage(error));
+      const retry = Number(error?.details?.retryAfterSeconds);
+      if (Number.isFinite(retry) && retry > 0) {
+        setRetryAt(Date.now() + retry * 1000);
+        setRetrySeconds(Math.ceil(retry));
+        showNotification('Please wait', `Too many code requests. Try again in ${Math.ceil(retry / 60)} minute(s). The Continue button will show the remaining time.`);
+      } else {
+        showNotification(error?.details?.reason === 'account-exists' ? 'Email already registered' : 'Signup failed', getAuthErrorMessage(error));
+      }
     } finally {
+      submissionRef.current = false;
       setLoading(false);
     }
   };
@@ -632,12 +652,12 @@ export default function SignupPage() {
 
             <View style={styles.buttonContainer}>
               <TouchableOpacity
-                style={[styles.continueButton, loading && styles.buttonDisabled]}
+                style={[styles.continueButton, (loading || retrySeconds > 0) && styles.buttonDisabled]}
                 onPress={handleContinue}
-                disabled={loading}
+                disabled={loading || retrySeconds > 0}
               >
                 <Text style={styles.continueButtonText}>
-                  {loading ? 'PLEASE WAIT...' : 'CONTINUE'}
+                  {loading ? 'PLEASE WAIT...' : retrySeconds > 0 ? `TRY AGAIN IN ${Math.floor(retrySeconds / 60)}:${String(retrySeconds % 60).padStart(2, '0')}` : 'CONTINUE'}
                 </Text>
               </TouchableOpacity>
             </View>
