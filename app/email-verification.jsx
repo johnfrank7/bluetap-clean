@@ -15,7 +15,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { onAuthStateChanged, reload, signInWithCustomToken, signOut } from 'firebase/auth';
 
-import { BLUETAP_LOGIN_GRADIENT } from '../constants/bluetapTheme';
+import { BLUETAP_COLORS, BLUETAP_LOGIN_GRADIENT } from '../constants/bluetapTheme';
 import { auth } from '../firebase';
 import { clearAllAuthSessions } from '../services/authSession';
 import { requestEmailOtp, verifyEmailOtp, getPendingRegistration, clearPendingRegistration,
@@ -77,6 +77,7 @@ export default function EmailVerificationPage() {
   const automaticRequestRef = React.useRef(false);
   const completionTimeoutRef = React.useRef(null);
   const registrationCompletedRef = React.useRef(false);
+  const verificationInFlightRef = React.useRef(false);
 
   const [user, setUser] = React.useState(registration ? { email: draft?.profile.email } : auth.currentUser);
   const [loading, setLoading] = React.useState(true);
@@ -267,8 +268,9 @@ export default function EmailVerificationPage() {
 
   const verify = async () => {
     let account = auth.currentUser || user;
-    if ((!registration && !account) || otp.length !== OTP_LENGTH || sending || verifying || codeExpired || verified) return;
+    if ((!registration && !account) || otp.length !== OTP_LENGTH || !codeSent || sending || verifying || verificationInFlightRef.current || codeExpired || verified) return;
 
+    verificationInFlightRef.current = true;
     setVerifying(true);
     setMessage('');
     try {
@@ -297,6 +299,7 @@ export default function EmailVerificationPage() {
       const reason = error?.details?.reason;
       if (reason === 'code-expired' || reason === 'attempt-limit-reached') {
         setExpiresAt(0);
+        setCodeSent(false);
         setOtp('');
       }
       console.log('Email OTP verification error:', error.message);
@@ -304,6 +307,7 @@ export default function EmailVerificationPage() {
       setMessageType('error');
       if (String(error?.code || '').includes('unauthenticated')) router.replace('/login');
     } finally {
+      verificationInFlightRef.current = false;
       setVerifying(false);
     }
   };
@@ -319,7 +323,7 @@ export default function EmailVerificationPage() {
     router.replace('/login');
   };
 
-  const verifyDisabled = otp.length !== OTP_LENGTH || sending || verifying || codeExpired || verified;
+  const verifyDisabled = otp.length !== OTP_LENGTH || !codeSent || sending || verifying || codeExpired || verified;
   const resendDisabled = resendSeconds > 0 || sending || verifying || verified;
 
   return (
@@ -366,7 +370,7 @@ export default function EmailVerificationPage() {
                 </Text>
                 <Text style={styles.emailAddress}>{user?.email || 'your email address'}</Text>
                 <Text style={styles.instructions}>
-                  Enter the code below to confirm your email address.
+                  Enter all 6 digits, then tap Confirm Code.
                 </Text>
 
                 <View style={styles.otpInputArea}>
@@ -394,6 +398,7 @@ export default function EmailVerificationPage() {
                     importantForAutofill="yes"
                     keyboardType="number-pad"
                     maxLength={OTP_LENGTH}
+                    editable={!sending && !verifying && !verified}
                     onChangeText={changeOtp}
                     onSubmitEditing={verify}
                     returnKeyType="done"
@@ -428,17 +433,19 @@ export default function EmailVerificationPage() {
 
                 <TouchableOpacity
                   accessibilityRole="button"
-                  style={[styles.primaryButton, verifyDisabled && styles.buttonDisabled]}
+                  accessibilityLabel={verifying ? 'Verifying code' : verified ? 'Email verified' : 'Confirm Code'}
+                  accessibilityState={{ disabled: verifyDisabled, busy: verifying }}
+                  style={[
+                    styles.primaryButton,
+                    { backgroundColor: verifyDisabled ? BLUETAP_COLORS.primaryDeep : BLUETAP_COLORS.primary },
+                  ]}
                   onPress={verify}
                   disabled={verifyDisabled}
                 >
-                  {verifying ? (
-                    <ActivityIndicator color="#FFFFFF" />
-                  ) : (
-                    <Text style={styles.primaryButtonText}>
-                      {verified ? 'EMAIL VERIFIED' : 'VERIFY EMAIL'}
-                    </Text>
-                  )}
+                  {verifying && <ActivityIndicator color={BLUETAP_COLORS.white} style={styles.confirmSpinner} />}
+                  <Text style={[styles.primaryButtonText, { color: BLUETAP_COLORS.white }]} accessibilityLiveRegion="polite">
+                    {verifying ? 'Verifying...' : verified ? 'Email Verified' : 'Confirm Code'}
+                  </Text>
                 </TouchableOpacity>
 
                 <View style={styles.resendSection}>
@@ -593,6 +600,7 @@ const styles = StyleSheet.create({
   noticeError: { color: '#A53B12', backgroundColor: '#FFF4E5' },
   noticeSuccess: { color: '#176B47', backgroundColor: '#EAF9F0' },
   primaryButton: {
+    flexDirection: 'row',
     width: '100%',
     minHeight: 52,
     borderRadius: 12,
@@ -602,7 +610,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
   },
   primaryButtonText: { color: '#FFFFFF', fontSize: 15, fontWeight: '800', letterSpacing: 0.2 },
-  buttonDisabled: { opacity: 0.48 },
+  confirmSpinner: { marginRight: 10 },
   resendSection: { alignItems: 'center', marginTop: 20 },
   resendPrompt: { color: '#52708A', fontSize: 14, marginBottom: 8 },
   resendButton: { minHeight: 32, justifyContent: 'center', paddingHorizontal: 8 },
