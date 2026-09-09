@@ -1,7 +1,7 @@
 import { StatusBar } from 'expo-status-bar';
 import React from 'react';
 import {
-  ActivityIndicator, Image, Modal, Platform, ScrollView, StyleSheet, Text,
+  ActivityIndicator, Animated, Easing, Image, Modal, Platform, ScrollView, StyleSheet, Text,
   TextInput, TouchableOpacity, useWindowDimensions, View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -50,7 +50,17 @@ export default function SignupPage() {
   const [retryAt, setRetryAt] = React.useState(0);
   const [now, setNow] = React.useState(Date.now());
   const submitting = React.useRef(false);
+  const entrance = React.useRef(new Animated.Value(0)).current;
   const mobile = width < 600;
+
+  React.useEffect(() => {
+    Animated.timing(entrance, {
+      toValue: 1,
+      duration: 320,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: Platform.OS !== 'web',
+    }).start();
+  }, [entrance]);
 
   const update = (key, value) => {
     setForm((current) => ({ ...current, [key]: value }));
@@ -170,7 +180,14 @@ export default function SignupPage() {
       <SafeAreaView style={styles.safe}>
         <StatusBar style="light" />
         <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-          <View style={[styles.shell, { maxWidth: mobile ? 520 : 600 }]}>
+          <Animated.View style={[
+            styles.shell,
+            {
+              maxWidth: mobile ? 520 : 600,
+              opacity: entrance,
+              transform: [{ translateY: entrance.interpolate({ inputRange: [0, 1], outputRange: [18, 0] }) }],
+            },
+          ]}>
             <View style={styles.brand}>
               <Image source={require('../assets/icons/bluetapwhitelogo.png')} style={styles.logo} resizeMode="contain" />
               <View><Text style={styles.brandName}>BlueTap</Text><Text style={styles.tagline}>Water Within Reach</Text></View>
@@ -234,7 +251,7 @@ export default function SignupPage() {
               </View>
               <Text style={styles.loginPrompt}>Already have an account? <Text style={styles.loginLink} onPress={() => router.replace('/login')}>Log in.</Text></Text>
             </View>
-          </View>
+          </Animated.View>
         </ScrollView>
         <Modal visible={!!notice} transparent animationType="fade"><View style={styles.modalBg}><View style={styles.modal}><Text style={styles.modalTitle}>{notice?.title}</Text><Text style={styles.modalText}>{notice?.message}</Text><TouchableOpacity style={styles.primary} onPress={() => setNotice(null)}><Text style={styles.primaryText}>OK</Text></TouchableOpacity></View></View></Modal>
       </SafeAreaView>

@@ -659,8 +659,6 @@ export default function LoginPage() {
                 </View>
 
                 <View style={styles.formContainer}>
-                  <Text style={styles.welcomeTitle}>Welcome back</Text>
-                  <Text style={styles.welcomeSubtitle}>Sign in to continue to BlueTap.</Text>
                   <View style={styles.inputContainer}>
                     <Text style={styles.inputLabel}>Username or email</Text>
                     <TextInput
@@ -897,8 +895,6 @@ const styles = StyleSheet.create({
     width: '100%',
     marginBottom: 16,
   },
-  welcomeTitle: { color: '#FFFFFF', fontSize: 22, fontWeight: '800', textAlign: 'center', marginBottom: 4 },
-  welcomeSubtitle: { color: 'rgba(255,255,255,0.82)', fontSize: 13, textAlign: 'center', marginBottom: 18 },
   inputLabel: { color: '#FFFFFF', fontSize: 13, fontWeight: '700', marginBottom: 6 },
   inputContainer: {
     width: '100%',
