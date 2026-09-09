@@ -12,6 +12,9 @@ import { BLUETAP_COLORS, BLUETAP_LOGIN_GRADIENT } from '../constants/bluetapThem
 import { clearAllAuthSessions } from '../services/authSession';
 import { clearPendingRegistration, requestRegistrationOtp, setPendingRegistration } from '../services/emailVerification';
 import { checkUsername, normalizeUsername, validateUsername } from '../services/usernameAuth';
+import { acceptRegistrationTerms, createRegistrationSession } from '../services/registrationSession';
+
+import { startFaceVerification } from '../services/faceVerification';
 
 const BARANGAYS = ['Awihao', 'Bagakay', 'Bato', 'Biga', 'Bulongan', 'Bunga', 'Cabitoonan', 'Calongcalong', 'Cambang-ug', 'Camp 8', 'Canlumampao', 'Cantabaco', 'Capitan Claudio', 'Carmen', 'Daanglungsod', 'Don Andres Soriano', 'Dumlog', 'Gen. Climaco', 'Ibo', 'Ilihan', 'Juan Climaco, Sr.', 'Landahan', 'Loay', 'Luray II', 'Matab-ang', 'Media Once', 'Pangamihan', 'Poblacion', 'Poog', 'Putingbato', 'Sagay', 'Sam-ang', 'Sangi', 'Santo Niño', 'Subayon', 'Talavera', 'Tubod', 'Tungkay'];
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -48,6 +51,11 @@ export default function SignupPage() {
   const [loading, setLoading] = React.useState(false);
   const [notice, setNotice] = React.useState(null);
   const [retryAt, setRetryAt] = React.useState(0);
+  const [registrationSessionId, setRegistrationSessionId] = React.useState('');
+  const [faceVerification, setFaceVerification] = React.useState({ status: 'unverified', duplicateCheck: 'unknown' });
+  const [faceLoading, setFaceLoading] = React.useState(false);
+  const [faceMessage, setFaceMessage] = React.useState('');
+  const [termsAccepted, setTermsAccepted] = React.useState(false);
   const [now, setNow] = React.useState(Date.now());
   const submitting = React.useRef(false);
   const entrance = React.useRef(new Animated.Value(0)).current;
@@ -66,6 +74,11 @@ export default function SignupPage() {
     setForm((current) => ({ ...current, [key]: value }));
     setErrors((current) => ({ ...current, [key]: '' }));
     if (key === 'username') setUsernameState({ checking: false, available: null, checked: '' });
+    if (['role', 'firstName', 'lastName', 'phone', 'barangay', 'address'].includes(key) && registrationSessionId) {
+      setRegistrationSessionId('');
+      setFaceVerification({ status: 'unverified', duplicateCheck: 'unknown' });
+      setFaceMessage('Your personal details changed. Start identity verification again.');
+    }
   };
 
   React.useEffect(() => {
@@ -76,8 +89,8 @@ export default function SignupPage() {
   const retrySeconds = Math.max(0, Math.ceil((retryAt - now) / 1000));
   const canContinue = step === 1 ? !!form.role
     : step === 2 ? !!form.firstName.trim() && !!form.lastName.trim() && PHONE.test(form.phone) && !!form.barangay && !!form.address.trim()
-      : step === 3 ? true
-        : !validateUsername(form.username) && EMAIL.test(form.email.trim()) && form.password.length >= 8 && form.password === form.confirmPassword && usernameState.available !== false;
+      : step === 3 ? (faceVerification.status === 'verified') && faceVerification.duplicateCheck !== 'flagged'
+        : !validateUsername(form.username) && EMAIL.test(form.email.trim()) && form.password.length >= 8 && form.password === form.confirmPassword && usernameState.available === true && termsAccepted;
 
   React.useEffect(() => {
     if (step !== 4) return undefined;
@@ -118,10 +131,38 @@ export default function SignupPage() {
     return Object.keys(next).length === 0;
   };
 
-  const next = () => {
-    if (!validateStep()) return;
+  const next = async () => {
+    if (!validateStep() || (step === 3 && !canContinue)) return;
+    if (step === 2 && !registrationSessionId) {
+      setLoading(true);
+      try {
+        const result = await createRegistrationSession({
+          role: form.role, firstName: form.firstName.trim(), lastName: form.lastName.trim(),
+          phone: `+63${form.phone}`, barangay: form.barangay, address: form.address.trim(),
+        });
+        setRegistrationSessionId(result.registrationSessionId);
+        setFaceVerification({ status: 'unverified', duplicateCheck: 'unknown' });
+      } catch (error) {
+        setNotice({ title: 'Could not start verification', message: error.message });
+        return;
+      } finally { setLoading(false); }
+    }
     setStep((current) => Math.min(4, current + 1));
     setErrors({});
+  };
+
+  const startFace = async () => {
+    if (!registrationSessionId || faceLoading) return;
+    setFaceLoading(true);
+    setFaceMessage('');
+    try {
+      const result = await startFaceVerification({ registrationSessionId });
+      setFaceVerification(result.faceVerification || { status: result.started ? 'pending' : 'unverified', duplicateCheck: 'unknown' });
+      setFaceMessage(result.faceVerification?.status === 'verified' ? 'Face comparison successful.' : 'Face verification was not successful. Please try again.');
+    } catch (error) {
+      setFaceMessage(error.message);
+      setFaceVerification((current) => ({ ...current, status: 'unverified' }));
+    } finally { setFaceLoading(false); }
   };
   const back = () => {
     if (loading) return;
@@ -134,15 +175,25 @@ export default function SignupPage() {
     submitting.current = true;
     setLoading(true);
     try {
+      if (!registrationSessionId || !(faceVerification.status === 'verified') || faceVerification.duplicateCheck === 'flagged') {
+        setNotice({ title: 'Identity verification required', message: 'Complete identity verification before continuing.' });
+        return;
+      }
+      if (!termsAccepted) {
+        setErrors((current) => ({ ...current, terms: 'Please accept the Terms of Service and Privacy Policy to continue.' }));
+        return;
+      }
+      await acceptRegistrationTerms(registrationSessionId);
       const profile = {
         role: form.role,
         firstName: form.firstName.trim(), lastName: form.lastName.trim(),
         phone: `+63${form.phone}`, barangay: form.barangay, address: form.address.trim(),
         username: form.username.trim(), usernameNormalized: normalizeUsername(form.username),
         email: form.email.trim().toLowerCase(), password: form.password,
+        registrationSessionId,
       };
       clearPendingRegistration();
-      const result = await requestRegistrationOtp(profile.email, profile.username);
+      const result = await requestRegistrationOtp(profile.email, profile.username, registrationSessionId);
       setPendingRegistration(profile, result);
       clearAllAuthSessions();
       router.replace({ pathname: '/email-verification', params: {
@@ -170,7 +221,7 @@ export default function SignupPage() {
   const titles = [
     ['Create your BlueTap account', "Choose how you'll use BlueTap."],
     ['Personal information', 'Tell us a little about yourself.'],
-    ['Verify your identity', 'BlueTap uses face verification to help protect accounts and prevent duplicate registrations.'],
+    ['Verify your identity', 'Help us keep BlueTap accounts secure.'],
     ['Set up your account', 'Choose your login credentials and recovery email.'],
   ];
   const [title, subtitle] = titles[step - 1];
@@ -227,11 +278,15 @@ export default function SignupPage() {
 
               {step === 3 && <View style={styles.identityBox}>
                 <View style={styles.faceIcon}><Text style={styles.faceIconText}>◎</Text></View>
-                <Text style={styles.identityTitle}>Identity verification follows email confirmation</Text>
-                <Text style={styles.identityText}>The current face provider requires a securely authenticated account ID. After your email is verified and your account is created, BlueTap will take you directly to the existing identity-verification screen.</Text>
-                <View style={styles.privacy}><Text style={styles.privacyText}>🔒 BlueTap does not mark identity verified from this form. Only the trusted verification provider can approve it.</Text></View>
-                <View style={styles.status}><View style={styles.statusDot} /><Text style={styles.statusText}>Verification pending until account creation</Text></View>
-                <TouchableOpacity style={[styles.faceButton, styles.disabled]} disabled accessibilityRole="button"><Text style={styles.faceButtonText}>Start Face Verification · After Email</Text></TouchableOpacity>
+                <Text style={styles.identityTitle}>Face verification</Text>
+                <Text style={styles.identityText}>Face verification requires a reference photo and a current photo. BlueTap image capture and enrollment still need to be connected.</Text>
+                <View style={styles.privacy}><Text style={styles.privacyText}>🔒 Face comparison does not verify liveness or check for duplicate accounts. Continue is available only after successful verification.</Text></View>
+                {!!faceMessage && <Text style={[styles.faceMessage, (faceVerification.status === 'verified') && styles.faceSuccess, faceVerification.status === 'review_required' && styles.faceReview]}>{faceMessage}</Text>}
+                {faceVerification.status === 'verified' ? <View style={styles.status}><Text style={styles.successMark}>✓</Text><Text style={styles.faceSuccess}>Identity verified</Text></View>
+                  : faceVerification.status === 'review_required' ? <View style={styles.status}><View style={styles.reviewDot} /><Text style={styles.faceReview}>Verification needs review</Text></View>
+                    : <TouchableOpacity style={[styles.faceButton, faceLoading && styles.disabled]} onPress={startFace} disabled={faceLoading} accessibilityRole="button">
+                      {faceLoading ? <ActivityIndicator color={BLUETAP_COLORS.primary} /> : <Text style={styles.faceButtonText}>{faceVerification.status === 'failed' ? 'Try Again' : 'Start Face Verification'}</Text>}
+                    </TouchableOpacity>}
               </View>}
 
               {step === 4 && <View>
@@ -241,6 +296,14 @@ export default function SignupPage() {
                 <Field label="Recovery email" error={errors.email}><TextInput style={[styles.input, errors.email && styles.inputError]} value={form.email} onChangeText={(v) => update('email', v)} keyboardType="email-address" autoCapitalize="none" autoComplete="email" /></Field>
                 <Field label="Password" error={errors.password} hint="Use at least 8 characters."><View style={[styles.password, errors.password && styles.inputError]}><TextInput style={styles.passwordInput} value={form.password} onChangeText={(v) => update('password', v)} secureTextEntry={!showPassword} autoCapitalize="none" /><TouchableOpacity onPress={() => setShowPassword((v) => !v)}><Text style={styles.show}>{showPassword ? 'Hide' : 'Show'}</Text></TouchableOpacity></View></Field>
                 <Field label="Confirm password" error={errors.confirmPassword}><TextInput style={[styles.input, errors.confirmPassword && styles.inputError]} value={form.confirmPassword} onChangeText={(v) => update('confirmPassword', v)} secureTextEntry={!showPassword} autoCapitalize="none" /></Field>
+                <View style={styles.termsRow}>
+                  <TouchableOpacity style={styles.checkboxTouch} onPress={() => { setTermsAccepted((value) => !value); setErrors((current) => ({ ...current, terms: '' })); }} accessibilityRole="checkbox" accessibilityState={{ checked: termsAccepted }}>
+                    <View style={[styles.checkboxBox, termsAccepted && styles.checkboxTouchChecked]}><Text style={styles.checkboxMark}>{termsAccepted ? '✓' : ''}</Text></View>
+                  </TouchableOpacity>
+                  <Text style={styles.termsText}>I agree to the BlueTap <Text style={styles.termsLink} onPress={() => router.push('/terms')}>Terms of Service</Text> and <Text style={styles.termsLink} onPress={() => router.push('/privacy')}>Privacy Policy</Text>.</Text>
+                </View>
+                {!!errors.terms && <Text style={styles.error}>{errors.terms}</Text>}
+                {!termsAccepted && <Text style={styles.termsRequired}>Terms acceptance is required to continue.</Text>}
               </View>}
 
               <View style={styles.actions}>
@@ -268,9 +331,10 @@ const styles = StyleSheet.create({
   roleList: { gap: 12 }, roleCard: { flexDirection: 'row', alignItems: 'center', minHeight: 94, padding: 16, borderRadius: 14, borderWidth: 1.5, borderColor: '#D8E5EF', backgroundColor: '#FAFCFE' }, roleCardSelected: { borderColor: BLUETAP_COLORS.primary, backgroundColor: '#EDF7FF' }, roleIcon: { fontSize: 28, marginRight: 14 }, roleCopy: { flex: 1 }, roleTitle: { color: '#17324D', fontSize: 16, fontWeight: '800' }, roleDescription: { color: '#607A90', fontSize: 13, lineHeight: 18, marginTop: 3 }, radio: { width: 18, height: 18, borderRadius: 9, borderWidth: 2, borderColor: '#A8BCCB' }, radioSelected: { borderWidth: 5, borderColor: BLUETAP_COLORS.primary },
   row: { flexDirection: 'row', gap: 12 }, half: { flex: 1 }, field: { marginBottom: 15 }, label: { color: '#29465F', fontSize: 13, fontWeight: '700', marginBottom: 6 }, input: { minHeight: 50, borderWidth: 1, borderColor: '#C8D9E6', borderRadius: 11, backgroundColor: '#FAFCFE', paddingHorizontal: 14, color: '#17324D', fontSize: 15 }, inputError: { borderColor: '#DC5757', backgroundColor: '#FFF8F8' }, inputSuccess: { borderColor: '#36A269' }, error: { color: '#B93A3A', fontSize: 12, marginTop: 5 }, hint: { color: '#68839A', fontSize: 12, marginTop: 5 },
   phone: { flexDirection: 'row', alignItems: 'center', minHeight: 50, borderWidth: 1, borderColor: '#C8D9E6', borderRadius: 11, backgroundColor: '#FAFCFE' }, prefix: { paddingHorizontal: 14, color: '#17324D', fontWeight: '700', borderRightWidth: 1, borderRightColor: '#D8E5EF' }, phoneInput: { flex: 1, minHeight: 48, paddingHorizontal: 12, color: '#17324D', fontSize: 15 }, select: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }, inputText: { color: '#17324D', fontSize: 15 }, placeholder: { color: '#94A3B8', fontSize: 15 }, dropdown: { maxHeight: 170, borderWidth: 1, borderColor: '#C8D9E6', borderRadius: 11, marginTop: -10, marginBottom: 15 }, option: { padding: 13, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#D8E5EF' },
-  identityBox: { alignItems: 'center' }, faceIcon: { width: 82, height: 82, borderRadius: 41, backgroundColor: '#E8F5FF', alignItems: 'center', justifyContent: 'center', marginBottom: 15 }, faceIconText: { color: BLUETAP_COLORS.primary, fontSize: 48 }, identityTitle: { color: '#17324D', fontSize: 17, fontWeight: '800', textAlign: 'center' }, identityText: { color: '#607A90', fontSize: 14, lineHeight: 21, textAlign: 'center', marginTop: 9 }, privacy: { backgroundColor: '#F1F7FB', padding: 13, borderRadius: 10, marginTop: 16 }, privacyText: { color: '#47667E', fontSize: 12, lineHeight: 18 }, status: { flexDirection: 'row', alignItems: 'center', marginTop: 14 }, statusDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#E5A129', marginRight: 7 }, statusText: { color: '#8A651F', fontSize: 12, fontWeight: '700' },
+  identityBox: { alignItems: 'center' }, faceIcon: { width: 82, height: 82, borderRadius: 41, backgroundColor: '#E8F5FF', alignItems: 'center', justifyContent: 'center', marginBottom: 15 }, faceIconText: { color: BLUETAP_COLORS.primary, fontSize: 48 }, identityTitle: { color: '#17324D', fontSize: 17, fontWeight: '800', textAlign: 'center' }, identityText: { color: '#607A90', fontSize: 14, lineHeight: 21, textAlign: 'center', marginTop: 9 }, privacy: { backgroundColor: '#F1F7FB', padding: 13, borderRadius: 10, marginTop: 16 }, privacyText: { color: '#47667E', fontSize: 12, lineHeight: 18 }, status: { flexDirection: 'row', alignItems: 'center', marginTop: 14 }, successMark: { color: '#238A57', fontSize: 18, fontWeight: '900', marginRight: 7 }, reviewDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#C47A13', marginRight: 7 }, faceMessage: { color: '#A34B23', fontSize: 13, lineHeight: 18, textAlign: 'center', marginTop: 14 }, faceSuccess: { color: '#238A57', fontSize: 13, fontWeight: '700' }, faceReview: { color: '#A5650B', fontSize: 13, fontWeight: '700' },
   faceButton: { width: '100%', minHeight: 48, marginTop: 16, borderRadius: 11, borderWidth: 1, borderColor: '#9AC7E8', alignItems: 'center', justifyContent: 'center' }, faceButtonText: { color: BLUETAP_COLORS.primary, fontSize: 14, fontWeight: '700' },
   password: { flexDirection: 'row', alignItems: 'center', minHeight: 50, borderWidth: 1, borderColor: '#C8D9E6', borderRadius: 11, backgroundColor: '#FAFCFE' }, passwordInput: { flex: 1, minHeight: 48, paddingHorizontal: 14, color: '#17324D', fontSize: 15 }, show: { color: BLUETAP_COLORS.primary, fontWeight: '700', padding: 13 },
+  termsRow: { flexDirection: 'row', alignItems: 'flex-start', minHeight: 44, marginTop: 2 }, checkboxTouch: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', marginRight: 2, marginTop: -8 }, checkboxBox: { width: 26, height: 26, borderRadius: 7, borderWidth: 1.5, borderColor: '#91ABC0', alignItems: 'center', justifyContent: 'center' }, checkboxTouchChecked: { backgroundColor: BLUETAP_COLORS.primary, borderColor: BLUETAP_COLORS.primary }, checkboxMark: { color: '#FFF', fontWeight: '900' }, termsText: { flex: 1, color: '#526E84', fontSize: 13, lineHeight: 20 }, termsLink: { color: BLUETAP_COLORS.primary, fontWeight: '800' }, termsRequired: { color: '#7A5C24', fontSize: 12, marginTop: 4 },
   actions: { flexDirection: 'row', gap: 12, marginTop: 14 }, back: { minHeight: 50, paddingHorizontal: 24, borderWidth: 1, borderColor: '#B9CEDD', borderRadius: 11, alignItems: 'center', justifyContent: 'center' }, backText: { color: '#3D607B', fontSize: 15, fontWeight: '700' }, primary: { flex: 1, minHeight: 50, borderRadius: 11, paddingHorizontal: 18, backgroundColor: BLUETAP_COLORS.primary, alignItems: 'center', justifyContent: 'center' }, primaryText: { color: '#FFF', fontSize: 15, fontWeight: '800', textAlign: 'center' }, disabled: { opacity: .55 }, loginPrompt: { textAlign: 'center', color: '#6B8498', fontSize: 13, marginTop: 20 }, loginLink: { color: BLUETAP_COLORS.primary, fontWeight: '800' },
   modalBg: { flex: 1, backgroundColor: 'rgba(0,0,0,.5)', alignItems: 'center', justifyContent: 'center', padding: 20 }, modal: { width: '100%', maxWidth: 420, backgroundColor: '#FFF', borderRadius: 20, padding: 24 }, modalTitle: { color: '#17324D', fontSize: 19, fontWeight: '800', textAlign: 'center' }, modalText: { color: '#526E84', fontSize: 14, lineHeight: 20, textAlign: 'center', marginVertical: 18 },
 });

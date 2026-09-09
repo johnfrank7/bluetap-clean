@@ -75,7 +75,17 @@ approval and admin code remain unchanged. Face verification is a separate existi
 integration; this OTP backend does not configure it or mark faces verified.
 ## Registration before account creation
 
-New signup uses `POST /api/auth/request-registration-otp` with the email only.
+Before email OTP, signup creates a 60-minute opaque registration session through
+`POST /api/auth/create-registration-session`. The session stores a digest of the
+personal details and server-owned face-verification/terms state, not the plaintext
+personal details or credentials. The former public start placeholder now fails closed.
+The Render proxy at `POST /api/verification/verify-face` owns pairwise results;
+see [FACE_VERIFICATION.md](FACE_VERIFICATION.md) for the contract and remaining
+capture/enrollment work. Signup cannot continue without successful verification.
+
+The OTP request requires trusted face status `verified`, provider verification,
+no flagged duplicate result, and server-recorded Terms/Privacy acceptance. Signup uses
+`POST /api/auth/request-registration-otp` with the email, username, and session ID.
 No Auth account or `users` profile is created at this point. Private pending OTP
 records share the locked-down `emailOtpVerifications` collection, keyed by an HMAC
 of the normalized email. Only OTP hashes and delivery/rate-limit metadata are saved.
@@ -84,8 +94,10 @@ the form details. Passwords are never persisted to browser storage, URLs, or Fir
 Refreshing this screen restarts signup safely, leaving the email available.
 
 `POST /api/auth/complete-registration` validates the challenge, submitted fields,
-and OTP before creating the Firebase user with emailVerified true. Admin saves the
-profile and counter together, then issues a custom login token. Existing unverified
+and OTP before creating the Firebase user with emailVerified true. Admin rechecks
+the registration session in the final transaction, binds only safe verification
+metadata, records versioned Terms/Privacy acceptance, completes the session, saves
+the profile and counter, then issues a custom login token. Existing unverified
 signups can recover after OTP verification without duplicate accounts; existing role,
 approval and identity status are preserved. Already verified accounts and admin
 profiles must use login/password reset. New distributor approval is always pending.
@@ -99,11 +111,18 @@ is additionally limited to 20 send requests/IP/hour using Vercel's forwarded cli
 IP. IP identifiers are HMAC hashed; no raw IPs are stored. Existing signed-in users
 continue using the two authenticated email-OTP routes.
 
-Deploy the two new API files and frontend together. No new secrets are required.
+Deploy the registration-session API routes, registration API updates, and frontend
+together. No new secrets are required for the session layer itself; the chosen face
+verification provider may require its own server-only configuration.
 This fixes registration writes through Admin; other app screens still require
 appropriate Firestore rules for their normal client reads and writes.
 
-Run `node --test server/emailOtp.test.js server/registration.test.js server/usernameHandler.test.js` for isolated server security tests,
+There is no `firestore.rules` source in this repository. Before deployment, the
+Firebase Console rules must deny all client reads/writes to `registrationSessions`,
+`usernameReservations`, `emailOtpVerifications`, and `authRateLimits`. Do not add
+an isolated deny to a broad wildcard allow: any matching allow grants access.
+
+Run `node --test server/emailOtp.test.js server/registration.test.js server/registrationSession.test.js server/usernameHandler.test.js` for isolated server security tests,
 and `npm run build` for Expo web compilation. No live emails are sent by the tests.
 
 ## Usernames

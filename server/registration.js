@@ -2,6 +2,7 @@ const { createHmac, randomUUID, timingSafeEqual } = require('node:crypto');
 const { createEmailOtpService } = require('./emailOtp');
 const { OtpError } = require('./otpError');
 const { normalizeUsername } = require('./username');
+const { readRegistrationSession } = require('./registrationSession');
 
 const RESERVATION_TTL = 15 * 60 * 1000;
 
@@ -16,8 +17,8 @@ function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, now = D
     }
     return value.trim().toLowerCase();
   };
-  function challengeFor(email, usernameNormalized) {
-    const payload = Buffer.from(JSON.stringify({ email, usernameNormalized, expires: now() + RESERVATION_TTL, nonce: randomUUID() })).toString('base64url');
+  function challengeFor(email, usernameNormalized, registrationSessionId) {
+    const payload = Buffer.from(JSON.stringify({ email, usernameNormalized, registrationSessionId, expires: now() + RESERVATION_TTL, nonce: randomUUID() })).toString('base64url');
     return `${payload}.${digest('registration:' + payload)}`;
   }
   function readChallenge(challenge) {
@@ -29,7 +30,7 @@ function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, now = D
     let data;
     try { data = JSON.parse(Buffer.from(payload, 'base64url').toString()); } catch { throw invalid(); }
     if (!Number.isFinite(data.expires) || now() >= data.expires) throw invalid();
-    return { email: normalizeEmail(data.email), usernameNormalized: normalizeUsername(data.usernameNormalized) };
+    return { email: normalizeEmail(data.email), usernameNormalized: normalizeUsername(data.usernameNormalized), registrationSessionId: data.registrationSessionId };
   }
   async function findUser(email) {
     try { return await auth.getUserByEmail(email); }
@@ -62,20 +63,58 @@ function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, now = D
       barangay: text('barangay', 150), address: text('address', 250), phone, role,
       username, usernameNormalized };
   }
-  async function saveProfile(user, profile, email) {
+  const personalDigest = (profile) => digest(JSON.stringify([profile.role, profile.firstName, profile.lastName, profile.phone, profile.barangay, profile.address]));
+  const hasEligibleFaceStep = (face = {}) => (
+    face.status === 'verified' && face.providerVerified === true && face.duplicateCheck !== 'flagged'
+  );
+  async function verifiedSession(registrationSessionId, profile) {
+    const { data } = await readRegistrationSession(db, registrationSessionId, now);
+    if (!hasEligibleFaceStep(data.faceVerification)) {
+      throw new OtpError(403, data.faceVerification?.duplicateCheck === 'flagged' ? 'face-review-required' : 'face-verification-required', data.faceVerification?.duplicateCheck === 'flagged' ? 'Verification needs review.' : 'Complete identity verification before continuing.');
+    }
+    if (data.termsAcceptance?.accepted !== true) throw new OtpError(403, 'terms-required', 'Please accept the Terms of Service and Privacy Policy to continue.');
+    if (profile && (data.role !== profile.role || data.personalInfoDigest !== personalDigest(profile))) {
+      throw new OtpError(400, 'registration-session-mismatch', 'Your registration details changed. Please restart identity verification.');
+    }
+    return data;
+  }
+  async function saveProfile(user, profile, email, registrationSessionId) {
     const ref = db.collection('users').doc(user.uid);
     const counter = db.collection('counters').doc('unique_ids');
     const usernameRef = db.collection('usernames').doc(profile.usernameNormalized);
     const reservationRef = db.collection('usernameReservations').doc(profile.usernameNormalized);
+    const registrationSessionRef = db.collection('registrationSessions').doc(registrationSessionId);
     await db.runTransaction(async (tx) => {
       const existing = (await tx.get(ref)).data();
       const counts = (await tx.get(counter)).data() || {};
       const claimed = (await tx.get(usernameRef)).data();
       const reservation = (await tx.get(reservationRef)).data();
+      const session = (await tx.get(registrationSessionRef)).data();
       const ownerHash = digest('email:' + email);
       if ((claimed?.uid && claimed.uid !== user.uid) || reservation?.ownerHash !== ownerHash || Number(reservation?.expiresAt?.toMillis?.() || reservation?.expiresAt || 0) <= now()) {
         throw new OtpError(409, 'username-taken', 'This username is already taken.');
       }
+      if (!session || session.completed || Number(session.expiresAt?.toMillis?.() || session.expiresAt || 0) <= now() || !hasEligibleFaceStep(session.faceVerification) || session.termsAcceptance?.accepted !== true || session.role !== profile.role || session.personalInfoDigest !== personalDigest(profile)) {
+        throw new OtpError(403, 'registration-session-invalid', 'Registration verification is incomplete or expired. Please restart signup.');
+      }
+      const face = session.faceVerification;
+      const trustedFaceVerification = {
+        status: 'verified', verifiedAt: face.verifiedAt || new Date(now()),
+        verificationId: face.verificationReference || null,
+        verificationReference: face.verificationReference || null,
+        livenessPassed: face.livenessPassed === true ? true : null,
+        duplicateCheck: face.duplicateCheck || 'unknown',
+        verificationMode: face.verificationMode || 'provider',
+        providerVerified: true, failureReason: null,
+        distance: Number.isFinite(face.distance) ? face.distance : null,
+        threshold: Number.isFinite(face.threshold) ? face.threshold : null,
+        model: typeof face.model === 'string' ? face.model : null,
+        detectorBackend: typeof face.detectorBackend === 'string' ? face.detectorBackend : null,
+      };
+      const termsAcceptance = {
+        accepted: true, acceptedAt: session.termsAcceptance.acceptedAt || new Date(now()),
+        termsVersion: session.termsAcceptance.termsVersion, privacyVersion: session.termsAcceptance.privacyVersion,
+      };
       tx.set(usernameRef, { uid: user.uid, createdAt: new Date(now()) });
       tx.delete(reservationRef);
       if (existing) {
@@ -87,7 +126,9 @@ function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, now = D
           throw new OtpError(409, 'account-exists', 'This account already exists. Please log in.');
         }
         tx.update(ref, { emailVerified: true, emailVerifiedAt: new Date(now()),
-          updatedAt: new Date(now()), username: profile.username, usernameNormalized: profile.usernameNormalized });
+          updatedAt: new Date(now()), username: profile.username, usernameNormalized: profile.usernameNormalized,
+          faceVerification: trustedFaceVerification, termsAcceptance });
+        tx.update(registrationSessionRef, { completed: true, emailVerified: true, completedAt: new Date(now()), userUid: user.uid, expiresAt: new Date(now()) });
         return;
       }
       const number = Number(counts[profile.role] || 0) + 1;
@@ -100,16 +141,17 @@ function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, now = D
         approvalStatus: pending ? 'pending' : 'approved', status: pending ? 'Pending' : 'Approved',
         rejectionReason: null, emailVerificationRequired: true, emailVerified: true,
         createdAt: new Date(now()), updatedAt: new Date(now()), emailVerifiedAt: new Date(now()),
-        faceVerification: { status: 'unverified', verifiedAt: null, verificationId: null,
-          livenessPassed: null, duplicateCheck: 'unknown', failureReason: null },
+        faceVerification: trustedFaceVerification, termsAcceptance,
       });
+      tx.update(registrationSessionRef, { completed: true, emailVerified: true, completedAt: new Date(now()), userUid: user.uid, expiresAt: new Date(now()) });
     });
   }
-  async function finish(email, usernameNormalized, input) {
+  async function finish(email, usernameNormalized, registrationSessionId, input) {
     const profile = validateProfile(input);
     if (profile.usernameNormalized !== usernameNormalized) {
       throw new OtpError(400, 'invalid-registration', 'Username changed. Please request a new verification code.');
     }
+    await verifiedSession(registrationSessionId, profile);
     let user = await findUser(email);
     const created = !user;
     if (user) {
@@ -119,7 +161,7 @@ function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, now = D
       user = await auth.createUser({ email, password: input.password, emailVerified: true });
     }
     try {
-      await saveProfile(user, profile, email);
+      await saveProfile(user, profile, email, registrationSessionId);
     } catch (error) {
       // Only roll back a new account if its profile definitely does not exist.
       if (created) {
@@ -134,12 +176,12 @@ function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, now = D
     }
     return { customToken: await auth.createCustomToken(user.uid) };
   }
-  function otpFor(email, usernameNormalized, input) {
+  function otpFor(email, usernameNormalized, registrationSessionId, input) {
     const uid = 'registration-' + digest('email:' + email);
     // Pending identity adapter: no Firebase account exists or is created on request.
     const pending = {
       getUser: async () => ({ uid, email, emailVerified: false }),
-      updateUser: async () => ({ registrationResult: await finish(email, usernameNormalized, input) }),
+      updateUser: async () => ({ registrationResult: await finish(email, usernameNormalized, registrationSessionId, input) }),
     };
     return { uid, service: createEmailOtpService({ auth: pending, db, sendEmailOtp, hashSecret, now }) };
   }
@@ -169,20 +211,21 @@ function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, now = D
       tx.set(ref, { count: active ? Number(data.count || 0) + 1 : 1, resetAt: active ? data.resetAt : time + 3600000 });
     });
   }
-  async function request(email, username, ip) {
+  async function request(email, username, registrationSessionId, ip) {
     email = normalizeEmail(email);
     await checkExistingAccount(await findUser(email));
     const usernameNormalized = normalizeUsername(username);
+    await verifiedSession(registrationSessionId);
     await limitIp(ip);
     await reserveUsername(email, usernameNormalized);
-    const otp = otpFor(email, usernameNormalized);
+    const otp = otpFor(email, usernameNormalized, registrationSessionId);
     const result = await otp.service.request(otp.uid);
-    return { ...result, challenge: challengeFor(email, usernameNormalized) };
+    return { ...result, challenge: challengeFor(email, usernameNormalized, registrationSessionId) };
   }
   async function complete(challenge, code, input) {
-    const { email, usernameNormalized } = readChallenge(challenge);
+    const { email, usernameNormalized, registrationSessionId } = readChallenge(challenge);
     validateProfile(input);
-    const otp = otpFor(email, usernameNormalized, input);
+    const otp = otpFor(email, usernameNormalized, registrationSessionId, input);
     return otp.service.verify(otp.uid, code);
   }
   return { request, complete };

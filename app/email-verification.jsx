@@ -164,7 +164,7 @@ export default function EmailVerificationPage() {
           return null;
         }
         const response = registration
-          ? await requestRegistrationOtp(currentDraft.profile.email, currentDraft.profile.username)
+          ? await requestRegistrationOtp(currentDraft.profile.email, currentDraft.profile.username, currentDraft.profile.registrationSessionId)
           : await requestEmailOtp();
         if (registration) setPendingRegistration(currentDraft.profile, response);
         if (response.alreadyVerified) {

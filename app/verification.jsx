@@ -297,8 +297,8 @@ export default function VerificationPage() {
       <View style={styles.stateContent}>
         <Text style={styles.title}>Verify your identity</Text>
         <Text style={styles.description}>
-          We use a quick face verification step to help prevent duplicate accounts and
-          account abuse.
+          Face verification compares a reference photo with a current photo. Image capture
+          and enrollment are still pending; liveness and duplicate prevention are not complete.
         </Text>
 
         <View style={styles.instructions}>

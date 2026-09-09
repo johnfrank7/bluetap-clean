@@ -1,5 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { createHmac } = require('node:crypto');
 const { createRegistrationService } = require('./registration');
 
 const form = { firstName: 'Test', lastName: 'Person', phone: '+639123456789',
@@ -10,6 +11,7 @@ function fixture() {
   const records = new Map();
   const users = new Map();
   const sent = [];
+  const sessionId = '123e4567-e89b-42d3-a456-426614174000';
   let failEmail = false;
   let failProfile = false;
   let creates = 0;
@@ -55,9 +57,21 @@ function fixture() {
   const service = createRegistrationService({ auth, db, hashSecret: 'test-signing-key', now: () => time,
     sendEmailOtp: async (message) => { if (failEmail) throw new Error('Test provider outage'); sent.push(message); },
   });
-  const registrationService = { ...service, request: (email, ip, username = form.username) => service.request(email, username, ip) };
+  const setSessionProfile = (profile = form, options = {}) => {
+    const personalInfoDigest = createHmac('sha256', 'test-signing-key').update(JSON.stringify([profile.role, profile.firstName, profile.lastName, profile.phone, profile.barangay, profile.address])).digest('hex');
+    records.set('registrationSessions/' + sessionId, {
+      role: profile.role, personalInfoCompleted: true, personalInfoDigest,
+      faceVerification: options.faceStatus === 'temporary'
+        ? { status: 'temporary', verifiedAt: null, duplicateCheck: 'unknown', verificationReference: null, livenessPassed: null, verificationMode: 'temporary', providerVerified: false }
+        : { status: options.faceStatus || 'verified', verifiedAt: new Date(time), duplicateCheck: options.duplicateCheck || 'clear', verificationReference: 'trusted-test-reference', livenessPassed: options.livenessPassed !== false, verificationMode: 'provider', providerVerified: true },
+      termsAcceptance: options.terms === false ? null : { accepted: true, acceptedAt: new Date(time), termsVersion: '1.0', privacyVersion: '1.0' },
+      completed: false, expiresAt: new Date(time + 3600000),
+    });
+  };
+  setSessionProfile();
+  const registrationService = { ...service, request: (email, ip, username = form.username) => service.request(email, username, sessionId, ip) };
   return { service: registrationService, users, records, sent, get creates() { return creates; },
-    advance: (ms) => { time += ms; }, failEmail: () => { failEmail = true; }, failProfile: () => { failProfile = true; } };
+    sessionId, setSessionProfile, advance: (ms) => { time += ms; }, failEmail: () => { failEmail = true; }, failProfile: () => { failProfile = true; } };
 }
 const reason = (expected) => (error) => error.reason === expected;
 
@@ -92,7 +106,10 @@ test('correct OTP creates verified Auth account and server-owned profile exactly
   assert.equal(profile.email, 'new@example.test');
   assert.equal(profile.uid, 'new-user');
   assert.equal(profile.unique_id, 'REQ-000001');
-  assert.equal(profile.faceVerification.status, 'unverified');
+  assert.equal(profile.faceVerification.status, 'verified');
+  assert.equal(profile.faceVerification.verificationReference, 'trusted-test-reference');
+  assert.equal(profile.termsAcceptance.accepted, true);
+  assert.equal(profile.termsAcceptance.termsVersion, '1.0');
   assert.equal(profile.username, 'Test_User');
   assert.equal(profile.usernameNormalized, 'test_user');
   assert.equal(profile.address, 'Test Street');
@@ -107,12 +124,33 @@ test('correct OTP creates verified Auth account and server-owned profile exactly
 
 test('distributor registration cannot set its own approval or face verification', async () => {
   const f = fixture();
+  f.setSessionProfile({ ...form, role: 'distributor' });
   const result = await f.service.request('new@example.test', 'test-ip');
   await f.service.complete(result.challenge, f.sent[0].code, { ...form, role: 'distributor', approvalStatus: 'approved', faceVerification: { status: 'verified' } });
   const profile = f.records.get('users/new-user');
   assert.equal(profile.approvalStatus, 'pending');
-  assert.equal(profile.faceVerification.status, 'unverified');
+  assert.equal(profile.faceVerification.status, 'verified');
+  assert.notEqual(profile.faceVerification.verificationReference, 'forged');
   assert.equal(profile.unique_id, 'DIS-000001');
+});
+
+test('registration cannot request OTP without trusted face verification and terms', async () => {
+  const face = fixture();
+  face.setSessionProfile(form, { faceStatus: 'unverified', duplicateCheck: 'unknown', livenessPassed: false });
+  await assert.rejects(face.service.request('new@example.test', 'test-ip'), reason('face-verification-required'));
+  assert.equal(face.sent.length, 0);
+  const review = fixture();
+  review.setSessionProfile(form, { faceStatus: 'review_required', duplicateCheck: 'flagged' });
+  await assert.rejects(review.service.request('new@example.test', 'test-ip'), reason('face-review-required'));
+  const terms = fixture();
+  terms.setSessionProfile(form, { terms: false });
+  await assert.rejects(terms.service.request('new@example.test', 'test-ip'), reason('terms-required'));
+});
+
+test('temporary face placeholder cannot bypass verification', async () => {
+  const f = fixture();
+  f.setSessionProfile(form, { faceStatus: 'temporary' });
+  await assert.rejects(f.service.request('new@example.test', 'test-ip'), reason('face-verification-required'));
 });
 
 test('tampered challenge and admin role cannot create an account', async () => {
@@ -214,6 +252,7 @@ test('email send limit returns remaining wait and permits requests after window 
   });
   assert.equal(f.sent.length, 6);
   f.advance(3240000);
+  f.setSessionProfile();
   await f.service.request('new@example.test', 'test-ip');
   assert.equal(f.sent.length, 7);
 });

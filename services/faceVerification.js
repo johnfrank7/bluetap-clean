@@ -1,3 +1,4 @@
+import { callRegistrationApi } from './registrationSession';
 import { doc, getDoc, onSnapshot } from 'firebase/firestore';
 
 import { db } from '../firebase';
@@ -9,6 +10,7 @@ export const DEV_FACE_VERIFICATION = false;
 const FACE_VERIFICATION_STATUSES = new Set([
   'unverified',
   'pending',
+  'temporary',
   'verified',
   'review_required',
   'failed',
@@ -51,23 +53,14 @@ export const normalizeFaceVerification = (profile = {}) => {
   };
 };
 
-/**
- * Backend-ready provider entry point. No biometric capture or verification occurs
- * in this client. With the production flag disabled, this intentionally does not
- * write to Firestore or claim that a user has been verified.
+/** Pairwise comparison only: referenceImage and probeImage are JPEG/PNG data URLs.
+ * Neither a successful comparison nor two client photos establish liveness or uniqueness.
  */
-export const startFaceVerification = async (user) => {
-  if (!user?.uid) {
-    return { started: false, reason: 'unauthenticated' };
-  }
-
-  if (!DEV_FACE_VERIFICATION) {
-    return { started: false, reason: 'not-configured' };
-  }
-
-  // DEVELOPMENT ONLY: retain the integration shape without auto-verifying or
-  // writing any biometric-related profile fields from the client.
-  return { started: false, reason: 'development-adapter-not-configured' };
+export const startFaceVerification = async ({ registrationSessionId, referenceImage, probeImage } = {}) => {
+  if (!registrationSessionId) return { started: false, reason: 'not-configured' };
+  return callRegistrationApi('/api/verification/verify-face', {
+    registrationSessionId, referenceImage, probeImage,
+  }, 55000);
 };
 
 export const getFaceVerificationStatus = async (uid) => {
