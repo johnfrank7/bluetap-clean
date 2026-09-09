@@ -39,7 +39,7 @@ function createRegistrationFaceService({ db, detector = defaultDetector, render 
       const type = Object.keys(instructions)[randomInt(2)];
       const challenge = { id: randomUUID(), type, state: 'issued', expiresAt: new Date(now() + TTL) };
       save({ faceChallenge: challenge, faceChallengeAttempts: (data.faceChallengeAttempts || 0) + 1, faceChallengeStartedAt: now(), faceVerification: { status: 'unverified', duplicateCheck: 'unknown', livenessPassed: null, verifiedAt: null } });
-      return { challengeId: challenge.id, instruction: instructions[type], expiresAt: now() + TTL, detectorAvailable: detector.available === true };
+      return { challengeId: challenge.id, challengeType: type, instruction: instructions[type], expiresAt: now() + TTL, detectorAvailable: detector.available === true };
     });
   }
   async function evaluate({ registrationSessionId: id, challengeId, frames }, signal) {

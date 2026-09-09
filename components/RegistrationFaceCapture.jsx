@@ -1,9 +1,10 @@
 import React from 'react';
-import { ActivityIndicator, AppState, Linking, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, AppState, Linking, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { beginRegistrationFace, evaluateRegistrationChallenge, completeRegistrationFace } from '../services/faceVerification';
 import { captureFaceImage } from '../services/cameraCapture';
 import { runFaceCaptureFlow } from '../services/faceCaptureFlow';
+import { nativeChallengeAvailable, runNativeFaceChallenge } from '../services/nativeFaceChallenge';
 
 export default function RegistrationFaceCapture({ registrationSessionId, verification, onResult }) {
   const [permission, requestPermission] = useCameraPermissions();
@@ -17,6 +18,8 @@ export default function RegistrationFaceCapture({ registrationSessionId, verific
   const generation = React.useRef(0);
   const busy = React.useRef(false);
   const mounted = React.useRef(true);
+  const nativeReady = Platform.OS !== 'web' && nativeChallengeAvailable();
+  const canAnalyze = Platform.OS === 'web' ? challenge?.detectorAvailable === true : nativeReady && !!challenge?.challengeType;
   React.useEffect(() => {
     mounted.current = true;
     const subscription = AppState.addEventListener('change', (value) => {
@@ -50,19 +53,25 @@ export default function RegistrationFaceCapture({ registrationSessionId, verific
       if (!active(attempt)) return;
       if (result.faceVerification) { onResult(result.faceVerification); setState('ready'); return; }
       setChallenge(result);
-      if (!result.detectorAvailable) setMessage('You can position your face, but the challenge check is not available yet. Verification cannot continue.');
+      if (Platform.OS !== 'web') {
+        if (!nativeReady) setMessage('Native face detection requires a custom Android or iOS build. It is not available in Expo Go.');
+        else if (!result.challengeType) setMessage('The face challenge service needs an update. Please try again later.');
+        else if (!result.detectorAvailable) setMessage('You can complete the motion check on this device. Server-side liveness confirmation is still required before registration can continue.');
+      } else if (!result.detectorAvailable) setMessage('You can position your face, but the challenge check is not available yet. Verification cannot continue.');
     } catch (error) { if (active(attempt)) { setState('failed'); setMessage(error.message); } }
     finally { if (active(attempt)) busy.current = false; }
   };
   const perform = async () => {
-    if (busy.current || !cameraReady || !challenge?.detectorAvailable) return;
+    if (busy.current || !cameraReady || !canAnalyze) return;
     busy.current = true;
     const attempt = generation.current;
     setState('challenge');
     const assertActive = () => { if (!active(attempt)) throw new Error('Capture cancelled.'); };
     try {
-      const result = await runFaceCaptureFlow({
+      const runChallenge = Platform.OS === 'web' ? runFaceCaptureFlow : runNativeFaceChallenge;
+      const result = await runChallenge({
         challenge, assertActive,
+        camera: () => camera.current,
         capture: () => captureFaceImage(camera.current),
         pause: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
         showInstruction: (text) => { assertActive(); setInstruction(text); },
@@ -78,12 +87,18 @@ export default function RegistrationFaceCapture({ registrationSessionId, verific
     } catch (error) { if (active(attempt)) { setState('failed'); setMessage(error.message); } }
     finally { if (active(attempt)) busy.current = false; }
   };
-  if (verification.status === 'verified' && verification.duplicateCheck === 'clear' && verification.livenessPassed === true) return <View style={styles.box}><Text style={styles.title}>✓ Identity verified</Text><Text style={styles.copy}>Your face check is complete. You can continue.</Text></View>;
-  if (verification.status === 'review_required') return <View style={styles.box}><Text style={styles.title}>Verification needs review</Text><Text style={styles.copy}>We found a possible existing BlueTap registration.</Text></View>;
+  if (verification.status === 'verified' && verification.duplicateCheck === 'clear' && verification.livenessPassed === true) return <View style={styles.stack}><View style={[styles.box, styles.successPanel]}><View style={[styles.icon, styles.successIcon]}><Text style={styles.successMark}>✓</Text></View><Text style={styles.title}>Identity verified</Text><Text style={styles.copy}>Your face verification was completed successfully.</Text></View><PrivacyNote /></View>;
+  if (verification.status === 'review_required') return <View style={styles.stack}><View style={[styles.box, styles.reviewPanel]}><View style={[styles.icon, styles.warningIcon]}><Text style={styles.warningMark}>!</Text></View><Text style={styles.title}>Verification needs review</Text><Text style={styles.copy}>We found a possible existing registration.</Text></View><PrivacyNote /></View>;
   const cameraVisible = state === 'camera' || state === 'challenge';
-  return <View style={styles.box}>
-    <Text style={styles.title}>{cameraVisible ? 'Position your face inside the frame' : 'Verify your identity'}</Text>
-    <Text style={styles.copy}>Complete a quick face check to help prevent duplicate accounts.</Text>
+  return <View style={styles.stack}><View style={[styles.box, state === 'failed' && styles.failedPanel]}>
+    {!cameraVisible && <View style={[styles.icon, state === 'failed' && styles.warningIcon]}>
+      {state === 'failed' ? <Text style={styles.warningMark}>!</Text> : <View accessible={false} style={styles.faceGlyph}><View style={styles.faceHead} /><View style={styles.faceShoulders} /></View>}
+    </View>}
+    <Text style={styles.title}>{cameraVisible ? 'Position your face inside the frame' : state === 'failed' ? 'Verification unsuccessful' : 'Face Verification'}</Text>
+    <Text style={styles.copy}>{cameraVisible ? 'Keep your face centered and follow the instruction below.' : 'Use your camera to complete a short identity check.'}</Text>
+    {!cameraVisible && state !== 'failed' && state !== 'opening' && <View style={styles.benefits}>
+      {['Helps prevent duplicate accounts', 'Protects your BlueTap identity', 'Takes only a few moments'].map((text) => <View key={text} style={styles.benefitRow}><Text style={styles.benefitCheck}>✓</Text><Text style={styles.benefitText}>{text}</Text></View>)}
+    </View>}
     {cameraVisible && <>
       <View style={styles.preview}>
         <CameraView ref={camera} style={StyleSheet.absoluteFill} facing="front" mode="picture" mute pictureSize={pictureSize}
@@ -92,23 +107,40 @@ export default function RegistrationFaceCapture({ registrationSessionId, verific
         <View pointerEvents="none" style={styles.frame} />
       </View>
       <Text accessibilityLiveRegion="polite" style={styles.copy}>{state === 'challenge' ? instruction : challenge ? `Follow the instruction: ${challenge.instruction}` : 'Preparing your challenge...'}</Text>
-      {state === 'challenge' ? <ActivityIndicator color="#187BCD" /> : <TouchableOpacity style={[styles.button, (!cameraReady || !challenge?.detectorAvailable) && styles.disabled]} disabled={!cameraReady || !challenge?.detectorAvailable} onPress={perform}><Text style={styles.buttonText}>Begin challenge</Text></TouchableOpacity>}
-      <TouchableOpacity onPress={cancel} style={styles.secondary}><Text>Cancel</Text></TouchableOpacity>
+      {state === 'challenge' ? <View style={styles.processing}><ActivityIndicator color="#187BCD" /><Text style={styles.processingText}>Checking your identity...</Text></View> : <TouchableOpacity style={[styles.button, (!cameraReady || !canAnalyze) && styles.disabled]} disabled={!cameraReady || !canAnalyze} onPress={perform}><Text style={styles.buttonText}>Begin challenge</Text></TouchableOpacity>}
+      <TouchableOpacity onPress={cancel} style={styles.secondary}><Text style={styles.secondaryText}>Cancel</Text></TouchableOpacity>
     </>}
     {!!message && <Text accessibilityLiveRegion="polite" style={styles.notice}>{message}</Text>}
-    {!cameraVisible && <TouchableOpacity style={styles.button} disabled={state === 'opening'} onPress={start}>{state === 'opening' ? <ActivityIndicator color="#FFF" /> : <Text style={styles.buttonText}>{state === 'failed' ? 'Try Again' : 'Start Face Verification'}</Text>}</TouchableOpacity>}
+    {!cameraVisible && <TouchableOpacity style={styles.button} disabled={state === 'opening'} onPress={start}>{state === 'opening' ? <View style={styles.processing}><ActivityIndicator color="#FFF" /><Text style={styles.buttonText}>Opening camera...</Text></View> : <Text style={styles.buttonText}>{state === 'failed' ? 'Try Again' : 'Start Face Verification'}</Text>}</TouchableOpacity>}
     {permission?.canAskAgain === false && !permission.granted && <TouchableOpacity style={styles.secondary} onPress={() => Linking.openSettings().catch(() => setMessage('Allow camera access in your browser or device settings.'))}><Text>Open settings</Text></TouchableOpacity>}
-    <Text style={styles.privacy}>Photos are used for the face check. Only verification metadata is saved in your BlueTap profile.</Text>
-  </View>;
+  </View><PrivacyNote /></View>;
+}
+function PrivacyNote() {
+  return <View style={styles.privacyBox}><View style={styles.lockIcon} accessible={false}><View style={styles.lockShackle} /><View style={styles.lockBody} /></View><View style={styles.privacyContent}><Text style={styles.privacyTitle}>Privacy and security</Text><Text style={styles.privacy}>Your face check is used only for identity verification. BlueTap stores only verification metadata in your profile.</Text></View></View>;
 }
 const styles = StyleSheet.create({
-  box: { width: '100%', alignItems: 'center', gap: 16, paddingVertical: 12 },
-  title: { fontSize: 23, fontWeight: '700', color: '#12304A', textAlign: 'center' },
+  stack: { width: '100%', gap: 16 },
+  box: { width: '100%', alignItems: 'center', gap: 12, padding: 24, backgroundColor: '#F8FBFE', borderWidth: 1, borderColor: '#DDEBF6', borderRadius: 18 },
+  title: { fontSize: 19, fontWeight: '600', color: '#12304A', textAlign: 'center' },
   copy: { fontSize: 15, lineHeight: 22, color: '#4D6274', textAlign: 'center' },
-  preview: { width: '100%', maxWidth: 360, aspectRatio: 3 / 4, borderRadius: 24, overflow: 'hidden', backgroundColor: '#12304A', alignItems: 'center', justifyContent: 'center' },
+  icon: { width: 56, height: 56, borderRadius: 28, backgroundColor: '#E5F2FC', alignItems: 'center', justifyContent: 'center', marginBottom: 4 },
+  faceGlyph: { width: 30, height: 34, borderWidth: 1.5, borderColor: '#187BCD', borderRadius: 8, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  faceHead: { width: 10, height: 10, borderWidth: 1.5, borderColor: '#187BCD', borderRadius: 5, marginBottom: 3 },
+  faceShoulders: { width: 19, height: 9, borderWidth: 1.5, borderColor: '#187BCD', borderTopLeftRadius: 10, borderTopRightRadius: 10 },
+  benefits: { alignSelf: 'stretch', gap: 8, marginVertical: 4 },
+  benefitRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  benefitCheck: { color: '#187BCD', fontSize: 14, fontWeight: '600' },
+  benefitText: { flex: 1, color: '#42637C', fontSize: 14, lineHeight: 20 },
+  successPanel: { backgroundColor: '#F4FBF7', borderColor: '#D7EDE0' }, successIcon: { backgroundColor: '#E0F3E8' }, successMark: { color: '#238254', fontSize: 27 },
+  reviewPanel: { backgroundColor: '#FFFCF5', borderColor: '#F0E5C9' }, failedPanel: { borderColor: '#EDDCCF' }, warningIcon: { backgroundColor: '#FCEDD8' }, warningMark: { color: '#9A6525', fontSize: 25, fontWeight: '600' },
+  preview: { width: '100%', maxWidth: 300, aspectRatio: 3 / 4, borderRadius: 16, overflow: 'hidden', backgroundColor: '#12304A', alignItems: 'center', justifyContent: 'center' },
   frame: { width: '70%', height: '70%', borderRadius: 160, borderWidth: 3, borderColor: '#FFF' },
-  button: { minHeight: 48, paddingHorizontal: 24, justifyContent: 'center', alignItems: 'center', backgroundColor: '#187BCD', borderRadius: 12 },
-  buttonText: { color: '#FFF', fontWeight: '700' }, disabled: { opacity: 0.5 },
-  secondary: { padding: 12 }, notice: { color: '#9A6700', textAlign: 'center', lineHeight: 21 },
-  privacy: { fontSize: 12, lineHeight: 18, color: '#64748B', textAlign: 'center' },
+  button: { width: '100%', minHeight: 50, paddingHorizontal: 16, paddingVertical: 12, justifyContent: 'center', alignItems: 'center', backgroundColor: '#187BCD', borderRadius: 11, marginTop: 4 },
+  buttonText: { color: '#FFF', fontSize: 15, fontWeight: '600', textAlign: 'center' }, disabled: { opacity: 0.5 },
+  processing: { flexDirection: 'row', gap: 12, alignItems: 'center', justifyContent: 'center', flexWrap: 'wrap' }, processingText: { color: '#315F82', fontSize: 14 },
+  secondary: { padding: 12 }, secondaryText: { color: '#416581', fontSize: 14 }, notice: { color: '#8D6024', backgroundColor: '#FFF7E8', padding: 12, borderRadius: 10, fontSize: 14, textAlign: 'center', lineHeight: 21, width: '100%' },
+  privacyBox: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, backgroundColor: '#EFF6FC', borderRadius: 12, padding: 16 },
+  privacyContent: { flex: 1 }, privacyTitle: { color: '#2E536F', fontSize: 14, fontWeight: '600', marginBottom: 4 },
+  privacy: { fontSize: 13, lineHeight: 20, color: '#526E84' },
+  lockIcon: { width: 20, height: 24, alignItems: 'center', marginTop: 1 }, lockShackle: { width: 10, height: 10, borderWidth: 1.5, borderColor: '#6189A7', borderTopLeftRadius: 6, borderTopRightRadius: 6 }, lockBody: { width: 16, height: 12, borderWidth: 1.5, borderColor: '#6189A7', borderRadius: 3, marginTop: -3, backgroundColor: '#EFF6FC' },
 });

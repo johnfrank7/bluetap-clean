@@ -227,17 +227,17 @@ export default function SignupPage() {
               <Image source={require('../assets/icons/bluetapwhitelogo.png')} style={styles.logo} resizeMode="contain" />
               <View><Text style={styles.brandName}>BlueTap</Text><Text style={styles.tagline}>Water Within Reach</Text></View>
             </View>
-            <View style={styles.card}>
-              <View style={styles.progress}>
+            <View style={[styles.card, step === 3 && styles.identityCard, step === 3 && mobile && styles.identityCardMobile]}>
+              <View style={[styles.progress, step === 3 && styles.identityProgress]}>
                 {STEPS.map((name, index) => <View key={name} style={styles.progressItem}>
                   <View style={[styles.progressCircle, index + 1 <= step && styles.progressCircleActive]}><Text style={[styles.progressNumber, index + 1 <= step && styles.progressNumberActive]}>{index + 1}</Text></View>
-                  {!mobile && <Text style={[styles.progressLabel, index + 1 === step && styles.progressLabelActive]}>{name}</Text>}
+                  {!mobile && <Text style={[styles.progressLabel, step === 3 && styles.identityProgressLabel, index + 1 === step && styles.progressLabelActive]}>{name}</Text>}
                   {index < STEPS.length - 1 && <View style={[styles.progressLine, index + 1 < step && styles.progressLineActive]} />}
                 </View>)}
               </View>
               {mobile && <Text style={styles.stepText}>Step {step} of 5 · {STEPS[step - 1]}</Text>}
-              <Text style={styles.title}>{title}</Text>
-              <Text style={styles.subtitle}>{subtitle}</Text>
+              <Text style={[styles.title, step === 3 && styles.identityHeading, step === 3 && mobile && styles.identityHeadingMobile]}>{step === 3 ? "Verify your identity" : title}</Text>
+              <Text style={[styles.subtitle, step === 3 && styles.identitySubtitle]}>{step === 3 ? "Complete a quick face check to help protect your account and prevent duplicate registrations." : subtitle}</Text>
 
               {step === 1 && <View style={styles.roleList}>
                 {[
@@ -284,10 +284,10 @@ export default function SignupPage() {
                 {!termsAccepted && <Text style={styles.termsRequired}>Terms acceptance is required to continue.</Text>}
               </View>}
 
-              <View style={styles.actions}>
+              <View style={[styles.actions, step === 3 && styles.identityActions]}>
                 <TouchableOpacity style={styles.back} onPress={back} disabled={loading}><Text style={styles.backText}>Back</Text></TouchableOpacity>
-                <TouchableOpacity style={[styles.primary, (!canContinue || loading || retrySeconds > 0) && styles.disabled]} onPress={step === 4 ? submit : next} disabled={!canContinue || loading || retrySeconds > 0}>
-                  {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.primaryText}>{retrySeconds > 0 ? `Try again in ${Math.floor(retrySeconds / 60)}:${String(retrySeconds % 60).padStart(2, '0')}` : step === 4 ? 'Send Verification Code' : 'Continue'}</Text>}
+                <TouchableOpacity style={[styles.primary, (!canContinue || loading || retrySeconds > 0) && styles.disabled, step === 3 && (!canContinue || loading || retrySeconds > 0) && styles.identityContinueDisabled]} onPress={step === 4 ? submit : next} disabled={!canContinue || loading || retrySeconds > 0}>
+                  {loading ? <ActivityIndicator color="#FFF" /> : <Text style={[styles.primaryText, step === 3 && !canContinue && styles.identityContinueTextDisabled]}>{retrySeconds > 0 ? `Try again in ${Math.floor(retrySeconds / 60)}:${String(retrySeconds % 60).padStart(2, '0')}` : step === 4 ? 'Send Verification Code' : 'Continue'}</Text>}
                 </TouchableOpacity>
               </View>
               <Text style={styles.loginPrompt}>Already have an account? <Text style={styles.loginLink} onPress={() => router.replace('/login')}>Log in.</Text></Text>
@@ -301,6 +301,15 @@ export default function SignupPage() {
 }
 
 const styles = StyleSheet.create({
+  identityCard: { borderRadius: 20, padding: 24, shadowOpacity: 0.16, shadowRadius: 16 },
+  identityCardMobile: { padding: 16 },
+  identityProgress: { marginBottom: 24 }, identityProgressLabel: { fontSize: 10 },
+  identityHeading: { fontSize: 30, lineHeight: 38, fontWeight: '700' },
+  identityHeadingMobile: { fontSize: 26, lineHeight: 34 },
+  identitySubtitle: { fontSize: 15, lineHeight: 22, marginTop: 8, marginBottom: 24 },
+  identityActions: { marginTop: 24 },
+  identityContinueDisabled: { backgroundColor: '#E4EFF8', opacity: 1 },
+  identityContinueTextDisabled: { color: '#6989A3', fontWeight: '600' },
   screen: { flex: 1 }, safe: { flex: 1 }, scroll: { flexGrow: 1, alignItems: 'center', justifyContent: 'center', padding: 20 }, shell: { width: '100%' },
   brand: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 18 }, logo: { width: 52, height: 52, marginRight: 10 }, brandName: { color: '#FFF', fontSize: 26, fontWeight: '800' }, tagline: { color: 'rgba(255,255,255,.86)', fontSize: 13 },
   card: { backgroundColor: '#FFF', borderRadius: 24, padding: 26, shadowColor: '#07518E', shadowOpacity: .24, shadowRadius: 18, shadowOffset: { width: 0, height: 10 }, elevation: 8 },

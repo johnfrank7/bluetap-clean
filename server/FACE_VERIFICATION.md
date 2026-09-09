@@ -1,5 +1,11 @@
 # Registration face verification
 
+Native continuation: [NATIVE_FACE_CHALLENGE.md](NATIVE_FACE_CHALLENGE.md) documents
+the installed SDK-54-compatible ML Kit detector, on-device head-turn evaluation,
+disabled blink sampling, and custom-build requirements. Native local motion can
+now be evaluated; trusted server-side liveness confirmation is still unavailable.
+The details below describe the existing server/web integration.
+
 Status: camera/challenge orchestration and the source-matched Render adapter are
 implemented. **Liveness detection is not implemented. Production registration
 remains blocked.** No timer, button, client status, or pairwise result can bypass it.
