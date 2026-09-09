@@ -727,7 +727,7 @@ export default function LoginPage() {
                   <Text style={styles.signupText}>
                     Need an account?{' '}
                     <Text style={styles.signupLink} onPress={openSignupOptions}>
-                      Click here to sign up.
+                      Sign up.
                     </Text>
                   </Text>
                 </View>
