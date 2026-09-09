@@ -518,8 +518,7 @@ export default function SignupPage() {
                     <TextInput
                       ref={assignInputRef('phone')}
                       style={styles.phoneInput}
-                      placeholder="9171234567"
-                      placeholderTextColor="#FFFFFF"
+                      accessibilityLabel="Philippine mobile number, without the +63 country code"
                       keyboardType="phone-pad"
                       value={phone}
                       textContentType="telephoneNumber"
