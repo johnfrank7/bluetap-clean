@@ -171,29 +171,69 @@ test('Vercel endpoints reject unauthenticated requests and handle preflight', as
   }
 });
 
-test('Resend test-recipient rejection is sanitized and explicit', async () => {
-  const originalFetch = global.fetch;
-  const originalKey = process.env.RESEND_API_KEY;
-  const originalFrom = process.env.EMAIL_FROM_ADDRESS;
+test('Gmail SMTP transport uses server credentials and sanitizes failures', async (t) => {
+  const nodemailer = require('nodemailer');
+  const originalUser = process.env.GMAIL_USER;
+  const originalPassword = process.env.GMAIL_APP_PASSWORD;
+  const logs = [];
+  t.mock.method(console, 'error', (...args) => logs.push(args));
+  let options;
+  let mail;
+  let failure;
+  let accepted = true;
+  const transport = t.mock.method(nodemailer, 'createTransport', (config) => {
+    options = config;
+    return { sendMail: async (message) => {
+      mail = message;
+      if (failure) throw failure;
+      return { accepted: accepted ? [message.to] : [], rejected: accepted ? [] : [message.to] };
+    } };
+  });
   try {
-    process.env.RESEND_API_KEY = 'test-placeholder';
-    process.env.EMAIL_FROM_ADDRESS = 'BlueTap <onboarding@resend.dev>';
-    global.fetch = async () => ({
-      ok: false, status: 403,
-      json: async () => ({ message: 'You can only send testing emails to your own email address (private@example.test).' }),
-    });
+    process.env.GMAIL_USER = 'sender@example.test';
+    process.env.GMAIL_APP_PASSWORD = 'test-password-only';
     const { sendEmailOtp } = require('./emailProvider');
-    await assert.rejects(sendEmailOtp({ recipient: 'test@example.test', code: '000000', requestId: 'test' }), (error) => {
-      assert.equal(error.reason, 'provider-test-recipient');
-      assert.equal(error.message.includes('private@example.test'), false);
+    const message = { recipient: 'recipient@example.test', code: '123456' };
+    await sendEmailOtp(message);
+    assert.equal(options.host, 'smtp.gmail.com');
+    assert.equal(options.port, 465);
+    assert.equal(options.secure, true);
+    assert.deepEqual(options.auth, { user: process.env.GMAIL_USER, pass: process.env.GMAIL_APP_PASSWORD });
+    assert.equal(options.logger, false);
+    assert.equal(options.debug, false);
+    assert.equal(mail.from, 'BlueTap <sender@example.test>');
+    assert.equal(mail.to, message.recipient);
+    assert.ok(mail.text.includes(message.code));
+    assert.ok(mail.text.includes('10 minutes'));
+    assert.equal(logs.length, 0);
+    const safeError = (error) => {
+      assert.equal(error.status, 503);
+      assert.equal(error.reason, 'provider-unavailable');
+      assert.equal(error.message, 'Unable to send verification email. Please try again.');
       return true;
-    });
+    };
+    for (const code of ['EAUTH', 'ETIMEDOUT', 'secret-raw-error']) {
+      failure = Object.assign(new Error('test-password-only recipient@example.test 123456'), { code, responseCode: 535 });
+      await assert.rejects(sendEmailOtp(message), safeError);
+    }
+    failure = null;
+    accepted = false;
+    await assert.rejects(sendEmailOtp(message), safeError);
+    delete process.env.GMAIL_APP_PASSWORD;
+    const calls = transport.mock.callCount();
+    await assert.rejects(sendEmailOtp(message), safeError);
+    assert.equal(transport.mock.callCount(), calls);
+    const serialized = JSON.stringify(logs);
+    for (const sensitive of ['test-password-only', message.recipient, message.code, 'secret-raw-error']) {
+      assert.equal(serialized.includes(sensitive), false);
+    }
+    assert.ok(serialized.includes('EAUTH'));
+    assert.ok(serialized.includes('SMTP_ERROR'));
   } finally {
-    global.fetch = originalFetch;
-    if (originalKey === undefined) delete process.env.RESEND_API_KEY;
-    else process.env.RESEND_API_KEY = originalKey;
-    if (originalFrom === undefined) delete process.env.EMAIL_FROM_ADDRESS;
-    else process.env.EMAIL_FROM_ADDRESS = originalFrom;
+    if (originalUser === undefined) delete process.env.GMAIL_USER;
+    else process.env.GMAIL_USER = originalUser;
+    if (originalPassword === undefined) delete process.env.GMAIL_APP_PASSWORD;
+    else process.env.GMAIL_APP_PASSWORD = originalPassword;
   }
 });
 

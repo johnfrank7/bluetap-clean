@@ -53,10 +53,7 @@ const getOtpError = (error) => {
     return 'Too many verification codes have been requested. Please try again later.';
   }
   if (reason === 'provider-unavailable') {
-    return 'Verification email could not be sent. Please try again.';
-  }
-  if (reason === 'provider-test-recipient') {
-    return 'Email delivery is in test mode and can only send to the Resend account owner. Please contact BlueTap support.';
+    return 'Unable to send verification email. Please try again.';
   }
   if (reason === 'no-active-code') return 'Please request a new verification code.';
   if (['registration-expired', 'invalid-registration', 'account-exists'].includes(reason)) return error.message;

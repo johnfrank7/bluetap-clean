@@ -1,7 +1,7 @@
 # BlueTap OTP on Vercel
 
 The active API is `POST /api/auth/request-email-otp` and
-`POST /api/auth/verify-email-otp`. Vercel discovers the two root `api/auth/*.js`
+`POST /api/auth/verify-email-otp`, plus the registration endpoints below. Vercel discovers the root `api/auth/*.js`
 Node handlers. `vercel.json` checks the filesystem (including Functions) before
 the Expo SPA fallback. Unknown API paths return 404, not the Expo HTML page.
 No Firebase Cloud Functions deployment or Blaze upgrade is needed for this OTP backend.
@@ -9,7 +9,7 @@ The legacy `functions/` directory and `firebase.json` are not used by Vercel.
 
 ## Existing Production environment
 
-Keep the existing Vercel values: `RESEND_API_KEY`, `EMAIL_FROM_ADDRESS`,
+Use server-only Vercel values: `GMAIL_USER`, `GMAIL_APP_PASSWORD`,
 `EMAIL_OTP_HASH_SECRET`, `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, and
 `FIREBASE_PRIVATE_KEY`. The service account must belong to the same Firebase
 project as the client (`bluetap-8c98d`) and have Auth and Firestore access.
@@ -29,15 +29,20 @@ output remain). Redeploy Production to pick up the new endpoints and configured
 environment. Preview deployments need their own environment configuration if
 they are used for testing; Production variables do not automatically apply there.
 Check an unauthenticated POST returns JSON HTTP 401, not HTML or 404.
-Then use signup with the Resend account owner's email and enter the received
+Then use signup with a recipient email and enter the received
 code. Check wrong codes, expiry, resend cooldown, and successful Firebase Auth
 email verification followed by `/verification`. Authenticated real delivery
 requires the deployed environment and cannot be proven by a local Expo build.
 
-`EMAIL_FROM_ADDRESS` remains `BlueTap <onboarding@resend.dev>` as configured.
-Resend's development sender only permits testing to the Resend account owner's
-email. Other recipients receive a clear test-mode error and remain unverified.
-No custom domain or sender changes are performed by this code.
+Both request handlers import `sendEmailOtp` from `server/emailProvider.js`.
+That shared server-only helper uses Nodemailer with `smtp.gmail.com`, port 465,
+TLS enabled, and sender `BlueTap <${process.env.GMAIL_USER}>`. There is no Resend
+fallback. Gmail authentication/delivery failures return a generic 503; server logs
+contain only allowlisted error categories and numeric SMTP status codes, not raw
+responses, credentials, recipients, or OTPs. SMTP acceptance is not proof of inbox delivery.
+Redeploy Production after installing Nodemailer and configuring the Gmail variables.
+The legacy Firebase `functions/emailProvider.js` still uses Resend, but is not imported
+by any Vercel API route and is not deployed by the Vercel build. It is retained unchanged.
 
 ## Security and limits
 
