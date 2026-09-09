@@ -153,6 +153,29 @@ test('temporary face placeholder cannot bypass verification', async () => {
   await assert.rejects(f.service.request('new@example.test', 'test-ip'), reason('face-verification-required'));
 });
 
+test('pairwise-only verification cannot request OTP', async () => {
+  const f = fixture();
+  f.setSessionProfile(form, { duplicateCheck: 'unknown', livenessPassed: false });
+  await assert.rejects(f.service.request('new@example.test', 'test-ip'), reason('face-verification-required'));
+});
+
+test('enrollment metadata binds the final uid without copying biometric fields', async () => {
+  const f = fixture();
+  const session = f.records.get('registrationSessions/' + f.sessionId);
+  Object.assign(session.faceVerification, { verificationMode: 'registration-enrollment', verificationReference: f.sessionId, model: 'SFace', detectorBackend: 'yunet', rawImage: 'must-not-copy', embedding: [1, 2, 3] });
+  const result = await f.service.request('new@example.test', 'test-ip');
+  await f.service.complete(result.challenge, f.sent[0].code, form);
+  const profile = f.records.get('users/new-user');
+  assert.equal(profile.faceVerification.verificationReference, f.sessionId);
+  assert.equal(profile.faceVerification.livenessPassed, true);
+  assert.equal(profile.faceVerification.duplicateCheck, 'clear');
+  assert.equal(profile.faceVerification.model, 'SFace');
+  assert.equal(profile.faceVerification.rawImage, undefined);
+  assert.equal(profile.faceVerification.embedding, undefined);
+  assert.equal(f.records.get('registrationSessions/' + f.sessionId).userUid, 'new-user');
+  assert.equal(f.records.get('registrationSessions/' + f.sessionId).completed, true);
+});
+
 test('tampered challenge and admin role cannot create an account', async () => {
   const f = fixture();
   const result = await f.service.request('new@example.test', 'test-ip');

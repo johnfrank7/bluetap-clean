@@ -29,7 +29,14 @@
       "output": "single"
     },
     "plugins": [
-      "expo-router"
+      "expo-router",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow BlueTap to use your camera for face verification.",
+          "recordAudioAndroid": false
+        }
+      ]
     ]
   }
 }

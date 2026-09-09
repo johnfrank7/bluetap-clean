@@ -63,6 +63,16 @@ export const startFaceVerification = async ({ registrationSessionId, referenceIm
   }, 55000);
 };
 
+export const beginRegistrationFace = (registrationSessionId) => callRegistrationApi(
+  '/api/verification/registration-face', { action: 'begin', registrationSessionId }
+);
+export const evaluateRegistrationChallenge = (registrationSessionId, challengeId, frames) => callRegistrationApi(
+  '/api/verification/registration-face', { action: 'evaluate', registrationSessionId, challengeId, frames }, 55000
+);
+export const completeRegistrationFace = (registrationSessionId, challengeId, referenceImage, image) => callRegistrationApi(
+  '/api/verification/registration-face', { action: 'complete', registrationSessionId, challengeId, referenceImage, image }, 55000
+);
+
 export const getFaceVerificationStatus = async (uid) => {
   if (!uid) return createUnverifiedFaceVerification();
 

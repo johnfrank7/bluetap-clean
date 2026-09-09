@@ -5,6 +5,10 @@ const SESSION_TTL = 60 * 60 * 1000;
 const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const TERMS_VERSION = '1.0';
 const PRIVACY_VERSION = '1.0';
+const isRegistrationFaceVerified = (face = {}) => face.status === 'verified' &&
+  face.providerVerified === true && face.livenessPassed === true &&
+  face.duplicateCheck === 'clear' && typeof face.verificationReference === 'string' &&
+  face.verificationReference.length > 0;
 const millis = (value) => value?.toMillis?.() || (value instanceof Date ? value.getTime() : Number(value) || 0);
 
 const sessionError = () => new OtpError(400, 'registration-session-expired', 'This registration session has expired. Please restart signup.');
@@ -69,6 +73,7 @@ function createRegistrationSessionService({ db, hashSecret, now = Date.now }) {
     return { faceVerification: {
       status: ['unverified', 'pending', 'temporary', 'verified', 'review_required', 'failed'].includes(face.status) ? face.status : 'unverified',
       duplicateCheck: ['unknown', 'clear', 'flagged'].includes(face.duplicateCheck) ? face.duplicateCheck : 'unknown',
+      livenessPassed: face.livenessPassed === true,
     }, expiresAt: millis(data.expiresAt) };
   }
   async function start(id) {
@@ -81,7 +86,7 @@ function createRegistrationSessionService({ db, hashSecret, now = Date.now }) {
     await db.runTransaction(async (tx) => {
       const data = (await tx.get(ref)).data();
       if (!data || data.completed || millis(data.expiresAt) <= now()) throw sessionError();
-      if (data.faceVerification?.status !== 'verified' || data.faceVerification?.duplicateCheck === 'flagged') {
+      if (!isRegistrationFaceVerified(data.faceVerification)) {
         throw new OtpError(403, 'face-verification-required', 'Complete identity verification before accepting the registration terms.');
       }
       tx.update(ref, { termsAcceptance: { accepted: true, acceptedAt: new Date(now()), termsVersion: TERMS_VERSION, privacyVersion: PRIVACY_VERSION } });
@@ -112,4 +117,4 @@ async function setTrustedFaceVerification(db, id, result, now = Date.now) {
   });
 }
 
-module.exports = { createRegistrationSessionService, readRegistrationSession, setTrustedFaceVerification, TERMS_VERSION, PRIVACY_VERSION };
+module.exports = { createRegistrationSessionService, readRegistrationSession, setTrustedFaceVerification, isRegistrationFaceVerified, TERMS_VERSION, PRIVACY_VERSION };

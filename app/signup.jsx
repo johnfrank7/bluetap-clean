@@ -14,7 +14,7 @@ import { clearPendingRegistration, requestRegistrationOtp, setPendingRegistratio
 import { checkUsername, normalizeUsername, validateUsername } from '../services/usernameAuth';
 import { acceptRegistrationTerms, createRegistrationSession } from '../services/registrationSession';
 
-import { startFaceVerification } from '../services/faceVerification';
+import RegistrationFaceCapture from '../components/RegistrationFaceCapture';
 
 const BARANGAYS = ['Awihao', 'Bagakay', 'Bato', 'Biga', 'Bulongan', 'Bunga', 'Cabitoonan', 'Calongcalong', 'Cambang-ug', 'Camp 8', 'Canlumampao', 'Cantabaco', 'Capitan Claudio', 'Carmen', 'Daanglungsod', 'Don Andres Soriano', 'Dumlog', 'Gen. Climaco', 'Ibo', 'Ilihan', 'Juan Climaco, Sr.', 'Landahan', 'Loay', 'Luray II', 'Matab-ang', 'Media Once', 'Pangamihan', 'Poblacion', 'Poog', 'Putingbato', 'Sagay', 'Sam-ang', 'Sangi', 'Santo Niño', 'Subayon', 'Talavera', 'Tubod', 'Tungkay'];
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -53,8 +53,6 @@ export default function SignupPage() {
   const [retryAt, setRetryAt] = React.useState(0);
   const [registrationSessionId, setRegistrationSessionId] = React.useState('');
   const [faceVerification, setFaceVerification] = React.useState({ status: 'unverified', duplicateCheck: 'unknown' });
-  const [faceLoading, setFaceLoading] = React.useState(false);
-  const [faceMessage, setFaceMessage] = React.useState('');
   const [termsAccepted, setTermsAccepted] = React.useState(false);
   const [now, setNow] = React.useState(Date.now());
   const submitting = React.useRef(false);
@@ -77,7 +75,6 @@ export default function SignupPage() {
     if (['role', 'firstName', 'lastName', 'phone', 'barangay', 'address'].includes(key) && registrationSessionId) {
       setRegistrationSessionId('');
       setFaceVerification({ status: 'unverified', duplicateCheck: 'unknown' });
-      setFaceMessage('Your personal details changed. Start identity verification again.');
     }
   };
 
@@ -89,7 +86,7 @@ export default function SignupPage() {
   const retrySeconds = Math.max(0, Math.ceil((retryAt - now) / 1000));
   const canContinue = step === 1 ? !!form.role
     : step === 2 ? !!form.firstName.trim() && !!form.lastName.trim() && PHONE.test(form.phone) && !!form.barangay && !!form.address.trim()
-      : step === 3 ? (faceVerification.status === 'verified') && faceVerification.duplicateCheck !== 'flagged'
+      : step === 3 ? (faceVerification.status === 'verified') && faceVerification.duplicateCheck === 'clear' && faceVerification.livenessPassed === true
         : !validateUsername(form.username) && EMAIL.test(form.email.trim()) && form.password.length >= 8 && form.password === form.confirmPassword && usernameState.available === true && termsAccepted;
 
   React.useEffect(() => {
@@ -151,19 +148,6 @@ export default function SignupPage() {
     setErrors({});
   };
 
-  const startFace = async () => {
-    if (!registrationSessionId || faceLoading) return;
-    setFaceLoading(true);
-    setFaceMessage('');
-    try {
-      const result = await startFaceVerification({ registrationSessionId });
-      setFaceVerification(result.faceVerification || { status: result.started ? 'pending' : 'unverified', duplicateCheck: 'unknown' });
-      setFaceMessage(result.faceVerification?.status === 'verified' ? 'Face comparison successful.' : 'Face verification was not successful. Please try again.');
-    } catch (error) {
-      setFaceMessage(error.message);
-      setFaceVerification((current) => ({ ...current, status: 'unverified' }));
-    } finally { setFaceLoading(false); }
-  };
   const back = () => {
     if (loading) return;
     if (step === 1) router.replace('/login');
@@ -175,7 +159,7 @@ export default function SignupPage() {
     submitting.current = true;
     setLoading(true);
     try {
-      if (!registrationSessionId || !(faceVerification.status === 'verified') || faceVerification.duplicateCheck === 'flagged') {
+      if (!registrationSessionId || !(faceVerification.status === 'verified') || faceVerification.duplicateCheck !== 'clear' || faceVerification.livenessPassed !== true) {
         setNotice({ title: 'Identity verification required', message: 'Complete identity verification before continuing.' });
         return;
       }
@@ -276,18 +260,12 @@ export default function SignupPage() {
                 <Field label="Address" error={errors.address}><TextInput style={[styles.input, errors.address && styles.inputError]} value={form.address} onChangeText={(v) => update('address', v)} placeholder="Street, sitio, or house number" placeholderTextColor="#94A3B8" /></Field>
               </View>}
 
-              {step === 3 && <View style={styles.identityBox}>
-                <View style={styles.faceIcon}><Text style={styles.faceIconText}>◎</Text></View>
-                <Text style={styles.identityTitle}>Face verification</Text>
-                <Text style={styles.identityText}>Face verification requires a reference photo and a current photo. BlueTap image capture and enrollment still need to be connected.</Text>
-                <View style={styles.privacy}><Text style={styles.privacyText}>🔒 Face comparison does not verify liveness or check for duplicate accounts. Continue is available only after successful verification.</Text></View>
-                {!!faceMessage && <Text style={[styles.faceMessage, (faceVerification.status === 'verified') && styles.faceSuccess, faceVerification.status === 'review_required' && styles.faceReview]}>{faceMessage}</Text>}
-                {faceVerification.status === 'verified' ? <View style={styles.status}><Text style={styles.successMark}>✓</Text><Text style={styles.faceSuccess}>Identity verified</Text></View>
-                  : faceVerification.status === 'review_required' ? <View style={styles.status}><View style={styles.reviewDot} /><Text style={styles.faceReview}>Verification needs review</Text></View>
-                    : <TouchableOpacity style={[styles.faceButton, faceLoading && styles.disabled]} onPress={startFace} disabled={faceLoading} accessibilityRole="button">
-                      {faceLoading ? <ActivityIndicator color={BLUETAP_COLORS.primary} /> : <Text style={styles.faceButtonText}>{faceVerification.status === 'failed' ? 'Try Again' : 'Start Face Verification'}</Text>}
-                    </TouchableOpacity>}
-              </View>}
+              {step === 3 && <RegistrationFaceCapture
+                key={registrationSessionId}
+                registrationSessionId={registrationSessionId}
+                verification={faceVerification}
+                onResult={setFaceVerification}
+              />}
 
               {step === 4 && <View>
                 <Field label="Username" error={errors.username} hint={usernameState.checking ? 'Checking availability…' : usernameState.available === true ? 'Username is available.' : '4–20 characters; letters, numbers, and underscores.'}>

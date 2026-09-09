@@ -2,7 +2,7 @@ const { createHmac, randomUUID, timingSafeEqual } = require('node:crypto');
 const { createEmailOtpService } = require('./emailOtp');
 const { OtpError } = require('./otpError');
 const { normalizeUsername } = require('./username');
-const { readRegistrationSession } = require('./registrationSession');
+const { readRegistrationSession, isRegistrationFaceVerified } = require('./registrationSession');
 
 const RESERVATION_TTL = 15 * 60 * 1000;
 
@@ -64,9 +64,7 @@ function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, now = D
       username, usernameNormalized };
   }
   const personalDigest = (profile) => digest(JSON.stringify([profile.role, profile.firstName, profile.lastName, profile.phone, profile.barangay, profile.address]));
-  const hasEligibleFaceStep = (face = {}) => (
-    face.status === 'verified' && face.providerVerified === true && face.duplicateCheck !== 'flagged'
-  );
+  const hasEligibleFaceStep = isRegistrationFaceVerified;
   async function verifiedSession(registrationSessionId, profile) {
     const { data } = await readRegistrationSession(db, registrationSessionId, now);
     if (!hasEligibleFaceStep(data.faceVerification)) {

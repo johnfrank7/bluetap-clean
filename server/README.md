@@ -81,10 +81,12 @@ personal details and server-owned face-verification/terms state, not the plainte
 personal details or credentials. The former public start placeholder now fails closed.
 The Render proxy at `POST /api/verification/verify-face` owns pairwise results;
 see [FACE_VERIFICATION.md](FACE_VERIFICATION.md) for the contract and remaining
-capture/enrollment work. Signup cannot continue without successful verification.
+liveness/storage work. Signup uses `/api/verification/registration-face` and cannot
+continue without a detector-validated challenge and successful unique enrollment.
 
 The OTP request requires trusted face status `verified`, provider verification,
-no flagged duplicate result, and server-recorded Terms/Privacy acceptance. Signup uses
+liveness true, duplicate clear, an enrollment reference, and server-recorded
+Terms/Privacy acceptance. Signup uses
 `POST /api/auth/request-registration-otp` with the email, username, and session ID.
 No Auth account or `users` profile is created at this point. Private pending OTP
 records share the locked-down `emailOtpVerifications` collection, keyed by an HMAC
