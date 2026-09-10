@@ -13,10 +13,10 @@ timers nor buttons grant a pass. This is prototype motion validation, not valida
 presentation-attack detection. A replayed video may satisfy these checks.
 
 After local validation, the app captures the final image and submits the retained
-challenge images to the existing Vercel evaluation endpoint. Only a trusted server
+challenge images to the BlueTap backend evaluation endpoint. Only a trusted server
 pass permits the final image to reach the existing duplicate/enrollment stage.
 `backend/verification/livenessDetector.js` still reports unavailable: client observations and
-client booleans cannot become trusted proof by posting them to Vercel. Therefore
+client booleans cannot become trusted proof by posting them to an API. Therefore
 **signup remains blocked at server confirmation**, even when native motion passes.
 Finishing that boundary needs server-evaluated liveness evidence or a verifiable
 provider attestation bound to the session/capture. Render recognition and the
@@ -46,7 +46,7 @@ Expo Camera plugin supplies camera permission configuration.
 Build with `npx expo run:android --device` after installing/configuring the Android
 SDK, or `npx expo run:ios --device` on macOS with Xcode/signing. The configured EAS
 development profile can also create an internal-distribution development client.
-A Vercel redeploy cannot install a native module on a phone; native binaries must
+A backend or web redeploy cannot install a native module on a phone; native binaries must
 be rebuilt.
 
 The maintainer recommends a physical iOS device rather than the simulator.
@@ -123,7 +123,7 @@ Web resolves `nativeFaceChallenge.js`, which imports no native ML Kit module.
 Android/iOS resolve `nativeFaceChallenge.native.js`. Browser-compatible liveness
 is still required; the existing blocked web flow is preserved.
 
-The complete backend suite currently has 56 passing Node tests, including head-turn direction, complete return, spikes, face
+The complete backend suite currently has 60 passing Node tests, including head-turn direction, complete return, spikes, face
 loss/multiplicity, tracking changes, missing outputs, stale frames, expiry, and
 disabled/opt-in blink behavior. Web, Android and iOS Expo exports pass. Both native
 platforms resolve the ML Kit autolinking modules. The generated web JS excludes

@@ -1,17 +1,10 @@
-import { Platform } from 'react-native';
-
-const apiUrl = (path) => {
-  const configured = (process.env.EXPO_PUBLIC_API_BASE_URL || '').replace(/\/+$/, '');
-  const base = Platform.OS === 'web' ? (__DEV__ ? configured : '') : configured;
-  if (Platform.OS !== 'web' && !base) throw new Error('Registration verification is unavailable in this app build.');
-  return `${base}${path}`;
-};
+import { getApiUrl } from './apiClient';
 
 export const callRegistrationApi = async (path, body, timeoutMs = 30000) => {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response = await fetch(apiUrl(path), {
+    const response = await fetch(getApiUrl(path, () => new Error('Registration verification is unavailable in this app build.')), {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body), signal: controller.signal,
     });

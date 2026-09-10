@@ -2,15 +2,14 @@ const { createHmac } = require('node:crypto');
 const { getFirebaseAdmin } = require('../firebase/firebaseAdmin');
 const { OtpError } = require('../utils/otpError');
 const { normalizeUsername } = require('./username');
+const { applyCors } = require('../utils/cors');
+const { getClientIp } = require('../utils/request');
 
 const genericLogin = () => new OtpError(401, 'invalid-credential', 'Invalid username or password.');
 const parseBody = (req) => {
   if (typeof req.body !== 'string') return req.body || {};
   try { return JSON.parse(req.body); } catch { throw new OtpError(400, 'invalid-request', 'Invalid request.'); }
 };
-const clientIp = (req) => process.env.VERCEL
-  ? String(req.headers['x-forwarded-for'] || 'unknown').split(',')[0].trim()
-  : req.socket?.remoteAddress || 'local';
 
 async function checkUsername(db, username) {
   const normalized = normalizeUsername(username);
@@ -40,9 +39,7 @@ async function limitLogin(db, ip, hashSecret) {
 function createUsernameHandler(action, getAdmin = getFirebaseAdmin) {
   return async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    if (!applyCors(req, res)) return;
     if (req.method === 'OPTIONS') return res.status(204).end();
     if (req.method !== 'POST') return res.status(405).json({ error: { reason: 'method-not-allowed', message: 'Use POST.' } });
     try {
@@ -52,7 +49,7 @@ function createUsernameHandler(action, getAdmin = getFirebaseAdmin) {
       let normalized;
       try { normalized = normalizeUsername(body.username); } catch { throw genericLogin(); }
       if (typeof body.password !== 'string' || !body.password || body.password.length > 128) throw genericLogin();
-      await limitLogin(db, clientIp(req), process.env.EMAIL_OTP_HASH_SECRET);
+      await limitLogin(db, getClientIp(req), process.env.EMAIL_OTP_HASH_SECRET);
       const registry = await db.collection('usernames').doc(normalized).get();
       if (!registry.exists || typeof registry.data()?.uid !== 'string') throw genericLogin();
       const expectedUid = registry.data().uid;

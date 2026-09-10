@@ -1,17 +1,10 @@
-import { Platform } from 'react-native';
-
-const apiUrl = (path) => {
-  const configured = (process.env.EXPO_PUBLIC_API_BASE_URL || '').replace(/\/+$/, '');
-  const base = Platform.OS === 'web' ? (__DEV__ ? configured : '') : configured;
-  if (Platform.OS !== 'web' && !base) throw new Error('Login service is unavailable in this app build.');
-  return `${base}${path}`;
-};
+import { getApiUrl } from './apiClient';
 
 const call = async (path, body) => {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 30000);
   try {
-    const response = await fetch(apiUrl(path), {
+    const response = await fetch(getApiUrl(path, () => new Error('Login service is unavailable in this app build.')), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),

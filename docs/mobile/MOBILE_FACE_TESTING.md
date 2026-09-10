@@ -34,8 +34,8 @@ on its first native build; retain those IDs for subsequent testing.
 2. Connect the phone by USB, accept its debugging authorization, and run
    `adb devices`. The device must appear as authorized.
 3. In the BlueTap app directory run `npm ci`.
-4. In the ignored `.env.local`, configure the public Vercel origin:
-   `EXPO_PUBLIC_API_BASE_URL=https://bluetap-beta.vercel.app`.
+4. In the ignored `.env.local`, configure the public Render backend origin:
+   `EXPO_PUBLIC_API_BASE_URL=https://<service>.onrender.com`.
    Never put Render credentials in this file or any public variable.
 5. Run `npm run build:android:device`. Select the phone and set the intended Android
    application ID if Expo asks. This generates/builds/installs the custom native app.
@@ -54,7 +54,7 @@ on its first native build; retain those IDs for subsequent testing.
 1. On a Mac install Xcode and its command-line tools; use a physical iPhone/iPad.
    Connect/trust the device and enable Developer Mode where required.
 2. In this app directory run `npm ci` and configure the same ignored `.env.local`
-   with the public Vercel origin above.
+   with the public Render origin above.
 3. Run `npm run build:ios:device`, select the physical device, and configure the
    intended bundle identifier and development signing team when prompted. If
    signing requires Xcode, open the generated `.xcworkspace`, select the team and
@@ -67,7 +67,7 @@ on its first native build; retain those IDs for subsequent testing.
 6. Run the same matrix; record device/OS and orientation results. The ML Kit
    maintainer recommends real iOS hardware rather than simulator testing.
 
-Rebuild native binaries after dependency/config changes; a Vercel redeploy or
+Rebuild native binaries after dependency/config changes; a web/backend redeploy or
 Metro reload alone cannot add ML Kit to an installed app. Export success is not
 proof that Gradle/CocoaPods compilation or real hardware execution succeeds.
 
@@ -126,13 +126,13 @@ can finish, server confirmation stops registration, and Continue stays disabled.
 
 Do not replace this with client `livenessPassed:true`. Completion needs trusted
 server-evaluated evidence or a verifiable provider proof bound to the capture and
-session. Render's recognition backend and Vercel security gates remain unchanged.
+session. The protected recognition service and BlueTap backend security gates remain unchanged.
 Existing Render persistence/idempotency/lifecycle gaps are documented separately
 in [FACE_VERIFICATION.md](../verification/FACE_VERIFICATION.md).
 
 ## Checks performed here
 
-56 Node tests and all 17 Expo Doctor checks passed. `expo-image` 3.0.11 and
+60 Node tests and all 17 Expo Doctor checks passed. `expo-image` 3.0.11 and
 `expo-keep-awake` 15.0.8 are pinned to SDK 54 versions because ML Kit core declares
 broad Expo dependencies. Expo config introspection passed for camera permissions.
 Native autolinking resolves the ML Kit modules on Android/iOS. Tests cover frame quality, motion sequencing,

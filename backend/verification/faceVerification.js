@@ -3,6 +3,7 @@ const { FieldValue } = require('firebase-admin/firestore');
 const { getFirebaseAdmin } = require('../firebase/firebaseAdmin');
 const { readRegistrationSession } = require('../registration/registrationSession');
 const { OtpError } = require('../utils/otpError');
+const { applyCors } = require('../utils/cors');
 
 const MAX_IMAGE_BYTES = 1024 * 1024;
 const preparing = () => new OtpError(503, 'face-service-preparing', 'Face verification service is preparing. Please try again in a moment.');
@@ -19,9 +20,7 @@ function decodeImage(value) {
 function createFaceVerificationHandler({ getAdmin = getFirebaseAdmin, fetchImpl = fetch, env = process.env, now = Date.now, timestamp = () => FieldValue.serverTimestamp() } = {}) {
   return async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    if (!applyCors(req, res, env)) return;
     if (req.method === 'OPTIONS') return res.status(204).end();
     if (req.method !== 'POST') return res.status(405).json({ error: { reason: 'method-not-allowed', message: 'Use POST.' } });
     let timer;

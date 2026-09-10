@@ -2,14 +2,13 @@ const { getFirebaseAdmin } = require('../firebase/firebaseAdmin');
 const { createEmailOtpService } = require('./emailOtp');
 const { sendEmailOtp } = require('../email/emailProvider');
 const { OtpError } = require('../utils/otpError');
+const { applyCors } = require('../utils/cors');
 
 function createOtpHandler(action, getAdmin = getFirebaseAdmin) {
   return async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
-    // Bearer tokens only; no cookies or credentialed CORS. Supports local Expo web.
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
+    // Bearer tokens only; no cookies or credentialed CORS.
+    if (!applyCors(req, res)) return;
     if (req.method === 'OPTIONS') return res.status(204).end();
     if (req.method !== 'POST') {
       res.setHeader('Allow', 'POST, OPTIONS');

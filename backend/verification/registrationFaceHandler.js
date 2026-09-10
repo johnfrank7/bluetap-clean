@@ -1,13 +1,12 @@
 const { getFirebaseAdmin } = require('../firebase/firebaseAdmin');
 const { createRegistrationFaceService } = require('./registrationFace');
 const { OtpError } = require('../utils/otpError');
+const { applyCors } = require('../utils/cors');
 
 function createRegistrationFaceHandler(getService = () => createRegistrationFaceService({ db: getFirebaseAdmin().db })) {
   return async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    if (!applyCors(req, res)) return;
     if (req.method === 'OPTIONS') return res.status(204).end();
     if (req.method !== 'POST') return res.status(405).json({ error: { reason: 'method-not-allowed', message: 'Use POST.' } });
     const controller = new AbortController();

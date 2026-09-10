@@ -1,5 +1,5 @@
-import { Platform } from 'react-native';
 import { auth } from '../firebaseAuth';
+import { getApiUrl } from './apiClient';
 
 const apiError = (reason, message, details = {}) => {
   const error = new Error(message);
@@ -8,21 +8,14 @@ const apiError = (reason, message, details = {}) => {
   return error;
 };
 
-function apiUrl(path) {
-  // A public URL, never a secret. Deployed web always uses its own origin.
-  const configured = (process.env.EXPO_PUBLIC_API_BASE_URL || '').replace(/\/+$/, '');
-  const base = Platform.OS === 'web' ? (__DEV__ ? configured : '') : configured;
-  if (Platform.OS !== 'web' && !base) {
-    throw apiError('service-unavailable', 'The email verification service is not available in this app build.');
-  }
-  return `${base}${path}`;
-}
-
 async function callOtp(path, body = {}, requireAuth = true) {
   const account = auth.currentUser;
   if (requireAuth && !account) throw apiError('unauthenticated', 'Please log in again.');
   const token = requireAuth ? await account.getIdToken() : null;
-  const url = apiUrl(path);
+  const url = getApiUrl(path, () => apiError(
+    'service-unavailable',
+    'The email verification service is not available in this app build.'
+  ));
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 30000);
   try {

@@ -1,13 +1,13 @@
 const { getFirebaseAdmin } = require('../firebase/firebaseAdmin');
 const { OtpError } = require('../utils/otpError');
 const { createRegistrationSessionService } = require('./registrationSession');
+const { applyCors } = require('../utils/cors');
+const { getClientIp } = require('../utils/request');
 
 function createRegistrationSessionHandler(action, getAdmin = getFirebaseAdmin) {
   return async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    if (!applyCors(req, res)) return;
     if (req.method === 'OPTIONS') return res.status(204).end();
     if (req.method !== 'POST') return res.status(405).json({ error: { reason: 'method-not-allowed', message: 'Use POST.' } });
     try {
@@ -15,7 +15,7 @@ function createRegistrationSessionHandler(action, getAdmin = getFirebaseAdmin) {
       if (typeof body === 'string') { try { body = JSON.parse(body); } catch { throw new OtpError(400, 'invalid-request', 'Invalid request.'); } }
       const { db } = getAdmin();
       const service = createRegistrationSessionService({ db, hashSecret: process.env.EMAIL_OTP_HASH_SECRET });
-      const ip = process.env.VERCEL ? String(req.headers['x-forwarded-for'] || 'unknown').split(',')[0].trim() : req.socket?.remoteAddress || 'local';
+      const ip = getClientIp(req);
       const result = action === 'create' ? await service.create(body, ip)
         : action === 'start' ? await service.start(body?.registrationSessionId)
           : action === 'terms' ? await service.acceptTerms(body?.registrationSessionId)

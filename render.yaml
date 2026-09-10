@@ -1,0 +1,30 @@
+services:
+  - type: web
+    name: bluetap-backend
+    runtime: node
+    buildCommand: npm ci
+    startCommand: npm run start:backend
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: ALLOWED_ORIGINS
+        sync: false
+      - key: FIREBASE_PROJECT_ID
+        sync: false
+      - key: FIREBASE_CLIENT_EMAIL
+        sync: false
+      - key: FIREBASE_PRIVATE_KEY
+        sync: false
+      - key: FIREBASE_WEB_API_KEY
+        sync: false
+      - key: GMAIL_USER
+        sync: false
+      - key: GMAIL_APP_PASSWORD
+        sync: false
+      - key: EMAIL_OTP_HASH_SECRET
+        sync: false
+      - key: DEEPFACE_API_URL
+        sync: false
+      - key: DEEPFACE_API_KEY
+        sync: false

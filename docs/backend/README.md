@@ -1,40 +1,79 @@
-# BlueTap OTP on Vercel
+# BlueTap Render backend
 
-The active API is `POST /api/auth/request-email-otp` and
-`POST /api/auth/verify-email-otp`, plus the registration endpoints below. Vercel discovers the root `api/auth/*.js`
-Node handlers. `vercel.json` checks the filesystem (including Functions) before
-the Expo SPA fallback. Unknown API paths return 404, not the Expo HTML page.
-No Firebase Cloud Functions deployment or Blaze upgrade is needed for this OTP backend.
-The legacy `functions/` directory and `firebase.json` are not used by Vercel.
+BlueTap now has a Render-compatible Node entrypoint at `backend/app.js`. It exposes
+the same `/api/...` paths and delegates to the same tested backend modules used by
+the Vercel handlers. `GET /health` returns `{ "status": "ok" }` without contacting
+Firebase, Gmail, or the face service.
 
-## Existing Production environment
+This is the first migration pass. The root `api/` handlers remain active Vercel
+fallbacks until the Render deployment has passed production smoke testing. They are
+not proxies and do not call Render; both hosts currently execute the shared modules
+under `backend/`. The legacy `functions/` directory remains inactive.
 
-Use server-only Vercel values: `GMAIL_USER`, `GMAIL_APP_PASSWORD`,
-`EMAIL_OTP_HASH_SECRET`, `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, and
-`FIREBASE_PRIVATE_KEY`, plus `FIREBASE_WEB_API_KEY` for username/password login.
-The Web API key is the public Firebase project configuration value, kept centrally
-in the server environment. The service account must belong to the same Firebase
-project as the client (`bluetap-8c98d`) and have Auth and Firestore access.
-Private key literal newline escapes are normalized on the server.
-Do not put these credentials in Expo public environment variables or files.
+## Endpoint map
 
-The frontend uses same-origin URLs on production web. For native Expo builds and
-local Expo web, set the non-secret `EXPO_PUBLIC_API_BASE_URL` to the deployed
-backend origin, e.g. `https://bluetap-beta.vercel.app`, and restart/rebuild Expo.
-Native builds fail safely if this public URL is missing. Local web can instead
-run through Vercel's local environment to serve same-origin API routes.
+All API endpoints accept `OPTIONS` and otherwise require `POST`, except `/health`.
+
+| Endpoint | Authentication/trust | Main dependencies |
+|---|---|---|
+| `GET /health` | None | None |
+| `POST /api/auth/check-username` | Public validated body | Firestore username registry |
+| `POST /api/auth/login-with-username` | Public credentials; rate limited by IP | Firebase Admin, Firebase Auth REST API |
+| `POST /api/auth/create-registration-session` | Public validated personal-info digest | Firestore, session HMAC |
+| `POST /api/auth/registration-session-status` | Opaque registration session ID | Firestore, session HMAC |
+| `POST /api/auth/start-registration-face-verification` | Opaque registration session ID; fails closed | Firestore |
+| `POST /api/auth/accept-registration-terms` | Opaque registration session ID | Firestore |
+| `POST /api/auth/request-registration-otp` | Verified session, accepted terms, email and username | Firebase Admin, Firestore, Gmail SMTP, HMAC |
+| `POST /api/auth/complete-registration` | Signed challenge and correct OTP | Firebase Admin/Auth, Firestore |
+| `POST /api/auth/request-email-otp` | Revocation-checked Firebase bearer token | Firebase Admin, Firestore, Gmail SMTP, HMAC |
+| `POST /api/auth/verify-email-otp` | Revocation-checked Firebase bearer token | Firebase Admin/Auth, Firestore, HMAC |
+| `POST /api/verification/verify-face` | Opaque registration session ID | Firebase Admin, protected DeepFace service |
+| `POST /api/verification/registration-face` | Opaque session and server-issued challenge | Firebase Admin, protected DeepFace service, liveness boundary |
+
+## Render environment
+
+Configure these values in the Render service dashboard. `backend/.env.example`
+contains names only.
+
+| Variable | Purpose |
+|---|---|
+| `NODE_ENV` | Set to `production` on Render |
+| `PORT` | Supplied by Render; the server defaults to `3000` locally |
+| `ALLOWED_ORIGINS` | Comma-separated Vercel production/preview origins allowed by browser CORS |
+| `FIREBASE_PROJECT_ID` | Firebase Admin project |
+| `FIREBASE_CLIENT_EMAIL` | Firebase Admin service-account email |
+| `FIREBASE_PRIVATE_KEY` | Firebase Admin private key; escaped newlines are normalized |
+| `FIREBASE_WEB_API_KEY` | Firebase Auth REST API key used only for username/password verification |
+| `GMAIL_USER` | Gmail SMTP account and sender |
+| `GMAIL_APP_PASSWORD` | Gmail application password |
+| `EMAIL_OTP_HASH_SECRET` | HMAC secret for OTPs, sessions, challenges, and rate-limit identifiers |
+| `DEEPFACE_API_URL` | HTTPS origin of the separate protected face service |
+| `DEEPFACE_API_KEY` | Bearer credential sent only from this backend to the face service |
+
+Never create `EXPO_PUBLIC_` versions of server credentials.
+
+## Frontend environment
+
+Set `EXPO_PUBLIC_API_BASE_URL` to the public Render origin, without a trailing
+slash, after Render is deployed, for example `https://<service>.onrender.com`.
+This value is public and contains no credential. If it is absent, Expo web keeps
+using same-origin `/api` Vercel fallbacks. Native builds fail safely without it.
 
 ## Deployment and testing
 
-Deploy this repository to Vercel (the existing Expo build command and `dist`
-output remain). Redeploy Production to pick up the new endpoints and configured
-environment. Preview deployments need their own environment configuration if
-they are used for testing; Production variables do not automatically apply there.
-Check an unauthenticated POST returns JSON HTTP 401, not HTML or 404.
-Then use signup with a recipient email and enter the received
-code. Check wrong codes, expiry, resend cooldown, and successful Firebase Auth
-email verification followed by `/verification`. Authenticated real delivery
-requires the deployed environment and cannot be proven by a local Expo build.
+The committed Render Blueprint uses:
+
+```text
+Build command: npm ci
+Start command: npm run start:backend
+Health check: /health
+```
+
+Configure every server variable, deploy, confirm `/health`, then smoke-test each
+JSON endpoint before setting the frontend public base URL. Keep the Vercel server
+variables during this migration pass because its fallback handlers remain active.
+Authenticated email delivery and live Firebase/DeepFace behavior require the
+deployed environment and are not proven by fixture-based local tests.
 
 Both request handlers import `sendEmailOtp` from `backend/email/emailProvider.js`.
 That shared server-only helper uses Nodemailer with `smtp.gmail.com`, port 465,
@@ -44,7 +83,7 @@ contain only allowlisted error categories and numeric SMTP status codes, not raw
 responses, credentials, recipients, or OTPs. SMTP acceptance is not proof of inbox delivery.
 Redeploy Production after installing Nodemailer and configuring the Gmail variables.
 The legacy Firebase `functions/emailProvider.js` still uses Resend, but is not imported
-by any Vercel API route and is not deployed by the Vercel build. It is retained unchanged.
+by the active shared backend and is not deployed by Render or Vercel. It is retained unchanged.
 
 ## Security and limits
 
@@ -79,7 +118,7 @@ Before email OTP, signup creates a 60-minute opaque registration session through
 `POST /api/auth/create-registration-session`. The session stores a digest of the
 personal details and server-owned face-verification/terms state, not the plaintext
 personal details or credentials. The former public start placeholder now fails closed.
-The Render proxy at `POST /api/verification/verify-face` owns pairwise results;
+The server-side adapter at `POST /api/verification/verify-face` owns pairwise results;
 see [FACE_VERIFICATION.md](../verification/FACE_VERIFICATION.md) for the contract and remaining
 liveness/storage work. Signup uses `/api/verification/registration-face` and cannot
 continue without a detector-validated challenge and successful unique enrollment.
@@ -109,12 +148,12 @@ Auth account is rolled back. Uncertain failures remain recoverable via OTP.
 These two registration endpoints intentionally do not require an ID token because
 the account does not exist yet. A correct email OTP plus signed challenge is required
 to complete registration. Email rate limits remain six sends/hour, and public signup
-is additionally limited to 20 send requests/IP/hour using Vercel's forwarded client
+is additionally limited to 20 send requests/IP/hour using the hosting proxy's forwarded client
 IP. IP identifiers are HMAC hashed; no raw IPs are stored. Existing signed-in users
 continue using the two authenticated email-OTP routes.
 
-Deploy the registration-session API routes, registration API updates, and frontend
-together. No new secrets are required for the session layer itself; the chosen face
+Deploy the Render service before switching the frontend public base URL. No new
+secrets are required for the session layer itself; the chosen face
 verification provider may require its own server-only configuration.
 This fixes registration writes through Admin; other app screens still require
 appropriate Firestore rules for their normal client reads and writes.

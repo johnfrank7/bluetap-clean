@@ -43,7 +43,7 @@ checks its pairwise match against the last detector-evaluated neutral frame. A
 SHA-256 hash binds that reference to the issued challenge without storing its image.
 Then it searches for duplicates and enrolls only a clear result.
 
-## Vercel endpoints and trust
+## BlueTap backend endpoints and trust
 
 `POST /api/verification/registration-face` accepts JSON:
 
@@ -56,7 +56,7 @@ Then it searches for duplicates and enrolls only a clear result.
 
 Images are bounded to 1 MiB decoded each with signature/base64 validation; Render
 fully decodes them. Requests have a 40-second server deadline, 55-second client
-limit, and 60-second Vercel function duration. Retries are manual. HTTP errors,
+limit, and bounded host request duration. Retries are manual. HTTP errors,
 malformed results, service preparation, failed challenges, expiry and replay all
 fail closed. Raw upstream errors and identity fields are never returned.
 
@@ -129,7 +129,7 @@ is present here, so deployed Firebase rules were not verified.
    protects only one Python process, not multiple workers or instances.
 4. Add idempotent enrollment/status lookup and orphan cleanup. Retrying an existing
    enrollment currently finds its own face as a duplicate before replacement. A
-   Vercel timeout after sending enrollment leaves faceEnrollmentPending and blocks
+   A hosting timeout after sending enrollment leaves faceEnrollmentPending and blocks
    automatic retries until reconciliation; no success is guessed.
 5. Add abandoned-session enrollment expiry/removal. Signup can be abandoned before
    OTP, and the current service has no delete/expiry route.
@@ -156,7 +156,7 @@ remain pending. No live biometric uploads or enrollment mutations were performed
 There is no lint script configured. Frontend/bundle scans must remain free of
 Render secrets and direct Render URLs.
 
-Current checks: all 56 backend tests pass; both Vercel face route modules load; web,
+Current checks: all 60 backend tests pass; both compatibility face route modules load; web,
 Android and iOS exports passed; both simulated-camera browser checks passed;
 frontend and generated-bundle scans found no Render URL or server-variable names.
 

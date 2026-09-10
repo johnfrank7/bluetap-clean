@@ -16,7 +16,7 @@ The documentation intentionally separates:
 
 BlueTap is a role-based mineral water ordering system built with Expo, React Native, Expo Router, and Firebase. Requesters can register, browse products, create water requests, track active orders, and cancel pending requests. Administrators can review distributor applications, manage products, and view dashboard analytics. Distributors can register, wait for approval, log in after approval, and manage their profile; their operational request screens are already designed but are not yet fully connected to Firestore for live accept, schedule, and delivery completion actions.
 
-The project uses an Expo client, Firebase Authentication, Cloud Firestore, Firebase Storage, and a Node.js Vercel API for secure registration, email OTP, username checks, and face-verification orchestration. The main technical risk areas are authorization hardening, replacing the hard-coded admin login, completing Firestore-backed distributor workflows, adding Firebase security rules, and implementing trusted liveness detection.
+The project uses an Expo client, Firebase Authentication, Cloud Firestore, Firebase Storage, and a Node.js backend prepared for Render for secure registration, email OTP, username checks, and face-verification orchestration. Vercel API handlers remain as temporary fallbacks during migration. The main technical risk areas are authorization hardening, replacing the hard-coded admin login, completing Firestore-backed distributor workflows, adding Firebase security rules, and implementing trusted liveness detection.
 
 ## Table of Contents
 
@@ -140,14 +140,15 @@ The project is built as an Expo Router and React Native application backed by Fi
 
 ### Backend
 
-The application uses Firebase services together with thin Vercel API routes and a responsibility-based Node.js backend. It does not run a persistent Express, PHP, or traditional application server.
+The application uses Firebase services together with a responsibility-based Node.js backend. `backend/app.js` runs the API on Render, while thin Vercel routes remain as migration fallbacks. It does not use Express, PHP, or a traditional stateful application server.
 
 Backend responsibilities are handled by:
 
 - Firebase Authentication for account identity
 - Cloud Firestore for structured application data
 - Firebase Storage for uploaded product images
-- Vercel functions under `api/` for the public HTTP contract
+- Render HTTP server under `backend/app.js` for the public HTTP contract
+- Vercel functions under `api/` as temporary same-contract fallbacks
 - Server-only implementations under `backend/` for registration, OTP, username, Firebase Admin, email, and face-verification work
 - A separately deployed Render face service called only by the verification backend
 
@@ -179,7 +180,7 @@ products/{productId}/{timestamp}-{sanitizedFileName}
 
 ### Hosting
 
-The app is an Expo project deployed on Vercel for web and API routes. The repository also retains `firebase.json` for the inactive legacy Firebase Functions implementation; it does not define Firebase Hosting.
+The Expo web app is deployed on Vercel. The API is prepared for Render, with the existing Vercel API routes retained during the first migration pass. The repository also retains `firebase.json` for the inactive legacy Firebase Functions implementation; it does not define Firebase Hosting.
 
 Possible hosting targets:
 
@@ -209,7 +210,8 @@ Current scripts in `package.json`:
 Current deployment status:
 
 - Expo development builds are configured for native testing.
-- Vercel builds the Expo web export and serves the root `api/` functions.
+- Vercel builds the Expo web export; root `api/` functions remain active fallbacks during migration.
+- Render runs `npm run start:backend` and checks `GET /health`.
 - `eas.json` includes an internal-distribution development profile; production profiles are not configured.
 - No CI/CD configuration is included.
 - No Firebase rules files are included in the repo.
@@ -249,8 +251,10 @@ Recommended production setup:
 |   `-- distributor/
 |-- assets/
 |   `-- icons/
-|-- api/                    # thin Vercel HTTP handlers; URLs stay stable
+|-- api/                    # temporary Vercel fallback handlers; URLs stay stable
 |-- backend/
+|   |-- app.js             # Render HTTP entrypoint
+|   |-- routes/
 |   |-- auth/
 |   |-- email/
 |   |-- firebase/
@@ -368,15 +372,15 @@ Service layer for Firebase and local persistence operations.
 
 ### `api/`
 
-Contains thin Vercel route handlers. These files preserve the existing `/api/auth/*`,
-`/api/registration/*`, `/api/username/*`, and `/api/verification/*` URLs and delegate
-to feature implementations under `backend/`.
+Contains thin Vercel route handlers. These files preserve the existing `/api/auth/*`
+and `/api/verification/*` URLs and delegate to feature implementations under
+`backend/`. They remain active fallbacks until the Render service is production-tested.
 
 ### `backend/`
 
-Contains server-only code grouped by responsibility. Each feature owns its handlers,
-domain logic, and a `tests/` directory where applicable. Frontend modules do not import
-this folder.
+Contains server-only code grouped by responsibility. `app.js` and `routes/` expose the
+same HTTP paths on Render. Each feature owns its handlers, domain logic, and a `tests/`
+directory where applicable. Frontend modules do not import this folder.
 
 ### `docs/`
 
@@ -2012,7 +2016,8 @@ service firebase.storage {
 
 ## 12. Serverless Architecture
 
-BlueTap follows a serverless architecture across Firebase, Vercel, and the separate Render face service.
+BlueTap follows a serverless architecture across Firebase, the BlueTap Render backend,
+Vercel web hosting, and the separate protected face service.
 
 ### High-Level Architecture Diagram
 
@@ -2028,12 +2033,14 @@ Expo React Native App
      |                         |-- Firestore
      |                         `-- Storage
      |
-     `-----------------------> Vercel /api routes
+     `-----------------------> BlueTap Render /api routes
                                `-- backend feature modules
                                    |-- Firebase Admin
                                    |-- email OTP and registration
                                    `-- face-verification orchestration
-                                        `-- separate Render face API
+                                        `-- separate protected face API
+
+Vercel /api routes temporarily expose the same backend modules as a fallback.
 ```
 
 ### Logical Module Diagram
@@ -2107,10 +2114,10 @@ Limitation:
 
 ### Serverless API Backend
 
-Vercel executes the handlers in `api/`. They delegate to `backend/` modules that use
+Render executes `backend/app.js`, whose route table delegates to modules that use
 Firebase Admin, send email OTPs, manage registration sessions, validate usernames,
-and coordinate face verification. The retained `functions/` implementation is legacy
-and inactive. No persistent application server runs in this repository.
+and coordinate face verification. Vercel executes equivalent fallback handlers from
+`api/` during migration. The retained `functions/` implementation is legacy and inactive.
 
 ## 13. Libraries Used
 
@@ -2417,7 +2424,7 @@ Recommended pre-demo data:
 | Distributor workflow | Approval-gated module, profile, designed request/schedule/history screens |
 | Analytics/reporting | Admin dashboard and analytics pages |
 | Security discussion | Firebase Auth, recommended Firestore/Storage rules, role authorization notes |
-| Serverless architecture | Firebase Auth/Firestore/Storage plus Vercel API handlers and a separate Render face service |
+| Serverless architecture | Vercel web frontend, BlueTap Render backend, Firebase services, and a separate protected face service |
 
 ## Appendix E: Production Readiness Checklist
 

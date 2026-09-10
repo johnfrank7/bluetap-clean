@@ -1,4 +1,4 @@
-// Server-only: imported by Vercel OTP handlers, never by Expo screens.
+// Server-only: imported by HTTP OTP handlers, never by Expo screens.
 const nodemailer = require('nodemailer');
 const { OtpError } = require('../utils/otpError');
 
