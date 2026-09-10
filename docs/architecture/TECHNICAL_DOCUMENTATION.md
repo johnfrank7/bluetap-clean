@@ -302,7 +302,7 @@ Login, admin secret login, forgot password, and missing-profile setup screen. It
 
 ### `app/signup.jsx`
 
-Registration screen for requesters and distributors. It validates fields, creates a Firebase Auth account, creates a Firestore user profile with a unique ID, and applies different status rules based on selected role.
+Registration screen for requesters and distributors. It validates staged account and personal details, uses a platform-specific identity-verification step, then asks the backend to create the Firebase Auth account and Firestore profile after the registration gate is satisfied. On web, Step 3 uses the browser camera and a backend-verified capture pair; Android and iOS retain the native ML Kit challenge flow.
 
 ### `app/admin/`
 
@@ -730,16 +730,18 @@ This flow signs out any Firebase Auth user, stores a local admin session, and ro
 
 Registration is implemented in `app/signup.jsx`.
 
-1. User chooses account type: requester or distributor.
-2. User fills first name, last name, email, phone, barangay, password, and confirmation password.
-3. Client validates required fields, email format, and password length.
-4. App calls `createUserWithEmailAndPassword`.
-5. App builds the Firestore profile.
-6. App calls `saveUserProfileWithUniqueId`.
-7. Transaction assigns a unique ID:
+1. User chooses account type and supplies the required personal details.
+2. The app creates an opaque registration session on the BlueTap backend.
+3. Step 3 verifies identity using the current platform:
+   - Web requests the front-facing browser camera, captures two short JPEG frames, and sends them only to the BlueTap backend.
+   - Android and iOS keep the existing on-device ML Kit challenge flow.
+4. The backend validates the registration session, performs protected face comparison, duplicate detection, and enrollment, then records a trusted verification result. The browser cannot set this result itself.
+5. The user supplies credentials, accepts the terms, and completes email OTP verification.
+6. Only a backend-approved registration session can create the Firebase Auth account and Firestore profile.
+7. The backend transaction assigns a unique ID:
    - requester -> `REQ-000001`
    - distributor -> `DIS-000001`
-8. Local profile cache is updated.
+8. Local profile cache is updated after successful registration.
 9. Requesters are approved automatically and routed to requester dashboard.
 10. Distributors are marked pending, signed out, and told to wait for admin approval.
 
@@ -840,6 +842,10 @@ User
 ```text
 User
 -> Signup screen
+-> registration-session backend endpoint
+-> browser camera verification OR native ML Kit challenge
+-> backend face comparison, duplicate check, and enrollment
+-> email OTP and backend registration completion
 -> Firebase Authentication creates account
 -> unique ID transaction reads counters/unique_ids
 -> Firestore writes users/{uid}
@@ -890,9 +896,10 @@ File: `app/signup.jsx`
 Internal behavior:
 
 - Shows account type selection modal.
-- Validates registration form.
-- Creates Firebase Auth user.
-- Saves Firestore user profile with unique ID.
+- Validates staged registration fields.
+- Uses browser camera verification on web and preserves the native ML Kit flow on Android and iOS.
+- Lets the backend, rather than the browser, determine whether the registration face check has passed.
+- Completes account creation through the backend only after face verification, terms acceptance, and email OTP verification.
 - Requester enters the app immediately.
 - Distributor is signed out and waits for admin approval.
 
@@ -2414,7 +2421,7 @@ Recommended pre-demo data:
 
 | Capstone Requirement | BlueTap Implementation |
 |---|---|
-| User registration | `app/signup.jsx` with Firebase Auth and Firestore profile |
+| User registration | `app/signup.jsx` with platform-specific face verification, backend registration session/OTP gates, Firebase Auth, and Firestore profile |
 | Login/authentication | `app/login.jsx` with Firebase email/password |
 | Role-based access | `RoleGate.jsx` and `services/authSession.js` |
 | Database storage | Firestore collections: `users`, `products`, `requests`, `counters` |

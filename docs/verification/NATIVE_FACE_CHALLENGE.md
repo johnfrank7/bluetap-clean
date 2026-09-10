@@ -119,11 +119,13 @@ testing; eye fields existing does not establish reliable blink capture.
 
 ## Web and validation
 
-Web resolves `nativeFaceChallenge.js`, which imports no native ML Kit module.
-Android/iOS resolve `nativeFaceChallenge.native.js`. Browser-compatible liveness
-is still required; the existing blocked web flow is preserved.
+Web resolves `nativeFaceChallenge.js`, which imports no native ML Kit module, and
+uses the separate browser-camera registration component. Android/iOS resolve
+`nativeFaceChallenge.native.js` and retain the ML Kit workflow. The browser flow
+has backend pair verification and duplicate checks, but it does not claim active
+presentation-attack liveness.
 
-The complete backend suite currently has 60 passing Node tests, including head-turn direction, complete return, spikes, face
+The complete backend suite currently has 65 passing Node tests, including head-turn direction, complete return, spikes, face
 loss/multiplicity, tracking changes, missing outputs, stale frames, expiry, and
 disabled/opt-in blink behavior. Web, Android and iOS Expo exports pass. Both native
 platforms resolve the ML Kit autolinking modules. The generated web JS excludes

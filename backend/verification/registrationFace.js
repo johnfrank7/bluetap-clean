@@ -70,14 +70,15 @@ function createRegistrationFaceService({ db, detector = defaultDetector, render 
       throw error;
     }
   }
-  async function complete({ registrationSessionId: id, challengeId, referenceImage, image }, signal) {
+  async function complete({ registrationSessionId: id, challengeId, referenceImage, image }, signal, webCapture = false) {
     const { data } = await readRegistrationSession(db, id, now);
-    const c = check(data, challengeId, 'passed');
-    if (data.faceVerification?.livenessPassed !== true || hash(String(referenceImage)) !== c.referenceHash) throw invalid();
+    const expectedChallengeState = webCapture ? 'issued' : 'passed';
+    const c = check(data, challengeId, expectedChallengeState);
+    if (!webCapture && (data.faceVerification?.livenessPassed !== true || hash(String(referenceImage)) !== c.referenceHash)) throw invalid();
     const reference = decodeImage(referenceImage);
     const probe = decodeImage(image);
     await update(id, (current, save) => {
-      const challenge = check(current, challengeId, 'passed');
+      const challenge = check(current, challengeId, expectedChallengeState);
       save({ faceChallenge: { ...challenge, state: 'processing' } });
     });
     let leaseHeld = false;
@@ -90,7 +91,8 @@ function createRegistrationFaceService({ db, detector = defaultDetector, render 
       const match = await render('/verify-face', pair, signal);
       if (typeof match?.verified !== 'boolean') throw contractError();
       if (!match.verified) {
-        const face = { status: 'failed', verifiedAt: null, duplicateCheck: 'unknown', livenessPassed: false, failureReason: 'liveness_failed' };
+        const face = { status: 'failed', verifiedAt: null, duplicateCheck: 'unknown', livenessPassed: false,
+          failureReason: webCapture ? 'face_match_failed' : 'liveness_failed' };
         await update(id, (current, save) => { check(current, challengeId, 'processing'); save({ faceVerification: face, faceChallenge: { ...current.faceChallenge, state: 'failed' } }); });
         return { faceVerification: publicFace(face) };
       }
@@ -126,7 +128,7 @@ function createRegistrationFaceService({ db, detector = defaultDetector, render 
       }
       if (enrolled?.enrolled !== true || enrolled?.duplicateDetected !== false || enrolled?.reviewRequired !== false) throw contractError();
       const face = { status: 'verified', verifiedAt: timestamp(), duplicateCheck: 'clear', livenessPassed: true,
-        verificationReference: id, verificationMode: 'registration-enrollment', providerVerified: true,
+        verificationReference: id, verificationMode: webCapture ? 'web-camera-capture' : 'registration-enrollment', providerVerified: true,
         model: 'SFace', detectorBackend: 'yunet', failureReason: null };
       await update(id, (current, save) => { check(current, challengeId, 'processing'); save({ faceVerification: face, faceEnrollmentPending: false, faceChallenge: { ...current.faceChallenge, state: 'used' } }); });
       return { faceVerification: publicFace(face) };
@@ -141,6 +143,10 @@ function createRegistrationFaceService({ db, detector = defaultDetector, render 
       });
     }
   }
-  return { begin, evaluate, complete };
+  // Web capture still reaches this trusted server path. It cannot set a
+  // verification field itself; the backend matches the captures, checks for a
+  // duplicate, enrolls the clear result, and then updates the session.
+  const webComplete = (body, signal) => complete(body, signal, true);
+  return { begin, evaluate, complete, webComplete };
 }
 module.exports = { createRegistrationFaceService };

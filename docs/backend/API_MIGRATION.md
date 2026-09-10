@@ -17,7 +17,7 @@ remain active fallbacks that invoke the same implementation modules.
 | `/api/auth/request-email-otp` | POST | `backend/auth/otpHandler.js` (`request`) | Revocation-checked Firebase bearer token | Firebase Admin variables, Gmail variables, `EMAIL_OTP_HASH_SECRET` | `services/emailVerification.js` | Render implemented; Vercel fallback active |
 | `/api/auth/verify-email-otp` | POST | `backend/auth/otpHandler.js` (`verify`) | Revocation-checked Firebase bearer token | Firebase Admin variables, `EMAIL_OTP_HASH_SECRET` | `services/emailVerification.js` | Render implemented; Vercel fallback active |
 | `/api/verification/verify-face` | POST | `backend/verification/faceVerification.js` | Opaque session; backend controls state | Firebase Admin variables, `DEEPFACE_API_URL`, `DEEPFACE_API_KEY` | `services/faceVerification.js` | Render implemented; Vercel fallback active |
-| `/api/verification/registration-face` | POST | `backend/verification/registrationFaceHandler.js` | Opaque session and server-issued challenge; fail closed | Firebase Admin variables, `DEEPFACE_API_URL`, `DEEPFACE_API_KEY` | `services/faceVerification.js` | Render implemented; Vercel fallback active |
+| `/api/verification/registration-face` | POST | `backend/verification/registrationFaceHandler.js` | Opaque session and server-issued challenge; `web-complete` remains backend-verified and fail closed | Firebase Admin variables, `DEEPFACE_API_URL`, `DEEPFACE_API_KEY` | `services/faceVerification.js` | Render implemented; Vercel fallback active |
 
 Firebase Admin variables means `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, and
 `FIREBASE_PRIVATE_KEY`. Gmail variables means `GMAIL_USER` and

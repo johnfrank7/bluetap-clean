@@ -28,7 +28,7 @@ All API endpoints accept `OPTIONS` and otherwise require `POST`, except `/health
 | `POST /api/auth/request-email-otp` | Revocation-checked Firebase bearer token | Firebase Admin, Firestore, Gmail SMTP, HMAC |
 | `POST /api/auth/verify-email-otp` | Revocation-checked Firebase bearer token | Firebase Admin/Auth, Firestore, HMAC |
 | `POST /api/verification/verify-face` | Opaque registration session ID | Firebase Admin, protected DeepFace service |
-| `POST /api/verification/registration-face` | Opaque session and server-issued challenge | Firebase Admin, protected DeepFace service, liveness boundary |
+| `POST /api/verification/registration-face` | Opaque session and server-issued challenge; web camera or native challenge completion | Firebase Admin, protected DeepFace service |
 
 ## Render environment
 
@@ -120,12 +120,13 @@ personal details and server-owned face-verification/terms state, not the plainte
 personal details or credentials. The former public start placeholder now fails closed.
 The server-side adapter at `POST /api/verification/verify-face` owns pairwise results;
 see [FACE_VERIFICATION.md](../verification/FACE_VERIFICATION.md) for the contract and remaining
-liveness/storage work. Signup uses `/api/verification/registration-face` and cannot
-continue without a detector-validated challenge and successful unique enrollment.
+liveness/storage work. Web signup uses the `web-complete` action on
+`/api/verification/registration-face`; native signup retains its detector-validated
+challenge. Neither flow can continue without backend-confirmed unique enrollment.
 
 The OTP request requires trusted face status `verified`, provider verification,
-liveness true, duplicate clear, an enrollment reference, and server-recorded
-Terms/Privacy acceptance. Signup uses
+a backend-approved capture gate, duplicate clear, an enrollment reference, and
+server-recorded Terms/Privacy acceptance. Signup uses
 `POST /api/auth/request-registration-otp` with the email, username, and session ID.
 No Auth account or `users` profile is created at this point. Private pending OTP
 records share the locked-down `emailOtpVerifications` collection, keyed by an HMAC

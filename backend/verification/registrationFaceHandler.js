@@ -18,9 +18,10 @@ function createRegistrationFaceHandler(getService = () => createRegistrationFace
         if (Buffer.byteLength(body) > 4250000) throw new OtpError(413, 'invalid-image-size', 'Face images are too large.');
         try { body = JSON.parse(body); } catch { throw new OtpError(400, 'invalid-request', 'Invalid request.'); }
       }
-      if (!['begin', 'evaluate', 'complete'].includes(body?.action)) throw new OtpError(400, 'invalid-request', 'Invalid face verification action.');
+      if (!['begin', 'evaluate', 'complete', 'web-complete'].includes(body?.action)) throw new OtpError(400, 'invalid-request', 'Invalid face verification action.');
       const service = getService();
-      const result = body.action === 'begin' ? await service.begin(body.registrationSessionId) : await service[body.action](body, controller.signal);
+      const action = body.action === 'web-complete' ? 'webComplete' : body.action;
+      const result = action === 'begin' ? await service.begin(body.registrationSessionId) : await service[action](body, controller.signal);
       return res.status(200).json(result);
     } catch (error) {
       const known = error instanceof OtpError;

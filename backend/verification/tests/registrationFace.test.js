@@ -28,6 +28,7 @@ function fixture(options = {}) {
     begin: async () => { challenge = await service.begin(id); return challenge; },
     evaluate: (extra = {}) => service.evaluate({ registrationSessionId: id, challengeId: challenge.challengeId, frames: [image, image, image], ...extra }),
     complete: (extra = {}) => service.complete({ registrationSessionId: id, challengeId: challenge.challengeId, referenceImage: image, image, ...extra }),
+    webComplete: (extra = {}) => service.webComplete({ registrationSessionId: id, challengeId: challenge.challengeId, referenceImage: image, image, ...extra }),
   };
 }
 test('production detector stays unavailable; client liveness fields cannot grant a pass', async () => {
@@ -38,6 +39,42 @@ test('production detector stays unavailable; client liveness fields cannot grant
   await assert.rejects(f.evaluate({ passed: true, livenessPassed: true }), (e) => e.reason === 'liveness-unavailable');
   await assert.rejects(f.complete(), (e) => e.reason === 'face-challenge-expired');
   assert.equal(f.calls.length, 0);
+});
+test('web capture uses trusted pair verification and enrollment without the native detector', async () => {
+  const f = fixture({ productionDetector: true });
+  await f.begin();
+  const result = await f.webComplete({ faceVerification: { status: 'verified', livenessPassed: true } });
+  assert.equal(result.faceVerification.status, 'verified');
+  assert.equal(result.faceVerification.duplicateCheck, 'clear');
+  assert.deepEqual(f.calls.map((call) => call.path), ['/ready', '/verify-face', '/check-duplicate', '/enroll-face']);
+  assert.equal(f.data().faceVerification.verificationMode, 'web-camera-capture');
+  assert.equal(f.data().faceVerification.providerVerified, true);
+  assert.equal(JSON.stringify([...f.records]).includes('base64'), false);
+});
+test('web capture fails closed for missing challenge, expired session, rejected match, and duplicates', async () => {
+  const missing = fixture({ productionDetector: true });
+  await assert.rejects(missing.service.webComplete({ registrationSessionId: id, challengeId: 'forged', referenceImage: image, image }), (error) => error.reason === 'face-challenge-expired');
+
+  const expired = fixture({ productionDetector: true });
+  await expired.begin(); expired.advance(3600001);
+  await assert.rejects(expired.webComplete(), (error) => error.reason === 'registration-session-expired');
+
+  const rejected = fixture({ productionDetector: true, '/verify-face': { verified: false } });
+  await rejected.begin();
+  assert.equal((await rejected.webComplete()).faceVerification.status, 'failed');
+
+  const duplicate = fixture({ productionDetector: true, '/check-duplicate': { duplicateDetected: true, reviewRequired: true, distance: 0.1, threshold: 0.637 } });
+  await duplicate.begin();
+  assert.equal((await duplicate.webComplete()).faceVerification.status, 'review_required');
+
+  const invalidImage = fixture({ productionDetector: true });
+  await invalidImage.begin();
+  await assert.rejects(invalidImage.webComplete({ image: 'not-an-image' }), /JPEG or PNG/);
+
+  const unavailable = fixture({ productionDetector: true, '/ready': new Error('timeout') });
+  await unavailable.begin();
+  await assert.rejects(unavailable.webComplete());
+  assert.equal(unavailable.data().faceVerification.status, 'unverified');
 });
 test('no face, multiple faces, incomplete motion or broken continuity block enrollment', async () => {
   for (const verdict of [{ passed: true, faceCount: 0, continuousIdentity: true }, { passed: true, faceCount: 2, continuousIdentity: true }, { passed: false, faceCount: 1, continuousIdentity: true }, { passed: true, faceCount: 1, continuousIdentity: false }]) {

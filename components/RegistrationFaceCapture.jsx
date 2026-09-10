@@ -3,8 +3,12 @@ import { ActivityIndicator, AppState, Linking, Platform, StyleSheet, Text, Touch
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { beginRegistrationFace, evaluateRegistrationChallenge, completeRegistrationFace } from '../services/faceVerification';
 import { nativeChallengeAvailable, runNativeFaceChallenge } from '../services/nativeFaceChallenge';
+import WebRegistrationFaceCapture from './WebRegistrationFaceCapture';
+
+const { getRegistrationFaceCaptureMode, isTrustedRegistrationFaceVerification } = require('../services/webFaceCaptureCore');
 
 export default function RegistrationFaceCapture({ registrationSessionId, verification, onResult }) {
+  const captureMode = getRegistrationFaceCaptureMode(Platform.OS);
   const [permission, requestPermission, getPermission] = useCameraPermissions();
   const [state, setState] = React.useState('ready');
   const [message, setMessage] = React.useState('');
@@ -18,7 +22,7 @@ export default function RegistrationFaceCapture({ registrationSessionId, verific
   const busy = React.useRef(false);
   const mounted = React.useRef(true);
   const permissionPending = React.useRef(false);
-  const nativeReady = Platform.OS !== 'web' && nativeChallengeAvailable();
+  const nativeReady = captureMode === 'native' && nativeChallengeAvailable();
   const canAnalyze = nativeReady && !!challenge?.challengeType;
   React.useEffect(() => {
     mounted.current = true;
@@ -95,9 +99,9 @@ export default function RegistrationFaceCapture({ registrationSessionId, verific
     } catch (error) { if (active(attempt)) { setState('failed'); setMessage(error.message); } }
     finally { if (active(attempt)) busy.current = false; }
   };
-  if (verification.status === 'verified' && verification.duplicateCheck === 'clear' && verification.livenessPassed === true) return <View style={styles.stack}><View style={[styles.box, styles.successPanel]}><View style={[styles.icon, styles.successIcon]}><Text style={styles.successMark}>✓</Text></View><Text style={styles.title}>Identity verified</Text><Text style={styles.copy}>Your face verification was completed successfully.</Text></View><PrivacyNote /></View>;
+  if (captureMode === 'browser') return <WebRegistrationFaceCapture registrationSessionId={registrationSessionId} verification={verification} onResult={onResult} />;
+  if (isTrustedRegistrationFaceVerification(verification)) return <View style={styles.stack}><View style={[styles.box, styles.successPanel]}><View style={[styles.icon, styles.successIcon]}><Text style={styles.successMark}>✓</Text></View><Text style={styles.title}>Identity verified</Text><Text style={styles.copy}>Your face verification was completed successfully.</Text></View><PrivacyNote /></View>;
   if (verification.status === 'review_required') return <View style={styles.stack}><View style={[styles.box, styles.reviewPanel]}><View style={[styles.icon, styles.warningIcon]}><Text style={styles.warningMark}>!</Text></View><Text style={styles.title}>Verification needs review</Text><Text style={styles.copy}>We found a possible existing registration.</Text></View><PrivacyNote /></View>;
-  if (Platform.OS === 'web') return <View style={styles.stack}><View style={styles.box}><Text style={styles.title}>Continue on mobile</Text><Text style={styles.copy}>Face verification is currently available on the BlueTap mobile app.</Text><Text style={styles.copy}>Use a supported Android or iOS build to complete the face challenge. Registration can continue only after verification succeeds.</Text></View><PrivacyNote /></View>;
   const cameraVisible = state === 'camera' || state === 'challenge';
   return <View style={styles.stack}><View style={[styles.box, state === 'failed' && styles.failedPanel]}>
     {!cameraVisible && <View style={[styles.icon, state === 'failed' && styles.warningIcon]}>

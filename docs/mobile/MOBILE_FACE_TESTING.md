@@ -113,16 +113,16 @@ callbacks; normal iOS permission-sheet inactivity is handled separately.
 | Timeout / cancellation / background | Attempt stops; no client verification write |
 | Move away during final capture | Final-photo validation fails; retry required |
 | Backend unavailable | Safe error; Continue remains disabled |
-| Web | Mobile-app notice; no camera/face calls; Step 3 stays blocked |
+| Web | Browser camera flow is used; it requires HTTPS or localhost and backend approval before Step 3 continues |
 
 ## Critical remaining boundary
 
-The server's trusted liveness evaluator is still unavailable. Native motion is
-prototype-grade local evidence, not remotely verifiable proof or presentation-
-attack protection. After local pass the final photo is captured, but the existing
-server evaluation must approve the challenge before that photo is sent to final
-duplicate/enrollment processing. **Expected current device result: local motion
-can finish, server confirmation stops registration, and Continue stays disabled.**
+The server's trusted native liveness evaluator is still unavailable. Native motion
+remains prototype-grade local evidence, not remotely verifiable proof or
+presentation-attack protection. The current web-first capstone flow uses browser
+captures plus backend pair verification, duplicate search, and enrollment instead.
+It can proceed only after the backend returns a clear result, but it must not be
+described as production-grade liveness.
 
 Do not replace this with client `livenessPassed:true`. Completion needs trusted
 server-evaluated evidence or a verifiable provider proof bound to the capture and
@@ -132,14 +132,13 @@ in [FACE_VERIFICATION.md](../verification/FACE_VERIFICATION.md).
 
 ## Checks performed here
 
-60 Node tests and all 17 Expo Doctor checks passed. `expo-image` 3.0.11 and
+65 Node tests, all 17 Expo Doctor checks, and Expo web/Android/iOS bundle exports passed. `expo-image` 3.0.11 and
 `expo-keep-awake` 15.0.8 are pinned to SDK 54 versions because ML Kit core declares
 broad Expo dependencies. Expo config introspection passed for camera permissions.
 Native autolinking resolves the ML Kit modules on Android/iOS. Tests cover frame quality, motion sequencing,
 final-photo rejection, cache cleanup, cancellation and backend failure. Native
 runner tests use mocked ML Kit/camera outputs; they do not measure detector accuracy.
-Expo web/Android/iOS bundle exports pass. A headless browser check confirms the
-mobile-only notice, no mounted camera/face API calls, and disabled Continue.
+No physical browser camera test was performed in this workspace.
 
 No physical-device or signed native binary test was possible here: this Windows
 workspace has no Android SDK, and iOS compilation requires macOS/Xcode. Remaining

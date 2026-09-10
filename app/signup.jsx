@@ -16,6 +16,8 @@ import { acceptRegistrationTerms, createRegistrationSession } from '../services/
 
 import RegistrationFaceCapture from '../components/RegistrationFaceCapture';
 
+const { isTrustedRegistrationFaceVerification } = require('../services/webFaceCaptureCore');
+
 const BARANGAYS = ['Awihao', 'Bagakay', 'Bato', 'Biga', 'Bulongan', 'Bunga', 'Cabitoonan', 'Calongcalong', 'Cambang-ug', 'Camp 8', 'Canlumampao', 'Cantabaco', 'Capitan Claudio', 'Carmen', 'Daanglungsod', 'Don Andres Soriano', 'Dumlog', 'Gen. Climaco', 'Ibo', 'Ilihan', 'Juan Climaco, Sr.', 'Landahan', 'Loay', 'Luray II', 'Matab-ang', 'Media Once', 'Pangamihan', 'Poblacion', 'Poog', 'Putingbato', 'Sagay', 'Sam-ang', 'Sangi', 'Santo Niño', 'Subayon', 'Talavera', 'Tubod', 'Tungkay'];
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PHONE = /^9\d{9}$/;
@@ -86,7 +88,7 @@ export default function SignupPage() {
   const retrySeconds = Math.max(0, Math.ceil((retryAt - now) / 1000));
   const canContinue = step === 1 ? !!form.role
     : step === 2 ? !!form.firstName.trim() && !!form.lastName.trim() && PHONE.test(form.phone) && !!form.barangay && !!form.address.trim()
-      : step === 3 ? (faceVerification.status === 'verified') && faceVerification.duplicateCheck === 'clear' && faceVerification.livenessPassed === true
+      : step === 3 ? isTrustedRegistrationFaceVerification(faceVerification)
         : !validateUsername(form.username) && EMAIL.test(form.email.trim()) && form.password.length >= 8 && form.password === form.confirmPassword && usernameState.available === true && termsAccepted;
 
   React.useEffect(() => {
@@ -159,7 +161,7 @@ export default function SignupPage() {
     submitting.current = true;
     setLoading(true);
     try {
-      if (!registrationSessionId || !(faceVerification.status === 'verified') || faceVerification.duplicateCheck !== 'clear' || faceVerification.livenessPassed !== true) {
+      if (!registrationSessionId || !isTrustedRegistrationFaceVerification(faceVerification)) {
         setNotice({ title: 'Identity verification required', message: 'Complete identity verification before continuing.' });
         return;
       }

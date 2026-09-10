@@ -1,47 +1,55 @@
 # Registration face verification
 
 Current Android/iOS device instructions and framing checks:
-[MOBILE_FACE_TESTING.md](../mobile/MOBILE_FACE_TESTING.md). Web now displays a mobile-only
-notice and does not start camera capture or call the face endpoints.
+[MOBILE_FACE_TESTING.md](../mobile/MOBILE_FACE_TESTING.md). Web is the primary
+capstone registration flow: it opens the browser's front-facing camera, captures
+two short-interval JPEG frames, and sends them only to the BlueTap backend.
 
 Native continuation: [NATIVE_FACE_CHALLENGE.md](NATIVE_FACE_CHALLENGE.md) documents
 the installed SDK-54-compatible ML Kit detector, on-device head-turn evaluation,
-disabled blink sampling, and custom-build requirements. Native local motion can
-now be evaluated; trusted server-side liveness confirmation is still unavailable.
-The details below describe the existing backend/web integration.
+disabled blink sampling, and custom-build requirements. Android and iOS retain
+that native-only implementation for future development.
 
-Status: camera/challenge orchestration and the source-matched Render adapter are
-implemented. **Liveness detection is not implemented. Production registration
-remains blocked.** No timer, button, client status, or pairwise result can bypass it.
+Status: web camera capture, server-side pair verification, duplicate search, and
+enrollment are implemented. The browser cannot set its session to verified; only
+the BlueTap backend can update it after its protected face-service calls succeed.
+This is a capstone capture check, not production-grade presentation-attack or
+active liveness detection.
 
 ## Frontend and challenge flow
 
-Expo SDK 54 `expo-camera` supplies CameraView and camera permissions on web,
-Android, and iOS. Expo's existing file-system dependency is declared directly so
-native temporary capture files can be deleted. Camera preview was tested in
-headless Edge with a simulated camera; physical Android/iOS cameras still need
-manual testing. Native builds must be rebuilt for the camera config plugin.
-Web camera use requires a secure context (HTTPS or localhost).
+On web, `WebRegistrationFaceCapture.web.jsx` uses
+`navigator.mediaDevices.getUserMedia` with a user-facing camera preference. It
+requests permission only after the user starts the check, shows a live preview
+with an oval guide, stops all media tracks on cancel, unmount, and capture, and
+works in a secure context (HTTPS or localhost). Camera-denied, unavailable, and
+unsupported-browser states stay blocked with a retry message.
 
-`RegistrationFaceCapture` mounts the front camera only during capture, handles
-permission denial/camera errors, and unmounts on cancel/back/background. It never
-loads a gallery photo. A server-issued UUID challenge randomly requests a left or
-right head turn and expires after two minutes. Three evidence frames represent
-neutral, requested head turn, and return to neutral. Timing only spaces frames;
-a trusted detector must evaluate motion, exactly one face, continuous identity,
-and replay/spoof resistance. Three frames may be insufficient for a robust detector;
-the evidence format must be adapted and validated with the chosen detector.
+Expo Camera and the native ML Kit flow remain in `RegistrationFaceCapture.jsx`
+for Android and iOS. Native builds must be rebuilt for the camera config plugin.
 
-`backend/verification/livenessDetector.js` is explicitly unavailable and throws 503. It has no
-client override or environment switch that can manufacture success. A real
-server-side detector must replace this boundary and honor the abort signal.
-There is no native ML Kit detector in the app and SFace/YuNet is not liveness.
-Current UI allows camera positioning but disables the challenge when unavailable.
+The web component waits for a short stable preview, captures two compressed JPEG
+frames about 700 ms apart, removes the stream, and calls the server. It does not
+use gallery input or browser storage. The oval and stable hold are positioning aids;
+the browser does not claim to detect face count, centering, or spoofing. The
+protected face service validates usable images and performs the pair and duplicate
+checks before enrollment.
 
-After a trusted challenge pass, the app captures the final clear photo. The server
-checks its pairwise match against the last detector-evaluated neutral frame. A
-SHA-256 hash binds that reference to the issued challenge without storing its image.
-Then it searches for duplicates and enrolls only a clear result.
+Native uses the existing server-issued left/right challenge. Its three evidence
+frames represent neutral, requested head turn, and return to neutral. That native
+path is unchanged and still requires a trusted detector.
+
+`backend/verification/livenessDetector.js` remains explicitly unavailable. It has
+no client override or environment switch that can manufacture a native challenge
+pass. SFace/YuNet pair matching and duplicate search are not active liveness.
+The web capture route is therefore documented as a capstone identity/duplicate
+check, not proof against presentation attacks.
+
+After a native challenge pass, the server binds the final image to the detector
+reference with a SHA-256 hash. The web route instead accepts two fresh browser
+captures while the server-issued session challenge is in `issued` state. Both paths
+perform the same protected pair check, duplicate search, and enrollment before a
+clear session can proceed.
 
 ## BlueTap backend endpoints and trust
 
@@ -53,6 +61,10 @@ Then it searches for duplicates and enrolls only a clear result.
   Only the server detector can move the challenge from issued to passed.
 * `action: complete`, session ID, challenge ID, `referenceImage`, `image`: binds
   the last challenge frame to the final capture, searches, then enrolls.
+* `action: web-complete`, session ID, challenge ID, `referenceImage`, `image`:
+  accepts two browser camera JPEG data URLs for the issued session challenge, then
+  performs the same server-side match, duplicate search, and enrollment. It does
+  not accept client verification fields.
 
 Images are bounded to 1 MiB decoded each with signature/base64 validation; Render
 fully decodes them. Requests have a 40-second server deadline, 55-second client
@@ -94,11 +106,14 @@ repeats duplicate search itself, so a new match at enrollment also requires revi
 
 ## Metadata, storage, and final Firebase binding
 
-Only clear duplicate search plus enrollment success after trusted liveness sets
-`status:verified`, a Firestore server timestamp, `duplicateCheck:clear`,
-`livenessPassed:true`, the enrollment reference, `model:SFace`, and
-`detectorBackend:yunet`. Possible matches store review_required/flagged. Liveness
-failure stores failed/liveness_failed. Upstream unavailability leaves unverified.
+Only clear duplicate search plus enrollment success sets `status:verified`, a
+Firestore server timestamp, `duplicateCheck:clear`, the enrollment reference,
+`model:SFace`, and `detectorBackend:yunet`. The existing `livenessPassed` field
+also remains true for a server-approved `web-camera-capture` session so the
+existing registration gate remains compatible; it means the capture workflow was
+approved by the backend, not that active presentation-attack liveness was proven.
+Possible matches store review_required/flagged. Upstream unavailability leaves the
+session unverified.
 
 No raw image, base64, vector, or embedding is stored in Firestore. Photos exist
 in request memory. Expo Camera creates a native cache file; capture deletes it in
@@ -121,7 +136,8 @@ is present here, so deployed Firebase rules were not verified.
 ## Remaining face-service work before enabling registration
 
 1. Implement and validate a real active liveness detector with replay resistance;
-   the current runtime explicitly has ANTI_SPOOFING=False.
+   the current runtime explicitly has ANTI_SPOOFING=False. This is required before
+   calling the web capture flow production-grade biometric verification.
 2. Make embedding storage durable. The source hardcodes a relative JSON file and
    rewrites it directly; no persistent-volume configuration was found. Persistence
    across Render restarts/deploys is not established.
@@ -140,39 +156,21 @@ is present here, so deployed Firebase rules were not verified.
 
 ## Verification
 
-Server tests use injected detector/Render fixtures to cover successful sequencing,
-no/multiple faces, failed challenges, duplicate review, enrollment races, outages,
-uncertain enrollment, expiry/replay, reference substitution, and safe final UID
-binding. They do not establish actual liveness accuracy or live biometric success.
+Server tests use injected detector/Render fixtures to cover native challenge
+sequencing, web capture completion, rejected pairs, duplicate review, enrollment
+races, outages, expiry/replay, and safe final UID binding. They do not establish
+browser hardware compatibility, actual liveness accuracy, or live biometric success.
 
-The headless Edge test uses fake camera media and mocked session/challenge routes:
-video opens, unavailable liveness disables challenge and Continue, cancel closes
-camera, and reload returns to unverified signup without enrollment calls. A second
-browser test captured real JPEGs from simulated camera media, mocked a trusted
-challenge pass, checked final capture/enrollment request ordering, and reached
-Credentials after mocked enrollment success. This is not a real detector test. Expo
-web, Android, and iOS bundle exports pass; physical-device permission/capture tests
-remain pending. No live biometric uploads or enrollment mutations were performed.
-There is no lint script configured. Frontend/bundle scans must remain free of
-Render secrets and direct Render URLs.
+No physical browser-camera, Android, or iOS camera test was performed in this
+workspace. Expo web, Android, and iOS bundle exports passed in this workspace.
+Frontend/bundle scans must remain free of Render secrets and direct face-service URLs.
 
-Current checks: all 60 backend tests pass; both compatibility face route modules load; web,
-Android and iOS exports passed; both simulated-camera browser checks passed;
-frontend and generated-bundle scans found no Render URL or server-variable names.
+## Relevant implementation files
 
-## Files changed in this continuation
-
-* Camera UI/config: `app/signup.jsx`, `components/RegistrationFaceCapture.jsx`,
-  `app.json`, `package.json`, `package-lock.json`.
-* Client flow: `services/faceVerification.js`, `services/cameraCapture.js`,
-  `services/faceCaptureFlow.js`.
-* Backend: `api/verification/registration-face.js`,
-  `backend/verification/registrationFace.js`,
-  `backend/verification/registrationFaceHandler.js`,
-  `backend/verification/renderFaceClient.js`,
-  `backend/verification/livenessDetector.js`,
-  `backend/registration/registrationSession.js`, and
-  `backend/registration/registration.js`.
-* Verification/docs: `backend/verification/tests/registrationFace.test.js`,
-  `backend/registration/tests/registration.test.js`, `docs/backend/README.md`,
-  and `docs/verification/FACE_VERIFICATION.md`.
+* Web camera UI: `components/WebRegistrationFaceCapture.web.jsx`
+* Shared platform/gate helpers: `services/webFaceCaptureCore.js`
+* Native camera and ML Kit flow: `components/RegistrationFaceCapture.jsx`,
+  `services/nativeFaceChallenge.native.js`
+* Client endpoint calls: `services/faceVerification.js`
+* Trusted server completion: `backend/verification/registrationFace.js` and
+  `backend/verification/registrationFaceHandler.js`
