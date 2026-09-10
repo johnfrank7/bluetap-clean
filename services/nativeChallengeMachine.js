@@ -7,7 +7,24 @@ const CHALLENGE_CONFIG = Object.freeze({
   maxChallengeMs: 60000, eyeOpen: 0.8, eyeClosed: 0.2,
   // Still-photo analysis cannot guarantee capture of a normal brief blink.
   blinkEnabled: false, leftYawSign: -1,
+  minimumFaceWidth: 0.20, maximumFaceWidth: 0.75, imageEdgeMargin: 0.04,
+  maximumCenterOffset: 0.18,
 });
+
+function assessFaceFrame(faces, dimensions, config = CHALLENGE_CONFIG) {
+  if (!Array.isArray(faces) || faces.length === 0) return 'no-face';
+  if (faces.length !== 1) return 'multiple-faces';
+  const width = dimensions?.width, height = dimensions?.height;
+  const { origin, size } = faces[0].frame || {};
+  const x = origin?.x, y = origin?.y, w = size?.x, h = size?.y;
+  if (![width, height, x, y, w, h].every(Number.isFinite) || Math.min(width, height, w, h) <= 0) return 'invalid-frame';
+  if (w / width < config.minimumFaceWidth) return 'too-far';
+  if (w / width > config.maximumFaceWidth) return 'too-close';
+  const margin = config.imageEdgeMargin;
+  if (x < width * margin || y < height * margin || x + w > width * (1 - margin) || y + h > height * (1 - margin)) return 'outside-frame';
+  if (Math.abs((x + w / 2) / width - 0.5) > config.maximumCenterOffset || Math.abs((y + h / 2) / height - 0.5) > config.maximumCenterOffset) return 'off-center';
+  return null;
+}
 
 function createChallengeMachine(type, overrides = {}) {
   const config = { ...CHALLENGE_CONFIG, ...overrides };
@@ -54,4 +71,4 @@ function createChallengeMachine(type, overrides = {}) {
     },
   };
 }
-module.exports = { CHALLENGE_CONFIG, createChallengeMachine };
+module.exports = { CHALLENGE_CONFIG, createChallengeMachine, assessFaceFrame };

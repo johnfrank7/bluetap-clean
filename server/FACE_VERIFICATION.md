@@ -1,5 +1,9 @@
 # Registration face verification
 
+Current Android/iOS device instructions and framing checks:
+[MOBILE_FACE_TESTING.md](MOBILE_FACE_TESTING.md). Web now displays a mobile-only
+notice and does not start camera capture or call the face endpoints.
+
 Native continuation: [NATIVE_FACE_CHALLENGE.md](NATIVE_FACE_CHALLENGE.md) documents
 the installed SDK-54-compatible ML Kit detector, on-device head-turn evaluation,
 disabled blink sampling, and custom-build requirements. Native local motion can

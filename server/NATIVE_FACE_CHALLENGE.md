@@ -1,5 +1,10 @@
 # Native challenge validation
 
+For the current custom-development-client setup, permission configuration, framing
+checks and exact device commands, see [MOBILE_FACE_TESTING.md](MOBILE_FACE_TESTING.md).
+The mobile continuation adds expo-dev-client and device build scripts; historical
+inspection notes below describe the setup before that addition.
+
 ## Current implementation and remaining trust boundary
 
 Android/iOS camera snapshots now run through actual on-device Google ML Kit face

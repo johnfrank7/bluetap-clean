@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { createChallengeMachine } = require('../services/nativeChallengeMachine');
+const { createChallengeMachine, assessFaceFrame } = require('../services/nativeChallengeMachine');
 const face = (yaw = 0, extra = {}) => ({ trackingID: 1, headEulerAngleY: yaw, headEulerAngleX: 0, headEulerAngleZ: 0, leftEyeOpenProbability: 0.95, rightEyeOpenProbability: 0.95, ...extra });
 function harness(type, options) {
   const machine = createChallengeMachine(type, options);
@@ -50,4 +50,18 @@ test('blink is disabled in production; opted-in logic needs two bilateral close/
   assert.equal(h.frames(0).challengePassed, true);
   const missing = harness('blink_twice', { blinkEnabled: true });
   assert.equal(missing.frames(0, { leftEyeOpenProbability: null }).reason, 'eyes-unavailable');
+});
+
+test('frame quality rejects missing/multiple faces, distance, clipping and off-center placement', () => {
+  const dimensions = { width: 640, height: 480 };
+  const framed = (x, y, w, h) => [{ ...face(), frame: { origin: { x, y }, size: { x: w, y: h } } }];
+  assert.equal(assessFaceFrame([], dimensions), 'no-face');
+  assert.equal(assessFaceFrame([face(), face()], dimensions), 'multiple-faces');
+  assert.equal(assessFaceFrame([face()], dimensions), 'invalid-frame');
+  assert.equal(assessFaceFrame(framed(280, 180, 80, 100), dimensions), 'too-far');
+  assert.equal(assessFaceFrame(framed(10, 20, 500, 400), dimensions), 'too-close');
+  assert.equal(assessFaceFrame(framed(-10, 100, 240, 280), dimensions), 'outside-frame');
+  assert.equal(assessFaceFrame(framed(40, 100, 200, 280), dimensions), 'off-center');
+  assert.equal(assessFaceFrame(framed(200, 100, 240, 280), dimensions), null);
+  assert.equal(assessFaceFrame(framed(200, 100, 240, 280), { width: 0, height: 480 }), 'invalid-frame');
 });

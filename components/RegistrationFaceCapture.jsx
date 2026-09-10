@@ -2,27 +2,30 @@ import React from 'react';
 import { ActivityIndicator, AppState, Linking, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { beginRegistrationFace, evaluateRegistrationChallenge, completeRegistrationFace } from '../services/faceVerification';
-import { captureFaceImage } from '../services/cameraCapture';
-import { runFaceCaptureFlow } from '../services/faceCaptureFlow';
 import { nativeChallengeAvailable, runNativeFaceChallenge } from '../services/nativeFaceChallenge';
 
 export default function RegistrationFaceCapture({ registrationSessionId, verification, onResult }) {
-  const [permission, requestPermission] = useCameraPermissions();
+  const [permission, requestPermission, getPermission] = useCameraPermissions();
   const [state, setState] = React.useState('ready');
   const [message, setMessage] = React.useState('');
   const [challenge, setChallenge] = React.useState(null);
   const [cameraReady, setCameraReady] = React.useState(false);
   const [pictureSize, setPictureSize] = React.useState(undefined);
   const [instruction, setInstruction] = React.useState('Position your face inside the frame');
+  const [progress, setProgress] = React.useState({ completed: 0, stage: 'neutral', reason: null });
   const camera = React.useRef(null);
   const generation = React.useRef(0);
   const busy = React.useRef(false);
   const mounted = React.useRef(true);
+  const permissionPending = React.useRef(false);
   const nativeReady = Platform.OS !== 'web' && nativeChallengeAvailable();
-  const canAnalyze = Platform.OS === 'web' ? challenge?.detectorAvailable === true : nativeReady && !!challenge?.challengeType;
+  const canAnalyze = nativeReady && !!challenge?.challengeType;
   React.useEffect(() => {
     mounted.current = true;
     const subscription = AppState.addEventListener('change', (value) => {
+      // iOS permission sheets temporarily make the app inactive; they are not
+      // a cancelled capture. Actual backgrounding still invalidates the run.
+      if (value === 'inactive' && permissionPending.current) return;
       if (value !== 'active') { generation.current++; busy.current = false; setState('ready'); setChallenge(null); setCameraReady(false); }
     });
     return () => { mounted.current = false; generation.current++; subscription.remove(); };
@@ -40,12 +43,19 @@ export default function RegistrationFaceCapture({ registrationSessionId, verific
     if (active(attempt)) setCameraReady(true);
   };
   const start = async () => {
+    if (Platform.OS === 'web') return;
     if (busy.current) return;
     busy.current = true;
     const attempt = ++generation.current;
     setMessage(''); setState('opening'); setCameraReady(false);
+    setProgress({ completed: 0, stage: 'neutral', reason: null });
     try {
-      const granted = permission?.granted || (await requestPermission()).granted;
+      let granted;
+      permissionPending.current = true;
+      try {
+        const currentPermission = await getPermission();
+        granted = currentPermission.granted || (currentPermission.canAskAgain && (await requestPermission()).granted);
+      } finally { permissionPending.current = false; }
       if (!active(attempt)) return;
       if (!granted) throw new Error('Camera access is needed for face verification. Allow access in your device or browser settings, then try again.');
       setState('camera');
@@ -68,13 +78,11 @@ export default function RegistrationFaceCapture({ registrationSessionId, verific
     setState('challenge');
     const assertActive = () => { if (!active(attempt)) throw new Error('Capture cancelled.'); };
     try {
-      const runChallenge = Platform.OS === 'web' ? runFaceCaptureFlow : runNativeFaceChallenge;
-      const result = await runChallenge({
+      const result = await runNativeFaceChallenge({
         challenge, assertActive,
         camera: () => camera.current,
-        capture: () => captureFaceImage(camera.current),
-        pause: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
         showInstruction: (text) => { assertActive(); setInstruction(text); },
+        onProgress: (value) => { assertActive(); setProgress(value); },
         evaluate: (frames) => evaluateRegistrationChallenge(registrationSessionId, challenge.challengeId, frames),
         complete: (reference, image) => completeRegistrationFace(registrationSessionId, challenge.challengeId, reference, image),
       });
@@ -89,6 +97,7 @@ export default function RegistrationFaceCapture({ registrationSessionId, verific
   };
   if (verification.status === 'verified' && verification.duplicateCheck === 'clear' && verification.livenessPassed === true) return <View style={styles.stack}><View style={[styles.box, styles.successPanel]}><View style={[styles.icon, styles.successIcon]}><Text style={styles.successMark}>✓</Text></View><Text style={styles.title}>Identity verified</Text><Text style={styles.copy}>Your face verification was completed successfully.</Text></View><PrivacyNote /></View>;
   if (verification.status === 'review_required') return <View style={styles.stack}><View style={[styles.box, styles.reviewPanel]}><View style={[styles.icon, styles.warningIcon]}><Text style={styles.warningMark}>!</Text></View><Text style={styles.title}>Verification needs review</Text><Text style={styles.copy}>We found a possible existing registration.</Text></View><PrivacyNote /></View>;
+  if (Platform.OS === 'web') return <View style={styles.stack}><View style={styles.box}><Text style={styles.title}>Continue on mobile</Text><Text style={styles.copy}>Face verification is currently available on the BlueTap mobile app.</Text><Text style={styles.copy}>Use a supported Android or iOS build to complete the face challenge. Registration can continue only after verification succeeds.</Text></View><PrivacyNote /></View>;
   const cameraVisible = state === 'camera' || state === 'challenge';
   return <View style={styles.stack}><View style={[styles.box, state === 'failed' && styles.failedPanel]}>
     {!cameraVisible && <View style={[styles.icon, state === 'failed' && styles.warningIcon]}>
@@ -104,10 +113,13 @@ export default function RegistrationFaceCapture({ registrationSessionId, verific
         <CameraView ref={camera} style={StyleSheet.absoluteFill} facing="front" mode="picture" mute pictureSize={pictureSize}
           onCameraReady={cameraOpened}
           onMountError={() => { generation.current++; busy.current = false; setCameraReady(false); setState('failed'); setMessage('The camera could not open. Check camera access and try again.'); }} />
-        <View pointerEvents="none" style={styles.frame} />
+        <View pointerEvents="none" style={[styles.frame, state === 'challenge' && progress.reason && styles.frameWarning, state === 'challenge' && !progress.reason && progress.completed > 0 && styles.frameProgress]} />
       </View>
       <Text accessibilityLiveRegion="polite" style={styles.copy}>{state === 'challenge' ? instruction : challenge ? `Follow the instruction: ${challenge.instruction}` : 'Preparing your challenge...'}</Text>
-      {state === 'challenge' ? <View style={styles.processing}><ActivityIndicator color="#187BCD" /><Text style={styles.processingText}>Checking your identity...</Text></View> : <TouchableOpacity style={[styles.button, (!cameraReady || !canAnalyze) && styles.disabled]} disabled={!cameraReady || !canAnalyze} onPress={perform}><Text style={styles.buttonText}>Begin challenge</Text></TouchableOpacity>}
+      {state === 'challenge' && <View style={styles.progressRow} accessibilityLabel={`${progress.completed} of 3 motion steps completed`}>
+        {['Look forward', 'Turn', 'Return'].map((label, index) => <View key={label} style={styles.progressStep}><View style={[styles.progressSegment, progress.completed > index && styles.progressSegmentDone]} /><Text style={styles.progressLabel}>{label}</Text></View>)}
+      </View>}
+      {state === 'challenge' ? <View style={styles.processing}><ActivityIndicator color="#187BCD" /><Text style={styles.processingText}>{progress.stage === 'processing' ? 'Checking your identity...' : 'Follow the motion guide'}</Text></View> : <TouchableOpacity style={[styles.button, (!cameraReady || !canAnalyze) && styles.disabled]} disabled={!cameraReady || !canAnalyze} onPress={perform}><Text style={styles.buttonText}>Begin challenge</Text></TouchableOpacity>}
       <TouchableOpacity onPress={cancel} style={styles.secondary}><Text style={styles.secondaryText}>Cancel</Text></TouchableOpacity>
     </>}
     {!!message && <Text accessibilityLiveRegion="polite" style={styles.notice}>{message}</Text>}
@@ -135,6 +147,9 @@ const styles = StyleSheet.create({
   reviewPanel: { backgroundColor: '#FFFCF5', borderColor: '#F0E5C9' }, failedPanel: { borderColor: '#EDDCCF' }, warningIcon: { backgroundColor: '#FCEDD8' }, warningMark: { color: '#9A6525', fontSize: 25, fontWeight: '600' },
   preview: { width: '100%', maxWidth: 300, aspectRatio: 3 / 4, borderRadius: 16, overflow: 'hidden', backgroundColor: '#12304A', alignItems: 'center', justifyContent: 'center' },
   frame: { width: '70%', height: '70%', borderRadius: 160, borderWidth: 3, borderColor: '#FFF' },
+  frameWarning: { borderColor: '#F7C76B' }, frameProgress: { borderColor: '#71D6B0' },
+  progressRow: { width: '100%', flexDirection: 'row', gap: 8 }, progressStep: { flex: 1, gap: 4 },
+  progressSegment: { height: 4, borderRadius: 2, backgroundColor: '#DDE8F1' }, progressSegmentDone: { backgroundColor: '#187BCD' }, progressLabel: { color: '#526E84', fontSize: 11, textAlign: 'center' },
   button: { width: '100%', minHeight: 50, paddingHorizontal: 16, paddingVertical: 12, justifyContent: 'center', alignItems: 'center', backgroundColor: '#187BCD', borderRadius: 11, marginTop: 4 },
   buttonText: { color: '#FFF', fontSize: 15, fontWeight: '600', textAlign: 'center' }, disabled: { opacity: 0.5 },
   processing: { flexDirection: 'row', gap: 12, alignItems: 'center', justifyContent: 'center', flexWrap: 'wrap' }, processingText: { color: '#315F82', fontSize: 14 },
