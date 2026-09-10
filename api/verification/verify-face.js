@@ -1,3 +1,3 @@
-const { createFaceVerificationHandler } = require('../../server/faceVerification');
+const { createFaceVerificationHandler } = require('../../backend/verification/faceVerification');
 module.exports = createFaceVerificationHandler();
 module.exports.config = { maxDuration: 60 };

@@ -1,7 +1,7 @@
 # BlueTap email OTP Functions
 
 **Legacy implementation, inactive in the app.** OTP now runs on Vercel under
-`api/auth/`. See `server/README.md` for the current setup. Do not deploy this
+`api/auth/`. See `docs/backend/README.md` for the current setup. Do not deploy this
 Cloud Functions backend for the Spark/Vercel setup. It is retained for reference.
 
 This isolated Firebase Functions backend owns email OTP generation and verification.

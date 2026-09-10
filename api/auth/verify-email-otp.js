@@ -1,2 +1,2 @@
-const { createOtpHandler } = require('../../server/otpHandler');
+const { createOtpHandler } = require('../../backend/auth/otpHandler');
 module.exports = createOtpHandler('verify');

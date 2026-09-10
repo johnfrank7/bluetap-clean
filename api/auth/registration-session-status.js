@@ -1,2 +1,2 @@
-const { createRegistrationSessionHandler } = require('../../server/registrationSessionHandler');
+const { createRegistrationSessionHandler } = require('../../backend/registration/registrationSessionHandler');
 module.exports = createRegistrationSessionHandler('status');

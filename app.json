@@ -15,6 +15,7 @@
     },
     "ios": {
       "supportsTablet": true,
+      "bundleIdentifier": "com.johnfrank7.bluetap",
       "infoPlist": {
         "NSCameraUsageDescription": "Allow BlueTap to use your camera for face verification."
       }
@@ -26,6 +27,7 @@
       },
       "edgeToEdgeEnabled": true,
       "softwareKeyboardLayoutMode": "resize",
+      "package": "com.johnfrank7.bluetap",
       "permissions": [
         "android.permission.CAMERA"
       ],
@@ -47,6 +49,12 @@
           "microphonePermission": false
         }
       ]
-    ]
+    ],
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "47b557e4-cdf2-402f-b143-50fd2cc877b1"
+      }
+    }
   }
 }

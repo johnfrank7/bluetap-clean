@@ -1,2 +1,2 @@
-const { createRegistrationHandler } = require('../../server/registrationHandler');
+const { createRegistrationHandler } = require('../../backend/registration/registrationHandler');
 module.exports = createRegistrationHandler('complete');

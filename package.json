@@ -10,7 +10,8 @@
     "build": "expo export --platform web",
     "dev:mobile": "expo start --dev-client",
     "build:android:device": "expo run:android --device",
-    "build:ios:device": "expo run:ios --device"
+    "build:ios:device": "expo run:ios --device",
+    "test": "node --test backend/*/tests/*.test.js"
   },
   "dependencies": {
     "@infinitered/react-native-mlkit-face-detection": "5.0.0",
