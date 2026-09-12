@@ -1,4 +1,5 @@
 import { callRegistrationApi } from './registrationSession';
+import { rememberPendingFaceEnrollment } from './pendingFaceEnrollment';
 import { doc, getDoc, onSnapshot } from 'firebase/firestore';
 
 import { db } from '../firebase';
@@ -69,12 +70,16 @@ export const beginRegistrationFace = (registrationSessionId) => callRegistration
 export const evaluateRegistrationChallenge = (registrationSessionId, challengeId, frames) => callRegistrationApi(
   '/api/verification/registration-face', { action: 'evaluate', registrationSessionId, challengeId, frames }, 55000
 );
-export const completeRegistrationFace = (registrationSessionId, challengeId, referenceImage, image) => callRegistrationApi(
-  '/api/verification/registration-face', { action: 'complete', registrationSessionId, challengeId, referenceImage, image }, 55000
-);
-export const completeWebRegistrationFace = (registrationSessionId, challengeId, referenceImage, image) => callRegistrationApi(
-  '/api/verification/registration-face', { action: 'web-complete', registrationSessionId, challengeId, referenceImage, image }, 55000
-);
+export const completeRegistrationFace = async (registrationSessionId, challengeId, referenceImage, image) => {
+  const result = await callRegistrationApi('/api/verification/registration-face', { action: 'complete', registrationSessionId, challengeId, referenceImage, image }, 55000);
+  if (result?.faceVerification?.status === 'passed_pending_finalization') rememberPendingFaceEnrollment(registrationSessionId, image);
+  return result;
+};
+export const completeWebRegistrationFace = async (registrationSessionId, challengeId, referenceImage, image) => {
+  const result = await callRegistrationApi('/api/verification/registration-face', { action: 'web-complete', registrationSessionId, challengeId, referenceImage, image }, 55000);
+  if (result?.faceVerification?.status === 'passed_pending_finalization') rememberPendingFaceEnrollment(registrationSessionId, image);
+  return result;
+};
 
 export const getFaceVerificationStatus = async (uid) => {
   if (!uid) return createUnverifiedFaceVerification();

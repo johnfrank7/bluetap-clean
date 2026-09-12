@@ -40,13 +40,13 @@ test('production detector stays unavailable; client liveness fields cannot grant
   await assert.rejects(f.complete(), (e) => e.reason === 'face-challenge-expired');
   assert.equal(f.calls.length, 0);
 });
-test('web capture uses trusted pair verification and enrollment without the native detector', async () => {
+test('web capture performs a temporary trusted check without enrollment', async () => {
   const f = fixture({ productionDetector: true });
   await f.begin();
   const result = await f.webComplete({ faceVerification: { status: 'verified', livenessPassed: true } });
-  assert.equal(result.faceVerification.status, 'verified');
+  assert.equal(result.faceVerification.status, 'passed_pending_finalization');
   assert.equal(result.faceVerification.duplicateCheck, 'clear');
-  assert.deepEqual(f.calls.map((call) => call.path), ['/ready', '/verify-face', '/check-duplicate', '/enroll-face']);
+  assert.deepEqual(f.calls.map((call) => call.path), ['/ready', '/verify-face', '/check-duplicate']);
   assert.equal(f.data().faceVerification.verificationMode, 'web-camera-capture');
   assert.equal(f.data().faceVerification.providerVerified, true);
   assert.equal(JSON.stringify([...f.records]).includes('base64'), false);
@@ -84,13 +84,11 @@ test('no face, multiple faces, incomplete motion or broken continuity block enro
     await assert.rejects(f.complete()); assert.equal(f.calls.length, 0);
   }
 });
-test('trusted challenge, pair binding, clear search, then enrollment verify the session', async () => {
+test('trusted challenge, pair binding, and clear search create only a pending-finalization session', async () => {
   const f = fixture(); await f.begin(); await f.evaluate();
   const result = await f.complete({ subject_id: 'attacker', faceVerification: { status: 'verified' } });
-  assert.equal(result.faceVerification.status, 'verified');
-  assert.deepEqual(f.calls.map((c) => c.path), ['/ready', '/verify-face', '/check-duplicate', '/enroll-face']);
-  assert.equal(f.calls[3].form.get('subject_id'), id);
-  assert.deepEqual([...f.calls[3].form.keys()], ['subject_id', 'image']);
+  assert.equal(result.faceVerification.status, 'passed_pending_finalization');
+  assert.deepEqual(f.calls.map((c) => c.path), ['/ready', '/verify-face', '/check-duplicate']);
   assert.equal(f.data().faceVerification.verificationReference, id);
   assert.equal(f.data().faceVerification.verifiedAt, 'server-timestamp');
   assert.equal(f.data().faceChallenge.state, 'used');
@@ -98,24 +96,20 @@ test('trusted challenge, pair binding, clear search, then enrollment verify the 
   assert.equal(JSON.stringify(result).includes(id), false);
   await assert.rejects(f.complete());
 });
-test('duplicate search and enrollment-time duplicate both require review', async () => {
-  for (const options of [
-    { '/check-duplicate': { duplicateDetected: true, reviewRequired: true, distance: 0.1, threshold: 0.637, subject_id: 'private' } },
-    { '/enroll-face': { enrolled: false, duplicateDetected: true, reviewRequired: true, distance: 0.1, threshold: 0.637 } },
-  ]) {
+test('duplicate search requires review before temporary verification can proceed', async () => {
+  for (const options of [{ '/check-duplicate': { duplicateDetected: true, reviewRequired: true, distance: 0.1, threshold: 0.637, subject_id: 'private' } }]) {
     const f = fixture(options); await f.begin(); await f.evaluate();
     const result = await f.complete();
     assert.equal(result.faceVerification.status, 'review_required');
     assert.equal(JSON.stringify(result).includes('private'), false);
-    if (options['/check-duplicate']) assert.equal(f.calls.length, 3);
+    assert.equal(f.calls.length, 3);
   }
 });
-test('outage/malformed responses fail closed; uncertain enrollment cannot retry silently', async () => {
-  for (const options of [{ '/ready': { ready: false } }, { '/check-duplicate': {} }, { '/enroll-face': new Error('timeout') }]) {
+test('outage and malformed responses fail closed before any enrollment', async () => {
+  for (const options of [{ '/ready': { ready: false } }, { '/check-duplicate': {} }]) {
     const f = fixture(options); await f.begin(); await f.evaluate();
     await assert.rejects(f.complete());
     assert.equal(f.data().faceVerification.status, 'unverified');
-    if (options['/enroll-face']) { f.advance(15000); await assert.rejects(f.begin(), (e) => e.reason === 'face-review-required'); }
   }
 });
 test('challenge expiry, missing evidence and substituted reference cannot self-verify', async () => {

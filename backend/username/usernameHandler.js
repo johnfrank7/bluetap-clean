@@ -55,6 +55,8 @@ function createUsernameHandler(action, getAdmin = getFirebaseAdmin) {
       const expectedUid = registry.data().uid;
       const user = await auth.getUser(expectedUid).catch(() => { throw genericLogin(); });
       if (user.disabled || !user.email) throw genericLogin();
+      const profile = (await db.collection('users').doc(expectedUid).get()).data();
+      if (!profile || profile.onboardingStatus === 'face_enrollment_pending' || profile.registrationCompleted === false) throw genericLogin();
       const apiKey = process.env.FIREBASE_WEB_API_KEY;
       if (!apiKey) throw new Error('Missing Firebase Web API configuration');
       const response = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${encodeURIComponent(apiKey)}`, {

@@ -10,9 +10,10 @@ the installed SDK-54-compatible ML Kit detector, on-device head-turn evaluation,
 disabled blink sampling, and custom-build requirements. Android and iOS retain
 that native-only implementation for future development.
 
-Status: web camera capture, server-side pair verification, duplicate search, and
-enrollment are implemented. The browser cannot set its session to verified; only
-the BlueTap backend can update it after its protected face-service calls succeed.
+Status: web camera capture, server-side pair verification, and duplicate search
+are implemented. Capture sets `passed_pending_finalization`; it creates no Render
+enrollment. The Vercel registration finalizer enrolls only after OTP, Firebase
+Auth, and the user profile succeed.
 This is a capstone capture check, not production-grade presentation-attack or
 active liveness detection.
 
@@ -60,10 +61,10 @@ clear session can proceed.
 * `action: evaluate`, session ID, `challengeId`, `frames`: three JPEG/PNG data URLs.
   Only the server detector can move the challenge from issued to passed.
 * `action: complete`, session ID, challenge ID, `referenceImage`, `image`: binds
-  the last challenge frame to the final capture, searches, then enrolls.
+  the last challenge frame to the final capture and searches finalized faces.
 * `action: web-complete`, session ID, challenge ID, `referenceImage`, `image`:
   accepts two browser camera JPEG data URLs for the issued session challenge, then
-  performs the same server-side match, duplicate search, and enrollment. It does
+  performs the same server-side match and duplicate search. It does
   not accept client verification fields.
 
 Images are bounded to 1 MiB decoded each with signature/base64 validation; Render
@@ -106,8 +107,9 @@ repeats duplicate search itself, so a new match at enrollment also requires revi
 
 ## Metadata, storage, and final Firebase binding
 
-Only clear duplicate search plus enrollment success sets `status:verified`, a
-Firestore server timestamp, `duplicateCheck:clear`, the enrollment reference,
+Only clear duplicate search sets temporary `status:passed_pending_finalization`.
+After OTP and account/profile creation, final enrollment sets `status:verified`,
+a Firestore server timestamp, `duplicateCheck:clear`, the final UID enrollment reference,
 `model:SFace`, and `detectorBackend:yunet`. The existing `livenessPassed` field
 also remains true for a server-approved `web-camera-capture` session so the
 existing registration gate remains compatible; it means the capture workflow was
@@ -122,12 +124,13 @@ file; there is no gallery save or permanent image store. Render closes its spool
 temporary upload files. Dedicated Render storage currently contains embeddings in
 `face-data/embeddings.json`, separate from BlueTap user/session documents.
 
-After OTP, existing account creation revalidates the session and copies only
-allowlisted metadata into users/{uid}, records userUid on the completed session,
-and preserves the session enrollment reference in the user profile. That reference
-is the durable BlueTap-side association. Render has no rebind endpoint, so its
-subject remains the session ID; no invented rebind call is made. Successful signup
-does not request another face check.
+After OTP, account creation revalidates the session, creates a profile marked
+`face_enrollment_pending`, and the trusted Vercel backend enrolls the final
+capture with `subject_id` set to the Firebase UID. Only enrollment success marks
+the profile/session complete. If final enrollment fails, protected access remains
+blocked and the account requires safe operational recovery; it is never presented
+as fully verified. Raw captures remain in process memory only and are never stored
+in Firestore.
 
 Firebase client rules must deny reads/writes to registrationSessions and
 faceServiceLocks (alongside the existing private auth collections). No rules source
@@ -147,8 +150,10 @@ is present here, so deployed Firebase rules were not verified.
    enrollment currently finds its own face as a duplicate before replacement. A
    A hosting timeout after sending enrollment leaves faceEnrollmentPending and blocks
    automatic retries until reconciliation; no success is guessed.
-5. Add abandoned-session enrollment expiry/removal. Signup can be abandoned before
-   OTP, and the current service has no delete/expiry route.
+5. Add a protected list/delete-by-subject endpoint for historical orphan cleanup.
+   New sessions create no Render enrollment before OTP. The dry-run tool
+   `scripts/cleanup-orphaned-faces.js` identifies legacy orphan candidates but
+   deliberately refuses `--apply` until this verified Render contract exists.
 6. Optionally add a server-only reference-to-UID rebind route. None exists now.
 7. Add typed response schemas and HTTP integration tests. Existing Python tests
    cover image processing, model loading, and local embedding storage; they do not

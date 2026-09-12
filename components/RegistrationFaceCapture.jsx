@@ -100,7 +100,7 @@ export default function RegistrationFaceCapture({ registrationSessionId, verific
     finally { if (active(attempt)) busy.current = false; }
   };
   if (captureMode === 'browser') return <WebRegistrationFaceCapture registrationSessionId={registrationSessionId} verification={verification} onResult={onResult} />;
-  if (isTrustedRegistrationFaceVerification(verification)) return <View style={styles.stack}><View style={[styles.box, styles.successPanel]}><View style={[styles.icon, styles.successIcon]}><Text style={styles.successMark}>✓</Text></View><Text style={styles.title}>Identity verified</Text><Text style={styles.copy}>Your face verification was completed successfully.</Text></View><PrivacyNote /></View>;
+  if (isTrustedRegistrationFaceVerification(verification)) return <View style={styles.stack}><View style={[styles.box, styles.successPanel]}><View style={[styles.icon, styles.successIcon]}><Text style={styles.successMark}>✓</Text></View><Text style={styles.title}>Identity check completed</Text><Text style={styles.copy}>Complete email verification to finalize your secure face enrollment.</Text></View><PrivacyNote /></View>;
   if (verification.status === 'review_required') return <View style={styles.stack}><View style={[styles.box, styles.reviewPanel]}><View style={[styles.icon, styles.warningIcon]}><Text style={styles.warningMark}>!</Text></View><Text style={styles.title}>Verification needs review</Text><Text style={styles.copy}>We found a possible existing registration.</Text></View><PrivacyNote /></View>;
   const cameraVisible = state === 'camera' || state === 'challenge';
   return <View style={styles.stack}><View style={[styles.box, state === 'failed' && styles.failedPanel]}>

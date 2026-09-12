@@ -1,12 +1,14 @@
-const { createHmac, randomUUID, timingSafeEqual } = require('node:crypto');
+const { createHash, createHmac, randomUUID, timingSafeEqual } = require('node:crypto');
 const { createEmailOtpService } = require('../auth/emailOtp');
 const { OtpError } = require('../utils/otpError');
 const { normalizeUsername } = require('../username/username');
 const { readRegistrationSession, isRegistrationFaceVerified } = require('./registrationSession');
+const { decodeImage } = require('../verification/faceVerification');
+const { createRenderFaceClient } = require('../verification/renderFaceClient');
 
 const RESERVATION_TTL = 15 * 60 * 1000;
 
-function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, now = Date.now }) {
+function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, render = createRenderFaceClient(), now = Date.now }) {
   const digest = (value) => {
     if (!hashSecret) throw new Error('Missing registration signing configuration');
     return createHmac('sha256', hashSecret).update(value).digest('hex');
@@ -64,6 +66,7 @@ function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, now = D
       username, usernameNormalized };
   }
   const personalDigest = (profile) => digest(JSON.stringify([profile.role, profile.firstName, profile.lastName, profile.phone, profile.barangay, profile.address]));
+  const captureHash = (image) => createHash('sha256').update(String(image)).digest('hex');
   const hasEligibleFaceStep = isRegistrationFaceVerified;
   async function verifiedSession(registrationSessionId, profile) {
     const { data } = await readRegistrationSession(db, registrationSessionId, now);
@@ -97,7 +100,7 @@ function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, now = D
       }
       const face = session.faceVerification;
       const trustedFaceVerification = {
-        status: 'verified', verifiedAt: face.verifiedAt || new Date(now()),
+        status: 'passed_pending_finalization', verifiedAt: face.verifiedAt || new Date(now()),
         verificationId: face.verificationReference || null,
         verificationReference: face.verificationReference || null,
         livenessPassed: face.livenessPassed === true ? true : null,
@@ -123,10 +126,10 @@ function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, now = D
         if (existing.usernameNormalized && existing.usernameNormalized !== profile.usernameNormalized) {
           throw new OtpError(409, 'account-exists', 'This account already exists. Please log in.');
         }
-        tx.update(ref, { emailVerified: true, emailVerifiedAt: new Date(now()), registrationCompleted: true,
+        tx.update(ref, { emailVerified: true, emailVerifiedAt: new Date(now()), registrationCompleted: false, onboardingStatus: 'face_enrollment_pending',
           updatedAt: new Date(now()), username: profile.username, usernameNormalized: profile.usernameNormalized,
           faceVerification: trustedFaceVerification, termsAcceptance });
-        tx.update(registrationSessionRef, { completed: true, emailVerified: true, completedAt: new Date(now()), userUid: user.uid, expiresAt: new Date(now()) });
+        tx.update(registrationSessionRef, { userUid: user.uid, faceEnrollmentPending: true });
         return;
       }
       const number = Number(counts[profile.role] || 0) + 1;
@@ -137,19 +140,51 @@ function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, now = D
         ...profile, uid: user.uid, email: user.email,
         unique_id: `${prefix}-${String(number).padStart(6, '0')}`,
         approvalStatus: pending ? 'pending' : 'approved', status: pending ? 'Pending' : 'Approved',
-        rejectionReason: null, emailVerificationRequired: true, emailVerified: true, registrationCompleted: true,
+        rejectionReason: null, emailVerificationRequired: true, emailVerified: true, registrationCompleted: false, onboardingStatus: 'face_enrollment_pending',
         createdAt: new Date(now()), updatedAt: new Date(now()), emailVerifiedAt: new Date(now()),
         faceVerification: trustedFaceVerification, termsAcceptance,
       });
-      tx.update(registrationSessionRef, { completed: true, emailVerified: true, completedAt: new Date(now()), userUid: user.uid, expiresAt: new Date(now()) });
+      tx.update(registrationSessionRef, { userUid: user.uid, faceEnrollmentPending: true });
     });
   }
-  async function finish(email, usernameNormalized, registrationSessionId, input) {
+  async function finalizeFaceEnrollment(user, registrationSessionId, image) {
+    const ready = await render('/ready');
+    if (ready?.modelLoaded === false || ready?.ready === false || !(ready?.status === 'ready' || ready?.ready === true)) throw new OtpError(503, 'face-service-preparing', 'Face verification service is preparing. Please try again in a moment.');
+    const form = new FormData(); form.append('subject_id', user.uid); form.append('image', image, 'face.jpg');
+    const enrolled = await render('/enroll-face', form);
+    if (enrolled?.enrolled !== true || enrolled?.duplicateDetected !== false || enrolled?.reviewRequired !== false) {
+      throw new OtpError(enrolled?.duplicateDetected || enrolled?.reviewRequired ? 403 : 502, enrolled?.duplicateDetected || enrolled?.reviewRequired ? 'face-review-required' : 'invalid-face-response', enrolled?.duplicateDetected || enrolled?.reviewRequired ? 'Verification needs review.' : 'Face verification could not finish. Please try again later.');
+    }
+    const profileRef = db.collection('users').doc(user.uid);
+    const sessionRef = db.collection('registrationSessions').doc(registrationSessionId);
+    await db.runTransaction(async (tx) => {
+      const profile = (await tx.get(profileRef)).data();
+      const session = (await tx.get(sessionRef)).data();
+      if (!profile || !session || session.userUid !== user.uid || session.completed || !isRegistrationFaceVerified(session.faceVerification)) throw new OtpError(409, 'registration-session-invalid', 'Registration finalization could not be completed.');
+      const face = session.faceVerification;
+      tx.update(profileRef, { onboardingStatus: 'complete', registrationCompleted: true, updatedAt: new Date(now()), faceVerification: {
+        status: 'verified', verifiedAt: face.verifiedAt || new Date(now()), verificationId: user.uid, verificationReference: user.uid,
+        livenessPassed: face.livenessPassed === true, duplicateCheck: 'clear', verificationMode: 'finalized-enrollment', providerVerified: true,
+        model: face.model || 'SFace', detectorBackend: face.detectorBackend || 'yunet', failureReason: null,
+      } });
+      tx.update(sessionRef, { completed: true, emailVerified: true, completedAt: new Date(now()), expiresAt: new Date(now()), faceEnrollmentPending: false,
+        faceVerification: { ...face, status: 'verified', verificationReference: user.uid, captureHash: null } });
+    });
+  }
+  async function markEnrollmentPending(user, registrationSessionId) {
+    await db.runTransaction(async (tx) => {
+      tx.update(db.collection('users').doc(user.uid), { onboardingStatus: 'face_enrollment_pending', registrationCompleted: false, updatedAt: new Date(now()) });
+      tx.update(db.collection('registrationSessions').doc(registrationSessionId), { faceEnrollmentPending: true });
+    });
+  }
+  async function finish(email, usernameNormalized, registrationSessionId, input, finalFaceImage) {
     const profile = validateProfile(input);
     if (profile.usernameNormalized !== usernameNormalized) {
       throw new OtpError(400, 'invalid-registration', 'Username changed. Please request a new verification code.');
     }
-    await verifiedSession(registrationSessionId, profile);
+    const session = await verifiedSession(registrationSessionId, profile);
+    if (typeof finalFaceImage !== 'string' || session.faceVerification?.captureHash !== captureHash(finalFaceImage)) throw new OtpError(409, 'face-capture-required', 'Please return to signup and complete face verification again.');
+    const image = decodeImage(finalFaceImage);
     let user = await findUser(email);
     const created = !user;
     if (user) {
@@ -168,18 +203,20 @@ function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, now = D
       }
       throw error;
     }
+    try { await finalizeFaceEnrollment(user, registrationSessionId, image); }
+    catch (error) { await markEnrollmentPending(user, registrationSessionId); throw error; }
     if (!created) {
       // Correct email OTP establishes ownership of this old unverified signup.
       await auth.updateUser(user.uid, { emailVerified: true, password: input.password });
     }
     return { customToken: await auth.createCustomToken(user.uid) };
   }
-  function otpFor(email, usernameNormalized, registrationSessionId, input) {
+  function otpFor(email, usernameNormalized, registrationSessionId, input, finalFaceImage) {
     const uid = 'registration-' + digest('email:' + email);
     // Pending identity adapter: no Firebase account exists or is created on request.
     const pending = {
       getUser: async () => ({ uid, email, emailVerified: false }),
-      updateUser: async () => ({ registrationResult: await finish(email, usernameNormalized, registrationSessionId, input) }),
+      updateUser: async () => ({ registrationResult: await finish(email, usernameNormalized, registrationSessionId, input, finalFaceImage) }),
     };
     return { uid, service: createEmailOtpService({ auth: pending, db, sendEmailOtp, hashSecret, now }) };
   }
@@ -220,10 +257,10 @@ function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, now = D
     const result = await otp.service.request(otp.uid);
     return { ...result, challenge: challengeFor(email, usernameNormalized, registrationSessionId) };
   }
-  async function complete(challenge, code, input) {
+  async function complete(challenge, code, input, finalFaceImage) {
     const { email, usernameNormalized, registrationSessionId } = readChallenge(challenge);
     validateProfile(input);
-    const otp = otpFor(email, usernameNormalized, registrationSessionId, input);
+    const otp = otpFor(email, usernameNormalized, registrationSessionId, input, finalFaceImage);
     return otp.service.verify(otp.uid, code);
   }
   return { request, complete };

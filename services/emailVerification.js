@@ -1,5 +1,6 @@
 import { auth } from '../firebaseAuth';
 import { getApiUrl } from './apiClient';
+import { clearPendingFaceEnrollment, getPendingFaceEnrollment } from './pendingFaceEnrollment';
 
 const apiError = (reason, message, details = {}) => {
   const error = new Error(message);
@@ -68,7 +69,10 @@ let pendingRegistration = null;
 export const setPendingRegistration = (profile, result) => {
   pendingRegistration = { profile, ...result, draftExpiresAt: Date.now() + 30 * 60 * 1000 };
 };
-export const clearPendingRegistration = () => { pendingRegistration = null; };
+export const clearPendingRegistration = () => {
+  clearPendingFaceEnrollment(pendingRegistration?.profile?.registrationSessionId);
+  pendingRegistration = null;
+};
 export const getPendingRegistration = () => {
   if (pendingRegistration?.draftExpiresAt <= Date.now()) clearPendingRegistration();
   return pendingRegistration;
@@ -83,11 +87,14 @@ export const requestRegistrationOtp = async (email, username, registrationSessio
 export const completeRegistration = async (code) => {
   const draft = getPendingRegistration();
   if (!draft) throw apiError('registration-expired', 'Please return to signup and request a new code.');
+  const finalFaceImage = getPendingFaceEnrollment(draft.profile.registrationSessionId);
+  if (!finalFaceImage) throw apiError('face-capture-required', 'Please return to signup and complete face verification again.');
   const data = await callOtp('/api/auth/complete-registration', {
-    challenge: draft.challenge, code, profile: draft.profile,
+    challenge: draft.challenge, code, profile: draft.profile, finalFaceImage,
   }, false);
   if (data.verified !== true || typeof data.customToken !== 'string') {
     throw apiError('service-unavailable', 'We could not complete your registration.');
   }
+  clearPendingFaceEnrollment(draft.profile.registrationSessionId);
   return data;
 };

@@ -1,11 +1,12 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { createHmac } = require('node:crypto');
+const { createHash, createHmac } = require('node:crypto');
 const { createRegistrationService } = require('../registration');
 
 const form = { firstName: 'Test', lastName: 'Person', phone: '+639123456789',
   barangay: 'Awihao', address: 'Test Street', username: 'Test_User',
   role: 'requester', password: 'test-password-only' };
+const finalFaceImage = 'data:image/jpeg;base64,/9j/2Q==';
 function fixture() {
   let time = 1800000000000;
   const records = new Map();
@@ -14,6 +15,7 @@ function fixture() {
   const sessionId = '123e4567-e89b-42d3-a456-426614174000';
   let failEmail = false;
   let failProfile = false;
+  let failEnrollment = false;
   let creates = 0;
   let queue = Promise.resolve();
   const snapshot = (key) => ({ exists: records.has(key), data: () => records.get(key) });
@@ -54,7 +56,16 @@ function fixture() {
     updateUser: async (uid, data) => users.set(uid, { ...users.get(uid), ...data }),
     createCustomToken: async (uid) => 'test-custom-token-for-' + uid,
   };
+  const renderCalls = [];
   const service = createRegistrationService({ auth, db, hashSecret: 'test-signing-key', now: () => time,
+    render: async (path, body) => {
+      renderCalls.push({ path, body });
+      if (path === '/ready') return { status: 'ready', modelLoaded: true };
+      if (path === '/enroll-face') return failEnrollment
+        ? { enrolled: false, duplicateDetected: false, reviewRequired: false }
+        : { enrolled: true, duplicateDetected: false, reviewRequired: false };
+      throw new Error('Unexpected Render path');
+    },
     sendEmailOtp: async (message) => { if (failEmail) throw new Error('Test provider outage'); sent.push(message); },
   });
   const setSessionProfile = (profile = form, options = {}) => {
@@ -63,15 +74,16 @@ function fixture() {
       role: profile.role, personalInfoCompleted: true, personalInfoDigest,
       faceVerification: options.faceStatus === 'temporary'
         ? { status: 'temporary', verifiedAt: null, duplicateCheck: 'unknown', verificationReference: null, livenessPassed: null, verificationMode: 'temporary', providerVerified: false }
-        : { status: options.faceStatus || 'verified', verifiedAt: new Date(time), duplicateCheck: options.duplicateCheck || 'clear', verificationReference: 'trusted-test-reference', livenessPassed: options.livenessPassed !== false, verificationMode: 'provider', providerVerified: true },
+        : { status: options.faceStatus || 'passed_pending_finalization', verifiedAt: new Date(time), duplicateCheck: options.duplicateCheck || 'clear', verificationReference: sessionId, captureHash: createHash('sha256').update(finalFaceImage).digest('hex'), livenessPassed: options.livenessPassed !== false, verificationMode: 'registration-capture', providerVerified: true },
       termsAcceptance: options.terms === false ? null : { accepted: true, acceptedAt: new Date(time), termsVersion: '1.0', privacyVersion: '1.0' },
       completed: false, expiresAt: new Date(time + 3600000),
     });
   };
   setSessionProfile();
-  const registrationService = { ...service, request: (email, ip, username = form.username) => service.request(email, username, sessionId, ip) };
+  const registrationService = { ...service, request: (email, ip, username = form.username) => service.request(email, username, sessionId, ip),
+    complete: (challenge, code, input) => service.complete(challenge, code, input, finalFaceImage) };
   return { service: registrationService, users, records, sent, get creates() { return creates; },
-    sessionId, setSessionProfile, advance: (ms) => { time += ms; }, failEmail: () => { failEmail = true; }, failProfile: () => { failProfile = true; } };
+    sessionId, setSessionProfile, renderCalls, advance: (ms) => { time += ms; }, failEmail: () => { failEmail = true; }, failProfile: () => { failProfile = true; }, failEnrollment: () => { failEnrollment = true; } };
 }
 const reason = (expected) => (error) => error.reason === expected;
 
@@ -108,7 +120,7 @@ test('correct OTP creates verified Auth account and server-owned profile exactly
   assert.equal(profile.uid, 'new-user');
   assert.equal(profile.unique_id, 'REQ-000001');
   assert.equal(profile.faceVerification.status, 'verified');
-  assert.equal(profile.faceVerification.verificationReference, 'trusted-test-reference');
+  assert.equal(profile.faceVerification.verificationReference, 'new-user');
   assert.equal(profile.termsAcceptance.accepted, true);
   assert.equal(profile.termsAcceptance.termsVersion, '1.0');
   assert.equal(profile.username, 'Test_User');
@@ -116,6 +128,7 @@ test('correct OTP creates verified Auth account and server-owned profile exactly
   assert.equal(profile.address, 'Test Street');
   assert.equal(f.records.get('usernames/test_user').uid, 'new-user');
   assert.equal(f.records.has('usernameReservations/test_user'), false);
+  assert.deepEqual(f.renderCalls.map((call) => call.path), ['/ready', '/enroll-face']);
   assert.equal(profile.password, undefined);
   assert.equal(completed.verified, true);
   assert.match(completed.customToken, /^test-custom-token/);
@@ -160,14 +173,14 @@ test('pairwise-only verification cannot request OTP', async () => {
   await assert.rejects(f.service.request('new@example.test', 'test-ip'), reason('face-verification-required'));
 });
 
-test('enrollment metadata binds the final uid without copying biometric fields', async () => {
+test('final enrollment binds the final uid without copying biometric fields', async () => {
   const f = fixture();
   const session = f.records.get('registrationSessions/' + f.sessionId);
   Object.assign(session.faceVerification, { verificationMode: 'registration-enrollment', verificationReference: f.sessionId, model: 'SFace', detectorBackend: 'yunet', rawImage: 'must-not-copy', embedding: [1, 2, 3] });
   const result = await f.service.request('new@example.test', 'test-ip');
   await f.service.complete(result.challenge, f.sent[0].code, form);
   const profile = f.records.get('users/new-user');
-  assert.equal(profile.faceVerification.verificationReference, f.sessionId);
+  assert.equal(profile.faceVerification.verificationReference, 'new-user');
   assert.equal(profile.faceVerification.livenessPassed, true);
   assert.equal(profile.faceVerification.duplicateCheck, 'clear');
   assert.equal(profile.faceVerification.model, 'SFace');
@@ -175,6 +188,7 @@ test('enrollment metadata binds the final uid without copying biometric fields',
   assert.equal(profile.faceVerification.embedding, undefined);
   assert.equal(f.records.get('registrationSessions/' + f.sessionId).userUid, 'new-user');
   assert.equal(f.records.get('registrationSessions/' + f.sessionId).completed, true);
+  assert.equal(f.renderCalls[1].body.get('subject_id'), 'new-user');
 });
 
 test('tampered challenge and admin role cannot create an account', async () => {
@@ -227,6 +241,20 @@ test('profile write failure rolls back only the newly created Auth account', asy
   await assert.rejects(f.service.complete(result.challenge, f.sent[0].code, form));
   assert.equal(f.users.size, 0);
   assert.equal(f.records.has('users/new-user'), false);
+});
+
+test('final face enrollment failure leaves the account and session explicitly pending', async () => {
+  const f = fixture();
+  const result = await f.service.request('new@example.test', 'test-ip');
+  f.failEnrollment();
+  await assert.rejects(f.service.complete(result.challenge, f.sent[0].code, form));
+  const profile = f.records.get('users/new-user');
+  const session = f.records.get('registrationSessions/' + f.sessionId);
+  assert.equal(profile.registrationCompleted, false);
+  assert.equal(profile.onboardingStatus, 'face_enrollment_pending');
+  assert.equal(session.completed, false);
+  assert.equal(session.faceEnrollmentPending, true);
+  assert.equal(f.records.get('usernames/test_user').uid, 'new-user');
 });
 
 test('expired registration challenge requires restarting and does not create an account', async () => {

@@ -13,7 +13,10 @@ const response = () => ({
 
 function fixture({ known = true } = {}) {
   const records = new Map();
-  if (known) records.set('usernames/johnbluetap', { uid: 'expected-user' });
+  if (known) {
+    records.set('usernames/johnbluetap', { uid: 'expected-user' });
+    records.set('users/expected-user', { role: 'requester', registrationCompleted: true, onboardingStatus: 'complete' });
+  }
   const ref = (collection, id) => ({ key: `${collection}/${id}`, get: async () => ({ exists: records.has(`${collection}/${id}`), data: () => records.get(`${collection}/${id}`) }) });
   const db = {
     collection: (name) => ({ doc: (id) => ref(name, id) }),

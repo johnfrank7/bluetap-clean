@@ -6,7 +6,7 @@ function getRegistrationFaceCaptureMode(platform) {
 }
 
 function isTrustedRegistrationFaceVerification(verification = {}) {
-  return verification.status === 'verified' &&
+  return verification.status === 'passed_pending_finalization' &&
     verification.duplicateCheck === 'clear' &&
     verification.livenessPassed === true;
 }

@@ -5,7 +5,7 @@ const SESSION_TTL = 60 * 60 * 1000;
 const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const TERMS_VERSION = '1.0';
 const PRIVACY_VERSION = '1.0';
-const isRegistrationFaceVerified = (face = {}) => face.status === 'verified' &&
+const isRegistrationFaceVerified = (face = {}) => ['passed_pending_finalization', 'verified'].includes(face.status) &&
   face.providerVerified === true && face.livenessPassed === true &&
   face.duplicateCheck === 'clear' && typeof face.verificationReference === 'string' &&
   face.verificationReference.length > 0;

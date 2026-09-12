@@ -82,7 +82,6 @@ function createRegistrationFaceService({ db, detector = defaultDetector, render 
       save({ faceChallenge: { ...challenge, state: 'processing' } });
     });
     let leaseHeld = false;
-    let enrollmentAttempted = false;
     const lock = db.collection('faceServiceLocks').doc('enrollment');
     try {
       const ready = await render('/ready', undefined, signal);
@@ -96,8 +95,8 @@ function createRegistrationFaceService({ db, detector = defaultDetector, render 
         await update(id, (current, save) => { check(current, challengeId, 'processing'); save({ faceVerification: face, faceChallenge: { ...current.faceChallenge, state: 'failed' } }); });
         return { faceVerification: publicFace(face) };
       }
-      // Serialize this application's search/enroll pairs. Render must still
-      // provide atomic uniqueness and idempotent enrollment for other callers.
+      // Duplicate search considers only Render's finalized enrollment database.
+      // This registration has no Render enrollment until OTP finalization.
       await db.runTransaction(async (tx) => {
         const held = (await tx.get(lock)).data();
         if (held && ms(held.expiresAt) > now()) throw new OtpError(503, 'face-service-busy', 'Face verification is busy. Please try again in a moment.');
@@ -115,26 +114,14 @@ function createRegistrationFaceService({ db, detector = defaultDetector, render 
         await update(id, (current, save) => { check(current, challengeId, 'processing'); save({ faceVerification: face, faceChallenge: { ...current.faceChallenge, state: 'used' } }); });
         return { faceVerification: publicFace(face) };
       }
-      // Mark an uncertain mutation before sending. A timeout must not silently
-      // enroll again or let the next attempt match its own orphaned enrollment.
-      await update(id, (current, save) => { check(current, challengeId, 'processing'); save({ faceEnrollmentPending: true }); });
-      enrollmentAttempted = true;
-      const enrollment = new FormData(); enrollment.append('subject_id', id); enrollment.append('image', probe, 'face.jpg');
-      const enrolled = await render('/enroll-face', enrollment, signal);
-      if (enrolled?.enrolled === false && (enrolled.duplicateDetected === true || enrolled.reviewRequired === true)) {
-        const face = { status: 'review_required', verifiedAt: null, duplicateCheck: 'flagged', livenessPassed: true };
-        await update(id, (current, save) => { check(current, challengeId, 'processing'); save({ faceVerification: face, faceEnrollmentPending: false, faceChallenge: { ...current.faceChallenge, state: 'used' } }); });
-        return { faceVerification: publicFace(face) };
-      }
-      if (enrolled?.enrolled !== true || enrolled?.duplicateDetected !== false || enrolled?.reviewRequired !== false) throw contractError();
-      const face = { status: 'verified', verifiedAt: timestamp(), duplicateCheck: 'clear', livenessPassed: true,
-        verificationReference: id, verificationMode: webCapture ? 'web-camera-capture' : 'registration-enrollment', providerVerified: true,
+      const face = { status: 'passed_pending_finalization', verifiedAt: timestamp(), duplicateCheck: 'clear', livenessPassed: true,
+        verificationReference: id, captureHash: hash(String(image)), verificationMode: webCapture ? 'web-camera-capture' : 'registration-capture', providerVerified: true,
         model: 'SFace', detectorBackend: 'yunet', failureReason: null };
       await update(id, (current, save) => { check(current, challengeId, 'processing'); save({ faceVerification: face, faceEnrollmentPending: false, faceChallenge: { ...current.faceChallenge, state: 'used' } }); });
       return { faceVerification: publicFace(face) };
     } catch (error) {
       await update(id, (current, save) => {
-        if (current.faceChallenge?.id === challengeId) save({ faceChallenge: { ...current.faceChallenge, state: 'failed' }, faceVerification: { status: 'unverified', verifiedAt: null, duplicateCheck: 'unknown', livenessPassed: null }, faceEnrollmentPending: enrollmentAttempted });
+        if (current.faceChallenge?.id === challengeId) save({ faceChallenge: { ...current.faceChallenge, state: 'failed' }, faceVerification: { status: 'unverified', verifiedAt: null, duplicateCheck: 'unknown', livenessPassed: null }, faceEnrollmentPending: false });
       });
       throw error;
     } finally {

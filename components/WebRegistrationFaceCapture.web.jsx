@@ -203,7 +203,7 @@ export default function WebRegistrationFaceCapture({ registrationSessionId, veri
   };
 
   if (isTrustedRegistrationFaceVerification(verification)) {
-    return <View style={styles.stack}><View style={[styles.box, styles.successPanel]}><Text style={styles.successMark}>OK</Text><Text style={styles.title}>Identity check completed</Text><Text style={styles.copy}>Your face verification was confirmed by BlueTap.</Text></View><PrivacyNote /></View>;
+    return <View style={styles.stack}><View style={[styles.box, styles.successPanel]}><Text style={styles.successMark}>OK</Text><Text style={styles.title}>Identity check completed</Text><Text style={styles.copy}>Complete email verification to finalize your secure face enrollment.</Text></View><PrivacyNote /></View>;
   }
 
   if (verification.status === 'review_required') {

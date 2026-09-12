@@ -315,6 +315,16 @@ export const validateRoleAccess = async (expectedRole) => {
     };
   }
 
+  if (profile.onboardingStatus === 'face_enrollment_pending' || profile.registrationCompleted === false) {
+    return {
+      status: 'onboarding-pending',
+      message: 'Your account is still completing secure face enrollment. Please contact BlueTap support.',
+      redirectTo: '/login',
+      shouldSignOut: true,
+      clearRole: expected,
+    };
+  }
+
   if (profile.role !== expected) {
     saveRoleSession(profile);
 
