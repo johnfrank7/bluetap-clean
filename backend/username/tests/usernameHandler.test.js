@@ -64,6 +64,30 @@ test('username login verifies password through Firebase REST and returns only cu
   }
 });
 
+test('username login uses the checked-in public Firebase project key when the server override is absent', async (t) => {
+  const originalSecret = process.env.EMAIL_OTP_HASH_SECRET;
+  const originalKey = process.env.FIREBASE_WEB_API_KEY;
+  process.env.EMAIL_OTP_HASH_SECRET = 'rate-limit-secret';
+  delete process.env.FIREBASE_WEB_API_KEY;
+  let requestedUrl = '';
+  t.mock.method(global, 'fetch', async (url) => {
+    requestedUrl = url;
+    return { ok: true, json: async () => ({ localId: 'expected-user' }) };
+  });
+  try {
+    const res = response();
+    await createUsernameHandler('login', () => fixture())({
+      method: 'POST', headers: {}, socket: { remoteAddress: 'fallback-key-test' },
+      body: { username: 'johnbluetap', password: 'private-password' },
+    }, res);
+    assert.equal(res.statusCode, 200);
+    assert.match(requestedUrl, new RegExp(require('../../../firebase-web-config.json').apiKey));
+  } finally {
+    if (originalSecret === undefined) delete process.env.EMAIL_OTP_HASH_SECRET; else process.env.EMAIL_OTP_HASH_SECRET = originalSecret;
+    if (originalKey === undefined) delete process.env.FIREBASE_WEB_API_KEY; else process.env.FIREBASE_WEB_API_KEY = originalKey;
+  }
+});
+
 test('unknown username and wrong password return identical generic errors', async (t) => {
   const originalSecret = process.env.EMAIL_OTP_HASH_SECRET;
   const originalKey = process.env.FIREBASE_WEB_API_KEY;

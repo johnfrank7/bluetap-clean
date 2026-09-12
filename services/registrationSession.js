@@ -1,4 +1,5 @@
 import { getApiUrl } from './apiClient';
+import { getInstallationId } from './installationId';
 
 export const callRegistrationApi = async (path, body, timeoutMs = 30000) => {
   const controller = new AbortController();
@@ -32,7 +33,10 @@ export const callRegistrationApi = async (path, body, timeoutMs = 30000) => {
 };
 
 export const createRegistrationSession = async (personalInfo) => {
-  const result = await callRegistrationApi('/api/auth/create-registration-session', personalInfo);
+  const result = await callRegistrationApi('/api/auth/create-registration-session', {
+    ...personalInfo,
+    installationId: await getInstallationId(),
+  });
   if (typeof result.registrationSessionId !== 'string' || !result.registrationSessionId) {
     const error = new Error('The registration service returned an incomplete response. Please try again.');
     error.code = 'registration/invalid-response';

@@ -95,6 +95,11 @@ export default function VerificationPage() {
           return;
         }
 
+        if (role === 'manager') {
+          router.replace('/manager/dashboard');
+          return;
+        }
+
         if (!nextProfile || !isVerificationRole(role)) {
           await signOutAndClearSessions();
           if (isActive) router.replace('/login');

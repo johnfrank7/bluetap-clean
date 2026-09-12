@@ -99,6 +99,20 @@ export const completeRegistration = async (code) => {
   return data;
 };
 
+export const completeRegistrationWithoutOtp = async () => {
+  const draft = getPendingRegistration();
+  if (!draft || draft.otpRequired !== false) throw apiError('EMAIL_OTP_REQUIRED', 'Email OTP verification is required.');
+  const faceRequired = draft.profile.securityPolicy?.faceVerificationRequired !== false;
+  const finalFaceImage = faceRequired ? getPendingFaceEnrollment(draft.profile.registrationSessionId) : null;
+  if (faceRequired && !finalFaceImage) throw apiError('face-capture-required', 'Please return to signup and complete face verification again.');
+  const data = await callOtp('/api/auth/complete-registration', {
+    action: 'complete-without-otp', challenge: draft.challenge, profile: draft.profile, finalFaceImage,
+  }, false);
+  if (data.verified !== true || typeof data.customToken !== 'string') throw apiError('service-unavailable', 'We could not complete your registration.');
+  clearPendingFaceEnrollment(draft.profile.registrationSessionId);
+  return data;
+};
+
 export const retryRegistrationFinalization = async () => {
   const draft = getPendingRegistration();
   if (!draft) throw apiError('registration-expired', 'Please return to signup and restart registration.');

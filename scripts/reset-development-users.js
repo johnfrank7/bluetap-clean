@@ -24,6 +24,7 @@ const fullResetCollections = new Set([
   'registrationOtpVerifications',
   'usernameReservations',
   'authRateLimits',
+  'registrationLimits',
 ]);
 const ownedCollections = new Map([
   ['requests', ['requester_id', 'distributor_id', 'uid', 'userUid']],
@@ -108,7 +109,8 @@ async function allAuthUsers(auth) {
 }
 
 const isSystemIdentity = (user, profile) =>
-  user?.customClaims?.admin === true || user?.customClaims?.role === 'admin' || profile?.role === 'admin';
+  user?.customClaims?.admin === true || ['admin', 'manager'].includes(user?.customClaims?.role) ||
+  ['admin', 'manager'].includes(profile?.role);
 const ownsDocument = (data, fields, targetUids) => fields.some((field) => targetUids.has(data?.[field]));
 const addTargets = (targets, snapshots) => snapshots.forEach((snapshot) => targets.set(snapshot.ref.path, snapshot.ref));
 const faceIsFinalized = (profile = {}) => {
@@ -182,7 +184,7 @@ async function run() {
     if (isSystemIdentity(user, profiles.get(user.uid))) protectedUids.add(user.uid);
   });
   userSnapshots.docs.forEach((snapshot) => {
-    if (snapshot.data()?.role === 'admin') protectedUids.add(snapshot.id);
+    if (['admin', 'manager'].includes(snapshot.data()?.role)) protectedUids.add(snapshot.id);
   });
   const authTargets = authUsers.filter((user) => !protectedUids.has(user.uid));
   const targetUids = new Set(authTargets.map((user) => user.uid));

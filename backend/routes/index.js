@@ -4,6 +4,7 @@ const { createRegistrationSessionHandler } = require('../registration/registrati
 const { createUsernameHandler } = require('../username/usernameHandler');
 const { createFaceVerificationHandler } = require('../verification/faceVerification');
 const { createRegistrationFaceHandler } = require('../verification/registrationFaceHandler');
+const { createAdminRegistrationSecurityHandler } = require('../admin/registrationSecurityHandler');
 
 const routes = new Map([
   ['/api/auth/check-username', createUsernameHandler('check')],
@@ -18,6 +19,7 @@ const routes = new Map([
   ['/api/auth/complete-registration', createRegistrationHandler('complete')],
   ['/api/verification/verify-face', createFaceVerificationHandler()],
   ['/api/verification/registration-face', createRegistrationFaceHandler()],
+  ['/api/admin/registration-security', createAdminRegistrationSecurityHandler()],
 ]);
 
 module.exports = { routes };

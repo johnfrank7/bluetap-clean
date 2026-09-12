@@ -12,6 +12,7 @@ export const AUTH_SESSION_CHANGED_EVENT = 'bluetapAuthSessionChanged';
 
 const ROLE_HOME_PATHS = {
   admin: '/admin/dashboard',
+  manager: '/manager/dashboard',
   requester: '/requester/r_dashboard',
   distributor: '/distributor/d_dashboard',
 };
@@ -98,14 +99,20 @@ export const normalizeRole = (role) => role?.toString().trim().toLowerCase() || 
 
 export const getRoleHomePath = (role) => ROLE_HOME_PATHS[normalizeRole(role)] || '/login';
 
+const isFaceRequirementSatisfied = (profile = {}) =>
+  profile.faceVerification?.status === 'not_required' && profile.faceVerification?.required === false
+    ? true
+    : isFaceVerified(profile);
+
 export const getPostAuthenticationDestination = (profile = {}) => {
   const role = normalizeRole(profile.role);
   if (role === 'admin') return '/admin/dashboard';
+  if (role === 'manager') return '/manager/dashboard';
   if (!['requester', 'distributor'].includes(role)) return '/login';
   if (profile.onboardingStatus === 'face_enrollment_pending' || profile.registrationCompleted === false) {
     return '/registration-status';
   }
-  if (!isFaceVerified(profile)) return '/verification';
+  if (!isFaceRequirementSatisfied(profile)) return '/verification';
   if (role === 'distributor' && getDistributorApplicationStatus(profile) !== 'approved') {
     return '/registration-status';
   }
@@ -130,14 +137,14 @@ export const saveRoleSession = (profile = {}) => {
     uid: profile.uid || profile.id || '',
     email: (profile.email || '').toString().trim().toLowerCase(),
     role,
-    isAdminSecret: !!profile.isAdminSecret,
+    isManagerSecret: !!profile.isManagerSecret,
   };
   const hasSameIdentity =
     existingSession &&
     existingSession.uid === nextSession.uid &&
     existingSession.email === nextSession.email &&
     existingSession.role === nextSession.role &&
-    !!existingSession.isAdminSecret === nextSession.isAdminSecret;
+    !!existingSession.isManagerSecret === nextSession.isManagerSecret;
   const session = hasSameIdentity
     ? existingSession
     : {
@@ -149,12 +156,12 @@ export const saveRoleSession = (profile = {}) => {
   return session;
 };
 
-export const saveAdminSession = () =>
+export const saveManagerSession = () =>
   saveRoleSession({
-    uid: 'secret-admin',
-    email: 'bluetapadmin',
-    role: 'admin',
-    isAdminSecret: true,
+    uid: 'legacy-secret-manager',
+    email: 'bluetapmanager',
+    role: 'manager',
+    isManagerSecret: true,
   });
 
 export const clearModuleSession = (role) => {
@@ -249,16 +256,16 @@ export const fetchFirestoreUserProfile = async (user) => {
   return profile;
 };
 
-const getAdminSessionAccess = () => {
-  const adminSession = getModuleSession('admin');
+const getManagerSessionAccess = () => {
+  const managerSession = getModuleSession('manager');
 
-  if (!adminSession?.isAdminSecret) {
+  if (!managerSession?.isManagerSecret) {
     return null;
   }
 
   return {
     status: 'authorized',
-    profile: adminSession,
+    profile: managerSession,
   };
 };
 
@@ -276,11 +283,11 @@ export const validateRoleAccess = async (expectedRole) => {
 
   const currentUser = auth.currentUser;
 
-  if (expected === 'admin' && !currentUser) {
-    const adminAccess = getAdminSessionAccess();
+  if (expected === 'manager' && !currentUser) {
+    const managerAccess = getManagerSessionAccess();
 
-    if (adminAccess) {
-      return adminAccess;
+    if (managerAccess) {
+      return managerAccess;
     }
   }
 
@@ -341,7 +348,7 @@ export const validateRoleAccess = async (expectedRole) => {
     };
   }
 
-  if ((profile.role === 'requester' || profile.role === 'distributor') && !isFaceVerified(profile)) {
+  if ((profile.role === 'requester' || profile.role === 'distributor') && !isFaceRequirementSatisfied(profile)) {
     return {
       status: 'face-unverified',
       message: 'Complete identity verification to continue.',

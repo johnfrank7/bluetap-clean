@@ -5,9 +5,9 @@ const test = require('node:test');
 
 const rules = readFileSync(resolve(__dirname, '..', '..', '..', 'firestore.rules'), 'utf8');
 
-test('Firestore rules allow only an authenticated user to get their own profile', () => {
-  assert.match(rules, /match \/users\/\{uid\}[\s\S]*allow get:\s*if request\.auth != null && request\.auth\.uid == uid;/);
-  assert.match(rules, /match \/users\/\{uid\}[\s\S]*allow list:\s*if false;/);
+test('Firestore rules allow own-profile access and trusted operational role reads', () => {
+  assert.match(rules, /allow get:\s*if request\.auth != null && \(request\.auth\.uid == uid \|\| isManager\(\) \|\| isAdmin\(\)\);/);
+  assert.match(rules, /allow list:\s*if isManager\(\) \|\| isAdmin\(\);/);
 });
 
 test('Firestore rules keep OTP and registration state private', () => {
@@ -23,9 +23,15 @@ test('client profile updates cannot change trusted verification fields', () => {
   }
 });
 
-test('signed-in users can read products but no client can write the catalog', () => {
+test('signed-in users read products while only authenticated managers write catalog', () => {
   assert.match(rules, /match \/products\/\{productId\}[\s\S]*allow read:\s*if signedIn\(\);/);
-  assert.match(rules, /match \/products\/\{productId\}[\s\S]*allow write:\s*if false;/);
+  assert.match(rules, /match \/products\/\{productId\}[\s\S]*allow write:\s*if isManager\(\);/);
+});
+
+test('registration config counters and audit logs are backend-only', () => {
+  for (const collection of ['registrationLimits', 'systemConfig', 'adminAuditLogs']) {
+    assert.match(rules, new RegExp(`match \/${collection}\/\\{document=\\*\\*\\} \\{ allow read, write: if false; \\}`));
+  }
 });
 
 test('request access stays bound to the authenticated requester', () => {

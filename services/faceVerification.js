@@ -15,9 +15,10 @@ const FACE_VERIFICATION_STATUSES = new Set([
   'verified',
   'review_required',
   'failed',
+  'not_required',
 ]);
 
-const DUPLICATE_CHECK_STATUSES = new Set(['unknown', 'clear', 'flagged']);
+const DUPLICATE_CHECK_STATUSES = new Set(['unknown', 'clear', 'flagged', 'not_required']);
 
 export const createUnverifiedFaceVerification = () => ({
   status: 'unverified',
@@ -45,6 +46,7 @@ export const normalizeFaceVerification = (profile = {}) => {
 
   return {
     status: safeDuplicateCheck === 'flagged' ? 'review_required' : safeStatus,
+    required: value.required === false && safeStatus === 'not_required' ? false : true,
     verifiedAt: value.verifiedAt || null,
     verificationId: value.verificationId || null,
     livenessPassed:

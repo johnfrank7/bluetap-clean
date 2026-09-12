@@ -1,8 +1,10 @@
 const { createHmac, randomUUID } = require('node:crypto');
 const { OtpError } = require('../utils/otpError');
+const { loadRegistrationSecurity, policySnapshot } = require('./registrationSecurity');
 
 const SESSION_TTL = 60 * 60 * 1000;
 const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const INSTALLATION_ID = SESSION_ID;
 const TERMS_VERSION = '1.0';
 const PRIVACY_VERSION = '1.0';
 const isRegistrationFaceVerified = (face = {}) => ['passed_pending_finalization', 'verified'].includes(face.status) &&
@@ -33,11 +35,28 @@ function validatePersonalInfo(input) {
   if (!/^\+639\d{9}$/.test(input.phone || '')) throw new OtpError(400, 'invalid-registration', 'Enter a valid Philippine mobile number.');
 }
 
-function createRegistrationSessionService({ db, hashSecret, now = Date.now }) {
+function createRegistrationSessionService({ db, hashSecret, deviceHashSecret, ipHashSecret, now = Date.now }) {
   const digest = (value) => {
     if (!hashSecret) throw new Error('Missing registration session configuration');
     return createHmac('sha256', hashSecret).update(value).digest('hex');
   };
+  const abuseDigest = (secret, namespace, value) => {
+    if (!secret) throw new Error(`Missing ${namespace} registration limit configuration`);
+    return createHmac('sha256', secret).update(`${namespace}:${value}`).digest('hex');
+  };
+  async function checkPermanentLimits(deviceHash, ipHash, policy) {
+    await db.runTransaction(async (tx) => {
+      const deviceRef = db.collection('registrationLimits').doc(`device_${deviceHash}`);
+      const ipRef = db.collection('registrationLimits').doc(`ip_${ipHash}`);
+      const [device, network] = await Promise.all([tx.get(deviceRef), tx.get(ipRef)]);
+      if (Number(device.data()?.finalizedCount || 0) >= policy.maxAccountsPerDevice) {
+        throw new OtpError(403, 'DEVICE_ACCOUNT_LIMIT_REACHED', 'Registration limit reached. This device or network has already created the maximum number of BlueTap accounts.');
+      }
+      if (Number(network.data()?.finalizedCount || 0) >= policy.maxAccountsPerIp) {
+        throw new OtpError(403, 'IP_ACCOUNT_LIMIT_REACHED', 'Registration limit reached. This device or network has already created the maximum number of BlueTap accounts.');
+      }
+    });
+  }
   async function limit(ip) {
     const ref = db.collection('authRateLimits').doc(digest('registration-session:' + ip));
     await db.runTransaction(async (tx) => {
@@ -51,30 +70,43 @@ function createRegistrationSessionService({ db, hashSecret, now = Date.now }) {
   }
   async function create(input, ip) {
     validatePersonalInfo(input);
+    if (!INSTALLATION_ID.test(input?.installationId || '')) {
+      throw new OtpError(400, 'invalid-installation-id', 'Restart BlueTap before registering.');
+    }
     await limit(ip);
+    const config = await loadRegistrationSecurity(db);
+    const securityPolicySnapshot = policySnapshot(config);
+    const deviceHash = abuseDigest(deviceHashSecret, 'device', input.installationId);
+    const ipHash = abuseDigest(ipHashSecret, 'ip', ip);
+    await checkPermanentLimits(deviceHash, ipHash, securityPolicySnapshot);
     const id = randomUUID();
     const time = now();
     await db.collection('registrationSessions').doc(id).set({
       role: input.role,
       personalInfoCompleted: true,
       personalInfoDigest: digest(JSON.stringify([input.role, input.firstName.trim(), input.lastName.trim(), input.phone, input.barangay.trim(), input.address.trim()])),
-      faceVerification: { status: 'unverified', verifiedAt: null, duplicateCheck: 'unknown', verificationReference: null, livenessPassed: null },
+      securityPolicySnapshot,
+      registrationLimitKeys: { deviceHash, ipHash },
+      faceVerification: securityPolicySnapshot.faceVerificationRequired
+        ? { required: true, status: 'unverified', verifiedAt: null, duplicateCheck: 'unknown', verificationReference: null, livenessPassed: null }
+        : { required: false, status: 'not_required', verifiedAt: null, duplicateCheck: 'not_required', verificationReference: null, livenessPassed: null },
       emailVerified: false,
       termsAcceptance: null,
       completed: false,
       createdAt: new Date(time),
       expiresAt: new Date(time + SESSION_TTL),
     });
-    return { registrationSessionId: id, expiresAt: time + SESSION_TTL };
+    return { registrationSessionId: id, expiresAt: time + SESSION_TTL, securityPolicy: securityPolicySnapshot };
   }
   async function status(id) {
     const { data } = await readRegistrationSession(db, id, now);
     const face = data.faceVerification || {};
     return { faceVerification: {
-      status: ['unverified', 'pending', 'temporary', 'verified', 'review_required', 'failed'].includes(face.status) ? face.status : 'unverified',
-      duplicateCheck: ['unknown', 'clear', 'flagged'].includes(face.duplicateCheck) ? face.duplicateCheck : 'unknown',
+      required: face.required !== false,
+      status: ['unverified', 'pending', 'temporary', 'verified', 'review_required', 'failed', 'not_required'].includes(face.status) ? face.status : 'unverified',
+      duplicateCheck: ['unknown', 'clear', 'flagged', 'not_required'].includes(face.duplicateCheck) ? face.duplicateCheck : 'unknown',
       livenessPassed: face.livenessPassed === true,
-    }, expiresAt: millis(data.expiresAt) };
+    }, securityPolicy: data.securityPolicySnapshot, expiresAt: millis(data.expiresAt) };
   }
   async function start(id) {
     await readRegistrationSession(db, id, now);
@@ -86,7 +118,7 @@ function createRegistrationSessionService({ db, hashSecret, now = Date.now }) {
     await db.runTransaction(async (tx) => {
       const data = (await tx.get(ref)).data();
       if (!data || data.completed || millis(data.expiresAt) <= now()) throw sessionError();
-      if (!isRegistrationFaceVerified(data.faceVerification)) {
+      if (data.securityPolicySnapshot?.faceVerificationRequired !== false && !isRegistrationFaceVerified(data.faceVerification)) {
         throw new OtpError(403, 'face-verification-required', 'Complete identity verification before accepting the registration terms.');
       }
       tx.update(ref, { termsAcceptance: { accepted: true, acceptedAt: new Date(now()), termsVersion: TERMS_VERSION, privacyVersion: PRIVACY_VERSION } });
@@ -105,6 +137,9 @@ async function setTrustedFaceVerification(db, id, result, now = Date.now) {
   await db.runTransaction(async (tx) => {
     const data = (await tx.get(ref)).data();
     if (!data || data.completed || millis(data.expiresAt) <= now()) throw sessionError();
+    if (data.securityPolicySnapshot?.faceVerificationRequired === false) {
+      throw new OtpError(409, 'face-verification-not-required', 'Face verification is not required for this registration.');
+    }
     tx.update(ref, { faceVerification: {
       status,
       verifiedAt: allowed ? new Date(now()) : null,

@@ -72,6 +72,8 @@ function fixture() {
     const personalInfoDigest = createHmac('sha256', 'test-signing-key').update(JSON.stringify([profile.role, profile.firstName, profile.lastName, profile.phone, profile.barangay, profile.address])).digest('hex');
     records.set('registrationSessions/' + sessionId, {
       role: profile.role, personalInfoCompleted: true, personalInfoDigest,
+      securityPolicySnapshot: { faceVerificationRequired: options.faceRequired !== false, emailOtpRequired: options.otpRequired !== false, maxAccountsPerDevice: 3, maxAccountsPerIp: 3, policyVersion: 1 },
+      registrationLimitKeys: { deviceHash: 'device-hash', ipHash: 'ip-hash' },
       faceVerification: options.faceStatus === 'temporary'
         ? { status: 'temporary', verifiedAt: null, duplicateCheck: 'unknown', verificationReference: null, livenessPassed: null, verificationMode: 'temporary', providerVerified: false }
         : { status: options.faceStatus || 'passed_pending_finalization', verifiedAt: new Date(time), duplicateCheck: options.duplicateCheck || 'clear', verificationReference: sessionId, captureHash: createHash('sha256').update(finalFaceImage).digest('hex'), livenessPassed: options.livenessPassed !== false, verificationMode: 'registration-capture', providerVerified: true },
@@ -128,6 +130,8 @@ test('correct OTP creates verified Auth account and server-owned profile exactly
   assert.equal(profile.address, 'Test Street');
   assert.equal(f.records.get('usernames/test_user').uid, 'new-user');
   assert.equal(f.records.has('usernameReservations/test_user'), false);
+  assert.equal(f.records.get('registrationLimits/device_device-hash').finalizedCount, 1);
+  assert.equal(f.records.get('registrationLimits/device_device-hash').reservedCount, 0);
   assert.deepEqual(f.renderCalls.map((call) => call.path), ['/ready', '/enroll-face']);
   assert.equal(profile.password, undefined);
   assert.equal(completed.verified, true);
@@ -168,6 +172,35 @@ test('temporary face placeholder cannot bypass verification', async () => {
   await assert.rejects(f.service.request('new@example.test', 'test-ip'), reason('face-verification-required'));
 });
 
+test('face-only policy sends no OTP and preserves unverified email state', async () => {
+  const f = fixture();
+  f.setSessionProfile(form, { otpRequired: false });
+  const result = await f.service.request('new@example.test', 'test-ip');
+  assert.equal(result.otpRequired, false);
+  assert.equal(f.sent.length, 0);
+  const completed = await f.service.completeWithoutOtp(result.challenge, form, finalFaceImage);
+  assert.equal(completed.finalized, true);
+  assert.equal(f.users.get('new-user').emailVerified, false);
+  assert.equal(f.records.get('users/new-user').emailOtpVerification.status, 'not_required');
+});
+
+test('OTP-only policy never calls face service and stores face as not required', async () => {
+  const f = fixture();
+  f.setSessionProfile(form, { faceRequired: false });
+  const session = f.records.get('registrationSessions/' + f.sessionId);
+  session.faceVerification = { required: false, status: 'not_required', duplicateCheck: 'not_required' };
+  const result = await f.service.request('new@example.test', 'test-ip');
+  await f.service.complete(result.challenge, f.sent[0].code, form);
+  assert.equal(f.renderCalls.length, 0);
+  assert.equal(f.records.get('users/new-user').faceVerification.status, 'not_required');
+});
+
+test('tampered policy with both verification methods off is rejected', async () => {
+  const f = fixture();
+  f.setSessionProfile(form, { faceRequired: false, otpRequired: false });
+  await assert.rejects(f.service.request('new@example.test', 'test-ip'), reason('VERIFICATION_METHOD_REQUIRED'));
+});
+
 test('pairwise-only verification cannot request OTP', async () => {
   const f = fixture();
   f.setSessionProfile(form, { duplicateCheck: 'unknown', livenessPassed: false });
@@ -193,11 +226,12 @@ test('final enrollment binds the final uid without copying biometric fields', as
   assert.equal(f.renderCalls[1].body.get('registration_session_id'), f.sessionId);
 });
 
-test('tampered challenge and admin role cannot create an account', async () => {
+test('tampered challenge and privileged roles cannot create an account', async () => {
   const f = fixture();
   const result = await f.service.request('new@example.test', 'test-ip');
   await assert.rejects(f.service.complete(result.challenge + 'x', f.sent[0].code, form), reason('registration-expired'));
   await assert.rejects(f.service.complete(result.challenge, f.sent[0].code, { ...form, role: 'admin' }), reason('invalid-registration'));
+  await assert.rejects(f.service.complete(result.challenge, f.sent[0].code, { ...form, role: 'manager' }), reason('invalid-registration'));
   assert.equal(f.creates, 0);
 });
 
@@ -256,6 +290,8 @@ test('final face enrollment failure leaves the account and session explicitly pe
   assert.equal(profile.onboardingStatus, 'face_enrollment_pending');
   assert.equal(session.completed, false);
   assert.equal(session.faceEnrollmentPending, true);
+  assert.equal(f.records.get('registrationLimits/device_device-hash').finalizedCount, 0);
+  assert.equal(f.records.get('registrationLimits/device_device-hash').reservedCount, 0);
   assert.equal(f.records.get('usernames/test_user').uid, 'new-user');
 });
 

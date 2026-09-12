@@ -20,6 +20,8 @@ function createRegistrationHandler(action) {
       const ip = getClientIp(req);
       const result = action === 'request'
         ? await service.request(body?.email, body?.username, body?.registrationSessionId, ip)
+        : body?.action === 'complete-without-otp'
+          ? await service.completeWithoutOtp(body?.challenge, body?.profile, body?.finalFaceImage)
         : body?.action === 'retry-finalization'
           ? await service.retryFinalization(body?.challenge, body?.profile, body?.finalFaceImage)
           : await service.complete(body?.challenge, body?.code, body?.profile, body?.finalFaceImage);

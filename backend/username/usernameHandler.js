@@ -4,6 +4,7 @@ const { OtpError } = require('../utils/otpError');
 const { normalizeUsername } = require('./username');
 const { applyCors } = require('../utils/cors');
 const { getClientIp } = require('../utils/request');
+const firebaseWebConfig = require('../../firebase-web-config.json');
 
 const genericLogin = () => new OtpError(401, 'invalid-credential', 'Invalid username or password.');
 const parseBody = (req) => {
@@ -57,7 +58,11 @@ function createUsernameHandler(action, getAdmin = getFirebaseAdmin) {
       if (user.disabled || !user.email) throw genericLogin();
       const profile = (await db.collection('users').doc(expectedUid).get()).data();
       if (!profile || profile.onboardingStatus === 'face_enrollment_pending' || profile.registrationCompleted === false) throw genericLogin();
-      const apiKey = process.env.FIREBASE_WEB_API_KEY;
+      // Firebase Web API keys identify the public Firebase project and are
+      // already shipped in every Firebase client. Prefer an environment
+      // override, but keep the server and client on the same checked-in public
+      // project config so username login cannot fail solely from a missing env.
+      const apiKey = process.env.FIREBASE_WEB_API_KEY || firebaseWebConfig.apiKey;
       if (!apiKey) throw new Error('Missing Firebase Web API configuration');
       const response = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${encodeURIComponent(apiKey)}`, {
         method: 'POST',

@@ -17,7 +17,10 @@ export default function HomeRoute() {
     let isActive = true;
 
     const redirectToHome = async () => {
-      const result = await validateRoleAccess('admin');
+      let result = await validateRoleAccess('admin');
+      if (result.status !== 'authorized' && !auth.currentUser) {
+        result = await validateRoleAccess('manager');
+      }
 
       if (isActive) {
         router.replace(result.redirectTo || '/admin/dashboard');

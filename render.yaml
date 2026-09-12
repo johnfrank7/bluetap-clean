@@ -28,3 +28,7 @@ services:
         sync: false
       - key: DEEPFACE_API_KEY
         sync: false
+      - key: REGISTRATION_DEVICE_HASH_SECRET
+        sync: false
+      - key: REGISTRATION_IP_HASH_SECRET
+        sync: false

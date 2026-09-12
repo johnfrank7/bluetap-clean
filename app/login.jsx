@@ -31,7 +31,7 @@ import { findLocalUserByEmail, saveLocalUser } from '../localUsers';
 import {
   clearAllAuthSessions,
   getPostAuthenticationDestination,
-  saveAdminSession,
+  saveManagerSession,
   saveRoleSession,
 } from '../services/authSession';
 import { ensureUserUniqueId } from '../services/uniqueIds';
@@ -301,30 +301,31 @@ export default function LoginPage() {
 
     const loginIdentifier = email.trim();
     const normalizedEmail = loginIdentifier.toLowerCase();
-    const trimmedPassword = password.trim();
+    const enteredPassword = password;
 
-    if (!normalizedEmail || !trimmedPassword) {
-      showNotification('Missing details', 'Please enter your email and password.');
+    if (!normalizedEmail || !enteredPassword) {
+      showNotification('Missing details', 'Please enter your username or email and password.');
       return;
     }
 
     try {
       setLoading(true);
 
-      // Secret admin credentials (bypass Firebase, go straight to admin panel)
-      if (normalizedEmail === 'bluetapadmin' && trimmedPassword === '12345678') {
+      // Legacy operational Manager credentials. This client-side mechanism is
+      // intentionally not accepted for the higher-privilege Admin role.
+      if (normalizedEmail === 'bluetapmanager' && enteredPassword === '12345678') {
         try {
           await signOut(auth);
         } catch (error) {
-          console.log('Admin Firebase sign out error:', error.message);
+          console.log('Manager Firebase sign out error:', error.message);
         }
 
-        saveAdminSession();
+        saveManagerSession();
         setLoading(false);
         showNotification(
           'Successfully logged in',
           'You have successfully logged in.',
-          () => router.replace('/admin/dashboard')
+          () => router.replace('/manager/dashboard')
         );
         return;
       }
@@ -332,8 +333,8 @@ export default function LoginPage() {
       // Legacy accounts may continue signing in with email. New accounts use
       // the server-side username registry and receive a Firebase custom token.
       const userCredential = loginIdentifier.includes('@')
-        ? await signInWithEmailAndPassword(auth, normalizedEmail, trimmedPassword)
-        : await signInWithCustomToken(auth, await loginWithUsername(loginIdentifier, trimmedPassword));
+        ? await signInWithEmailAndPassword(auth, normalizedEmail, enteredPassword)
+        : await signInWithCustomToken(auth, await loginWithUsername(loginIdentifier, enteredPassword));
 
       const user = userCredential.user;
 
@@ -377,7 +378,7 @@ export default function LoginPage() {
         rejectionReason: userData.rejectionReason || null,
       };
 
-      if (!['admin', 'requester', 'distributor'].includes(profileRole)) {
+      if (!['admin', 'manager', 'requester', 'distributor'].includes(profileRole)) {
         clearAllAuthSessions();
         await signOut(auth);
         showNotification('Login failed', 'This account has no valid role.');

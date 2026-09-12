@@ -13,6 +13,14 @@ service cloud.firestore {
       return signedIn() && currentUser().role == 'requester';
     }
 
+    function isManager() {
+      return signedIn() && currentUser().role == 'manager';
+    }
+
+    function isAdmin() {
+      return signedIn() && currentUser().role == 'admin';
+    }
+
     // The registration backend is the sole writer for these protected records.
     match /registrationSessions/{document=**} { allow read, write: if false; }
     match /usernameReservations/{document=**} { allow read, write: if false; }
@@ -20,11 +28,14 @@ service cloud.firestore {
     match /registrationOtpVerifications/{document=**} { allow read, write: if false; }
     match /authRateLimits/{document=**} { allow read, write: if false; }
     match /faceServiceLocks/{document=**} { allow read, write: if false; }
+    match /registrationLimits/{document=**} { allow read, write: if false; }
+    match /systemConfig/{document=**} { allow read, write: if false; }
+    match /adminAuditLogs/{document=**} { allow read, write: if false; }
 
     match /users/{uid} {
       // Fixes the missing-profile read failure without allowing user discovery.
-      allow get: if request.auth != null && request.auth.uid == uid;
-      allow list: if false;
+      allow get: if request.auth != null && (request.auth.uid == uid || isManager() || isAdmin());
+      allow list: if isManager() || isAdmin();
       allow create, delete: if false;
       // Profile screens may update ordinary contact/profile fields only. Roles,
       // approval, username ownership, completion, terms, and verification are
@@ -34,22 +45,27 @@ service cloud.firestore {
           'uid', 'email', 'role', 'status', 'approvalStatus', 'accountStatus',
           'rejectionReason', 'username', 'usernameNormalized', 'unique_id',
           'emailVerified', 'emailVerifiedAt', 'emailVerificationRequired',
-          'registrationCompleted', 'onboardingStatus', 'faceVerification',
+          'emailOtpVerification', 'registrationCompleted', 'onboardingStatus', 'faceVerification',
+          'registrationLimitKeys', 'registrationLimitReservation', 'admin', 'manager',
           'termsAcceptance', 'createdAt', 'restoredAt'
+        ]);
+      allow update: if isManager() && resource.data.role == 'distributor'
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'approvalStatus', 'status', 'accountStatus', 'rejectionReason', 'updatedAt'
         ]);
     }
 
-    // The water catalog is visible to signed-in BlueTap users. Product writes
-    // remain denied because the current local admin session is not a Firebase
-    // identity and therefore cannot be authorized safely by Firestore rules.
+    // The water catalog is visible to signed-in BlueTap users. Only a trusted,
+    // Firebase-authenticated Manager identity can mutate it.
     match /products/{productId} {
       allow read: if signedIn();
-      allow write: if false;
+      allow write: if isManager();
     }
 
     match /requests/{requestId} {
       // Requester queries are scoped with requester_id == request.auth.uid.
       allow read: if isRequester() && resource.data.requester_id == request.auth.uid;
+      allow read, update: if isManager();
       allow create: if isRequester()
         && request.resource.data.requester_id == request.auth.uid
         && request.resource.data.status == 'Pending';

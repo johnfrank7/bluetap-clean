@@ -17,7 +17,7 @@ const getWebReducedMotion = () =>
   typeof window.matchMedia === 'function' &&
   window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-export const formatAdminNumber = (value) =>
+export const formatManagerNumber = (value) =>
   new Intl.NumberFormat('en-US').format(Math.max(Number(value || 0), 0));
 
 export function useReducedMotionPreference() {

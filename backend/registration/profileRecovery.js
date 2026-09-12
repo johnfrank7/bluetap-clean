@@ -91,7 +91,8 @@ async function restartIncompleteRegistration({ auth, db, uid, hashSecret, render
   const user = await auth.getUser(uid);
   if (!user.email) throw restartUnavailable();
   const profile = await db.collection('users').doc(uid).get();
-  if (profile.exists || user.disabled || user.customClaims?.admin === true || user.customClaims?.role === 'admin') throw restartUnavailable();
+  if (profile.exists || user.disabled || user.customClaims?.admin === true ||
+    ['admin', 'manager'].includes(user.customClaims?.role)) throw restartUnavailable();
 
   const [uidSessions, recoverySessions] = await Promise.all([
     db.collection('registrationSessions').where('userUid', '==', uid).get(),

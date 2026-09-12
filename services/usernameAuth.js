@@ -16,6 +16,11 @@ const call = async (path, body) => {
       error.code = `username/${data?.error?.reason || 'service-unavailable'}`;
       throw error;
     }
+    if (!data || typeof data !== 'object') {
+      const error = new Error('The authentication service returned an invalid response.');
+      error.code = 'username/service-unavailable';
+      throw error;
+    }
     return data;
   } catch (error) {
     if (String(error.code || '').startsWith('username/')) throw error;
@@ -37,6 +42,10 @@ export const validateUsername = (value) => {
 export const checkUsername = async (username) => call('/api/auth/check-username', { username });
 export const loginWithUsername = async (username, password) => {
   const result = await call('/api/auth/login-with-username', { username, password });
-  if (typeof result.customToken !== 'string') throw new Error('The login service returned an invalid response.');
+  if (typeof result?.customToken !== 'string' || !result.customToken) {
+    const error = new Error('The login service returned an invalid response.');
+    error.code = 'username/service-unavailable';
+    throw error;
+  }
   return result.customToken;
 };

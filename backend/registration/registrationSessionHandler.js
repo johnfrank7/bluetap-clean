@@ -14,7 +14,12 @@ function createRegistrationSessionHandler(action, getAdmin = getFirebaseAdmin) {
       let body = req.body;
       if (typeof body === 'string') { try { body = JSON.parse(body); } catch { throw new OtpError(400, 'invalid-request', 'Invalid request.'); } }
       const { db } = getAdmin();
-      const service = createRegistrationSessionService({ db, hashSecret: process.env.EMAIL_OTP_HASH_SECRET });
+      const service = createRegistrationSessionService({
+        db,
+        hashSecret: process.env.EMAIL_OTP_HASH_SECRET,
+        deviceHashSecret: process.env.REGISTRATION_DEVICE_HASH_SECRET,
+        ipHashSecret: process.env.REGISTRATION_IP_HASH_SECRET,
+      });
       const ip = getClientIp(req);
       const result = action === 'create' ? await service.create(body, ip)
         : action === 'start' ? await service.start(body?.registrationSessionId)

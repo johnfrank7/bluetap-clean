@@ -6,6 +6,7 @@ const { routes } = require('..');
 const { getClientIp } = require('../../utils/request');
 
 const EXPECTED_ROUTES = [
+  '/api/admin/registration-security',
   '/api/auth/accept-registration-terms',
   '/api/auth/check-username',
   '/api/auth/complete-registration',

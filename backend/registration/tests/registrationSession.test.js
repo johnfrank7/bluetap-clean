@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { createRegistrationSessionService, setTrustedFaceVerification } = require('../registrationSession');
 
-const personal = { role: 'requester', firstName: 'Test', lastName: 'Person', phone: '+639123456789', barangay: 'Awihao', address: 'Test Street' };
+const personal = { role: 'requester', firstName: 'Test', lastName: 'Person', phone: '+639123456789', barangay: 'Awihao', address: 'Test Street', installationId: '123e4567-e89b-42d3-a456-426614174000' };
 function fixture() {
   let time = 1800000000000;
   const records = new Map();
@@ -21,7 +21,7 @@ function fixture() {
       return result;
     },
   };
-  return { db, records, service: createRegistrationSessionService({ db, hashSecret: 'session-secret', now: () => time }), advance: (ms) => { time += ms; }, now: () => time };
+  return { db, records, service: createRegistrationSessionService({ db, hashSecret: 'session-secret', deviceHashSecret: 'device-secret', ipHashSecret: 'ip-secret', now: () => time }), advance: (ms) => { time += ms; }, now: () => time };
 }
 
 test('registration session uses a random opaque id and starts unverified', async () => {
@@ -32,6 +32,8 @@ test('registration session uses a random opaque id and starts unverified', async
   assert.notEqual(first.registrationSessionId, second.registrationSessionId);
   const data = f.records.get('registrationSessions/' + first.registrationSessionId);
   assert.equal(data.faceVerification.status, 'unverified');
+  assert.deepEqual(data.securityPolicySnapshot, { faceVerificationRequired: true, emailOtpRequired: true, maxAccountsPerDevice: 3, maxAccountsPerIp: 3, policyVersion: 1 });
+  assert.equal(JSON.stringify(data).includes(personal.installationId), false);
   assert.equal(data.termsAcceptance, null);
   assert.equal(JSON.stringify(data).includes('Test Street'), false);
 });
@@ -60,4 +62,15 @@ test('duplicate flag requires review and expired sessions fail closed', async ()
   const second = await expired.service.create(personal, 'ip');
   expired.advance(60 * 60 * 1000);
   await assert.rejects(expired.service.status(second.registrationSessionId), (error) => error.reason === 'registration-session-expired');
+});
+
+test('new sessions snapshot admin policy and face-disabled sessions skip face securely', async () => {
+  const f = fixture();
+  f.records.set('systemConfig/registrationSecurity', { faceVerificationEnabled: false, emailOtpEnabled: true, maxAccountsPerDevice: 5, maxAccountsPerIp: 4, version: 7 });
+  const result = await f.service.create(personal, 'ip');
+  const session = f.records.get('registrationSessions/' + result.registrationSessionId);
+  assert.deepEqual(session.securityPolicySnapshot, { faceVerificationRequired: false, emailOtpRequired: true, maxAccountsPerDevice: 5, maxAccountsPerIp: 4, policyVersion: 7 });
+  assert.equal(session.faceVerification.status, 'not_required');
+  assert.equal((await f.service.acceptTerms(result.registrationSessionId)).accepted, true);
+  await assert.rejects(setTrustedFaceVerification(f.db, result.registrationSessionId, { livenessPassed: true, duplicateCheck: 'clear' }, f.now), (error) => error.reason === 'face-verification-not-required');
 });

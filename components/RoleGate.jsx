@@ -11,8 +11,11 @@ import {
   validateRoleAccess,
 } from '../services/authSession';
 
-export default function RoleGate({ role, children }) {
+export default function RoleGate({ role, allowedRoles, children }) {
   const router = useRouter();
+  const allowedRolesKey = (Array.isArray(allowedRoles) && allowedRoles.length
+    ? allowedRoles
+    : [role]).join(',');
   const validationRunRef = useRef(0);
   const redirectTimerRef = useRef(null);
   const [gateState, setGateState] = useState({
@@ -31,7 +34,12 @@ export default function RoleGate({ role, children }) {
 
     setGateState({ status: 'checking', message: '' });
 
-    const result = await validateRoleAccess(role);
+    const roles = allowedRolesKey.split(',').filter(Boolean);
+    let result = null;
+    for (const allowedRole of roles) {
+      result = await validateRoleAccess(allowedRole);
+      if (result.status === 'authorized') break;
+    }
 
     if (validationRunRef.current !== runId) return;
 
@@ -64,7 +72,7 @@ export default function RoleGate({ role, children }) {
     redirectTimerRef.current = setTimeout(() => {
       router.replace(result.redirectTo || '/login');
     }, 0);
-  }, [role, router]);
+  }, [allowedRolesKey, router]);
 
   useEffect(() => {
     let hasAuthStateLoaded = false;

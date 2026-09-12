@@ -10,11 +10,14 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 
 import { BLUETAP_COLORS, BLUETAP_LOGIN_GRADIENT } from '../constants/bluetapTheme';
 import { clearAllAuthSessions } from '../services/authSession';
-import { clearPendingRegistration, requestRegistrationOtp, setPendingRegistration } from '../services/emailVerification';
+import { clearPendingRegistration, completeRegistrationWithoutOtp, requestRegistrationOtp, setPendingRegistration } from '../services/emailVerification';
 import { checkUsername, normalizeUsername, validateUsername } from '../services/usernameAuth';
 import { acceptRegistrationTerms, createRegistrationSession } from '../services/registrationSession';
 
 import RegistrationFaceCapture from '../components/RegistrationFaceCapture';
+import { auth } from '../firebase';
+import { signInWithCustomToken } from 'firebase/auth';
+import { getRoleHomePath, saveRoleSession } from '../services/authSession';
 
 const { isTrustedRegistrationFaceVerification } = require('../services/webFaceCaptureCore');
 
@@ -56,6 +59,7 @@ export default function SignupPage() {
   const [registrationSessionId, setRegistrationSessionId] = React.useState('');
   const [faceVerification, setFaceVerification] = React.useState({ status: 'unverified', duplicateCheck: 'unknown' });
   const [termsAccepted, setTermsAccepted] = React.useState(false);
+  const [securityPolicy, setSecurityPolicy] = React.useState({ faceVerificationRequired: true, emailOtpRequired: true });
   const [now, setNow] = React.useState(Date.now());
   const submitting = React.useRef(false);
   const entrance = React.useRef(new Animated.Value(0)).current;
@@ -88,7 +92,7 @@ export default function SignupPage() {
   const retrySeconds = Math.max(0, Math.ceil((retryAt - now) / 1000));
   const canContinue = step === 1 ? !!form.role
     : step === 2 ? !!form.firstName.trim() && !!form.lastName.trim() && PHONE.test(form.phone) && !!form.barangay && !!form.address.trim()
-      : step === 3 ? isTrustedRegistrationFaceVerification(faceVerification)
+      : step === 3 ? !securityPolicy.faceVerificationRequired || isTrustedRegistrationFaceVerification(faceVerification)
         : !validateUsername(form.username) && EMAIL.test(form.email.trim()) && form.password.length >= 8 && form.password === form.confirmPassword && usernameState.available === true && termsAccepted;
 
   React.useEffect(() => {
@@ -140,7 +144,15 @@ export default function SignupPage() {
           phone: `+63${form.phone}`, barangay: form.barangay, address: form.address.trim(),
         });
         setRegistrationSessionId(result.registrationSessionId);
-        setFaceVerification({ status: 'unverified', duplicateCheck: 'unknown' });
+        setSecurityPolicy(result.securityPolicy || { faceVerificationRequired: true, emailOtpRequired: true });
+        setFaceVerification(result.securityPolicy?.faceVerificationRequired === false
+          ? { required: false, status: 'not_required', duplicateCheck: 'not_required' }
+          : { required: true, status: 'unverified', duplicateCheck: 'unknown' });
+        if (result.securityPolicy?.faceVerificationRequired === false) {
+          setStep(4);
+          setErrors({});
+          return;
+        }
       } catch (error) {
         setNotice({ title: 'Could not start verification', message: error.message });
         return;
@@ -153,6 +165,7 @@ export default function SignupPage() {
   const back = () => {
     if (loading) return;
     if (step === 1) router.replace('/login');
+    else if (step === 4 && !securityPolicy.faceVerificationRequired) setStep(2);
     else setStep((current) => current - 1);
   };
 
@@ -161,7 +174,7 @@ export default function SignupPage() {
     submitting.current = true;
     setLoading(true);
     try {
-      if (!registrationSessionId || !isTrustedRegistrationFaceVerification(faceVerification)) {
+      if (!registrationSessionId || (securityPolicy.faceVerificationRequired && !isTrustedRegistrationFaceVerification(faceVerification))) {
         setNotice({ title: 'Identity verification required', message: 'Complete identity verification before continuing.' });
         return;
       }
@@ -177,11 +190,20 @@ export default function SignupPage() {
         username: form.username.trim(), usernameNormalized: normalizeUsername(form.username),
         email: form.email.trim().toLowerCase(), password: form.password,
         registrationSessionId,
+        securityPolicy,
       };
       clearPendingRegistration();
       const result = await requestRegistrationOtp(profile.email, profile.username, registrationSessionId);
       setPendingRegistration(profile, result);
       clearAllAuthSessions();
+      if (result.otpRequired === false) {
+        const completed = await completeRegistrationWithoutOtp();
+        await signInWithCustomToken(auth, completed.customToken);
+        saveRoleSession({ uid: auth.currentUser.uid, email: profile.email, role: completed.role });
+        clearPendingRegistration();
+        router.replace(getRoleHomePath(completed.role));
+        return;
+      }
       router.replace({ pathname: '/email-verification', params: {
         registration: 'true', role: form.role, sent: 'true', expiresAt: String(result.expiresAt),
         resendAfterSeconds: String(result.resendAfterSeconds),
@@ -289,7 +311,7 @@ export default function SignupPage() {
               <View style={[styles.actions, step === 3 && styles.identityActions]}>
                 <TouchableOpacity style={styles.back} onPress={back} disabled={loading}><Text style={styles.backText}>Back</Text></TouchableOpacity>
                 <TouchableOpacity style={[styles.primary, (!canContinue || loading || retrySeconds > 0) && styles.disabled, step === 3 && (!canContinue || loading || retrySeconds > 0) && styles.identityContinueDisabled]} onPress={step === 4 ? submit : next} disabled={!canContinue || loading || retrySeconds > 0}>
-                  {loading ? <ActivityIndicator color="#FFF" /> : <Text style={[styles.primaryText, step === 3 && !canContinue && styles.identityContinueTextDisabled]}>{retrySeconds > 0 ? `Try again in ${Math.floor(retrySeconds / 60)}:${String(retrySeconds % 60).padStart(2, '0')}` : step === 4 ? 'Send Verification Code' : 'Continue'}</Text>}
+                  {loading ? <ActivityIndicator color="#FFF" /> : <Text style={[styles.primaryText, step === 3 && !canContinue && styles.identityContinueTextDisabled]}>{retrySeconds > 0 ? `Try again in ${Math.floor(retrySeconds / 60)}:${String(retrySeconds % 60).padStart(2, '0')}` : step === 4 ? (securityPolicy.emailOtpRequired ? 'Send Verification Code' : 'Complete Registration') : 'Continue'}</Text>}
                 </TouchableOpacity>
               </View>
               <Text style={styles.loginPrompt}>Already have an account? <Text style={styles.loginLink} onPress={() => router.replace('/login')}>Log in.</Text></Text>
