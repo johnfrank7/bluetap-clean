@@ -1,7 +1,6 @@
 const { createOtpHandler } = require('../auth/otpHandler');
 const { createRegistrationHandler } = require('../registration/registrationHandler');
 const { createRegistrationSessionHandler } = require('../registration/registrationSessionHandler');
-const { createProfileRecoveryHandler } = require('../registration/profileRecoveryHandler');
 const { createUsernameHandler } = require('../username/usernameHandler');
 const { createFaceVerificationHandler } = require('../verification/faceVerification');
 const { createRegistrationFaceHandler } = require('../verification/registrationFaceHandler');
@@ -17,7 +16,6 @@ const routes = new Map([
   ['/api/auth/verify-email-otp', createOtpHandler('verify')],
   ['/api/auth/request-registration-otp', createRegistrationHandler('request')],
   ['/api/auth/complete-registration', createRegistrationHandler('complete')],
-  ['/api/auth/recover-profile', createProfileRecoveryHandler()],
   ['/api/verification/verify-face', createFaceVerificationHandler()],
   ['/api/verification/registration-face', createRegistrationFaceHandler()],
 ]);

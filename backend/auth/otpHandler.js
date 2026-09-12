@@ -3,6 +3,7 @@ const { createEmailOtpService } = require('./emailOtp');
 const { sendEmailOtp } = require('../email/emailProvider');
 const { OtpError } = require('../utils/otpError');
 const { applyCors } = require('../utils/cors');
+const { recoverProfile } = require('../registration/profileRecovery');
 
 function createOtpHandler(action, getAdmin = getFirebaseAdmin) {
   return async (req, res) => {
@@ -33,9 +34,11 @@ function createOtpHandler(action, getAdmin = getFirebaseAdmin) {
         try { body = JSON.parse(body); }
         catch { throw new OtpError(400, 'invalid-code', 'Invalid request body.'); }
       }
-      const result = action === 'request'
-        ? await service.request(identity.uid)
-        : await service.verify(identity.uid, body?.code);
+      const result = action === 'request' && body?.action === 'recover-profile'
+        ? await recoverProfile({ auth, db, uid: identity.uid })
+        : action === 'request'
+          ? await service.request(identity.uid)
+          : await service.verify(identity.uid, body?.code);
       return res.status(200).json(result);
     } catch (error) {
       const known = error instanceof OtpError;
