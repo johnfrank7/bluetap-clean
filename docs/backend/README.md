@@ -54,10 +54,12 @@ Never create `EXPO_PUBLIC_` versions of server credentials.
 
 ## Frontend environment
 
-Set `EXPO_PUBLIC_API_BASE_URL` to the public Render origin, without a trailing
-slash, after Render is deployed, for example `https://<service>.onrender.com`.
+Web clients use same-origin Vercel `/api` routes. Set
+`EXPO_PUBLIC_API_BASE_URL` only for native builds, without a trailing slash,
+to the public Vercel origin, for example `https://bluetap-beta.vercel.app`.
 This value is public and contains no credential. If it is absent, Expo web keeps
-using same-origin `/api` Vercel fallbacks. Native builds fail safely without it.
+using same-origin `/api` Vercel routes and native builds use the BlueTap Vercel
+origin by default. Native clients reject Render origins.
 
 ## Deployment and testing
 

@@ -29,8 +29,10 @@ external service. All API routes also support CORS preflight with `OPTIONS`.
 ## Switchover state
 
 - `services/apiClient.js` is the single frontend base-URL resolver.
-- With `EXPO_PUBLIC_API_BASE_URL` set, calls go directly to Render.
-- Without it, Expo web uses relative `/api` paths and continues through Vercel.
-- Native builds require the public base URL and fail safely when it is absent.
+- Web calls use same-origin Vercel `/api` routes. Native calls use
+  `EXPO_PUBLIC_API_BASE_URL`, which must be the public Vercel origin.
+- Web always uses relative `/api` paths and continues through Vercel.
+- Native builds default to the public BlueTap Vercel origin when the public
+  base URL is absent, and reject Render origins.
 - No Vercel route is ready for deletion until the deployed Render service passes
   health, endpoint, Firebase, Gmail, and protected face-service smoke tests.

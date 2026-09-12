@@ -34,9 +34,9 @@ on its first native build; retain those IDs for subsequent testing.
 2. Connect the phone by USB, accept its debugging authorization, and run
    `adb devices`. The device must appear as authorized.
 3. In the BlueTap app directory run `npm ci`.
-4. In the ignored `.env.local`, configure the public Render backend origin:
-   `EXPO_PUBLIC_API_BASE_URL=https://<service>.onrender.com`.
-   Never put Render credentials in this file or any public variable.
+4. In the ignored `.env.local`, configure the public Vercel backend origin:
+   `EXPO_PUBLIC_API_BASE_URL=https://bluetap-beta.vercel.app`.
+   Never put server credentials in this file or any public variable.
 5. Run `npm run build:android:device`. Select the phone and set the intended Android
    application ID if Expo asks. This generates/builds/installs the custom native app.
 6. For subsequent JS sessions run `npm run dev:mobile`. Open the installed BlueTap

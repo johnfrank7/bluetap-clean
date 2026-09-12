@@ -25,6 +25,13 @@ function createRegistrationFaceHandler(getService = () => createRegistrationFace
       return res.status(200).json(result);
     } catch (error) {
       const known = error instanceof OtpError;
+      // Keep upstream detail out of the response, but retain enough context in
+      // Vercel logs to diagnose DeepFace outages and invalid payloads.
+      console.error('Registration face verification failed', {
+        status: known ? error.status : error.name === 'AbortError' ? 504 : 502,
+        reason: known ? error.reason : 'face-service-unavailable',
+        cause: error?.message,
+      });
       return res.status(known ? error.status : error.name === 'AbortError' ? 504 : 502).json({ error: {
         reason: known ? error.reason : 'face-service-unavailable',
         message: known ? error.message : 'Face verification could not finish. Please try again later.',
