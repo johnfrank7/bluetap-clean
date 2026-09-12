@@ -98,22 +98,32 @@ const temporaryFaceSession = (snapshot) => {
     face.verificationReference === snapshot.id;
 };
 
-async function discardTemporaryFace(registrationSessionId) {
+async function resetDevelopmentFaces(dryRun) {
   const base = (process.env.DEEPFACE_API_URL || '').replace(/\/+$/, '');
   const key = process.env.DEEPFACE_API_KEY;
-  if (!base.startsWith('https://') || !key) throw new Error('Temporary face cleanup requires server-only DEEPFACE_API_URL and DEEPFACE_API_KEY.');
-  const form = new FormData();
-  form.append('registration_session_id', registrationSessionId);
-  const response = await fetch(`${base}/discard-registration-face`, {
+  if (!base.startsWith('https://') || !key) {
+    throw new Error('Face reset requires server-only DEEPFACE_API_URL and DEEPFACE_API_KEY.');
+  }
+  const response = await fetch(`${base}/admin/reset-development-enrollments`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${key}` },
-    body: form,
+    headers: {
+      Authorization: `Bearer ${key}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(dryRun
+      ? { dryRun: true }
+      : { dryRun: false, confirm: 'RESET_BLUETAP_FACE_DEV' }),
     redirect: 'error',
   });
   const result = await response.json().catch(() => null);
-  if (!response.ok || (result?.discarded !== true && result?.notFound !== true)) {
-    throw new Error(`Temporary face cleanup failed for registration session ${registrationSessionId}.`);
+  if (!response.ok || result?.scope !== 'development' || result?.dryRun !== dryRun ||
+      !Number.isInteger(result?.totalEntries) || !Number.isInteger(result?.deletedEntries)) {
+    throw new Error(`Development face ${dryRun ? 'preflight' : 'reset'} failed (HTTP ${response.status}).`);
   }
+  if (!dryRun && result.deletedEntries !== result.totalEntries) {
+    throw new Error('Development face reset returned inconsistent deletion counts.');
+  }
+  return result;
 }
 
 async function deleteDocuments(db, refs) {
@@ -181,6 +191,7 @@ async function run() {
     targetUids.has(snapshot.id) && faceIsFinalized({ uid: snapshot.id, ...snapshot.data() })
   );
   const temporaryFaces = registrationSessions.filter(temporaryFaceSession);
+  const facePreflight = await resetDevelopmentFaces(true);
 
   console.log(`Mode: ${apply ? 'APPLY' : 'DRY RUN'}`);
   console.log(`Project: ${EXPECTED_PROJECT}`);
@@ -197,9 +208,11 @@ async function run() {
   [...counts].sort(([left], [right]) => left.localeCompare(right)).forEach(([name, count]) => console.log(`- ${name}: ${count}`));
   console.log(`- total unique documents: ${targets.size}`);
   console.log('\nFace enrollment plan:');
-  console.log(`- temporary registrations eligible for trusted discard: ${temporaryFaces.length}`);
-  console.log(`- finalized test enrollments requiring a protected bulk/delete endpoint: ${finalizedFaces.length}`);
-  console.log('- deployed face API exposes discard-registration-face for temporary data, but no finalized enrollment reset endpoint');
+  console.log(`- API dry-run finalized enrollments: ${facePreflight.finalizedEnrollments}`);
+  console.log(`- API dry-run orphaned enrollments: ${facePreflight.orphanedEnrollments}`);
+  console.log(`- API dry-run temporary registrations: ${facePreflight.temporaryRegistrations}`);
+  console.log(`- Firestore-inferred finalized profiles: ${finalizedFaces.length}`);
+  console.log(`- Firestore-inferred temporary face sessions: ${temporaryFaces.length}`);
   console.log('\nPreserved data:');
   preserved.forEach((entry) => console.log(`- ${entry}`));
   alwaysPreservedCollections.forEach((name) => {
@@ -210,14 +223,11 @@ async function run() {
   if (!apply) {
     console.log(`\nDRY RUN ONLY: nothing was deleted.`);
     console.log(`Apply command after review: node scripts/reset-development-users.js --apply --confirm ${CONFIRMATION}`);
-    if (finalizedFaces.length) console.log('BLOCKER: apply will refuse until the face API has a trusted finalized-enrollment reset contract.');
     return;
   }
-  if (finalizedFaces.length) {
-    throw new Error('Refusing partial reset: finalized face enrollments exist and the deployed face API has no authenticated reset endpoint.');
-  }
 
-  for (const session of temporaryFaces) await discardTemporaryFace(session.id);
+  const faceReset = await resetDevelopmentFaces(false);
+  console.log(`Face reset complete: deleted ${faceReset.deletedEntries} development face entries.`);
   await deleteDocuments(db, targets);
   for (const user of authTargets) await auth.deleteUser(user.uid);
   console.log(`Reset complete: deleted ${targets.size} Firestore documents and ${authTargets.length} normal Firebase Auth users.`);
