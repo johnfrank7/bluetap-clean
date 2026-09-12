@@ -1,5 +1,5 @@
 import { signOut } from 'firebase/auth';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDocFromServer } from 'firebase/firestore';
 
 import { auth, db } from '../firebase';
 import { saveLocalUser } from '../localUsers';
@@ -219,7 +219,10 @@ const buildFirestoreProfile = (user, data = {}) => ({
 export const fetchFirestoreUserProfile = async (user) => {
   if (!user?.uid) return null;
 
-  const snapshot = await getDoc(doc(db, 'users', user.uid));
+  // Authentication and authorization routing must use the authoritative
+  // server profile. A cached pre-finalization document can otherwise send a
+  // newly completed registration back through the legacy verification route.
+  const snapshot = await getDocFromServer(doc(db, 'users', user.uid));
 
   if (!snapshot.exists()) {
     return null;

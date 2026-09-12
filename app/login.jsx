@@ -26,10 +26,11 @@ import {
   signInWithCustomToken,
   signOut,
 } from 'firebase/auth';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDocFromServer } from 'firebase/firestore';
 import { findLocalUserByEmail, saveLocalUser } from '../localUsers';
 import {
   clearAllAuthSessions,
+  getPostAuthenticationDestination,
   saveAdminSession,
   saveRoleSession,
 } from '../services/authSession';
@@ -267,20 +268,6 @@ export default function LoginPage() {
     }, keyboardVisibleRef.current ? 60 : 320);
   };
 
-  const navigateToRoleHome = (role) => {
-    const normalizedRole = normalizeRole(role);
-
-    if (normalizedRole === 'admin') {
-      router.replace('/admin/dashboard');
-    } else if (normalizedRole === 'requester') {
-      router.replace('/requester/r_dashboard');
-    } else if (normalizedRole === 'distributor') {
-      router.replace('/distributor/d_dashboard');
-    } else {
-      showNotification('Login failed', 'This account has no valid role.');
-    }
-  };
-
   const finishSuccessfulLogin = (profile) => {
     const role = normalizeRole(profile?.role || profile);
 
@@ -299,12 +286,13 @@ export default function LoginPage() {
       ...(typeof profile === 'object' ? profile : {}),
       role,
     });
+    const destination = getPostAuthenticationDestination(profile);
 
     setLoading(false);
     showNotification(
       'Successfully logged in',
       'You have successfully logged in.',
-      () => navigateToRoleHome(role)
+      () => router.replace(destination)
     );
   };
 
@@ -352,7 +340,7 @@ export default function LoginPage() {
       let userDoc = null;
 
       try {
-        userDoc = await getDoc(doc(db, 'users', user.uid));
+        userDoc = await getDocFromServer(doc(db, 'users', user.uid));
       } catch (error) {
         console.log('Login profile read error:', error.message);
       }
@@ -360,7 +348,7 @@ export default function LoginPage() {
       if (!userDoc?.exists()) {
         try {
           const recovery = await recoverTrustedProfile();
-          if (recovery?.recovered) userDoc = await getDoc(doc(db, 'users', user.uid));
+          if (recovery?.recovered) userDoc = await getDocFromServer(doc(db, 'users', user.uid));
         } catch (error) {
           console.log('Trusted profile recovery unavailable:', error.message);
         }
