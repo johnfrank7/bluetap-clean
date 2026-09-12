@@ -50,8 +50,18 @@ export const normalizeFaceVerification = (profile = {}) => {
     livenessPassed:
       typeof value.livenessPassed === 'boolean' ? value.livenessPassed : null,
     duplicateCheck: safeDuplicateCheck,
+    verificationReference: value.verificationReference || null,
+    model: value.model || null,
+    detectorBackend: value.detectorBackend || null,
     failureReason: value.failureReason || null,
   };
+};
+
+// This status is written only by trusted server-side finalization. A flagged
+// duplicate is normalized to review_required above and can never reach here.
+export const isFaceVerified = (profile = {}) => {
+  const verification = normalizeFaceVerification(profile);
+  return verification.status === 'verified';
 };
 
 /** Pairwise comparison only: referenceImage and probeImage are JPEG/PNG data URLs.

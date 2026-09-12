@@ -17,12 +17,14 @@ import { BLUETAP_LOGIN_GRADIENT } from '../constants/bluetapTheme';
 import { auth } from '../firebase';
 import {
   fetchFirestoreUserProfile,
+  getPostAuthenticationDestination,
   getDistributorApplicationStatus,
   normalizeRole,
   signOutAndClearSessions,
 } from '../services/authSession';
 import {
   createUnverifiedFaceVerification,
+  isFaceVerified,
   normalizeFaceVerification,
   startFaceVerification,
   subscribeFaceVerification,
@@ -115,19 +117,8 @@ export default function VerificationPage() {
 
         // Users who were already verified before opening this route can continue
         // directly. A newly received verified status remains visible as success.
-        if (initialVerification.status === 'verified') {
-          if (role === 'requester') {
-            router.replace('/requester/r_dashboard');
-            return;
-          }
-
-          if (getDistributorApplicationStatus(nextProfile) === 'approved') {
-            router.replace('/distributor/d_dashboard');
-            return;
-          }
-
-          setDistributorApprovalRequired(true);
-          setIsLoading(false);
+        if (isFaceVerified(nextProfile)) {
+          router.replace(getPostAuthenticationDestination(nextProfile));
           return;
         }
 
@@ -297,8 +288,8 @@ export default function VerificationPage() {
       <View style={styles.stateContent}>
         <Text style={styles.title}>Verify your identity</Text>
         <Text style={styles.description}>
-          Face verification compares a reference photo with a current photo. Image capture
-          and enrollment are still pending; liveness and duplicate prevention are not complete.
+          This recovery flow is for accounts that do not yet have a completed identity
+          verification. Use a clear, current face capture so BlueTap can verify your account.
         </Text>
 
         <View style={styles.instructions}>

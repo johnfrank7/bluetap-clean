@@ -3,7 +3,7 @@ import { doc, getDoc } from 'firebase/firestore';
 
 import { auth, db } from '../firebase';
 import { saveLocalUser } from '../localUsers';
-import { normalizeFaceVerification } from './faceVerification';
+import { isFaceVerified, normalizeFaceVerification } from './faceVerification';
 import { ensureUserUniqueId } from './uniqueIds';
 
 const ACTIVE_SESSION_KEY = 'bluetapActiveAuthSession';
@@ -97,6 +97,20 @@ const setSessions = (activeSession, moduleSessions) => {
 export const normalizeRole = (role) => role?.toString().trim().toLowerCase() || '';
 
 export const getRoleHomePath = (role) => ROLE_HOME_PATHS[normalizeRole(role)] || '/login';
+
+export const getPostAuthenticationDestination = (profile = {}) => {
+  const role = normalizeRole(profile.role);
+  if (role === 'admin') return '/admin/dashboard';
+  if (!['requester', 'distributor'].includes(role)) return '/login';
+  if (profile.onboardingStatus === 'face_enrollment_pending' || profile.registrationCompleted === false) {
+    return '/registration-status';
+  }
+  if (!isFaceVerified(profile)) return '/verification';
+  if (role === 'distributor' && getDistributorApplicationStatus(profile) !== 'approved') {
+    return '/registration-status';
+  }
+  return getRoleHomePath(role);
+};
 
 export const isValidRole = (role) => validRoles.has(normalizeRole(role));
 
@@ -318,9 +332,17 @@ export const validateRoleAccess = async (expectedRole) => {
   if (profile.onboardingStatus === 'face_enrollment_pending' || profile.registrationCompleted === false) {
     return {
       status: 'onboarding-pending',
-      message: 'Your account is still completing secure face enrollment. Please contact BlueTap support.',
-      redirectTo: '/login',
-      shouldSignOut: true,
+      message: 'Your account is still completing secure face enrollment.',
+      redirectTo: '/registration-status',
+      clearRole: expected,
+    };
+  }
+
+  if ((profile.role === 'requester' || profile.role === 'distributor') && !isFaceVerified(profile)) {
+    return {
+      status: 'face-unverified',
+      message: 'Complete identity verification to continue.',
+      redirectTo: '/verification',
       clearRole: expected,
     };
   }
@@ -343,9 +365,8 @@ export const validateRoleAccess = async (expectedRole) => {
   ) {
     return {
       status: 'unauthorized',
-      message: 'Unauthorized Access',
-      redirectTo: '/login',
-      shouldSignOut: true,
+      message: 'Your distributor application is awaiting administrator approval.',
+      redirectTo: '/registration-status',
       clearRole: expected,
     };
   }

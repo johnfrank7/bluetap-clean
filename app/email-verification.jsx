@@ -17,7 +17,7 @@ import { onAuthStateChanged, reload, signInWithCustomToken, signOut } from 'fire
 
 import { BLUETAP_COLORS, BLUETAP_LOGIN_GRADIENT } from '../constants/bluetapTheme';
 import { auth } from '../firebase';
-import { clearAllAuthSessions } from '../services/authSession';
+import { clearAllAuthSessions, fetchFirestoreUserProfile, getPostAuthenticationDestination } from '../services/authSession';
 import { requestEmailOtp, verifyEmailOtp, getPendingRegistration, clearPendingRegistration,
   setPendingRegistration, requestRegistrationOtp, completeRegistration } from '../services/emailVerification';
 
@@ -57,6 +57,9 @@ const getOtpError = (error) => {
   }
   if (reason === 'no-active-code') return 'Please request a new verification code.';
   if (['registration-expired', 'invalid-registration', 'account-exists'].includes(reason)) return error.message;
+  if (['face-service-preparing', 'invalid-face-response', 'face-review-required'].includes(reason)) {
+    return 'Your account was created, but secure face enrollment still needs attention. Please log in again shortly to view the recovery status.';
+  }
   if (reason === 'service-unavailable') {
     return 'The email verification service is currently unavailable. Please try again later or contact BlueTap support.';
   }
@@ -130,8 +133,10 @@ export default function EmailVerificationPage() {
         if (!refreshedUser.emailVerified) return false;
 
         await refreshedUser.getIdToken(true);
+        const profile = await fetchFirestoreUserProfile(refreshedUser);
+        const destination = getPostAuthenticationDestination(profile || {});
         clearAllAuthSessions();
-        router.replace('/verification');
+        router.replace(destination);
         return true;
       } catch (error) {
         console.log('Email OTP account refresh error:', error.message);
@@ -292,8 +297,7 @@ export default function EmailVerificationPage() {
       setMessage('Email verified successfully.');
       setMessageType('success');
       completionTimeoutRef.current = setTimeout(() => {
-        clearAllAuthSessions();
-        router.replace('/verification');
+        continueAfterVerification(account);
       }, 500);
     } catch (error) {
       const reason = error?.details?.reason;
