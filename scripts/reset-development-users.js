@@ -40,6 +40,31 @@ const alwaysPreservedCollections = new Set([
   'faceServiceLocks',
 ]);
 
+const faceResetErrorDetails = new Map([
+  ['Development face reset is disabled.', ['FACE_RESET_DISABLED', 'Development face reset is disabled on the face API.']],
+  ['Face storage is not declared as development-only.', ['FACE_DATA_ENVIRONMENT_NOT_DEVELOPMENT', 'Face storage is not declared as development-only.']],
+  ['Exact development reset confirmation is required.', ['FACE_RESET_CONFIRMATION_INVALID', 'The destructive face reset confirmation was rejected.']],
+]);
+
+function safeFaceResetError(response, result, dryRun) {
+  let code = 'FACE_RESET_REQUEST_FAILED';
+  let message = 'The face API rejected the development reset request.';
+  if (response.status === 401 ||
+      (response.status === 403 && result?.detail === 'Invalid API key.')) {
+    code = 'INVALID_API_KEY';
+    message = 'The face API rejected the server authentication key.';
+  } else if (faceResetErrorDetails.has(result?.detail)) {
+    [code, message] = faceResetErrorDetails.get(result.detail);
+  } else if (response.status === 404) {
+    code = 'FACE_RESET_ENDPOINT_NOT_FOUND';
+    message = 'The development face reset endpoint is not deployed.';
+  }
+  return new Error(
+    `Development face ${dryRun ? 'preflight' : 'reset'} failed ` +
+    `(HTTP ${response.status}, ${code}): ${message}`
+  );
+}
+
 function credentials() {
   const serviceAccountPath = process.env.FIREBASE_SERVICE_ACCOUNT_PATH;
   if (serviceAccountPath) {
@@ -116,9 +141,15 @@ async function resetDevelopmentFaces(dryRun) {
     redirect: 'error',
   });
   const result = await response.json().catch(() => null);
-  if (!response.ok || result?.scope !== 'development' || result?.dryRun !== dryRun ||
+  if (!response.ok) {
+    throw safeFaceResetError(response, result, dryRun);
+  }
+  if (result?.scope !== 'development' || result?.dryRun !== dryRun ||
       !Number.isInteger(result?.totalEntries) || !Number.isInteger(result?.deletedEntries)) {
-    throw new Error(`Development face ${dryRun ? 'preflight' : 'reset'} failed (HTTP ${response.status}).`);
+    throw new Error(
+      `Development face ${dryRun ? 'preflight' : 'reset'} failed ` +
+      `(HTTP ${response.status}, INVALID_FACE_RESET_RESPONSE): The face API returned an invalid response.`
+    );
   }
   if (!dryRun && result.deletedEntries !== result.totalEntries) {
     throw new Error('Development face reset returned inconsistent deletion counts.');
