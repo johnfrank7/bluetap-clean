@@ -410,10 +410,12 @@ export default function LoginPage() {
 
     } catch (error) {
       console.log('Login error:', error.message);
-      const usernameAuthError = String(error?.code || '').startsWith('username/');
+      const invalidUsernameCredential = error?.code === 'username/invalid-credential';
       showNotification(
-        isWrongLoginError(error) || usernameAuthError ? 'Login failed' : 'Login failed',
-        isWrongLoginError(error) || usernameAuthError ? 'Invalid username or password.' : getAuthErrorMessage(error)
+        'Login failed',
+        isWrongLoginError(error) || invalidUsernameCredential
+          ? 'Invalid username or password.'
+          : getAuthErrorMessage(error)
       );
     } finally {
       setLoading(false);
