@@ -1,6 +1,18 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function currentUser() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isRequester() {
+      return signedIn() && currentUser().role == 'requester';
+    }
+
     // The registration backend is the sole writer for these protected records.
     match /registrationSessions/{document=**} { allow read, write: if false; }
     match /usernameReservations/{document=**} { allow read, write: if false; }
@@ -25,6 +37,30 @@ service cloud.firestore {
           'registrationCompleted', 'onboardingStatus', 'faceVerification',
           'termsAcceptance', 'createdAt', 'restoredAt'
         ]);
+    }
+
+    // The water catalog is visible to signed-in BlueTap users. Product writes
+    // remain denied because the current local admin session is not a Firebase
+    // identity and therefore cannot be authorized safely by Firestore rules.
+    match /products/{productId} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+
+    match /requests/{requestId} {
+      // Requester queries are scoped with requester_id == request.auth.uid.
+      allow read: if isRequester() && resource.data.requester_id == request.auth.uid;
+      allow create: if isRequester()
+        && request.resource.data.requester_id == request.auth.uid
+        && request.resource.data.status == 'Pending';
+      allow update: if isRequester()
+        && resource.data.requester_id == request.auth.uid
+        && resource.data.status == 'Pending'
+        && request.resource.data.status == 'Cancelled'
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'status', 'updated_at', 'canceled_at'
+        ]);
+      allow delete: if false;
     }
   }
 }

@@ -22,3 +22,15 @@ test('client profile updates cannot change trusted verification fields', () => {
     assert.match(rules, new RegExp(`['\"]${protectedField}['\"]`));
   }
 });
+
+test('signed-in users can read products but no client can write the catalog', () => {
+  assert.match(rules, /match \/products\/\{productId\}[\s\S]*allow read:\s*if signedIn\(\);/);
+  assert.match(rules, /match \/products\/\{productId\}[\s\S]*allow write:\s*if false;/);
+});
+
+test('request access stays bound to the authenticated requester', () => {
+  assert.match(rules, /allow read:\s*if isRequester\(\) && resource\.data\.requester_id == request\.auth\.uid;/);
+  assert.match(rules, /allow create:\s*if isRequester\(\)[\s\S]*request\.resource\.data\.requester_id == request\.auth\.uid[\s\S]*request\.resource\.data\.status == 'Pending';/);
+  assert.match(rules, /allow update:\s*if isRequester\(\)[\s\S]*affectedKeys\(\)\.hasOnly\(\[[\s\S]*'status', 'updated_at', 'canceled_at'[\s\S]*\]\);/);
+  assert.match(rules, /match \/requests\/\{requestId\}[\s\S]*allow delete:\s*if false;/);
+});
