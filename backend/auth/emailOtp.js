@@ -8,7 +8,7 @@ const MAX_SENDS = 6; // Initial code plus five resends per hour, including faile
 const millis = (value) => value?.toMillis?.() || (value instanceof Date ? value.getTime() : 0);
 const unavailable = () => new OtpError(503, 'provider-unavailable', 'Verification email could not be sent. Please try again.');
 
-function createEmailOtpService({ auth, db, sendEmailOtp, hashSecret, now = Date.now }) {
+function createEmailOtpService({ auth, db, sendEmailOtp, hashSecret, now = Date.now, allowConsumedRetry = false }) {
   function hash(uid, email, code) {
     if (!hashSecret) throw unavailable();
     return createHmac('sha256', hashSecret).update(JSON.stringify([uid, email, code])).digest('hex');
@@ -91,6 +91,11 @@ function createEmailOtpService({ auth, db, sendEmailOtp, hashSecret, now = Date.
       const data = (await tx.get(ref)).data();
       if (data?.status === 'locked') return 'attempt-limit-reached';
       if (data?.status === 'expired') return 'code-expired';
+      if (data?.status === 'consumed') {
+        if (!allowConsumedRetry || now() >= millis(data.expiresAt) || data.email !== user.email || !data.otpHash) return 'no-active-code';
+        const expected = Buffer.from(data.otpHash, 'hex');
+        return expected.length === received.length && timingSafeEqual(expected, received) ? 'retry-completed' : 'no-active-code';
+      }
       if (!data?.otpHash || data.status !== 'active' || data.email !== user.email) return 'no-active-code';
       if (now() >= millis(data.expiresAt)) {
         tx.update(ref, { otpHash: null, status: 'expired' });
@@ -109,7 +114,10 @@ function createEmailOtpService({ auth, db, sendEmailOtp, hashSecret, now = Date.
           : { attempts: next });
         return next >= 5 ? 'attempt-limit-reached' : 'incorrect-code';
       }
-      tx.update(ref, { otpHash: null, status: 'consumed' });
+      // Registration finalization can safely re-authorize this same code until
+      // expiry if its success response was lost. Ordinary email OTP flows still
+      // clear the hash and reject every retry.
+      tx.update(ref, allowConsumedRetry ? { status: 'consumed' } : { otpHash: null, status: 'consumed' });
       return 'verified';
     });
     const errors = {
@@ -118,7 +126,7 @@ function createEmailOtpService({ auth, db, sendEmailOtp, hashSecret, now = Date.
       'no-active-code': [400, 'Please request a new verification code.'],
       'incorrect-code': [400, 'The verification code you entered is incorrect.'],
     };
-    if (result !== 'verified') throw new OtpError(errors[result][0], result, errors[result][1]);
+    if (result !== 'verified' && result !== 'retry-completed') throw new OtpError(errors[result][0], result, errors[result][1]);
     // Refuse a code issued for a different email if the account changed mid-request.
     const current = await userFor(uid);
     if (current.email !== user.email) throw new OtpError(409, 'no-active-code', 'Please request a new verification code.');

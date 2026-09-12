@@ -57,8 +57,8 @@ const getOtpError = (error) => {
   }
   if (reason === 'no-active-code') return 'Please request a new verification code.';
   if (['registration-expired', 'invalid-registration', 'account-exists'].includes(reason)) return error.message;
-  if (['face-service-preparing', 'invalid-face-response', 'face-review-required'].includes(reason)) {
-    return 'Your account was created, but secure face enrollment still needs attention. Please log in again shortly to view the recovery status.';
+  if (['face-service-preparing', 'invalid-face-response', 'face-review-required', 'registration-finalization-failed'].includes(reason)) {
+    return 'Registration could not be completed. Your verification code was accepted, but BlueTap could not finish creating your account. Please try again.';
   }
   if (reason === 'service-unavailable') {
     return 'The email verification service is currently unavailable. Please try again later or contact BlueTap support.';
@@ -101,6 +101,7 @@ export default function EmailVerificationPage() {
     sent === 'false' ? 'Verification email could not be sent. Please try again.' : ''
   );
   const [messageType, setMessageType] = React.useState(sent === 'false' ? 'error' : 'info');
+  const [registrationFinalizationFailed, setRegistrationFinalizationFailed] = React.useState(false);
 
   const secondsRemaining = expiresAt ? Math.max(0, Math.ceil((expiresAt - now) / 1000)) : 0;
   const resendSeconds = cooldownEndsAt
@@ -286,6 +287,7 @@ export default function EmailVerificationPage() {
         account = credential.user;
         registrationCompletedRef.current = true;
         clearPendingRegistration();
+        setRegistrationFinalizationFailed(false);
       }
 
       await reload(account);
@@ -301,6 +303,12 @@ export default function EmailVerificationPage() {
       }, 500);
     } catch (error) {
       const reason = error?.details?.reason;
+      if (registration && ['face-service-preparing', 'invalid-face-response', 'face-review-required', 'registration-finalization-failed'].includes(reason)) {
+        setRegistrationFinalizationFailed(true);
+        setOtp('');
+        setCodeSent(false);
+        setExpiresAt(0);
+      }
       if (reason === 'code-expired' || reason === 'attempt-limit-reached') {
         setExpiresAt(0);
         setCodeSent(false);
@@ -457,6 +465,17 @@ export default function EmailVerificationPage() {
                     {verifying ? 'Verifying...' : verified ? 'Email Verified' : 'Confirm Code'}
                   </Text>
                 </TouchableOpacity>
+
+                {registrationFinalizationFailed && (
+                  <TouchableOpacity
+                    accessibilityRole="button"
+                    style={styles.primaryButton}
+                    onPress={() => requestOtp()}
+                    disabled={sending || verifying}
+                  >
+                    <Text style={[styles.primaryButtonText, { color: BLUETAP_COLORS.white }]}>Try Again</Text>
+                  </TouchableOpacity>
+                )}
 
                 <View style={styles.resendSection}>
                   <Text style={styles.resendPrompt}>Didn't receive the code?</Text>

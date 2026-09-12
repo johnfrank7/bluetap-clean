@@ -83,7 +83,7 @@ function fixture() {
   const registrationService = { ...service, request: (email, ip, username = form.username) => service.request(email, username, sessionId, ip),
     complete: (challenge, code, input) => service.complete(challenge, code, input, finalFaceImage) };
   return { service: registrationService, users, records, sent, get creates() { return creates; },
-    sessionId, setSessionProfile, renderCalls, advance: (ms) => { time += ms; }, failEmail: () => { failEmail = true; }, failProfile: () => { failProfile = true; }, failEnrollment: () => { failEnrollment = true; } };
+    sessionId, setSessionProfile, renderCalls, advance: (ms) => { time += ms; }, failEmail: () => { failEmail = true; }, failProfile: () => { failProfile = true; }, failEnrollment: () => { failEnrollment = true; }, restoreEnrollment: () => { failEnrollment = false; } };
 }
 const reason = (expected) => (error) => error.reason === expected;
 
@@ -132,7 +132,8 @@ test('correct OTP creates verified Auth account and server-owned profile exactly
   assert.equal(profile.password, undefined);
   assert.equal(completed.verified, true);
   assert.match(completed.customToken, /^test-custom-token/);
-  await assert.rejects(f.service.complete(result.challenge, f.sent[0].code, form), reason('no-active-code'));
+  const replay = await f.service.complete(result.challenge, f.sent[0].code, form);
+  assert.equal(replay.finalized, true);
   assert.equal(f.creates, 1);
 });
 
@@ -256,6 +257,21 @@ test('final face enrollment failure leaves the account and session explicitly pe
   assert.equal(session.completed, false);
   assert.equal(session.faceEnrollmentPending, true);
   assert.equal(f.records.get('usernames/test_user').uid, 'new-user');
+});
+
+test('a pending face-enrollment finalization can safely retry without another account or username claim', async () => {
+  const f = fixture();
+  const first = await f.service.request('new@example.test', 'test-ip');
+  f.failEnrollment();
+  await assert.rejects(f.service.complete(first.challenge, f.sent[0].code, form));
+  f.advance(60000);
+  f.restoreEnrollment();
+  const retry = await f.service.request('new@example.test', 'test-ip');
+  const completed = await f.service.complete(retry.challenge, f.sent[1].code, form);
+  assert.equal(f.creates, 1);
+  assert.equal(f.records.get('usernames/test_user').uid, 'new-user');
+  assert.equal(f.records.get('registrationSessions/' + f.sessionId).completed, true);
+  assert.equal(completed.finalized, true);
 });
 
 test('expired registration challenge requires restarting and does not create an account', async () => {
