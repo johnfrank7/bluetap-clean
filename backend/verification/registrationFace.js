@@ -114,6 +114,15 @@ function createRegistrationFaceService({ db, detector = defaultDetector, render 
         await update(id, (current, save) => { check(current, challengeId, 'processing'); save({ faceVerification: face, faceChallenge: { ...current.faceChallenge, state: 'used' } }); });
         return { faceVerification: publicFace(face) };
       }
+      // Store only an expiring embedding keyed by this trusted registration
+      // session. This endpoint is server-authenticated and never finalizes a
+      // user; finalized enrollment happens after OTP verification.
+      const temporary = new FormData();
+      temporary.append('registration_session_id', id);
+      temporary.append('image', probe, 'face.jpg');
+      const stored = await render('/store-registration-face', temporary, signal);
+      if (stored?.stored !== true || stored?.duplicateDetected !== false || stored?.reviewRequired !== false ||
+          stored?.registrationSessionId !== id || typeof stored?.expiresAt !== 'string') throw contractError();
       const face = { status: 'passed_pending_finalization', verifiedAt: timestamp(), duplicateCheck: 'clear', livenessPassed: true,
         verificationReference: id, captureHash: hash(String(image)), verificationMode: webCapture ? 'web-camera-capture' : 'registration-capture', providerVerified: true,
         model: 'SFace', detectorBackend: 'yunet', failureReason: null };
@@ -132,7 +141,7 @@ function createRegistrationFaceService({ db, detector = defaultDetector, render 
   }
   // Web capture still reaches this trusted server path. It cannot set a
   // verification field itself; the backend matches the captures, checks for a
-  // duplicate, enrolls the clear result, and then updates the session.
+  // duplicate, and stores only an expiring registration reference.
   const webComplete = (body, signal) => complete(body, signal, true);
   return { begin, evaluate, complete, webComplete };
 }

@@ -188,7 +188,8 @@ test('final enrollment binds the final uid without copying biometric fields', as
   assert.equal(profile.faceVerification.embedding, undefined);
   assert.equal(f.records.get('registrationSessions/' + f.sessionId).userUid, 'new-user');
   assert.equal(f.records.get('registrationSessions/' + f.sessionId).completed, true);
-  assert.equal(f.renderCalls[1].body.get('subject_id'), 'new-user');
+  assert.equal(f.renderCalls[1].body.get('uid'), 'new-user');
+  assert.equal(f.renderCalls[1].body.get('registration_session_id'), f.sessionId);
 });
 
 test('tampered challenge and admin role cannot create an account', async () => {

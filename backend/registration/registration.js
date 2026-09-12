@@ -147,10 +147,12 @@ function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, render 
       tx.update(registrationSessionRef, { userUid: user.uid, faceEnrollmentPending: true });
     });
   }
-  async function finalizeFaceEnrollment(user, registrationSessionId, image) {
+  async function finalizeFaceEnrollment(user, registrationSessionId) {
     const ready = await render('/ready');
     if (ready?.modelLoaded === false || ready?.ready === false || !(ready?.status === 'ready' || ready?.ready === true)) throw new OtpError(503, 'face-service-preparing', 'Face verification service is preparing. Please try again in a moment.');
-    const form = new FormData(); form.append('subject_id', user.uid); form.append('image', image, 'face.jpg');
+    // The face service promotes the previously stored, expiring registration
+    // reference. Browser and mobile clients never receive its API credential.
+    const form = new FormData(); form.append('uid', user.uid); form.append('registration_session_id', registrationSessionId);
     const enrolled = await render('/enroll-face', form);
     if (enrolled?.enrolled !== true || enrolled?.duplicateDetected !== false || enrolled?.reviewRequired !== false) {
       throw new OtpError(enrolled?.duplicateDetected || enrolled?.reviewRequired ? 403 : 502, enrolled?.duplicateDetected || enrolled?.reviewRequired ? 'face-review-required' : 'invalid-face-response', enrolled?.duplicateDetected || enrolled?.reviewRequired ? 'Verification needs review.' : 'Face verification could not finish. Please try again later.');
@@ -184,7 +186,7 @@ function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, render 
     }
     const session = await verifiedSession(registrationSessionId, profile);
     if (typeof finalFaceImage !== 'string' || session.faceVerification?.captureHash !== captureHash(finalFaceImage)) throw new OtpError(409, 'face-capture-required', 'Please return to signup and complete face verification again.');
-    const image = decodeImage(finalFaceImage);
+    decodeImage(finalFaceImage);
     let user = await findUser(email);
     const created = !user;
     if (user) {
@@ -203,7 +205,7 @@ function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, render 
       }
       throw error;
     }
-    try { await finalizeFaceEnrollment(user, registrationSessionId, image); }
+    try { await finalizeFaceEnrollment(user, registrationSessionId); }
     catch (error) { await markEnrollmentPending(user, registrationSessionId); throw error; }
     if (!created) {
       // Correct email OTP establishes ownership of this old unverified signup.

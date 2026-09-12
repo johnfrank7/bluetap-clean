@@ -16,7 +16,7 @@ function fixture(options = {}) {
     const response = options[path] || {
       '/ready': { status: 'ready', modelLoaded: true }, '/verify-face': { verified: true },
       '/check-duplicate': { duplicateDetected: false, reviewRequired: false, distance: null, threshold: 0.637 },
-      '/enroll-face': { enrolled: true, duplicateDetected: false, reviewRequired: false },
+      '/store-registration-face': { stored: true, duplicateDetected: false, reviewRequired: false, registrationSessionId: id, expiresAt: '2026-01-01T00:00:00Z' },
     }[path];
     if (response instanceof Error) throw response;
     return response;
@@ -46,7 +46,7 @@ test('web capture performs a temporary trusted check without enrollment', async 
   const result = await f.webComplete({ faceVerification: { status: 'verified', livenessPassed: true } });
   assert.equal(result.faceVerification.status, 'passed_pending_finalization');
   assert.equal(result.faceVerification.duplicateCheck, 'clear');
-  assert.deepEqual(f.calls.map((call) => call.path), ['/ready', '/verify-face', '/check-duplicate']);
+  assert.deepEqual(f.calls.map((call) => call.path), ['/ready', '/verify-face', '/check-duplicate', '/store-registration-face']);
   assert.equal(f.data().faceVerification.verificationMode, 'web-camera-capture');
   assert.equal(f.data().faceVerification.providerVerified, true);
   assert.equal(JSON.stringify([...f.records]).includes('base64'), false);
@@ -88,7 +88,7 @@ test('trusted challenge, pair binding, and clear search create only a pending-fi
   const f = fixture(); await f.begin(); await f.evaluate();
   const result = await f.complete({ subject_id: 'attacker', faceVerification: { status: 'verified' } });
   assert.equal(result.faceVerification.status, 'passed_pending_finalization');
-  assert.deepEqual(f.calls.map((c) => c.path), ['/ready', '/verify-face', '/check-duplicate']);
+  assert.deepEqual(f.calls.map((c) => c.path), ['/ready', '/verify-face', '/check-duplicate', '/store-registration-face']);
   assert.equal(f.data().faceVerification.verificationReference, id);
   assert.equal(f.data().faceVerification.verifiedAt, 'server-timestamp');
   assert.equal(f.data().faceChallenge.state, 'used');
