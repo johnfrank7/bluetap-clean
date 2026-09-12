@@ -167,7 +167,7 @@ export default function EmailVerificationPage() {
         return false;
       }
     },
-    [rootNavigationState?.key, router]
+    [registration, rootNavigationState?.key, router]
   );
 
   const requestOtp = React.useCallback(
@@ -499,31 +499,25 @@ export default function EmailVerificationPage() {
 
                 <TouchableOpacity
                   accessibilityRole="button"
-                  accessibilityLabel={verifying ? 'Verifying code' : verified ? 'Email verified' : 'Confirm Code'}
-                  accessibilityState={{ disabled: verifyDisabled, busy: verifying }}
+                  accessibilityLabel={verifying
+                    ? registrationFinalizationFailed ? 'Finishing account setup' : 'Verifying code'
+                    : registrationFinalizationFailed ? 'Try finalization again' : verified ? 'Email verified' : 'Confirm Code'}
+                  accessibilityState={{ disabled: registrationFinalizationFailed ? sending || verifying : verifyDisabled, busy: verifying }}
                   style={[
                     styles.primaryButton,
-                    { backgroundColor: verifyDisabled ? BLUETAP_COLORS.primaryDeep : BLUETAP_COLORS.primary },
+                    { backgroundColor: (registrationFinalizationFailed ? sending || verifying : verifyDisabled)
+                      ? BLUETAP_COLORS.primaryDeep : BLUETAP_COLORS.primary },
                   ]}
-                  onPress={verify}
-                  disabled={verifyDisabled}
+                  onPress={registrationFinalizationFailed ? retryFinalization : verify}
+                  disabled={registrationFinalizationFailed ? sending || verifying : verifyDisabled}
                 >
                   {verifying && <ActivityIndicator color={BLUETAP_COLORS.white} style={styles.confirmSpinner} />}
                   <Text style={[styles.primaryButtonText, { color: BLUETAP_COLORS.white }]} accessibilityLiveRegion="polite">
-                    {verifying ? 'Verifying...' : verified ? 'Email Verified' : 'Confirm Code'}
+                    {verifying
+                      ? registrationFinalizationFailed ? 'Finishing...' : 'Verifying...'
+                      : registrationFinalizationFailed ? 'Try Again' : verified ? 'Email Verified' : 'Confirm Code'}
                   </Text>
                 </TouchableOpacity>
-
-                {registrationFinalizationFailed && (
-                  <TouchableOpacity
-                    accessibilityRole="button"
-                    style={styles.primaryButton}
-                    onPress={retryFinalization}
-                    disabled={sending || verifying}
-                  >
-                    <Text style={[styles.primaryButtonText, { color: BLUETAP_COLORS.white }]}>Try Again</Text>
-                  </TouchableOpacity>
-                )}
 
                 <View style={styles.resendSection}>
                   <Text style={styles.resendPrompt}>Didn't receive the code?</Text>
