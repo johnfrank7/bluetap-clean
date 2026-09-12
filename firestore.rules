@@ -1,0 +1,30 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // The registration backend is the sole writer for these protected records.
+    match /registrationSessions/{document=**} { allow read, write: if false; }
+    match /usernameReservations/{document=**} { allow read, write: if false; }
+    match /emailOtpVerifications/{document=**} { allow read, write: if false; }
+    match /registrationOtpVerifications/{document=**} { allow read, write: if false; }
+    match /authRateLimits/{document=**} { allow read, write: if false; }
+    match /faceServiceLocks/{document=**} { allow read, write: if false; }
+
+    match /users/{uid} {
+      // Fixes the missing-profile read failure without allowing user discovery.
+      allow get: if request.auth != null && request.auth.uid == uid;
+      allow list: if false;
+      allow create, delete: if false;
+      // Profile screens may update ordinary contact/profile fields only. Roles,
+      // approval, username ownership, completion, terms, and verification are
+      // server-owned and cannot be elevated by a client update.
+      allow update: if request.auth != null && request.auth.uid == uid
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+          'uid', 'email', 'role', 'status', 'approvalStatus', 'accountStatus',
+          'rejectionReason', 'username', 'usernameNormalized', 'unique_id',
+          'emailVerified', 'emailVerifiedAt', 'emailVerificationRequired',
+          'registrationCompleted', 'onboardingStatus', 'faceVerification',
+          'termsAcceptance', 'createdAt', 'restoredAt'
+        ]);
+    }
+  }
+}
