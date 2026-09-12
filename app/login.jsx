@@ -26,20 +26,16 @@ import {
   signInWithCustomToken,
   signOut,
 } from 'firebase/auth';
-import { doc, getDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, getDoc } from 'firebase/firestore';
 import { findLocalUserByEmail, saveLocalUser } from '../localUsers';
 import {
   clearAllAuthSessions,
   saveAdminSession,
   saveRoleSession,
 } from '../services/authSession';
-import {
-  ensureUserUniqueId,
-  saveUserProfileWithUniqueId,
-} from '../services/uniqueIds';
-import { createUnverifiedFaceVerification } from '../services/faceVerification';
-import { requestEmailOtp } from '../services/emailVerification';
+import { ensureUserUniqueId } from '../services/uniqueIds';
 import { loginWithUsername } from '../services/usernameAuth';
+import { recoverTrustedProfile } from '../services/profileRecovery';
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const applicationPendingTitle = 'Application Pending';
@@ -358,69 +354,17 @@ export default function LoginPage() {
       }
 
       if (!userDoc?.exists()) {
-        const localUser = findLocalUserByEmail(normalizedEmail);
-
-        if (localUser) {
-          const localRole = normalizeRole(localUser.role);
-          const localApplicationStatus = getApplicationStatus(localUser);
-          const localProfileData = {
-            ...localUser,
-            uid: user.uid,
-            role: localRole,
-            email: (localUser.email || user.email || normalizedEmail).trim().toLowerCase(),
-          };
-
-          if (!['requester', 'distributor'].includes(localRole)) {
-            clearAllAuthSessions();
-            await signOut(auth);
-            showNotification('Login failed', 'This account has no valid role.');
-            return;
-          }
-
-          if (localRole === 'distributor' && localApplicationStatus !== 'approved') {
-            clearAllAuthSessions();
-            await signOut(auth);
-            showDistributorStatusNotification(
-              localApplicationStatus,
-              localUser.rejectionReason
-            );
-            return;
-          }
-
-          let savedLocalProfile = localProfileData;
-
-          try {
-            const syncedProfile = await saveUserProfileWithUniqueId(
-              user.uid,
-              localRole,
-              {
-                ...localProfileData,
-                updatedAt: serverTimestamp(),
-              }
-            );
-            savedLocalProfile = {
-              ...localProfileData,
-              unique_id: syncedProfile.unique_id,
-            };
-          } catch (error) {
-            console.log('Local profile Firestore sync error:', error.message);
-            clearAllAuthSessions();
-            await signOut(auth);
-            showNotification('Login failed', getAuthErrorMessage(error));
-            return;
-          }
-
-          saveLocalUser(savedLocalProfile);
-          finishSuccessfulLogin(savedLocalProfile);
+        try {
+          const recovery = await recoverTrustedProfile();
+          if (recovery?.recovered) userDoc = await getDoc(doc(db, 'users', user.uid));
+        } catch (error) {
+          console.log('Trusted profile recovery unavailable:', error.message);
+        }
+        if (!userDoc?.exists()) {
+          setPendingUser(user);
+          showNotification('Account setup incomplete', 'Your sign-in account exists, but BlueTap could not find a completed profile for it.');
           return;
         }
-
-        setPendingUser(user);
-        showNotification(
-          'Finish account setup',
-          'Your login exists, but your app profile is missing. Choose your account type to finish setup.'
-        );
-        return;
       }
 
       const userData = userDoc.data();
@@ -482,93 +426,18 @@ export default function LoginPage() {
     }
   };
 
-  const finishMissingProfile = async (role) => {
-    if (!pendingUser) return;
+  const restartIncompleteRegistration = async () => {
+    setPendingUser(null);
+    clearAllAuthSessions();
+    await signOut(auth).catch(() => {});
+    router.replace('/signup');
+  };
 
-    try {
-      setLoading(true);
-
-      let localUserData = {
-        uid: pendingUser.uid,
-        firstName: '',
-        lastName: '',
-        email: (pendingUser.email || '').trim().toLowerCase(),
-        phone: '',
-        barangay: '',
-        address: '',
-        role,
-        approvalStatus: role === 'distributor' ? 'pending' : 'approved',
-        status: role === 'distributor' ? 'Pending' : 'Approved',
-        rejectionReason: null,
-        emailVerificationRequired: true,
-        emailVerified: Boolean(pendingUser.emailVerified),
-        faceVerification: createUnverifiedFaceVerification(),
-      };
-
-      try {
-        const savedProfile = await saveUserProfileWithUniqueId(
-          pendingUser.uid,
-          role,
-          {
-            ...localUserData,
-            createdAt: serverTimestamp(),
-          }
-        );
-
-        localUserData = {
-          ...localUserData,
-          unique_id: savedProfile.unique_id,
-        };
-        saveLocalUser(localUserData);
-      } catch (error) {
-        console.log('Profile setup Firestore error:', error.message);
-        throw error;
-      }
-
-      setPendingUser(null);
-
-      if (!pendingUser.emailVerified) {
-        let otpRequest = null;
-
-        try {
-          otpRequest = await requestEmailOtp();
-        } catch (error) {
-          console.log('Missing-profile email OTP request error:', error.message);
-        }
-
-        clearAllAuthSessions();
-        router.replace({
-          pathname: '/email-verification',
-          params: {
-            sent: otpRequest ? 'true' : 'false',
-            expiresAt: otpRequest?.expiresAt ? String(otpRequest.expiresAt) : '',
-            resendAfterSeconds: otpRequest?.resendAfterSeconds
-              ? String(otpRequest.resendAfterSeconds)
-              : '',
-          },
-        });
-        return;
-      }
-
-      if (role === 'distributor') {
-        clearAllAuthSessions();
-        await signOut(auth);
-        setLoading(false);
-        showNotification(
-          'Registration Submitted',
-          distributorRegistrationMessage,
-          () => router.replace('/login')
-        );
-        return;
-      }
-
-      finishSuccessfulLogin(localUserData);
-    } catch (error) {
-      console.log('Profile setup error:', error.message);
-      showNotification('Setup failed', getAuthErrorMessage(error));
-    } finally {
-      setLoading(false);
-    }
+  const returnFromIncompleteRegistration = async () => {
+    setPendingUser(null);
+    clearAllAuthSessions();
+    await signOut(auth).catch(() => {});
+    router.replace('/login');
   };
 
   const openForgotPassword = () => {
@@ -730,30 +599,25 @@ export default function LoginPage() {
         <Modal visible={!!pendingUser} transparent animationType="slide">
           <View style={styles.modalBackground}>
             <View style={styles.modalContainer}>
-              <Text style={styles.modalTitle}>Finish Account Setup</Text>
+              <Text style={styles.modalTitle}>Account setup incomplete</Text>
+              <Text style={styles.resetHelperText}>
+                Your sign-in account exists, but BlueTap could not find a completed profile for it.
+              </Text>
 
               <TouchableOpacity
                 style={styles.modalButton}
-                onPress={() => finishMissingProfile('requester')}
+                onPress={restartIncompleteRegistration}
                 disabled={loading}
               >
-                <Text style={styles.modalButtonText}>Requester</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.modalButton}
-                onPress={() => finishMissingProfile('distributor')}
-                disabled={loading}
-              >
-                <Text style={styles.modalButtonText}>Distributor</Text>
+                <Text style={styles.modalButtonText}>Restart Registration</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
                 style={styles.modalCancel}
-                onPress={() => setPendingUser(null)}
+                onPress={returnFromIncompleteRegistration}
                 disabled={loading}
               >
-                <Text style={styles.modalCancelText}>Cancel</Text>
+                <Text style={styles.modalCancelText}>Back to Login</Text>
               </TouchableOpacity>
             </View>
           </View>

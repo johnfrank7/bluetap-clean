@@ -116,6 +116,16 @@ function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, render 
         accepted: true, acceptedAt: session.termsAcceptance.acceptedAt || new Date(now()),
         termsVersion: session.termsAcceptance.termsVersion, privacyVersion: session.termsAcceptance.privacyVersion,
       };
+      const recoveryProfile = {
+        ...profile, uid: user.uid, email: user.email,
+        unique_id: existing?.unique_id || `${profile.role === 'requester' ? 'REQ' : 'DIS'}-${String(Number(counts[profile.role] || 0) + 1).padStart(6, '0')}`,
+        approvalStatus: existing?.approvalStatus || (profile.role === 'distributor' ? 'pending' : 'approved'),
+        status: existing?.status || (profile.role === 'distributor' ? 'Pending' : 'Approved'),
+        rejectionReason: existing?.rejectionReason || null,
+        emailVerificationRequired: true, emailVerified: true,
+        registrationCompleted: false, onboardingStatus: 'face_enrollment_pending',
+        faceVerification: trustedFaceVerification, termsAcceptance,
+      };
       tx.set(usernameRef, { uid: user.uid, createdAt: new Date(now()) });
       tx.delete(reservationRef);
       if (existing) {
@@ -129,7 +139,7 @@ function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, render 
         tx.update(ref, { emailVerified: true, emailVerifiedAt: new Date(now()), registrationCompleted: false, onboardingStatus: 'face_enrollment_pending',
           updatedAt: new Date(now()), username: profile.username, usernameNormalized: profile.usernameNormalized,
           faceVerification: trustedFaceVerification, termsAcceptance });
-        tx.update(registrationSessionRef, { userUid: user.uid, faceEnrollmentPending: true });
+        tx.update(registrationSessionRef, { userUid: user.uid, faceEnrollmentPending: true, profileRecovery: recoveryProfile });
         return;
       }
       const number = Number(counts[profile.role] || 0) + 1;
@@ -144,7 +154,7 @@ function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, render 
         createdAt: new Date(now()), updatedAt: new Date(now()), emailVerifiedAt: new Date(now()),
         faceVerification: trustedFaceVerification, termsAcceptance,
       });
-      tx.update(registrationSessionRef, { userUid: user.uid, faceEnrollmentPending: true });
+      tx.update(registrationSessionRef, { userUid: user.uid, faceEnrollmentPending: true, profileRecovery: recoveryProfile });
     });
   }
   async function finalizeFaceEnrollment(user, registrationSessionId) {
@@ -164,13 +174,15 @@ function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, render 
       const session = (await tx.get(sessionRef)).data();
       if (!profile || !session || session.userUid !== user.uid || session.completed || !isRegistrationFaceVerified(session.faceVerification)) throw new OtpError(409, 'registration-session-invalid', 'Registration finalization could not be completed.');
       const face = session.faceVerification;
-      tx.update(profileRef, { onboardingStatus: 'complete', registrationCompleted: true, updatedAt: new Date(now()), faceVerification: {
+      const finalizedFaceVerification = {
         status: 'verified', verifiedAt: face.verifiedAt || new Date(now()), verificationId: user.uid, verificationReference: user.uid,
         livenessPassed: face.livenessPassed === true, duplicateCheck: 'clear', verificationMode: 'finalized-enrollment', providerVerified: true,
         model: face.model || 'SFace', detectorBackend: face.detectorBackend || 'yunet', failureReason: null,
-      } });
+      };
+      tx.update(profileRef, { onboardingStatus: 'complete', registrationCompleted: true, updatedAt: new Date(now()), faceVerification: finalizedFaceVerification });
       tx.update(sessionRef, { completed: true, emailVerified: true, completedAt: new Date(now()), expiresAt: new Date(now()), faceEnrollmentPending: false,
-        faceVerification: { ...face, status: 'verified', verificationReference: user.uid, captureHash: null } });
+        faceVerification: { ...face, status: 'verified', verificationReference: user.uid, captureHash: null },
+        profileRecovery: session.profileRecovery ? { ...session.profileRecovery, registrationCompleted: true, onboardingStatus: 'complete', faceVerification: finalizedFaceVerification } : null });
     });
   }
   async function markEnrollmentPending(user, registrationSessionId) {

@@ -11,6 +11,7 @@ const EXPECTED_ROUTES = [
   '/api/auth/complete-registration',
   '/api/auth/create-registration-session',
   '/api/auth/login-with-username',
+  '/api/auth/recover-profile',
   '/api/auth/registration-session-status',
   '/api/auth/request-email-otp',
   '/api/auth/request-registration-otp',
