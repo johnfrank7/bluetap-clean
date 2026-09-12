@@ -20,7 +20,9 @@ function createRegistrationHandler(action) {
       const ip = getClientIp(req);
       const result = action === 'request'
         ? await service.request(body?.email, body?.username, body?.registrationSessionId, ip)
-        : await service.complete(body?.challenge, body?.code, body?.profile, body?.finalFaceImage);
+        : body?.action === 'retry-finalization'
+          ? await service.retryFinalization(body?.challenge, body?.profile, body?.finalFaceImage)
+          : await service.complete(body?.challenge, body?.code, body?.profile, body?.finalFaceImage);
       return res.status(200).json(result);
     } catch (error) {
       const known = error instanceof OtpError;

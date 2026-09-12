@@ -98,3 +98,18 @@ export const completeRegistration = async (code) => {
   clearPendingFaceEnrollment(draft.profile.registrationSessionId);
   return data;
 };
+
+export const retryRegistrationFinalization = async () => {
+  const draft = getPendingRegistration();
+  if (!draft) throw apiError('registration-expired', 'Please return to signup and restart registration.');
+  const finalFaceImage = getPendingFaceEnrollment(draft.profile.registrationSessionId);
+  if (!finalFaceImage) throw apiError('face-capture-required', 'Please return to signup and complete face verification again.');
+  const data = await callOtp('/api/auth/complete-registration', {
+    action: 'retry-finalization', challenge: draft.challenge, profile: draft.profile, finalFaceImage,
+  }, false);
+  if (data.verified !== true || data.finalized !== true || typeof data.customToken !== 'string') {
+    throw apiError('service-unavailable', 'BlueTap could not finish creating your account.');
+  }
+  clearPendingFaceEnrollment(draft.profile.registrationSessionId);
+  return data;
+};

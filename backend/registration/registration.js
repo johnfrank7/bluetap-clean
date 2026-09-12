@@ -43,14 +43,18 @@ function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, render 
     try { return await auth.getUserByEmail(email); }
     catch (error) { if (error.code === 'auth/user-not-found') return null; throw error; }
   }
-  async function checkExistingAccount(user, registrationSessionId) {
+  async function checkExistingAccount(user, registrationSessionId, verifiedRetry = false) {
     if (!user) return;
     const existing = (await db.collection('users').doc(user.uid).get()).data();
     const session = registrationSessionId ? (await db.collection('registrationSessions').doc(registrationSessionId).get()).data() : null;
     const retryingPendingEnrollment = user.emailVerified === true && existing &&
       ['requester', 'distributor'].includes(existing.role) && existing.registrationCompleted === false &&
       existing.onboardingStatus === 'face_enrollment_pending' && session?.userUid === user.uid && session?.completed !== true;
-    if (retryingPendingEnrollment) return true;
+    const retryingAuthOnlyRecovery = verifiedRetry && user.emailVerified === true && !existing &&
+      session?.completed !== true && session?.emailVerified === true &&
+      ['pending', 'recovery_required'].includes(session?.finalization?.status) &&
+      (!session.finalization.uid || session.finalization.uid === user.uid);
+    if (retryingPendingEnrollment || retryingAuthOnlyRecovery) return true;
     if (user.disabled || user.emailVerified || existing?.registrationCompleted === true || (existing && !['requester', 'distributor'].includes(existing.role))) {
       throw new OtpError(409, 'account-exists', 'Email already registered.');
     }
@@ -207,7 +211,21 @@ function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, render 
       tx.update(db.collection('registrationSessions').doc(registrationSessionId), { faceEnrollmentPending: true });
     });
   }
-  async function finish(email, usernameNormalized, registrationSessionId, input, finalFaceImage) {
+  async function authorizeFinalization(email, registrationSessionId) {
+    const ref = db.collection('registrationSessions').doc(registrationSessionId);
+    await db.runTransaction(async (tx) => {
+      const session = (await tx.get(ref)).data();
+      if (session?.completed === true && session?.finalization?.status === 'completed' &&
+        session?.verifiedEmailHash === digest('email:' + email)) return;
+      if (!session || session.completed === true || Number(session.expiresAt?.toMillis?.() || session.expiresAt || 0) <= now() ||
+        !hasEligibleFaceStep(session.faceVerification) || session.termsAcceptance?.accepted !== true) {
+        throw new OtpError(403, 'registration-session-invalid', 'Registration verification is incomplete or expired. Please restart signup.');
+      }
+      tx.update(ref, { emailVerified: true, verifiedEmailHash: digest('email:' + email),
+        finalization: { status: 'pending', uid: session.finalization?.uid || null, startedAt: session.finalization?.startedAt || new Date(now()) } });
+    });
+  }
+  async function finish(email, usernameNormalized, registrationSessionId, input, finalFaceImage, verifiedRetry = false) {
     logFinalization('started', registrationSessionId);
     const profile = validateProfile(input);
     if (profile.usernameNormalized !== usernameNormalized) {
@@ -231,7 +249,7 @@ function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, render 
     let user = await findUser(email);
     const created = !user;
     if (user) {
-      await checkExistingAccount(user, registrationSessionId);
+      await checkExistingAccount(user, registrationSessionId, verifiedRetry);
     } else {
       // This is reached only after the OTP hash was successfully checked and consumed.
       user = await auth.createUser({ email, password: input.password, emailVerified: true });
@@ -287,7 +305,10 @@ function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, render 
     // Pending identity adapter: no Firebase account exists or is created on request.
     const pending = {
       getUser: async () => ({ uid, email, emailVerified: false }),
-      updateUser: async () => ({ registrationResult: await finish(email, usernameNormalized, registrationSessionId, input, finalFaceImage) }),
+      updateUser: async () => {
+        await authorizeFinalization(email, registrationSessionId);
+        return { registrationResult: await finish(email, usernameNormalized, registrationSessionId, input, finalFaceImage) };
+      },
     };
     return { uid, service: createEmailOtpService({ auth: pending, db, sendEmailOtp, hashSecret, now, allowConsumedRetry: true }) };
   }
@@ -334,6 +355,19 @@ function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, render 
     const otp = otpFor(email, usernameNormalized, registrationSessionId, input, finalFaceImage);
     return otp.service.verify(otp.uid, code);
   }
-  return { request, complete };
+  async function retryFinalization(challenge, input, finalFaceImage) {
+    const { email, usernameNormalized, registrationSessionId } = readChallenge(challenge);
+    const profile = validateProfile(input);
+    const snapshot = await db.collection('registrationSessions').doc(registrationSessionId).get();
+    const session = snapshot.data();
+    if (!snapshot.exists || session?.emailVerified !== true || session?.verifiedEmailHash !== digest('email:' + email) ||
+      !['pending', 'recovery_required', 'completed'].includes(session?.finalization?.status)) {
+      throw new OtpError(403, 'registration-finalization-not-authorized', 'Please verify your email before finishing registration.');
+    }
+    if (profile.usernameNormalized !== usernameNormalized) throw new OtpError(400, 'registration-session-mismatch', 'Registration details changed. Please restart signup.');
+    const result = await finish(email, usernameNormalized, registrationSessionId, input, finalFaceImage, true);
+    return { verified: true, ...result };
+  }
+  return { request, complete, retryFinalization };
 }
 module.exports = { createRegistrationService };

@@ -264,11 +264,10 @@ test('a pending face-enrollment finalization can safely retry without another ac
   const first = await f.service.request('new@example.test', 'test-ip');
   f.failEnrollment();
   await assert.rejects(f.service.complete(first.challenge, f.sent[0].code, form));
-  f.advance(60000);
   f.restoreEnrollment();
-  const retry = await f.service.request('new@example.test', 'test-ip');
-  const completed = await f.service.complete(retry.challenge, f.sent[1].code, form);
+  const completed = await f.service.retryFinalization(first.challenge, form, finalFaceImage);
   assert.equal(f.creates, 1);
+  assert.equal(f.sent.length, 1);
   assert.equal(f.records.get('usernames/test_user').uid, 'new-user');
   assert.equal(f.records.get('registrationSessions/' + f.sessionId).completed, true);
   assert.equal(completed.finalized, true);

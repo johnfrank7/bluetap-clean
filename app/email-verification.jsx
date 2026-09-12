@@ -19,7 +19,7 @@ import { BLUETAP_COLORS, BLUETAP_LOGIN_GRADIENT } from '../constants/bluetapThem
 import { auth } from '../firebase';
 import { clearAllAuthSessions, fetchFirestoreUserProfile, getPostAuthenticationDestination } from '../services/authSession';
 import { requestEmailOtp, verifyEmailOtp, getPendingRegistration, clearPendingRegistration,
-  setPendingRegistration, requestRegistrationOtp, completeRegistration } from '../services/emailVerification';
+  setPendingRegistration, requestRegistrationOtp, completeRegistration, retryRegistrationFinalization } from '../services/emailVerification';
 
 const OTP_LENGTH = 6;
 const OTP_EXPIRY_MS = 10 * 60 * 1000;
@@ -57,7 +57,10 @@ const getOtpError = (error) => {
   }
   if (reason === 'no-active-code') return 'Please request a new verification code.';
   if (['registration-expired', 'invalid-registration', 'account-exists'].includes(reason)) return error.message;
-  if (['face-service-preparing', 'invalid-face-response', 'face-review-required', 'registration-finalization-failed'].includes(reason)) {
+  if (reason === 'face-service-preparing') {
+    return 'Face verification service is preparing. Please try again in a moment.';
+  }
+  if (['invalid-face-response', 'face-review-required', 'registration-finalization-failed'].includes(reason)) {
     return 'Registration could not be completed. Your verification code was accepted, but BlueTap could not finish creating your account. Please try again.';
   }
   if (reason === 'service-unavailable') {
@@ -158,6 +161,7 @@ export default function EmailVerificationPage() {
         return true;
       } catch (error) {
         console.log('Email OTP account refresh error:', error.message);
+        if (registration) setRegistrationFinalizationFailed(true);
         setMessage('Registration could not be completed. Your verification code was accepted, but BlueTap could not finish creating your account. Please try again.');
         setMessageType('error');
         return false;
@@ -339,6 +343,35 @@ export default function EmailVerificationPage() {
     }
   };
 
+  const retryFinalization = async () => {
+    if (!registration || sending || verifying || verificationInFlightRef.current) return;
+    verificationInFlightRef.current = true;
+    setVerifying(true);
+    setMessage('Your email has been verified. BlueTap is finishing your account setup.');
+    setMessageType('info');
+    try {
+      if (registrationCompletedRef.current && auth.currentUser) {
+        await auth.currentUser.getIdToken(true);
+        await continueAfterVerification(auth.currentUser);
+        return;
+      }
+      const response = await retryRegistrationFinalization();
+      const credential = await signInWithCustomToken(auth, response.customToken);
+      await credential.user.getIdToken(true);
+      registrationCompletedRef.current = true;
+      setRegistrationFinalizationFailed(false);
+      await continueAfterVerification(credential.user);
+    } catch (error) {
+      console.log('Registration finalization retry error:', error.message);
+      setRegistrationFinalizationFailed(true);
+      setMessage(getOtpError(error));
+      setMessageType('error');
+    } finally {
+      verificationInFlightRef.current = false;
+      setVerifying(false);
+    }
+  };
+
   const returnToLogin = async () => {
     clearPendingRegistration();
     clearAllAuthSessions();
@@ -485,7 +518,7 @@ export default function EmailVerificationPage() {
                   <TouchableOpacity
                     accessibilityRole="button"
                     style={styles.primaryButton}
-                    onPress={() => requestOtp()}
+                    onPress={retryFinalization}
                     disabled={sending || verifying}
                   >
                     <Text style={[styles.primaryButtonText, { color: BLUETAP_COLORS.white }]}>Try Again</Text>
