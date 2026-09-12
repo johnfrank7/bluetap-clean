@@ -39,8 +39,8 @@ function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, now = D
   async function checkExistingAccount(user) {
     if (!user) return;
     const existing = (await db.collection('users').doc(user.uid).get()).data();
-    if (user.disabled || user.emailVerified || (existing && !['requester', 'distributor'].includes(existing.role))) {
-      throw new OtpError(409, 'account-exists', 'This email is already registered. Please log in or reset your password.');
+    if (user.disabled || user.emailVerified || existing?.registrationCompleted === true || (existing && !['requester', 'distributor'].includes(existing.role))) {
+      throw new OtpError(409, 'account-exists', 'Email already registered.');
     }
   }
   function validateProfile(input) {
@@ -123,7 +123,7 @@ function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, now = D
         if (existing.usernameNormalized && existing.usernameNormalized !== profile.usernameNormalized) {
           throw new OtpError(409, 'account-exists', 'This account already exists. Please log in.');
         }
-        tx.update(ref, { emailVerified: true, emailVerifiedAt: new Date(now()),
+        tx.update(ref, { emailVerified: true, emailVerifiedAt: new Date(now()), registrationCompleted: true,
           updatedAt: new Date(now()), username: profile.username, usernameNormalized: profile.usernameNormalized,
           faceVerification: trustedFaceVerification, termsAcceptance });
         tx.update(registrationSessionRef, { completed: true, emailVerified: true, completedAt: new Date(now()), userUid: user.uid, expiresAt: new Date(now()) });
@@ -137,7 +137,7 @@ function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, now = D
         ...profile, uid: user.uid, email: user.email,
         unique_id: `${prefix}-${String(number).padStart(6, '0')}`,
         approvalStatus: pending ? 'pending' : 'approved', status: pending ? 'Pending' : 'Approved',
-        rejectionReason: null, emailVerificationRequired: true, emailVerified: true,
+        rejectionReason: null, emailVerificationRequired: true, emailVerified: true, registrationCompleted: true,
         createdAt: new Date(now()), updatedAt: new Date(now()), emailVerifiedAt: new Date(now()),
         faceVerification: trustedFaceVerification, termsAcceptance,
       });

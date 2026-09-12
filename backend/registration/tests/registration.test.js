@@ -104,6 +104,7 @@ test('correct OTP creates verified Auth account and server-owned profile exactly
   assert.equal(f.users.get('new-user').emailVerified, true);
   const profile = f.records.get('users/new-user');
   assert.equal(profile.email, 'new@example.test');
+  assert.equal(profile.registrationCompleted, true);
   assert.equal(profile.uid, 'new-user');
   assert.equal(profile.unique_id, 'REQ-000001');
   assert.equal(profile.faceVerification.status, 'verified');

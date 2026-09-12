@@ -61,6 +61,21 @@ This value is public and contains no credential. If it is absent, Expo web keeps
 using same-origin `/api` Vercel routes and native builds use the BlueTap Vercel
 origin by default. Native clients reject Render origins.
 
+## Incomplete registration cleanup
+
+Use `scripts/cleanup-incomplete-registrations.js` only for a bounded period in
+which the older pre-OTP registration flow was deployed. It is dry-run by
+default and reports ambiguous records for manual review:
+
+```sh
+node scripts/cleanup-incomplete-registrations.js --from 2026-09-01 --to 2026-09-12
+```
+
+After reviewing the output, append `--apply` to delete only the listed
+unverified, inactive records. The script never deletes completed users, users
+with profile/role/approval state, users with request activity, or records that
+may have a pending face enrollment.
+
 ## Deployment and testing
 
 The committed Render Blueprint uses:

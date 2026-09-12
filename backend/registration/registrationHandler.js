@@ -28,7 +28,7 @@ function createRegistrationHandler(action) {
       const duplicate = error.code === 'auth/email-already-exists';
       return res.status(known ? error.status : duplicate ? 409 : 500).json({ error: {
         reason: known ? error.reason : duplicate ? 'account-exists' : 'service-unavailable',
-        message: known ? error.message : duplicate ? 'This account already exists. Please log in.' : 'Registration could not be completed. Please try again.',
+        message: known ? error.message : duplicate ? 'Email already registered.' : 'Registration could not be completed. Please try again.',
         ...(known ? error.details : {}),
       } });
     }

@@ -130,7 +130,9 @@ Firebase Auth is initialized in `firebase.js`.
 
 Requester and distributor accounts use Firebase email/password auth:
 
-- Sign up calls `createUserWithEmailAndPassword`.
+- Sign up stores only a registration session and hashed OTP before verification.
+  The server creates the Firebase Auth account with `emailVerified: true` only
+  after the registration OTP, face verification, and terms checks succeed.
 - Login calls `signInWithEmailAndPassword`.
 - Forgot password calls `fetchSignInMethodsForEmail` and `sendPasswordResetEmail`.
 - User profile metadata is stored in Firestore under `users/{uid}`.
