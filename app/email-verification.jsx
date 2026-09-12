@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams, useRootNavigationState, useRouter } from 'expo-router';
 import { onAuthStateChanged, reload, signInWithCustomToken, signOut } from 'firebase/auth';
 
 import { BLUETAP_COLORS, BLUETAP_LOGIN_GRADIENT } from '../constants/bluetapTheme';
@@ -72,15 +72,16 @@ const getOtpError = (error) => {
 
 export default function EmailVerificationPage() {
   const router = useRouter();
+  const rootNavigationState = useRootNavigationState();
   const params = useLocalSearchParams();
   const { width } = useWindowDimensions();
   const sent = firstParam(params.sent);
   const registration = firstParam(params.registration) === 'true';
   const draft = registration ? getPendingRegistration() : null;
   const automaticRequestRef = React.useRef(false);
-  const completionTimeoutRef = React.useRef(null);
   const registrationCompletedRef = React.useRef(false);
   const verificationInFlightRef = React.useRef(false);
+  const [pendingDestination, setPendingDestination] = React.useState('');
 
   const [user, setUser] = React.useState(registration ? { email: draft?.profile.email } : auth.currentUser);
   const [loading, setLoading] = React.useState(true);
@@ -114,12 +115,11 @@ export default function EmailVerificationPage() {
     return () => clearInterval(interval);
   }, []);
 
-  React.useEffect(
-    () => () => {
-      if (completionTimeoutRef.current) clearTimeout(completionTimeoutRef.current);
-    },
-    []
-  );
+  React.useEffect(() => {
+    if (!pendingDestination || !rootNavigationState?.key) return;
+    setPendingDestination('');
+    router.replace(pendingDestination);
+  }, [pendingDestination, rootNavigationState?.key, router]);
 
   const continueAfterVerification = React.useCallback(
     async (account = auth.currentUser) => {
@@ -134,19 +134,36 @@ export default function EmailVerificationPage() {
         if (!refreshedUser.emailVerified) return false;
 
         await refreshedUser.getIdToken(true);
-        const profile = await fetchFirestoreUserProfile(refreshedUser);
-        const destination = getPostAuthenticationDestination(profile || {});
-        clearAllAuthSessions();
+        // The server does not report registration success until this profile is
+        // complete. Do not turn a transient post-token read into the legacy
+        // missing-profile recovery state.
+        let profile = null;
+        let lastError = null;
+        for (let attempt = 0; attempt < 3 && !profile; attempt += 1) {
+          try {
+            profile = await fetchFirestoreUserProfile(refreshedUser);
+          } catch (error) {
+            lastError = error;
+          }
+        }
+        if (!profile) throw lastError || new Error('Your finalized profile is not available yet.');
+        const destination = getPostAuthenticationDestination(profile);
+        if (!rootNavigationState?.key) {
+          setPendingDestination(destination);
+          setMessage('Finishing your account setup...');
+          setMessageType('info');
+          return false;
+        }
         router.replace(destination);
         return true;
       } catch (error) {
         console.log('Email OTP account refresh error:', error.message);
-        setMessage('Email verified successfully. We could not continue yet; please log in again.');
-        setMessageType('success');
+        setMessage('Registration could not be completed. Your verification code was accepted, but BlueTap could not finish creating your account. Please try again.');
+        setMessageType('error');
         return false;
       }
     },
-    [router]
+    [rootNavigationState?.key, router]
   );
 
   const requestOtp = React.useCallback(
@@ -298,9 +315,7 @@ export default function EmailVerificationPage() {
       setVerified(true);
       setMessage('Email verified successfully.');
       setMessageType('success');
-      completionTimeoutRef.current = setTimeout(() => {
-        continueAfterVerification(account);
-      }, 500);
+      await continueAfterVerification(account);
     } catch (error) {
       const reason = error?.details?.reason;
       if (registration && ['face-service-preparing', 'invalid-face-response', 'face-review-required', 'registration-finalization-failed'].includes(reason)) {
