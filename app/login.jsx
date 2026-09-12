@@ -36,6 +36,8 @@ import {
 import { ensureUserUniqueId } from '../services/uniqueIds';
 import { loginWithUsername } from '../services/usernameAuth';
 import { recoverTrustedProfile } from '../services/profileRecovery';
+import { restartIncompleteRegistration } from '../services/profileRecovery';
+import { clearPendingRegistration } from '../services/emailVerification';
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const applicationPendingTitle = 'Application Pending';
@@ -128,6 +130,8 @@ export default function LoginPage() {
   const [password, setPassword] = React.useState('');
   const [loading, setLoading] = React.useState(false);
   const [pendingUser, setPendingUser] = React.useState(null);
+  const [restartPhase, setRestartPhase] = React.useState('idle');
+  const [restartError, setRestartError] = React.useState('');
   const [forgotPasswordVisible, setForgotPasswordVisible] = React.useState(false);
   const [resetEmail, setResetEmail] = React.useState('');
   const [resetEmailError, setResetEmailError] = React.useState('');
@@ -362,7 +366,8 @@ export default function LoginPage() {
         }
         if (!userDoc?.exists()) {
           setPendingUser(user);
-          showNotification('Account setup incomplete', 'Your sign-in account exists, but BlueTap could not find a completed profile for it.');
+          setRestartPhase('idle');
+          setRestartError('');
           return;
         }
       }
@@ -426,15 +431,36 @@ export default function LoginPage() {
     }
   };
 
-  const restartIncompleteRegistration = async () => {
-    setPendingUser(null);
-    clearAllAuthSessions();
-    await signOut(auth).catch(() => {});
-    router.replace('/signup');
+  const confirmRestartIncompleteRegistration = () => {
+    if (restartPhase === 'cleaning') return;
+    setRestartError('');
+    setRestartPhase('confirm');
+  };
+
+  const restartCurrentIncompleteRegistration = async () => {
+    if (restartPhase === 'cleaning') return;
+    try {
+      setRestartPhase('cleaning');
+      setRestartError('');
+      await restartIncompleteRegistration();
+      clearPendingRegistration();
+      clearAllAuthSessions();
+      await signOut(auth).catch(() => {});
+      setPendingUser(null);
+      router.replace('/signup');
+    } catch (error) {
+      console.log('Incomplete registration restart error:', error.message);
+      setRestartError(error.message || 'We could not safely restart this account. Please contact support.');
+      setRestartPhase('idle');
+    }
   };
 
   const returnFromIncompleteRegistration = async () => {
+    if (restartPhase === 'cleaning') return;
+    clearPendingRegistration();
     setPendingUser(null);
+    setRestartPhase('idle');
+    setRestartError('');
     clearAllAuthSessions();
     await signOut(auth).catch(() => {});
     router.replace('/login');
@@ -599,26 +625,33 @@ export default function LoginPage() {
         <Modal visible={!!pendingUser} transparent animationType="slide">
           <View style={styles.modalBackground}>
             <View style={styles.modalContainer}>
-              <Text style={styles.modalTitle}>Account setup incomplete</Text>
-              <Text style={styles.resetHelperText}>
-                Your sign-in account exists, but BlueTap could not find a completed profile for it.
-              </Text>
-
-              <TouchableOpacity
-                style={styles.modalButton}
-                onPress={restartIncompleteRegistration}
-                disabled={loading}
-              >
-                <Text style={styles.modalButtonText}>Restart Registration</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.modalCancel}
-                onPress={returnFromIncompleteRegistration}
-                disabled={loading}
-              >
-                <Text style={styles.modalCancelText}>Back to Login</Text>
-              </TouchableOpacity>
+              {restartPhase === 'confirm' ? <>
+                <Text style={styles.modalTitle}>Restart registration?</Text>
+                <Text style={styles.resetHelperText}>
+                  This will remove the incomplete signup associated with this account so you can register again. Completed BlueTap account data will not be deleted.
+                </Text>
+                <TouchableOpacity style={styles.modalButton} onPress={restartCurrentIncompleteRegistration}>
+                  <Text style={styles.modalButtonText}>Restart Registration</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.modalCancel} onPress={() => setRestartPhase('idle')}>
+                  <Text style={styles.modalCancelText}>Cancel</Text>
+                </TouchableOpacity>
+              </> : restartPhase === 'cleaning' ? <>
+                <Text style={styles.modalTitle}>Preparing a fresh registration...</Text>
+                <Text style={styles.resetHelperText}>Please wait while we safely remove incomplete signup records.</Text>
+              </> : <>
+                <Text style={styles.modalTitle}>Account setup incomplete</Text>
+                <Text style={styles.resetHelperText}>
+                  Your sign-in account exists, but BlueTap could not find a completed profile for it.
+                </Text>
+                {!!restartError && <Text style={styles.resetErrorText}>{restartError}</Text>}
+                <TouchableOpacity style={styles.modalButton} onPress={confirmRestartIncompleteRegistration} disabled={loading}>
+                  <Text style={styles.modalButtonText}>Restart Registration</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.modalCancel} onPress={returnFromIncompleteRegistration} disabled={loading}>
+                  <Text style={styles.modalCancelText}>Back to Login</Text>
+                </TouchableOpacity>
+              </>}
             </View>
           </View>
         </Modal>

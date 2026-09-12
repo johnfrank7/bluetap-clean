@@ -3,7 +3,7 @@ const { createEmailOtpService } = require('./emailOtp');
 const { sendEmailOtp } = require('../email/emailProvider');
 const { OtpError } = require('../utils/otpError');
 const { applyCors } = require('../utils/cors');
-const { recoverProfile } = require('../registration/profileRecovery');
+const { recoverProfile, restartIncompleteRegistration } = require('../registration/profileRecovery');
 
 function createOtpHandler(action, getAdmin = getFirebaseAdmin) {
   return async (req, res) => {
@@ -36,9 +36,11 @@ function createOtpHandler(action, getAdmin = getFirebaseAdmin) {
       }
       const result = action === 'request' && body?.action === 'recover-profile'
         ? await recoverProfile({ auth, db, uid: identity.uid })
-        : action === 'request'
-          ? await service.request(identity.uid)
-          : await service.verify(identity.uid, body?.code);
+        : action === 'request' && body?.action === 'restart-incomplete-registration'
+          ? await restartIncompleteRegistration({ auth, db, uid: identity.uid, hashSecret: process.env.EMAIL_OTP_HASH_SECRET })
+          : action === 'request'
+            ? await service.request(identity.uid)
+            : await service.verify(identity.uid, body?.code);
       return res.status(200).json(result);
     } catch (error) {
       const known = error instanceof OtpError;
