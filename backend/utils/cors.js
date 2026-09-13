@@ -7,6 +7,10 @@ const DEFAULT_DEVELOPMENT_ORIGINS = new Set([
   'http://127.0.0.1:3000',
 ]);
 
+const TRUSTED_PRODUCTION_ORIGINS = new Set([
+  'https://bluetap-beta.vercel.app',
+]);
+
 function configuredOrigins(env = process.env) {
   return new Set(
     String(env.ALLOWED_ORIGINS || '')
@@ -29,13 +33,14 @@ function isAllowedOrigin(req, origin, env = process.env) {
   if (!origin) return true;
   const normalized = String(origin).replace(/\/+$/, '');
   if (isSameOrigin(req, normalized)) return true;
+  if (TRUSTED_PRODUCTION_ORIGINS.has(normalized)) return true;
   if (configuredOrigins(env).has(normalized)) return true;
   return env.NODE_ENV !== 'production' && DEFAULT_DEVELOPMENT_ORIGINS.has(normalized);
 }
 
 function applyCors(req, res, env = process.env) {
   const origin = req.headers.origin;
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
 
   if (!isAllowedOrigin(req, origin, env)) {

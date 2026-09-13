@@ -1,4 +1,6 @@
 const assert = require('node:assert/strict');
+const { readFileSync } = require('node:fs');
+const { resolve } = require('node:path');
 const { test } = require('node:test');
 
 const { createAppServer } = require('../../app');
@@ -20,6 +22,19 @@ const EXPECTED_ROUTES = [
   '/api/verification/registration-face',
   '/api/verification/verify-face',
 ];
+
+test('web and native API clients share the Render Node backend resolver', () => {
+  const root = resolve(__dirname, '../../..');
+  const config = readFileSync(resolve(root, 'services/apiClientConfig.js'), 'utf8');
+  const web = readFileSync(resolve(root, 'services/apiClient.web.js'), 'utf8');
+  const native = readFileSync(resolve(root, 'services/apiClient.native.js'), 'utf8');
+  assert.match(config, /https:\/\/bluetap-clean\.onrender\.com/);
+  assert.match(config, /hostname\.endsWith\('\.vercel\.app'\)/);
+  assert.match(config, /bluetap-face-api\.onrender\.com/);
+  assert.match(web, /apiClientConfig/);
+  assert.match(native, /apiClientConfig/);
+  assert.doesNotMatch(web + native, /bluetap-beta\.vercel\.app/);
+});
 
 async function withServer(run) {
   const server = createAppServer();
@@ -71,6 +86,14 @@ test('Render routes accept configured origins and reject unlisted production ori
       });
       assert.equal(allowed.status, 204);
       assert.equal(allowed.headers.get('access-control-allow-origin'), 'https://bluetap.example');
+      assert.equal(allowed.headers.get('access-control-allow-methods'), 'GET, POST, PATCH, OPTIONS');
+
+      const productionWeb = await fetch(`${baseUrl}/api/auth/check-username`, {
+        method: 'OPTIONS',
+        headers: { Origin: 'https://bluetap-beta.vercel.app' },
+      });
+      assert.equal(productionWeb.status, 204);
+      assert.equal(productionWeb.headers.get('access-control-allow-origin'), 'https://bluetap-beta.vercel.app');
 
       const denied = await fetch(`${baseUrl}/api/auth/check-username`, {
         method: 'OPTIONS',
