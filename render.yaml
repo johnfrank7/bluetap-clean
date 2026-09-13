@@ -19,10 +19,10 @@ services:
       - key: FIREBASE_WEB_API_KEY
         sync: false
       - key: EMAIL_PROVIDER
-        value: resend
-      - key: RESEND_API_KEY
-        sync: false
-      - key: EMAIL_FROM_ADDRESS
+        value: vercel-relay
+      - key: VERCEL_MAIL_RELAY_URL
+        value: https://bluetap-beta.vercel.app/api/internal/send-otp-email
+      - key: INTERNAL_MAIL_RELAY_SECRET
         sync: false
       - key: EMAIL_OTP_HASH_SECRET
         sync: false

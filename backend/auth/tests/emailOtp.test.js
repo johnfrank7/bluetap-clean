@@ -247,8 +247,8 @@ test('Resend HTTPS provider maps configuration and provider failures safely', as
   });
 
   for (const env of [
-    { EMAIL_FROM_ADDRESS: 'BlueTap <verify@example.test>' },
-    { RESEND_API_KEY: 'test-api-key' },
+    { EMAIL_PROVIDER: 'resend', EMAIL_FROM_ADDRESS: 'BlueTap <verify@example.test>' },
+    { EMAIL_PROVIDER: 'resend', RESEND_API_KEY: 'test-api-key' },
     { EMAIL_PROVIDER: 'smtp', RESEND_API_KEY: 'test-api-key', EMAIL_FROM_ADDRESS: 'BlueTap <verify@example.test>' },
   ]) {
     let called = false;
@@ -271,7 +271,7 @@ test('Resend HTTPS provider maps configuration and provider failures safely', as
   for (const [providerResponse, reason] of cases) {
     const logs = [];
     const provider = createEmailProvider({
-      env: { RESEND_API_KEY: 'test-api-key', EMAIL_FROM_ADDRESS: 'BlueTap <verify@example.test>' },
+      env: { EMAIL_PROVIDER: 'resend', RESEND_API_KEY: 'test-api-key', EMAIL_FROM_ADDRESS: 'BlueTap <verify@example.test>' },
       fetchImpl: async () => providerResponse,
       logger: { info: (...args) => logs.push(args), error: (...args) => logs.push(args) },
     });
@@ -284,11 +284,71 @@ test('Resend HTTPS provider maps configuration and provider failures safely', as
   }
 
   const networkProvider = createEmailProvider({
-    env: { RESEND_API_KEY: 'test-api-key', EMAIL_FROM_ADDRESS: 'BlueTap <verify@example.test>' },
+    env: { EMAIL_PROVIDER: 'resend', RESEND_API_KEY: 'test-api-key', EMAIL_FROM_ADDRESS: 'BlueTap <verify@example.test>' },
     fetchImpl: async () => { throw new Error('secret network error'); },
     logger: { info() {}, error() {} },
   });
   await assert.rejects(networkProvider.sendEmailOtp(message), safeError('EMAIL_SEND_FAILED'));
+});
+
+test('Render provider sends OTP content only to the authenticated Vercel HTTPS relay', async () => {
+  const { createEmailProvider } = require('../../email/emailProvider');
+  const calls = [];
+  const logs = [];
+  const env = {
+    EMAIL_PROVIDER: 'vercel-relay',
+    VERCEL_MAIL_RELAY_URL: 'https://bluetap-beta.vercel.app/api/internal/send-otp-email',
+    INTERNAL_MAIL_RELAY_SECRET: 'relay-secret',
+    GMAIL_USER: 'render-must-ignore@example.test',
+    GMAIL_APP_PASSWORD: 'render-must-ignore',
+  };
+  const provider = createEmailProvider({
+    env,
+    fetchImpl: async (...args) => {
+      calls.push(args);
+      return { ok: true, status: 200, json: async () => ({ success: true }) };
+    },
+    logger: { info: (...args) => logs.push(args), error: (...args) => logs.push(args) },
+  });
+  await provider.sendEmailOtp({
+    recipient: 'recipient@example.test',
+    code: '123456',
+    requestId: '123e4567-e89b-42d3-a456-426614174000',
+  });
+
+  assert.equal(calls.length, 1);
+  const [url, options] = calls[0];
+  assert.equal(url, env.VERCEL_MAIL_RELAY_URL);
+  assert.equal(options.headers.Authorization, 'Bearer relay-secret');
+  const body = JSON.parse(options.body);
+  assert.deepEqual(Object.keys(body).sort(), ['html', 'requestId', 'subject', 'text', 'to']);
+  assert.equal(body.to, 'recipient@example.test');
+  assert.ok(body.text.includes('123456'));
+  assert.equal(JSON.stringify(calls).includes('render-must-ignore'), false);
+  assert.equal(JSON.stringify(calls).includes('smtp.gmail.com'), false);
+  assert.ok(JSON.stringify(logs).includes('EMAIL_SEND_SUCCEEDED'));
+});
+
+test('Render provider safely maps Vercel relay authentication, configuration, and delivery failures', async () => {
+  const { createEmailProvider } = require('../../email/emailProvider');
+  const baseEnv = {
+    EMAIL_PROVIDER: 'vercel-relay',
+    VERCEL_MAIL_RELAY_URL: 'https://bluetap-beta.vercel.app/api/internal/send-otp-email',
+    INTERNAL_MAIL_RELAY_SECRET: 'relay-secret',
+  };
+  const message = { recipient: 'recipient@example.test', code: '123456', requestId: '123e4567-e89b-42d3-a456-426614174000' };
+  const run = (response, env = baseEnv) => createEmailProvider({
+    env,
+    fetchImpl: async () => response,
+    logger: { info() {}, error() {} },
+  }).sendEmailOtp(message);
+  const errorResponse = (status, reason) => ({ ok: false, status, json: async () => ({ error: { reason, private: 'do-not-forward' } }) });
+
+  await assert.rejects(run(errorResponse(403, 'INVALID_RELAY_SECRET')), (error) => error.reason === 'EMAIL_TRANSPORT_AUTH_FAILED');
+  await assert.rejects(run(errorResponse(503, 'EMAIL_TRANSPORT_NOT_CONFIGURED')), (error) => error.reason === 'EMAIL_TRANSPORT_NOT_CONFIGURED');
+  await assert.rejects(run(errorResponse(503, 'EMAIL_SEND_FAILED')), (error) => error.reason === 'EMAIL_SEND_FAILED');
+  await assert.rejects(run({ ok: true, status: 200, json: async () => ({ success: false }) }), (error) => error.reason === 'EMAIL_SEND_FAILED');
+  await assert.rejects(run({ ok: true, status: 200, json: async () => ({ success: true }) }, { ...baseEnv, VERCEL_MAIL_RELAY_URL: 'http://unsafe.test/api/internal/send-otp-email' }), (error) => error.reason === 'EMAIL_TRANSPORT_NOT_CONFIGURED');
 });
 
 test('handler rejects invalid tokens before touching account or Firestore', async () => {

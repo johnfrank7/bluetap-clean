@@ -3,7 +3,7 @@
 BlueTap now has a Render-compatible Node entrypoint at `backend/app.js`. It exposes
 the same `/api/...` paths and delegates to the same tested backend modules used by
 the Vercel handlers. `GET /health` returns `{ "status": "ok" }` without contacting
-Firebase, Resend, or the face service.
+Firebase, the internal mail relay, or the face service.
 
 This is the first migration pass. The root `api/` handlers remain active Vercel
 fallbacks until the Render deployment has passed production smoke testing. They are
@@ -23,9 +23,9 @@ All API endpoints accept `OPTIONS` and otherwise require `POST`, except `/health
 | `POST /api/auth/registration-session-status` | Opaque registration session ID | Firestore, session HMAC |
 | `POST /api/auth/start-registration-face-verification` | Opaque registration session ID; fails closed | Firestore |
 | `POST /api/auth/accept-registration-terms` | Opaque registration session ID | Firestore |
-| `POST /api/auth/request-registration-otp` | Verified session, accepted terms, email and username | Firebase Admin, Firestore, Resend HTTPS API, HMAC |
+| `POST /api/auth/request-registration-otp` | Verified session, accepted terms, email and username | Firebase Admin, Firestore, Vercel HTTPS mail relay, HMAC |
 | `POST /api/auth/complete-registration` | Signed challenge and correct OTP | Firebase Admin/Auth, Firestore |
-| `POST /api/auth/request-email-otp` | Revocation-checked Firebase bearer token | Firebase Admin, Firestore, Resend HTTPS API, HMAC |
+| `POST /api/auth/request-email-otp` | Revocation-checked Firebase bearer token | Firebase Admin, Firestore, Vercel HTTPS mail relay, HMAC |
 | `POST /api/auth/verify-email-otp` | Revocation-checked Firebase bearer token | Firebase Admin/Auth, Firestore, HMAC |
 | `POST /api/verification/verify-face` | Opaque registration session ID | Firebase Admin, protected DeepFace service |
 | `POST /api/verification/registration-face` | Opaque session and server-issued challenge; web camera or native challenge completion | Firebase Admin, protected DeepFace service |
@@ -44,9 +44,9 @@ contains names only.
 | `FIREBASE_CLIENT_EMAIL` | Firebase Admin service-account email |
 | `FIREBASE_PRIVATE_KEY` | Firebase Admin private key; escaped newlines are normalized |
 | `FIREBASE_WEB_API_KEY` | Firebase Auth REST API key used only for username/password verification |
-| `EMAIL_PROVIDER` | Optional explicit provider selector; use `resend` (also the secure default) |
-| `RESEND_API_KEY` | Server-only Resend API key used with the HTTPS email API |
-| `EMAIL_FROM_ADDRESS` | Sender on a verified Resend domain, such as `BlueTap <verify@example.com>` |
+| `EMAIL_PROVIDER` | Explicit provider selector; use `vercel-relay` on Render |
+| `VERCEL_MAIL_RELAY_URL` | HTTPS URL `https://bluetap-beta.vercel.app/api/internal/send-otp-email` |
+| `INTERNAL_MAIL_RELAY_SECRET` | Server-only bearer secret shared only with the Vercel relay |
 | `EMAIL_OTP_HASH_SECRET` | HMAC secret for OTPs, sessions, challenges, and rate-limit identifiers |
 | `DEEPFACE_API_URL` | HTTPS origin of the separate protected face service |
 | `DEEPFACE_API_KEY` | Bearer credential sent only from this backend to the face service |
@@ -93,11 +93,16 @@ deployed environment and are not proven by fixture-based local tests.
 
 Both request handlers import `sendEmailOtp` from `backend/email/emailProvider.js`.
 That shared server-only helper builds the BlueTap verification content and calls a
-generic `sendEmail` provider boundary. The active provider sends `POST /emails` to
-Resend over HTTPS with bearer authentication. SMTP is not configured as a fallback.
-Provider failures are mapped to allowlisted error categories; server logs never
-contain raw provider responses, credentials, recipients, or OTPs. Configure a
-verified sender and redeploy Production after setting the Resend variables.
+generic `sendEmail` provider boundary. Render uses an authenticated HTTPS request
+to `POST /api/internal/send-otp-email` on Vercel. The relay alone uses Gmail SMTP;
+Render never imports it or attempts an SMTP connection. Provider failures are
+mapped to allowlisted categories, and logs never contain raw responses, credentials,
+recipients, or OTPs.
+
+The Vercel relay requires `GMAIL_USER`, `GMAIL_APP_PASSWORD`, and the same
+`INTERNAL_MAIL_RELAY_SECRET` configured on Render. It is transport-only and does
+not need Firebase Admin configuration. Missing or invalid bearer authentication is
+rejected before payload processing or SMTP initialization.
 The legacy Firebase `functions/emailProvider.js` still uses Resend, but is not imported
 by the active shared backend and is not deployed by Render or Vercel. It is retained unchanged.
 

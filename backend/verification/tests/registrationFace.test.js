@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { createRegistrationFaceService } = require('../registrationFace');
+const { createRenderFaceClient } = require('../renderFaceClient');
 const { runFaceCaptureFlow } = require('../../../services/faceCaptureFlow');
 const id = '12345678-1234-4123-8123-123456789abc';
 const image = 'data:image/jpeg;base64,/9j/2Q==';
@@ -132,4 +133,33 @@ test('capture waits for detector pass, cancels on back, and never passes via ela
   await assert.rejects(runFaceCaptureFlow({ challenge: { detectorAvailable: false }, capture: async () => { captures++; } }));
   await assert.rejects(runFaceCaptureFlow({ challenge: { detectorAvailable: true }, assertActive: () => { throw new Error('cancelled'); } }));
   assert.equal(captures, 0);
+});
+
+test('Render face client reports safe upstream failure stages without exposing credentials', async () => {
+  const env = { DEEPFACE_API_URL: 'https://face.example.test', DEEPFACE_API_KEY: 'server-secret' };
+  const cases = [
+    [401, 502, 'face-service-auth'],
+    [403, 502, 'face-service-auth'],
+    [404, 502, 'face-route-unavailable'],
+    [422, 400, 'invalid-face-image'],
+    [500, 502, 'face-upstream-error'],
+    [503, 503, 'face-service-preparing'],
+  ];
+  for (const [upstreamStatus, status, reason] of cases) {
+    const request = createRenderFaceClient({ env, fetchImpl: async () => ({ ok: false, status: upstreamStatus }) });
+    await assert.rejects(request('/verify-face', new FormData()), (error) => {
+      assert.equal(error.status, status);
+      assert.equal(error.reason, reason);
+      assert.deepEqual(error.details, { upstreamPath: '/verify-face', upstreamStatus });
+      assert.equal(JSON.stringify(error).includes(env.DEEPFACE_API_KEY), false);
+      return true;
+    });
+  }
+  const request = createRenderFaceClient({ env, fetchImpl: async () => { throw new Error('private network detail'); } });
+  await assert.rejects(request('/check-duplicate', new FormData()), (error) => {
+    assert.equal(error.reason, 'face-service-network');
+    assert.deepEqual(error.details, { upstreamPath: '/check-duplicate' });
+    assert.equal(JSON.stringify(error).includes('private network detail'), false);
+    return true;
+  });
 });
