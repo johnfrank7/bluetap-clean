@@ -1,14 +1,14 @@
 # BlueTap Render backend
 
-BlueTap now has a Render-compatible Node entrypoint at `backend/app.js`. It exposes
-the same `/api/...` paths and delegates to the same tested backend modules used by
-the Vercel handlers. `GET /health` returns `{ "status": "ok" }` without contacting
+BlueTap's authoritative Node entrypoint is `backend/app.js` on Render. It exposes
+the application `/api/...` paths and delegates to the tested backend modules.
+`GET /health` returns `{ "status": "ok" }` without contacting
 Firebase, the internal mail relay, or the face service.
 
-This is the first migration pass. The root `api/` handlers remain active Vercel
-fallbacks until the Render deployment has passed production smoke testing. They are
-not proxies and do not call Render; both hosts currently execute the shared modules
-under `backend/`. The legacy `functions/` directory remains inactive.
+The former Vercel business-API wrappers have been removed. Render is authoritative
+for every registration, authentication, face-proxy, and Admin route listed below.
+Vercel deploys only the authenticated mail-transport function at
+`/api/internal/send-otp-email`. The legacy `functions/` directory remains inactive.
 
 ## Endpoint map
 
