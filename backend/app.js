@@ -2,6 +2,7 @@ const http = require('node:http');
 
 const { routes } = require('./routes');
 const { faceUpstreamConfigStatus } = require('./verification/renderFaceClient');
+const { emailProviderConfigStatus } = require('./email/emailProvider');
 
 const MAX_REQUEST_BYTES = 5 * 1024 * 1024;
 
@@ -89,6 +90,10 @@ if (require.main === module) {
     console.log('[face-upstream]', JSON.stringify({
       stage: 'FACE_UPSTREAM_CONFIGURATION',
       ...faceUpstreamConfigStatus(),
+    }));
+    console.log('[email-otp]', JSON.stringify({
+      stage: 'EMAIL_PROVIDER_CONFIGURATION',
+      ...emailProviderConfigStatus(),
     }));
   });
 }

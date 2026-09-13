@@ -292,7 +292,7 @@ test('Resend HTTPS provider maps configuration and provider failures safely', as
 });
 
 test('Render provider sends OTP content only to the authenticated Vercel HTTPS relay', async () => {
-  const { createEmailProvider } = require('../../email/emailProvider');
+  const { createEmailProvider, emailProviderConfigStatus } = require('../../email/emailProvider');
   const calls = [];
   const logs = [];
   const env = {
@@ -326,6 +326,15 @@ test('Render provider sends OTP content only to the authenticated Vercel HTTPS r
   assert.ok(body.text.includes('123456'));
   assert.equal(JSON.stringify(calls).includes('render-must-ignore'), false);
   assert.equal(JSON.stringify(calls).includes('smtp.gmail.com'), false);
+  assert.deepEqual(emailProviderConfigStatus(env), {
+    provider: 'vercel-relay',
+    providerRecognized: true,
+    relayUrlPresent: true,
+    relayUrlConfigured: true,
+    relaySecretConfigured: true,
+  });
+  assert.ok(JSON.stringify(logs).includes('EMAIL_PROVIDER_CONFIGURATION'));
+  assert.ok(JSON.stringify(logs).includes('EMAIL_RELAY_STATUS'));
   assert.ok(JSON.stringify(logs).includes('EMAIL_SEND_SUCCEEDED'));
 });
 
@@ -337,10 +346,11 @@ test('Render provider safely maps Vercel relay authentication, configuration, an
     INTERNAL_MAIL_RELAY_SECRET: 'relay-secret',
   };
   const message = { recipient: 'recipient@example.test', code: '123456', requestId: '123e4567-e89b-42d3-a456-426614174000' };
+  const logs = [];
   const run = (response, env = baseEnv) => createEmailProvider({
     env,
     fetchImpl: async () => response,
-    logger: { info() {}, error() {} },
+    logger: { info: (...args) => logs.push(args), error: (...args) => logs.push(args) },
   }).sendEmailOtp(message);
   const errorResponse = (status, reason) => ({ ok: false, status, json: async () => ({ error: { reason, private: 'do-not-forward' } }) });
 
@@ -349,6 +359,10 @@ test('Render provider safely maps Vercel relay authentication, configuration, an
   await assert.rejects(run(errorResponse(503, 'EMAIL_SEND_FAILED')), (error) => error.reason === 'EMAIL_SEND_FAILED');
   await assert.rejects(run({ ok: true, status: 200, json: async () => ({ success: false }) }), (error) => error.reason === 'EMAIL_SEND_FAILED');
   await assert.rejects(run({ ok: true, status: 200, json: async () => ({ success: true }) }, { ...baseEnv, VERCEL_MAIL_RELAY_URL: 'http://unsafe.test/api/internal/send-otp-email' }), (error) => error.reason === 'EMAIL_TRANSPORT_NOT_CONFIGURED');
+  const serialized = JSON.stringify(logs);
+  assert.ok(serialized.includes('EMAIL_RELAY_STATUS'));
+  assert.ok(serialized.includes('EMAIL_RELAY_AUTH_FAILED'));
+  for (const sensitive of ['relay-secret', message.recipient, message.code]) assert.equal(serialized.includes(sensitive), false);
 });
 
 test('handler rejects invalid tokens before touching account or Firestore', async () => {

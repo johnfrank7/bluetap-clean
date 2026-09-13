@@ -71,6 +71,19 @@ const relayUrl = (value) => {
   }
 };
 
+const emailProviderConfigStatus = (env = process.env) => {
+  const configuredProvider = String(env.EMAIL_PROVIDER || '').trim().toLowerCase();
+  const providerRecognized = ['resend', 'vercel-relay'].includes(configuredProvider);
+  const configuredRelayUrl = String(env.VERCEL_MAIL_RELAY_URL || '').trim();
+  return {
+    provider: providerRecognized ? configuredProvider : configuredProvider ? 'unrecognized' : 'missing',
+    providerRecognized,
+    relayUrlPresent: Boolean(configuredRelayUrl),
+    relayUrlConfigured: Boolean(relayUrl(configuredRelayUrl)),
+    relaySecretConfigured: Boolean(String(env.INTERNAL_MAIL_RELAY_SECRET || '')),
+  };
+};
+
 const readSafeRelayReason = async (response) => {
   try {
     const body = await response.json();
@@ -84,9 +97,11 @@ const readSafeRelayReason = async (response) => {
 function createEmailProvider({ env = process.env, fetchImpl = globalThis.fetch, logger = console } = {}) {
   async function sendEmail({ to, subject, text, html, requestId }) {
     const provider = String(env.EMAIL_PROVIDER || '').trim().toLowerCase();
+    const configuration = emailProviderConfigStatus(env);
+    logger.info('[email-otp]', JSON.stringify({ stage: 'EMAIL_PROVIDER_CONFIGURATION', ...configuration }));
     if (!provider || typeof fetchImpl !== 'function') {
       const error = notConfigured();
-      logger.error('[email-otp]', JSON.stringify({ stage: 'EMAIL_SEND_FAILED', reason: error.reason }));
+      logger.error('[email-otp]', JSON.stringify({ stage: 'EMAIL_SEND_FAILED', reason: error.reason, ...configuration }));
       throw error;
     }
 
@@ -98,7 +113,7 @@ function createEmailProvider({ env = process.env, fetchImpl = globalThis.fetch, 
       const secret = String(env.INTERNAL_MAIL_RELAY_SECRET || '');
       if (!url || !secret || !requestId) {
         const error = notConfigured();
-        logger.error('[email-otp]', JSON.stringify({ stage: 'EMAIL_SEND_FAILED', reason: error.reason }));
+        logger.error('[email-otp]', JSON.stringify({ stage: 'EMAIL_SEND_FAILED', reason: error.reason, ...configuration }));
         throw error;
       }
       headers = {
@@ -125,7 +140,7 @@ function createEmailProvider({ env = process.env, fetchImpl = globalThis.fetch, 
       body = JSON.stringify({ from: fromAddress, to: [to], subject, text, html });
     } else {
       const error = notConfigured();
-      logger.error('[email-otp]', JSON.stringify({ stage: 'EMAIL_SEND_FAILED', reason: error.reason }));
+      logger.error('[email-otp]', JSON.stringify({ stage: 'EMAIL_SEND_FAILED', reason: error.reason, ...configuration }));
       throw error;
     }
 
@@ -151,17 +166,26 @@ function createEmailProvider({ env = process.env, fetchImpl = globalThis.fetch, 
       clearTimeout(timeout);
     }
 
+    if (provider === 'vercel-relay') {
+      logger.info('[email-otp]', JSON.stringify({ stage: 'EMAIL_RELAY_STATUS', relayStatus: Number(response.status) || 0 }));
+    }
+
     if (!response.ok) {
       let error;
       if (provider === 'resend') {
         error = await mapResendFailure(response);
       } else {
         const relayReason = await readSafeRelayReason(response);
-        error = [401, 403].includes(response.status) || relayReason === 'EMAIL_TRANSPORT_AUTH_FAILED'
+        const authenticationFailure = [401, 403].includes(response.status) ||
+          ['EMAIL_TRANSPORT_AUTH_FAILED', 'INVALID_RELAY_SECRET', 'UNAUTHENTICATED'].includes(relayReason);
+        error = authenticationFailure
           ? providerError('EMAIL_TRANSPORT_AUTH_FAILED', 'Email delivery authentication failed. Please contact support.')
           : relayReason === 'EMAIL_TRANSPORT_NOT_CONFIGURED'
             ? notConfigured()
             : providerError('EMAIL_SEND_FAILED', 'Unable to send verification email. Please try again.');
+        if (authenticationFailure) {
+          logger.error('[email-otp]', JSON.stringify({ stage: 'EMAIL_RELAY_AUTH_FAILED', relayStatus: Number(response.status) || 0 }));
+        }
       }
       logger.error('[email-otp]', JSON.stringify({
         stage: 'EMAIL_SEND_FAILED',
@@ -197,6 +221,7 @@ const defaultProvider = createEmailProvider();
 module.exports = {
   RESEND_EMAILS_ENDPOINT,
   createEmailProvider,
+  emailProviderConfigStatus,
   sendEmail: defaultProvider.sendEmail,
   sendEmailOtp: defaultProvider.sendEmailOtp,
 };

@@ -90,10 +90,36 @@ export default function SignupPage() {
     return () => clearInterval(timer);
   }, [retryAt]);
   const retrySeconds = Math.max(0, Math.ceil((retryAt - now) / 1000));
-  const canContinue = step === 1 ? !!form.role
-    : step === 2 ? !!form.firstName.trim() && !!form.lastName.trim() && PHONE.test(form.phone) && !!form.barangay && !!form.address.trim()
-      : step === 3 ? !securityPolicy.faceVerificationRequired || isTrustedRegistrationFaceVerification(faceVerification)
-        : !validateUsername(form.username) && EMAIL.test(form.email.trim()) && form.password.length >= 8 && form.password === form.confirmPassword && usernameState.available === true && termsAccepted;
+  const accountComplete = !!form.role;
+  const personalComplete = !!form.firstName.trim() && !!form.lastName.trim() && PHONE.test(form.phone) && !!form.barangay && !!form.address.trim();
+  const identityComplete = !!registrationSessionId && (!securityPolicy.faceVerificationRequired || isTrustedRegistrationFaceVerification(faceVerification));
+  const credentialsComplete = !validateUsername(form.username) && EMAIL.test(form.email.trim()) && form.password.length >= 8 && form.password === form.confirmPassword && usernameState.available === true && termsAccepted;
+  const canContinue = step === 1 ? accountComplete
+    : step === 2 ? accountComplete && personalComplete
+      : step === 3 ? accountComplete && personalComplete && identityComplete
+        : step === 4 ? accountComplete && personalComplete && identityComplete && credentialsComplete
+          : false;
+
+  const prerequisiteReminder = step >= 2 && !accountComplete
+    ? 'Complete Step 1 — Account before continuing.'
+    : step >= 3 && !personalComplete
+      ? 'Complete Step 2 — Personal before continuing.'
+      : step >= 3 && !registrationSessionId
+        ? 'Return to Step 2 and tap Continue to start identity verification.'
+        : step >= 4 && !identityComplete
+          ? 'Complete Step 3 — Identity before continuing.'
+          : step >= 5 && !credentialsComplete
+            ? 'Complete Step 4 — Credentials before email verification.'
+            : step === 5
+              ? 'Return to Step 4 and send the verification code to open email verification.'
+              : '';
+
+  const openStep = (target) => {
+    if (loading || target === step || target < 1 || target > 5) return;
+    setErrors({});
+    setShowBarangays(false);
+    setStep(target);
+  };
 
   React.useEffect(() => {
     if (step !== 4) return undefined;
@@ -158,7 +184,8 @@ export default function SignupPage() {
         return;
       } finally { setLoading(false); }
     }
-    setStep((current) => Math.min(4, current + 1));
+    const nextStep = Math.min(4, step + 1);
+    setStep(nextStep);
     setErrors({});
   };
 
@@ -231,6 +258,7 @@ export default function SignupPage() {
     ['Personal information', 'Tell us a little about yourself.'],
     ['Verify your identity', 'Help us keep BlueTap accounts secure.'],
     ['Set up your account', 'Choose your login credentials and recovery email.'],
+    ['Verify your email', 'Confirm your email address to finish registration.'],
   ];
   const [title, subtitle] = titles[step - 1];
 
@@ -253,15 +281,33 @@ export default function SignupPage() {
             </View>
             <View style={[styles.card, step === 3 && styles.identityCard, step === 3 && mobile && styles.identityCardMobile]}>
               <View style={[styles.progress, step === 3 && styles.identityProgress]}>
-                {STEPS.map((name, index) => <View key={name} style={styles.progressItem}>
-                  <View style={[styles.progressCircle, index + 1 <= step && styles.progressCircleActive]}><Text style={[styles.progressNumber, index + 1 <= step && styles.progressNumberActive]}>{index + 1}</Text></View>
-                  {!mobile && <Text style={[styles.progressLabel, step === 3 && styles.identityProgressLabel, index + 1 === step && styles.progressLabelActive]}>{name}</Text>}
-                  {index < STEPS.length - 1 && <View style={[styles.progressLine, index + 1 < step && styles.progressLineActive]} />}
-                </View>)}
+                {STEPS.map((name, index) => {
+                  const target = index + 1;
+                  const complete = target === 1 ? accountComplete
+                    : target === 2 ? personalComplete && !!registrationSessionId
+                      : target === 3 ? identityComplete
+                        : target === 4 ? credentialsComplete
+                          : false;
+                  return <View key={name} style={styles.progressItem}>
+                  <TouchableOpacity
+                    style={styles.progressStepButton}
+                    onPress={() => openStep(target)}
+                    disabled={loading || target === step}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Step ${target}: ${name}`}
+                    accessibilityHint="Open this registration step"
+                    accessibilityState={{ selected: target === step, disabled: loading || target === step }}
+                  >
+                    <View style={[styles.progressCircle, (complete || target === step) && styles.progressCircleActive]}><Text style={[styles.progressNumber, (complete || target === step) && styles.progressNumberActive]}>{target}</Text></View>
+                    {!mobile && <Text style={[styles.progressLabel, step === 3 && styles.identityProgressLabel, target === step && styles.progressLabelActive]}>{name}</Text>}
+                  </TouchableOpacity>
+                  {index < STEPS.length - 1 && <View style={[styles.progressLine, complete && styles.progressLineActive]} />}
+                </View>})}
               </View>
               {mobile && <Text style={styles.stepText}>Step {step} of 5 · {STEPS[step - 1]}</Text>}
               <Text style={[styles.title, step === 3 && styles.identityHeading, step === 3 && mobile && styles.identityHeadingMobile]}>{step === 3 ? "Verify your identity" : title}</Text>
               <Text style={[styles.subtitle, step === 3 && styles.identitySubtitle]}>{step === 3 ? "Complete a quick face check to help protect your account and prevent duplicate registrations." : subtitle}</Text>
+              {!!prerequisiteReminder && <View style={styles.prerequisiteReminder} accessibilityRole="alert"><Text style={styles.prerequisiteReminderText}>{prerequisiteReminder}</Text></View>}
 
               {step === 1 && <View style={styles.roleList}>
                 {[
@@ -284,7 +330,7 @@ export default function SignupPage() {
                 <Field label="Address" error={errors.address}><TextInput style={[styles.input, errors.address && styles.inputError]} value={form.address} onChangeText={(v) => update('address', v)} placeholder="Street, sitio, or house number" placeholderTextColor="#94A3B8" /></Field>
               </View>}
 
-              {step === 3 && <RegistrationFaceCapture
+              {step === 3 && accountComplete && personalComplete && !!registrationSessionId && <RegistrationFaceCapture
                 key={registrationSessionId}
                 registrationSessionId={registrationSessionId}
                 verification={faceVerification}
@@ -308,10 +354,12 @@ export default function SignupPage() {
                 {!termsAccepted && <Text style={styles.termsRequired}>Terms acceptance is required to continue.</Text>}
               </View>}
 
+              {step === 5 && <View style={styles.verifyPreview}><Text style={styles.verifyPreviewText}>Email verification becomes available only after BlueTap accepts the completed Credentials step and sends a secure verification code.</Text></View>}
+
               <View style={[styles.actions, step === 3 && styles.identityActions]}>
                 <TouchableOpacity style={styles.back} onPress={back} disabled={loading}><Text style={styles.backText}>Back</Text></TouchableOpacity>
                 <TouchableOpacity style={[styles.primary, (!canContinue || loading || retrySeconds > 0) && styles.disabled, step === 3 && (!canContinue || loading || retrySeconds > 0) && styles.identityContinueDisabled]} onPress={step === 4 ? submit : next} disabled={!canContinue || loading || retrySeconds > 0}>
-                  {loading ? <ActivityIndicator color="#FFF" /> : <Text style={[styles.primaryText, step === 3 && !canContinue && styles.identityContinueTextDisabled]}>{retrySeconds > 0 ? `Try again in ${Math.floor(retrySeconds / 60)}:${String(retrySeconds % 60).padStart(2, '0')}` : step === 4 ? (securityPolicy.emailOtpRequired ? 'Send Verification Code' : 'Complete Registration') : 'Continue'}</Text>}
+                  {loading ? <ActivityIndicator color="#FFF" /> : <Text style={[styles.primaryText, step === 3 && !canContinue && styles.identityContinueTextDisabled]}>{retrySeconds > 0 ? `Try again in ${Math.floor(retrySeconds / 60)}:${String(retrySeconds % 60).padStart(2, '0')}` : step === 5 ? 'Complete previous steps' : step === 4 ? (securityPolicy.emailOtpRequired ? 'Send Verification Code' : 'Complete Registration') : 'Continue'}</Text>}
                 </TouchableOpacity>
               </View>
               <Text style={styles.loginPrompt}>Already have an account? <Text style={styles.loginLink} onPress={() => router.replace('/login')}>Log in.</Text></Text>
@@ -334,10 +382,14 @@ const styles = StyleSheet.create({
   identityActions: { marginTop: 24 },
   identityContinueDisabled: { backgroundColor: '#E4EFF8', opacity: 1 },
   identityContinueTextDisabled: { color: '#6989A3', fontWeight: '600' },
+  prerequisiteReminder: { borderWidth: 1, borderColor: '#E9A3A3', backgroundColor: '#FFF1F1', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 11, marginTop: -10, marginBottom: 18 },
+  prerequisiteReminderText: { color: '#B42318', fontSize: 13, lineHeight: 19, fontWeight: '700', textAlign: 'center' },
+  verifyPreview: { borderWidth: 1, borderColor: '#D8E5EF', backgroundColor: '#F7FAFC', borderRadius: 12, padding: 18 },
+  verifyPreviewText: { color: '#526E84', fontSize: 14, lineHeight: 21, textAlign: 'center' },
   screen: { flex: 1 }, safe: { flex: 1 }, scroll: { flexGrow: 1, alignItems: 'center', justifyContent: 'center', padding: 20 }, shell: { width: '100%' },
   brand: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 18 }, logo: { width: 52, height: 52, marginRight: 10 }, brandName: { color: '#FFF', fontSize: 26, fontWeight: '800' }, tagline: { color: 'rgba(255,255,255,.86)', fontSize: 13 },
   card: { backgroundColor: '#FFF', borderRadius: 24, padding: 26, shadowColor: '#07518E', shadowOpacity: .24, shadowRadius: 18, shadowOffset: { width: 0, height: 10 }, elevation: 8 },
-  progress: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 20 }, progressItem: { flexDirection: 'row', alignItems: 'center' }, progressCircle: { width: 28, height: 28, borderRadius: 14, backgroundColor: '#E8F1F8', alignItems: 'center', justifyContent: 'center' }, progressCircleActive: { backgroundColor: BLUETAP_COLORS.primary }, progressNumber: { color: '#68839A', fontSize: 12, fontWeight: '700' }, progressNumberActive: { color: '#FFF' }, progressLabel: { marginLeft: 5, color: '#7890A3', fontSize: 11 }, progressLabelActive: { color: BLUETAP_COLORS.primary, fontWeight: '700' }, progressLine: { width: 12, height: 2, backgroundColor: '#D9E7F1', marginHorizontal: 5 }, progressLineActive: { backgroundColor: BLUETAP_COLORS.primary }, stepText: { color: BLUETAP_COLORS.primary, fontSize: 12, fontWeight: '700', textAlign: 'center', marginBottom: 10 },
+  progress: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 20 }, progressItem: { flexDirection: 'row', alignItems: 'center' }, progressStepButton: { flexDirection: 'row', alignItems: 'center' }, progressCircle: { width: 28, height: 28, borderRadius: 14, backgroundColor: '#E8F1F8', alignItems: 'center', justifyContent: 'center' }, progressCircleActive: { backgroundColor: BLUETAP_COLORS.primary }, progressNumber: { color: '#68839A', fontSize: 12, fontWeight: '700' }, progressNumberActive: { color: '#FFF' }, progressLabel: { marginLeft: 5, color: '#7890A3', fontSize: 11 }, progressLabelActive: { color: BLUETAP_COLORS.primary, fontWeight: '700' }, progressLine: { width: 12, height: 2, backgroundColor: '#D9E7F1', marginHorizontal: 5 }, progressLineActive: { backgroundColor: BLUETAP_COLORS.primary }, stepText: { color: BLUETAP_COLORS.primary, fontSize: 12, fontWeight: '700', textAlign: 'center', marginBottom: 10 },
   title: { color: '#17324D', fontSize: 25, fontWeight: '800', textAlign: 'center' }, subtitle: { color: '#607A90', fontSize: 14, lineHeight: 20, textAlign: 'center', marginTop: 7, marginBottom: 24 },
   roleList: { gap: 12 }, roleCard: { flexDirection: 'row', alignItems: 'center', minHeight: 94, padding: 16, borderRadius: 14, borderWidth: 1.5, borderColor: '#D8E5EF', backgroundColor: '#FAFCFE' }, roleCardSelected: { borderColor: BLUETAP_COLORS.primary, backgroundColor: '#EDF7FF' }, roleIcon: { fontSize: 28, marginRight: 14 }, roleCopy: { flex: 1 }, roleTitle: { color: '#17324D', fontSize: 16, fontWeight: '800' }, roleDescription: { color: '#607A90', fontSize: 13, lineHeight: 18, marginTop: 3 }, radio: { width: 18, height: 18, borderRadius: 9, borderWidth: 2, borderColor: '#A8BCCB' }, radioSelected: { borderWidth: 5, borderColor: BLUETAP_COLORS.primary },
   row: { flexDirection: 'row', gap: 12 }, half: { flex: 1 }, field: { marginBottom: 15 }, label: { color: '#29465F', fontSize: 13, fontWeight: '700', marginBottom: 6 }, input: { minHeight: 50, borderWidth: 1, borderColor: '#C8D9E6', borderRadius: 11, backgroundColor: '#FAFCFE', paddingHorizontal: 14, color: '#17324D', fontSize: 15 }, inputError: { borderColor: '#DC5757', backgroundColor: '#FFF8F8' }, inputSuccess: { borderColor: '#36A269' }, error: { color: '#B93A3A', fontSize: 12, marginTop: 5 }, hint: { color: '#68839A', fontSize: 12, marginTop: 5 },

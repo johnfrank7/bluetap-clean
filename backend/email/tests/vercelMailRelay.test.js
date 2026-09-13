@@ -75,6 +75,7 @@ test('Vercel relay uses Gmail SMTP only after auth and returns sanitized success
   assert.equal(mail.from, 'BlueTap <sender@example.test>');
   assert.equal(mail.to, validBody.to);
   const serialized = JSON.stringify(logs);
+  assert.ok(serialized.includes('RELAY_CONFIGURATION'));
   for (const sensitive of ['relay-secret', 'app password', 'apppassword', validBody.to, '123456']) assert.equal(serialized.includes(sensitive), false);
 });
 
@@ -99,6 +100,7 @@ test('Vercel relay maps missing Gmail config and SMTP failures without leaking d
     assert.equal(result.statusCode, 503);
     assert.equal(result.body.error.reason, reason);
     const serialized = JSON.stringify([logs, result.body]);
+    assert.ok(serialized.includes('GMAIL_TRANSPORT_FAILED'));
     assert.equal(serialized.includes('secret SMTP detail'), false);
     assert.equal(serialized.includes('secret network detail'), false);
     assert.equal(serialized.includes('app-password'), false);

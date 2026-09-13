@@ -47,6 +47,14 @@ function createInternalMailRelayHandler({
     }
 
     const expectedSecret = String(env.INTERNAL_MAIL_RELAY_SECRET || '');
+    const gmailUser = String(env.GMAIL_USER || '').trim();
+    const gmailAppPassword = String(env.GMAIL_APP_PASSWORD || '').replace(/\s/g, '');
+    logger.info('[internal-mail-relay]', JSON.stringify({
+      stage: 'RELAY_CONFIGURATION',
+      relaySecretConfigured: Boolean(expectedSecret),
+      gmailUserConfigured: Boolean(gmailUser),
+      gmailAppPasswordConfigured: Boolean(gmailAppPassword),
+    }));
     if (!expectedSecret) {
       logger.error('[internal-mail-relay]', JSON.stringify({ stage: 'RELAY_FAILED', reason: 'EMAIL_TRANSPORT_NOT_CONFIGURED' }));
       return responseError(res, 503, 'EMAIL_TRANSPORT_NOT_CONFIGURED', 'Email delivery is not configured.');
@@ -62,8 +70,6 @@ function createInternalMailRelayHandler({
     const message = validateMessage(body);
     if (!message) return responseError(res, 400, 'INVALID_EMAIL_PAYLOAD', 'Invalid email request.');
 
-    const gmailUser = String(env.GMAIL_USER || '').trim();
-    const gmailAppPassword = String(env.GMAIL_APP_PASSWORD || '').replace(/\s/g, '');
     if (!gmailUser || !gmailAppPassword) {
       logger.error('[internal-mail-relay]', JSON.stringify({ stage: 'RELAY_FAILED', reason: 'EMAIL_TRANSPORT_NOT_CONFIGURED' }));
       return responseError(res, 503, 'EMAIL_TRANSPORT_NOT_CONFIGURED', 'Email delivery is not configured.');
@@ -95,7 +101,7 @@ function createInternalMailRelayHandler({
       const authenticationFailure = error?.code === 'EAUTH' || [534, 535].includes(responseCode);
       const reason = authenticationFailure ? 'EMAIL_TRANSPORT_AUTH_FAILED' : 'EMAIL_SEND_FAILED';
       logger.error('[internal-mail-relay]', JSON.stringify({
-        stage: 'RELAY_FAILED',
+        stage: 'GMAIL_TRANSPORT_FAILED',
         reason,
         ...(responseCode ? { smtpStatus: responseCode } : {}),
       }));
