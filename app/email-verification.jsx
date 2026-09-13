@@ -1,7 +1,6 @@
 import React from 'react';
 import {
   ActivityIndicator,
-  Image,
   ScrollView,
   StyleSheet,
   Text,
@@ -15,7 +14,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRootNavigationState, useRouter } from 'expo-router';
 import { onAuthStateChanged, reload, signInWithCustomToken, signOut } from 'firebase/auth';
 
-import { BLUETAP_COLORS, BLUETAP_LOGIN_GRADIENT } from '../constants/bluetapTheme';
+import { BLUETAP_LOGIN_GRADIENT } from '../constants/bluetapTheme';
+import { RegistrationActions, RegistrationBrand, RegistrationNotice, RegistrationStepper } from '../components/RegistrationUi';
 import { auth } from '../firebase';
 import { clearAllAuthSessions, fetchFirestoreUserProfile, getPostAuthenticationDestination } from '../services/authSession';
 import { requestEmailOtp, verifyEmailOtp, getPendingRegistration, clearPendingRegistration,
@@ -399,23 +399,10 @@ export default function EmailVerificationPage() {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          <View style={styles.brand}>
-            <Image
-              source={require('../assets/icons/bluetapwhitelogo.png')}
-              style={styles.logo}
-              resizeMode="contain"
-            />
-            <Text style={styles.brandName}>BlueTap</Text>
-            <Text style={styles.tagline}>Water Within Reach</Text>
-          </View>
+          <RegistrationBrand />
 
-          <View style={[styles.card, { maxWidth: width >= 768 ? 460 : 430 }]}>
-            {registration && !loading && (
-              <View style={styles.registrationProgress}>
-                <Text style={styles.registrationStep}>Step 5 of 5 · Verify</Text>
-                <View style={styles.registrationTrack}><View style={styles.registrationTrackComplete} /></View>
-              </View>
-            )}
+          <View style={[styles.card, { maxWidth: width >= 768 ? 600 : 520 }]}>
+            {registration && !loading && <RegistrationStepper currentStep={5} completedSteps={[1, 2, 3, 4]} />}
             {loading ? (
               <View style={styles.loadingState}>
                 <ActivityIndicator size="large" color="#187BCD" />
@@ -484,40 +471,24 @@ export default function EmailVerificationPage() {
                       : 'This code will expire in 10 minutes.'}
                 </Text>
 
-                {!!message && (
-                  <Text
-                    style={[
-                      styles.notice,
-                      messageType === 'error' && styles.noticeError,
-                      messageType === 'success' && styles.noticeSuccess,
-                    ]}
-                    accessibilityLiveRegion="polite"
-                  >
-                    {message}
-                  </Text>
-                )}
+                {!!message && <RegistrationNotice
+                  tone={messageType === 'error' ? 'error' : messageType === 'success' ? 'success' : 'info'}
+                  title={messageType === 'error' ? 'Verification problem' : messageType === 'success' ? 'Verification successful' : undefined}
+                  message={message}
+                />}
 
-                <TouchableOpacity
-                  accessibilityRole="button"
-                  accessibilityLabel={verifying
-                    ? registrationFinalizationFailed ? 'Finishing account setup' : 'Verifying code'
-                    : registrationFinalizationFailed ? 'Try finalization again' : verified ? 'Email verified' : 'Confirm Code'}
-                  accessibilityState={{ disabled: registrationFinalizationFailed ? sending || verifying : verifyDisabled, busy: verifying }}
-                  style={[
-                    styles.primaryButton,
-                    { backgroundColor: (registrationFinalizationFailed ? sending || verifying : verifyDisabled)
-                      ? BLUETAP_COLORS.primaryDeep : BLUETAP_COLORS.primary },
-                  ]}
-                  onPress={registrationFinalizationFailed ? retryFinalization : verify}
-                  disabled={registrationFinalizationFailed ? sending || verifying : verifyDisabled}
-                >
-                  {verifying && <ActivityIndicator color={BLUETAP_COLORS.white} style={styles.confirmSpinner} />}
-                  <Text style={[styles.primaryButtonText, { color: BLUETAP_COLORS.white }]} accessibilityLiveRegion="polite">
-                    {verifying
-                      ? registrationFinalizationFailed ? 'Finishing...' : 'Verifying...'
-                      : registrationFinalizationFailed ? 'Try Again' : verified ? 'Email Verified' : 'Confirm Code'}
-                  </Text>
-                </TouchableOpacity>
+                <RegistrationActions
+                  stacked={width < 520}
+                  backLabel={registration ? 'Cancel registration' : 'Back to Login'}
+                  primaryLabel={verifying
+                    ? registrationFinalizationFailed ? 'Finishing...' : 'Verifying...'
+                    : registrationFinalizationFailed ? 'Try Again' : verified ? 'Email Verified' : 'Confirm Code'}
+                  onBack={returnToLogin}
+                  onPrimary={registrationFinalizationFailed ? retryFinalization : verify}
+                  backDisabled={sending || verifying || verified}
+                  primaryDisabled={registrationFinalizationFailed ? sending || verifying : verifyDisabled}
+                  loading={verifying}
+                />
 
                 <View style={styles.resendSection}>
                   <Text style={styles.resendPrompt}>Didn't receive the code?</Text>
@@ -542,14 +513,6 @@ export default function EmailVerificationPage() {
                   </TouchableOpacity>
                 </View>
 
-                <TouchableOpacity
-                  accessibilityRole="button"
-                  style={styles.loginButton}
-                  onPress={returnToLogin}
-                  disabled={sending || verifying || verified}
-                >
-                  <Text style={styles.loginButtonText}>{registration ? 'Cancel registration' : 'Back to Login'}</Text>
-                </TouchableOpacity>
               </>
             )}
           </View>
@@ -569,22 +532,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 28,
   },
-  brand: { alignItems: 'center', marginBottom: 24 },
-  logo: { width: 70, height: 70, marginBottom: 8 },
-  brandName: {
-    color: '#FFFFFF',
-    fontSize: 32,
-    fontWeight: '800',
-    letterSpacing: -0.5,
-  },
-  tagline: { color: 'rgba(255,255,255,0.88)', fontSize: 14, marginTop: 4 },
   card: {
     width: '100%',
     alignSelf: 'center',
     backgroundColor: '#FFFFFF',
     borderRadius: 24,
-    paddingHorizontal: 24,
-    paddingVertical: 28,
+    padding: 26,
     shadowColor: '#07518E',
     shadowOpacity: 0.24,
     shadowRadius: 18,
@@ -592,10 +545,6 @@ const styles = StyleSheet.create({
     elevation: 8,
   },
   loadingState: { minHeight: 300, justifyContent: 'center', alignItems: 'center' },
-  registrationProgress: { marginBottom: 20 },
-  registrationStep: { color: '#187BCD', fontSize: 12, fontWeight: '800', textAlign: 'center', marginBottom: 8 },
-  registrationTrack: { height: 4, borderRadius: 2, backgroundColor: '#DCEBF6', overflow: 'hidden' },
-  registrationTrackComplete: { width: '100%', height: '100%', backgroundColor: '#187BCD' },
   loadingText: { color: '#40617A', fontSize: 15, marginTop: 14 },
   emailIcon: {
     width: 52,
@@ -661,43 +610,10 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   expiredText: { color: '#B45309' },
-  notice: {
-    color: '#40617A',
-    backgroundColor: '#EFF8FF',
-    borderRadius: 10,
-    fontSize: 13,
-    lineHeight: 18,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    textAlign: 'center',
-    marginBottom: 16,
-  },
-  noticeError: { color: '#A53B12', backgroundColor: '#FFF4E5' },
-  noticeSuccess: { color: '#176B47', backgroundColor: '#EAF9F0' },
-  primaryButton: {
-    flexDirection: 'row',
-    width: '100%',
-    minHeight: 52,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#187BCD',
-    paddingHorizontal: 18,
-  },
-  primaryButtonText: { color: '#FFFFFF', fontSize: 15, fontWeight: '800', letterSpacing: 0.2 },
-  confirmSpinner: { marginRight: 10 },
   resendSection: { alignItems: 'center', marginTop: 20 },
   resendPrompt: { color: '#52708A', fontSize: 14, marginBottom: 8 },
   resendButton: { minHeight: 32, justifyContent: 'center', paddingHorizontal: 8 },
   resendButtonDisabled: { opacity: 0.8 },
   resendButtonText: { color: '#187BCD', fontSize: 14, fontWeight: '700' },
   resendButtonTextDisabled: { color: '#6E8AA2' },
-  loginButton: {
-    alignSelf: 'center',
-    marginTop: 14,
-    minHeight: 36,
-    justifyContent: 'center',
-    paddingHorizontal: 12,
-  },
-  loginButtonText: { color: '#187BCD', fontSize: 14, fontWeight: '700' },
 });

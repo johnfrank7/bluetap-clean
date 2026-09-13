@@ -1,7 +1,7 @@
 import { StatusBar } from 'expo-status-bar';
 import React from 'react';
 import {
-  ActivityIndicator, Animated, Easing, Image, Modal, Platform, ScrollView, StyleSheet, Text,
+  Animated, Easing, Modal, Platform, ScrollView, StyleSheet, Text,
   TextInput, TouchableOpacity, useWindowDimensions, View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -15,6 +15,7 @@ import { checkUsername, normalizeUsername, validateUsername } from '../services/
 import { acceptRegistrationTerms, createRegistrationSession } from '../services/registrationSession';
 
 import RegistrationFaceCapture from '../components/RegistrationFaceCapture';
+import { RegistrationActions, RegistrationBrand, RegistrationHeading, RegistrationNotice, RegistrationStepper, REGISTRATION_STEPS as STEPS } from '../components/RegistrationUi';
 import { auth } from '../firebase';
 import { signInWithCustomToken } from 'firebase/auth';
 import { getRoleHomePath, saveRoleSession } from '../services/authSession';
@@ -24,7 +25,6 @@ const { isTrustedRegistrationFaceVerification } = require('../services/webFaceCa
 const BARANGAYS = ['Awihao', 'Bagakay', 'Bato', 'Biga', 'Bulongan', 'Bunga', 'Cabitoonan', 'Calongcalong', 'Cambang-ug', 'Camp 8', 'Canlumampao', 'Cantabaco', 'Capitan Claudio', 'Carmen', 'Daanglungsod', 'Don Andres Soriano', 'Dumlog', 'Gen. Climaco', 'Ibo', 'Ilihan', 'Juan Climaco, Sr.', 'Landahan', 'Loay', 'Luray II', 'Matab-ang', 'Media Once', 'Pangamihan', 'Poblacion', 'Poog', 'Putingbato', 'Sagay', 'Sam-ang', 'Sangi', 'Santo Niño', 'Subayon', 'Talavera', 'Tubod', 'Tungkay'];
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PHONE = /^9\d{9}$/;
-const STEPS = ['Account', 'Personal', 'Identity', 'Credentials', 'Verify'];
 
 const normalizePhone = (value) => {
   const digits = value.replace(/\D/g, '');
@@ -100,19 +100,19 @@ export default function SignupPage() {
         : step === 4 ? accountComplete && personalComplete && identityComplete && credentialsComplete
           : false;
 
-  const prerequisiteReminder = step >= 2 && !accountComplete
-    ? 'Complete Step 1 — Account before continuing.'
+  const prerequisiteNotice = step >= 2 && !accountComplete
+    ? { title: 'Account type required', message: 'Complete Step 1 before continuing with registration.', target: 1, actionLabel: 'Go to Account' }
     : step >= 3 && !personalComplete
-      ? 'Complete Step 2 — Personal before continuing.'
+      ? { title: 'Personal information required', message: 'Complete Step 2 before continuing with account setup.', target: 2, actionLabel: 'Go to Personal Information' }
       : step >= 3 && !registrationSessionId
-        ? 'Return to Step 2 and tap Continue to start identity verification.'
+        ? { title: 'Verification session required', message: 'Return to Step 2 and tap Continue to start identity verification.', target: 2, actionLabel: 'Go to Personal Information' }
         : step >= 4 && !identityComplete
-          ? 'Complete Step 3 — Identity before continuing.'
+          ? { title: 'Identity verification required', message: 'Complete Step 3 before continuing with credentials.', target: 3, actionLabel: 'Go to Identity Verification' }
           : step >= 5 && !credentialsComplete
-            ? 'Complete Step 4 — Credentials before email verification.'
+            ? { title: 'Credentials required', message: 'Complete Step 4 before continuing with email verification.', target: 4, actionLabel: 'Go to Credentials' }
             : step === 5
-              ? 'Return to Step 4 and send the verification code to open email verification.'
-              : '';
+              ? { title: 'Verification code required', message: 'Return to Step 4 and send the verification code to open email verification.', target: 4, actionLabel: 'Go to Credentials' }
+              : null;
 
   const openStep = (target) => {
     if (loading || target === step || target < 1 || target > 5) return;
@@ -275,39 +275,22 @@ export default function SignupPage() {
               transform: [{ translateY: entrance.interpolate({ inputRange: [0, 1], outputRange: [18, 0] }) }],
             },
           ]}>
-            <View style={styles.brand}>
-              <Image source={require('../assets/icons/bluetapwhitelogo.png')} style={styles.logo} resizeMode="contain" />
-              <View><Text style={styles.brandName}>BlueTap</Text><Text style={styles.tagline}>Water Within Reach</Text></View>
-            </View>
+            <RegistrationBrand />
             <View style={[styles.card, step === 3 && styles.identityCard, step === 3 && mobile && styles.identityCardMobile]}>
-              <View style={[styles.progress, step === 3 && styles.identityProgress]}>
-                {STEPS.map((name, index) => {
-                  const target = index + 1;
-                  const complete = target === 1 ? accountComplete
-                    : target === 2 ? personalComplete && !!registrationSessionId
-                      : target === 3 ? identityComplete
-                        : target === 4 ? credentialsComplete
-                          : false;
-                  return <View key={name} style={styles.progressItem}>
-                  <TouchableOpacity
-                    style={styles.progressStepButton}
-                    onPress={() => openStep(target)}
-                    disabled={loading || target === step}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Step ${target}: ${name}`}
-                    accessibilityHint="Open this registration step"
-                    accessibilityState={{ selected: target === step, disabled: loading || target === step }}
-                  >
-                    <View style={[styles.progressCircle, (complete || target === step) && styles.progressCircleActive]}><Text style={[styles.progressNumber, (complete || target === step) && styles.progressNumberActive]}>{target}</Text></View>
-                    {!mobile && <Text style={[styles.progressLabel, step === 3 && styles.identityProgressLabel, target === step && styles.progressLabelActive]}>{name}</Text>}
-                  </TouchableOpacity>
-                  {index < STEPS.length - 1 && <View style={[styles.progressLine, complete && styles.progressLineActive]} />}
-                </View>})}
-              </View>
+              <RegistrationStepper
+                currentStep={step}
+                completedSteps={[
+                  accountComplete && 1,
+                  personalComplete && !!registrationSessionId && 2,
+                  identityComplete && 3,
+                  credentialsComplete && 4,
+                ].filter(Boolean)}
+                onStepPress={openStep}
+                disabled={loading}
+              />
               {mobile && <Text style={styles.stepText}>Step {step} of 5 · {STEPS[step - 1]}</Text>}
-              <Text style={[styles.title, step === 3 && styles.identityHeading, step === 3 && mobile && styles.identityHeadingMobile]}>{step === 3 ? "Verify your identity" : title}</Text>
-              <Text style={[styles.subtitle, step === 3 && styles.identitySubtitle]}>{step === 3 ? "Complete a quick face check to help protect your account and prevent duplicate registrations." : subtitle}</Text>
-              {!!prerequisiteReminder && <View style={styles.prerequisiteReminder} accessibilityRole="alert"><Text style={styles.prerequisiteReminderText}>{prerequisiteReminder}</Text></View>}
+              <RegistrationHeading title={step === 3 ? 'Verify your identity' : title} subtitle={step === 3 ? 'Complete a quick face check to help protect your account and prevent duplicate registrations.' : subtitle} />
+              {!!prerequisiteNotice && <RegistrationNotice tone="warning" {...prerequisiteNotice} onAction={() => openStep(prerequisiteNotice.target)} />}
 
               {step === 1 && <View style={styles.roleList}>
                 {[
@@ -356,17 +339,23 @@ export default function SignupPage() {
 
               {step === 5 && <View style={styles.verifyPreview}><Text style={styles.verifyPreviewText}>Email verification becomes available only after BlueTap accepts the completed Credentials step and sends a secure verification code.</Text></View>}
 
-              <View style={[styles.actions, step === 3 && styles.identityActions]}>
-                <TouchableOpacity style={styles.back} onPress={back} disabled={loading}><Text style={styles.backText}>Back</Text></TouchableOpacity>
-                <TouchableOpacity style={[styles.primary, (!canContinue || loading || retrySeconds > 0) && styles.disabled, step === 3 && (!canContinue || loading || retrySeconds > 0) && styles.identityContinueDisabled]} onPress={step === 4 ? submit : next} disabled={!canContinue || loading || retrySeconds > 0}>
-                  {loading ? <ActivityIndicator color="#FFF" /> : <Text style={[styles.primaryText, step === 3 && !canContinue && styles.identityContinueTextDisabled]}>{retrySeconds > 0 ? `Try again in ${Math.floor(retrySeconds / 60)}:${String(retrySeconds % 60).padStart(2, '0')}` : step === 5 ? 'Complete previous steps' : step === 4 ? (securityPolicy.emailOtpRequired ? 'Send Verification Code' : 'Complete Registration') : 'Continue'}</Text>}
-                </TouchableOpacity>
-              </View>
+              <RegistrationActions
+                stacked={mobile}
+                onBack={back}
+                onPrimary={step === 4 ? submit : next}
+                loading={loading}
+                primaryDisabled={!canContinue || retrySeconds > 0}
+                primaryLabel={retrySeconds > 0
+                  ? `Try again in ${Math.floor(retrySeconds / 60)}:${String(retrySeconds % 60).padStart(2, '0')}`
+                  : step === 5 ? 'Complete previous steps'
+                    : step === 4 ? (securityPolicy.emailOtpRequired ? 'Send Verification Code' : 'Complete Registration')
+                      : 'Continue'}
+              />
               <Text style={styles.loginPrompt}>Already have an account? <Text style={styles.loginLink} onPress={() => router.replace('/login')}>Log in.</Text></Text>
             </View>
           </Animated.View>
         </ScrollView>
-        <Modal visible={!!notice} transparent animationType="fade"><View style={styles.modalBg}><View style={styles.modal}><Text style={styles.modalTitle}>{notice?.title}</Text><Text style={styles.modalText}>{notice?.message}</Text><TouchableOpacity style={styles.primary} onPress={() => setNotice(null)}><Text style={styles.primaryText}>OK</Text></TouchableOpacity></View></View></Modal>
+        <Modal visible={!!notice} transparent animationType="fade"><View style={styles.modalBg}><View style={styles.modal}><RegistrationNotice tone="error" title={notice?.title} message={notice?.message} /><TouchableOpacity style={styles.primary} onPress={() => setNotice(null)}><Text style={styles.primaryText}>OK</Text></TouchableOpacity></View></View></Modal>
       </SafeAreaView>
     </LinearGradient>
   );
@@ -375,22 +364,11 @@ export default function SignupPage() {
 const styles = StyleSheet.create({
   identityCard: { borderRadius: 20, padding: 24, shadowOpacity: 0.16, shadowRadius: 16 },
   identityCardMobile: { padding: 16 },
-  identityProgress: { marginBottom: 24 }, identityProgressLabel: { fontSize: 10 },
-  identityHeading: { fontSize: 30, lineHeight: 38, fontWeight: '700' },
-  identityHeadingMobile: { fontSize: 26, lineHeight: 34 },
-  identitySubtitle: { fontSize: 15, lineHeight: 22, marginTop: 8, marginBottom: 24 },
-  identityActions: { marginTop: 24 },
-  identityContinueDisabled: { backgroundColor: '#E4EFF8', opacity: 1 },
-  identityContinueTextDisabled: { color: '#6989A3', fontWeight: '600' },
-  prerequisiteReminder: { borderWidth: 1, borderColor: '#E9A3A3', backgroundColor: '#FFF1F1', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 11, marginTop: -10, marginBottom: 18 },
-  prerequisiteReminderText: { color: '#B42318', fontSize: 13, lineHeight: 19, fontWeight: '700', textAlign: 'center' },
   verifyPreview: { borderWidth: 1, borderColor: '#D8E5EF', backgroundColor: '#F7FAFC', borderRadius: 12, padding: 18 },
   verifyPreviewText: { color: '#526E84', fontSize: 14, lineHeight: 21, textAlign: 'center' },
   screen: { flex: 1 }, safe: { flex: 1 }, scroll: { flexGrow: 1, alignItems: 'center', justifyContent: 'center', padding: 20 }, shell: { width: '100%' },
-  brand: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 18 }, logo: { width: 52, height: 52, marginRight: 10 }, brandName: { color: '#FFF', fontSize: 26, fontWeight: '800' }, tagline: { color: 'rgba(255,255,255,.86)', fontSize: 13 },
   card: { backgroundColor: '#FFF', borderRadius: 24, padding: 26, shadowColor: '#07518E', shadowOpacity: .24, shadowRadius: 18, shadowOffset: { width: 0, height: 10 }, elevation: 8 },
-  progress: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 20 }, progressItem: { flexDirection: 'row', alignItems: 'center' }, progressStepButton: { flexDirection: 'row', alignItems: 'center' }, progressCircle: { width: 28, height: 28, borderRadius: 14, backgroundColor: '#E8F1F8', alignItems: 'center', justifyContent: 'center' }, progressCircleActive: { backgroundColor: BLUETAP_COLORS.primary }, progressNumber: { color: '#68839A', fontSize: 12, fontWeight: '700' }, progressNumberActive: { color: '#FFF' }, progressLabel: { marginLeft: 5, color: '#7890A3', fontSize: 11 }, progressLabelActive: { color: BLUETAP_COLORS.primary, fontWeight: '700' }, progressLine: { width: 12, height: 2, backgroundColor: '#D9E7F1', marginHorizontal: 5 }, progressLineActive: { backgroundColor: BLUETAP_COLORS.primary }, stepText: { color: BLUETAP_COLORS.primary, fontSize: 12, fontWeight: '700', textAlign: 'center', marginBottom: 10 },
-  title: { color: '#17324D', fontSize: 25, fontWeight: '800', textAlign: 'center' }, subtitle: { color: '#607A90', fontSize: 14, lineHeight: 20, textAlign: 'center', marginTop: 7, marginBottom: 24 },
+  stepText: { color: BLUETAP_COLORS.primary, fontSize: 12, fontWeight: '700', textAlign: 'center', marginTop: -12, marginBottom: 12 },
   roleList: { gap: 12 }, roleCard: { flexDirection: 'row', alignItems: 'center', minHeight: 94, padding: 16, borderRadius: 14, borderWidth: 1.5, borderColor: '#D8E5EF', backgroundColor: '#FAFCFE' }, roleCardSelected: { borderColor: BLUETAP_COLORS.primary, backgroundColor: '#EDF7FF' }, roleIcon: { fontSize: 28, marginRight: 14 }, roleCopy: { flex: 1 }, roleTitle: { color: '#17324D', fontSize: 16, fontWeight: '800' }, roleDescription: { color: '#607A90', fontSize: 13, lineHeight: 18, marginTop: 3 }, radio: { width: 18, height: 18, borderRadius: 9, borderWidth: 2, borderColor: '#A8BCCB' }, radioSelected: { borderWidth: 5, borderColor: BLUETAP_COLORS.primary },
   row: { flexDirection: 'row', gap: 12 }, half: { flex: 1 }, field: { marginBottom: 15 }, label: { color: '#29465F', fontSize: 13, fontWeight: '700', marginBottom: 6 }, input: { minHeight: 50, borderWidth: 1, borderColor: '#C8D9E6', borderRadius: 11, backgroundColor: '#FAFCFE', paddingHorizontal: 14, color: '#17324D', fontSize: 15 }, inputError: { borderColor: '#DC5757', backgroundColor: '#FFF8F8' }, inputSuccess: { borderColor: '#36A269' }, error: { color: '#B93A3A', fontSize: 12, marginTop: 5 }, hint: { color: '#68839A', fontSize: 12, marginTop: 5 },
   phone: { flexDirection: 'row', alignItems: 'center', minHeight: 50, borderWidth: 1, borderColor: '#C8D9E6', borderRadius: 11, backgroundColor: '#FAFCFE' }, prefix: { paddingHorizontal: 14, color: '#17324D', fontWeight: '700', borderRightWidth: 1, borderRightColor: '#D8E5EF' }, phoneInput: { flex: 1, minHeight: 48, paddingHorizontal: 12, color: '#17324D', fontSize: 15 }, select: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }, inputText: { color: '#17324D', fontSize: 15 }, placeholder: { color: '#94A3B8', fontSize: 15 }, dropdown: { maxHeight: 170, borderWidth: 1, borderColor: '#C8D9E6', borderRadius: 11, marginTop: -10, marginBottom: 15 }, option: { padding: 13, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#D8E5EF' },
@@ -398,6 +376,6 @@ const styles = StyleSheet.create({
   faceButton: { width: '100%', minHeight: 48, marginTop: 16, borderRadius: 11, borderWidth: 1, borderColor: '#9AC7E8', alignItems: 'center', justifyContent: 'center' }, faceButtonText: { color: BLUETAP_COLORS.primary, fontSize: 14, fontWeight: '700' },
   password: { flexDirection: 'row', alignItems: 'center', minHeight: 50, borderWidth: 1, borderColor: '#C8D9E6', borderRadius: 11, backgroundColor: '#FAFCFE' }, passwordInput: { flex: 1, minHeight: 48, paddingHorizontal: 14, color: '#17324D', fontSize: 15 }, show: { color: BLUETAP_COLORS.primary, fontWeight: '700', padding: 13 },
   termsRow: { flexDirection: 'row', alignItems: 'flex-start', minHeight: 44, marginTop: 2 }, checkboxTouch: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', marginRight: 2, marginTop: -8 }, checkboxBox: { width: 26, height: 26, borderRadius: 7, borderWidth: 1.5, borderColor: '#91ABC0', alignItems: 'center', justifyContent: 'center' }, checkboxTouchChecked: { backgroundColor: BLUETAP_COLORS.primary, borderColor: BLUETAP_COLORS.primary }, checkboxMark: { color: '#FFF', fontWeight: '900' }, termsText: { flex: 1, color: '#526E84', fontSize: 13, lineHeight: 20 }, termsLink: { color: BLUETAP_COLORS.primary, fontWeight: '800' }, termsRequired: { color: '#7A5C24', fontSize: 12, marginTop: 4 },
-  actions: { flexDirection: 'row', gap: 12, marginTop: 14 }, back: { minHeight: 50, paddingHorizontal: 24, borderWidth: 1, borderColor: '#B9CEDD', borderRadius: 11, alignItems: 'center', justifyContent: 'center' }, backText: { color: '#3D607B', fontSize: 15, fontWeight: '700' }, primary: { flex: 1, minHeight: 50, borderRadius: 11, paddingHorizontal: 18, backgroundColor: BLUETAP_COLORS.primary, alignItems: 'center', justifyContent: 'center' }, primaryText: { color: '#FFF', fontSize: 15, fontWeight: '800', textAlign: 'center' }, disabled: { opacity: .55 }, loginPrompt: { textAlign: 'center', color: '#6B8498', fontSize: 13, marginTop: 20 }, loginLink: { color: BLUETAP_COLORS.primary, fontWeight: '800' },
-  modalBg: { flex: 1, backgroundColor: 'rgba(0,0,0,.5)', alignItems: 'center', justifyContent: 'center', padding: 20 }, modal: { width: '100%', maxWidth: 420, backgroundColor: '#FFF', borderRadius: 20, padding: 24 }, modalTitle: { color: '#17324D', fontSize: 19, fontWeight: '800', textAlign: 'center' }, modalText: { color: '#526E84', fontSize: 14, lineHeight: 20, textAlign: 'center', marginVertical: 18 },
+  primary: { flex: 1, minHeight: 50, borderRadius: 11, paddingHorizontal: 18, backgroundColor: BLUETAP_COLORS.primary, alignItems: 'center', justifyContent: 'center' }, primaryText: { color: '#FFF', fontSize: 15, fontWeight: '800', textAlign: 'center' }, loginPrompt: { textAlign: 'center', color: '#6B8498', fontSize: 13, marginTop: 20 }, loginLink: { color: BLUETAP_COLORS.primary, fontWeight: '800' },
+  modalBg: { flex: 1, backgroundColor: 'rgba(0,0,0,.5)', alignItems: 'center', justifyContent: 'center', padding: 20 }, modal: { width: '100%', maxWidth: 420, backgroundColor: '#FFF', borderRadius: 20, padding: 24 },
 });

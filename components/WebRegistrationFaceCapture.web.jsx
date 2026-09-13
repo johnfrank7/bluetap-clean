@@ -211,6 +211,7 @@ export default function WebRegistrationFaceCapture({ registrationSessionId, veri
   }
 
   const showPreview = cameraVisible && state !== 'failed';
+  const servicePreparing = state === 'failed' && /starting|preparing|temporarily|moment/i.test(message);
   return <View style={styles.stack}><View style={[styles.box, state === 'failed' && styles.failedPanel]}>
     <Text style={styles.title}>{showPreview ? 'Position your face inside the frame' : state === 'failed' ? 'Verification unsuccessful' : 'Verify your identity'}</Text>
     <Text style={styles.copy}>{showPreview ? 'Look directly at the camera and keep only one face in the oval.' : 'Complete a quick face check to help protect your account and prevent duplicate registrations.'}</Text>
@@ -222,7 +223,7 @@ export default function WebRegistrationFaceCapture({ registrationSessionId, veri
 
     {showPreview && state === 'camera' && <Text accessibilityLiveRegion="polite" style={styles.guidance}>{stable ? 'Hold still, then capture your face.' : 'Hold still while we prepare a clear capture...'}</Text>}
     {state === 'processing' && <View style={styles.processing}><ActivityIndicator color="#187BCD" /><Text style={styles.processingText}>Checking your identity...</Text></View>}
-    {!!message && <Text accessibilityLiveRegion="polite" style={styles.notice}>{message}</Text>}
+    {!!message && <Text accessibilityLiveRegion="polite" accessibilityRole={state === 'failed' && !servicePreparing ? 'alert' : undefined} style={[styles.notice, state === 'failed' && !servicePreparing && styles.noticeError]}>{message}</Text>}
 
     {state === 'camera' && <TouchableOpacity style={[styles.button, !stable && styles.disabled]} disabled={!stable} onPress={capture}><Text style={styles.buttonText}>Capture face</Text></TouchableOpacity>}
     {showPreview && state !== 'processing' && <TouchableOpacity style={styles.secondary} onPress={reset}><Text style={styles.secondaryText}>Cancel</Text></TouchableOpacity>}
@@ -252,8 +253,8 @@ const styles = StyleSheet.create({
   disabled: { opacity: 0.5 },
   secondary: { padding: 12 }, secondaryText: { color: '#416581', fontSize: 14 },
   processing: { flexDirection: 'row', gap: 12, alignItems: 'center', justifyContent: 'center', flexWrap: 'wrap' }, processingText: { color: '#315F82', fontSize: 14 },
-  notice: { color: '#8D6024', backgroundColor: '#FFF7E8', padding: 12, borderRadius: 10, fontSize: 14, textAlign: 'center', lineHeight: 21, width: '100%' },
-  successPanel: { backgroundColor: '#F4FBF7', borderColor: '#D7EDE0' }, reviewPanel: { backgroundColor: '#FFFCF5', borderColor: '#F0E5C9' }, failedPanel: { borderColor: '#EDDCCF' },
+  notice: { color: '#8D6024', backgroundColor: '#FFF7E8', padding: 12, borderRadius: 10, fontSize: 14, textAlign: 'center', lineHeight: 21, width: '100%' }, noticeError: { color: '#A72C25', backgroundColor: '#FFF1F0' },
+  successPanel: { backgroundColor: '#F4FBF7', borderColor: '#D7EDE0' }, reviewPanel: { backgroundColor: '#FFFCF5', borderColor: '#F0E5C9' }, failedPanel: { borderColor: '#E7A6A1', backgroundColor: '#FFF8F7' },
   successMark: { color: '#238254', fontSize: 27, fontWeight: '700' }, warningMark: { color: '#9A6525', fontSize: 25, fontWeight: '600' },
   privacyBox: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, backgroundColor: '#EFF6FC', borderRadius: 12, padding: 16 },
   privacyContent: { flex: 1 }, privacyTitle: { color: '#2E536F', fontSize: 14, fontWeight: '600', marginBottom: 4 }, privacy: { fontSize: 13, lineHeight: 20, color: '#526E84' },

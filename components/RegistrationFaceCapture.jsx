@@ -103,6 +103,7 @@ export default function RegistrationFaceCapture({ registrationSessionId, verific
   if (isTrustedRegistrationFaceVerification(verification)) return <View style={styles.stack}><View style={[styles.box, styles.successPanel]}><View style={[styles.icon, styles.successIcon]}><Text style={styles.successMark}>✓</Text></View><Text style={styles.title}>Identity check completed</Text><Text style={styles.copy}>Complete email verification to finalize your secure face enrollment.</Text></View><PrivacyNote /></View>;
   if (verification.status === 'review_required') return <View style={styles.stack}><View style={[styles.box, styles.reviewPanel]}><View style={[styles.icon, styles.warningIcon]}><Text style={styles.warningMark}>!</Text></View><Text style={styles.title}>Verification needs review</Text><Text style={styles.copy}>We found a possible existing registration.</Text></View><PrivacyNote /></View>;
   const cameraVisible = state === 'camera' || state === 'challenge';
+  const servicePreparing = state === 'failed' && /starting|preparing|temporarily|moment/i.test(message);
   return <View style={styles.stack}><View style={[styles.box, state === 'failed' && styles.failedPanel]}>
     {!cameraVisible && <View style={[styles.icon, state === 'failed' && styles.warningIcon]}>
       {state === 'failed' ? <Text style={styles.warningMark}>!</Text> : <View accessible={false} style={styles.faceGlyph}><View style={styles.faceHead} /><View style={styles.faceShoulders} /></View>}
@@ -126,7 +127,7 @@ export default function RegistrationFaceCapture({ registrationSessionId, verific
       {state === 'challenge' ? <View style={styles.processing}><ActivityIndicator color="#187BCD" /><Text style={styles.processingText}>{progress.stage === 'processing' ? 'Checking your identity...' : 'Follow the motion guide'}</Text></View> : <TouchableOpacity style={[styles.button, (!cameraReady || !canAnalyze) && styles.disabled]} disabled={!cameraReady || !canAnalyze} onPress={perform}><Text style={styles.buttonText}>Begin challenge</Text></TouchableOpacity>}
       <TouchableOpacity onPress={cancel} style={styles.secondary}><Text style={styles.secondaryText}>Cancel</Text></TouchableOpacity>
     </>}
-    {!!message && <Text accessibilityLiveRegion="polite" style={styles.notice}>{message}</Text>}
+    {!!message && <Text accessibilityLiveRegion="polite" accessibilityRole={state === 'failed' && !servicePreparing ? 'alert' : undefined} style={[styles.notice, state === 'failed' && !servicePreparing && styles.noticeError]}>{message}</Text>}
     {!cameraVisible && <TouchableOpacity style={styles.button} disabled={state === 'opening'} onPress={start}>{state === 'opening' ? <View style={styles.processing}><ActivityIndicator color="#FFF" /><Text style={styles.buttonText}>Opening camera...</Text></View> : <Text style={styles.buttonText}>{state === 'failed' ? 'Try Again' : 'Start Face Verification'}</Text>}</TouchableOpacity>}
     {permission?.canAskAgain === false && !permission.granted && <TouchableOpacity style={styles.secondary} onPress={() => Linking.openSettings().catch(() => setMessage('Allow camera access in your browser or device settings.'))}><Text>Open settings</Text></TouchableOpacity>}
   </View><PrivacyNote /></View>;
@@ -148,7 +149,7 @@ const styles = StyleSheet.create({
   benefitCheck: { color: '#187BCD', fontSize: 14, fontWeight: '600' },
   benefitText: { flex: 1, color: '#42637C', fontSize: 14, lineHeight: 20 },
   successPanel: { backgroundColor: '#F4FBF7', borderColor: '#D7EDE0' }, successIcon: { backgroundColor: '#E0F3E8' }, successMark: { color: '#238254', fontSize: 27 },
-  reviewPanel: { backgroundColor: '#FFFCF5', borderColor: '#F0E5C9' }, failedPanel: { borderColor: '#EDDCCF' }, warningIcon: { backgroundColor: '#FCEDD8' }, warningMark: { color: '#9A6525', fontSize: 25, fontWeight: '600' },
+  reviewPanel: { backgroundColor: '#FFFCF5', borderColor: '#F0E5C9' }, failedPanel: { borderColor: '#E7A6A1', backgroundColor: '#FFF8F7' }, warningIcon: { backgroundColor: '#FCEDD8' }, warningMark: { color: '#9A6525', fontSize: 25, fontWeight: '600' },
   preview: { width: '100%', maxWidth: 300, aspectRatio: 3 / 4, borderRadius: 16, overflow: 'hidden', backgroundColor: '#12304A', alignItems: 'center', justifyContent: 'center' },
   frame: { width: '70%', height: '70%', borderRadius: 160, borderWidth: 3, borderColor: '#FFF' },
   frameWarning: { borderColor: '#F7C76B' }, frameProgress: { borderColor: '#71D6B0' },
@@ -157,7 +158,7 @@ const styles = StyleSheet.create({
   button: { width: '100%', minHeight: 50, paddingHorizontal: 16, paddingVertical: 12, justifyContent: 'center', alignItems: 'center', backgroundColor: '#187BCD', borderRadius: 11, marginTop: 4 },
   buttonText: { color: '#FFF', fontSize: 15, fontWeight: '600', textAlign: 'center' }, disabled: { opacity: 0.5 },
   processing: { flexDirection: 'row', gap: 12, alignItems: 'center', justifyContent: 'center', flexWrap: 'wrap' }, processingText: { color: '#315F82', fontSize: 14 },
-  secondary: { padding: 12 }, secondaryText: { color: '#416581', fontSize: 14 }, notice: { color: '#8D6024', backgroundColor: '#FFF7E8', padding: 12, borderRadius: 10, fontSize: 14, textAlign: 'center', lineHeight: 21, width: '100%' },
+  secondary: { minHeight: 44, padding: 12, justifyContent: 'center' }, secondaryText: { color: '#416581', fontSize: 14 }, notice: { color: '#8D6024', backgroundColor: '#FFF7E8', padding: 12, borderRadius: 10, fontSize: 14, textAlign: 'center', lineHeight: 21, width: '100%' }, noticeError: { color: '#A72C25', backgroundColor: '#FFF1F0' },
   privacyBox: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, backgroundColor: '#EFF6FC', borderRadius: 12, padding: 16 },
   privacyContent: { flex: 1 }, privacyTitle: { color: '#2E536F', fontSize: 14, fontWeight: '600', marginBottom: 4 },
   privacy: { fontSize: 13, lineHeight: 20, color: '#526E84' },
