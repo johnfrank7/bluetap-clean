@@ -6,11 +6,12 @@ const COOLDOWN = 60 * 1000;
 const WINDOW = 60 * 60 * 1000;
 const MAX_SENDS = 6; // Initial code plus five resends per hour, including failed sends.
 const millis = (value) => value?.toMillis?.() || (value instanceof Date ? value.getTime() : 0);
-const unavailable = () => new OtpError(503, 'provider-unavailable', 'Verification email could not be sent. Please try again.');
+const unavailable = () => new OtpError(503, 'EMAIL_SEND_FAILED', 'Verification email could not be sent. Please try again.');
+const missingSecret = () => new OtpError(503, 'OTP_SECRET_MISSING', 'Email verification is not configured. Please contact support.');
 
-function createEmailOtpService({ auth, db, sendEmailOtp, hashSecret, now = Date.now, allowConsumedRetry = false }) {
+function createEmailOtpService({ auth, db, sendEmailOtp, hashSecret, now = Date.now, allowConsumedRetry = false, onStage = () => {} }) {
   function hash(uid, email, code) {
-    if (!hashSecret) throw unavailable();
+    if (!hashSecret) throw missingSecret();
     return createHmac('sha256', hashSecret).update(JSON.stringify([uid, email, code])).digest('hex');
   }
   async function userFor(uid) {
@@ -59,7 +60,9 @@ function createEmailOtpService({ auth, db, sendEmailOtp, hashSecret, now = Date.
         sendCount: count + 1, resendCount: count,
       });
     });
+    onStage('OTP_CREATED');
     try {
+      onStage('EMAIL_SEND_STARTED');
       await sendEmailOtp({ recipient: user.email, code, requestId });
     } catch (error) {
       await db.runTransaction(async (tx) => {
@@ -76,6 +79,7 @@ function createEmailOtpService({ auth, db, sendEmailOtp, hashSecret, now = Date.
       tx.update(ref, { status: 'active' });
       return millis(data.expiresAt);
     });
+    onStage('OTP_REQUEST_COMPLETED');
     return { expiresAt, resendAfterSeconds: 60 };
   }
 

@@ -4,6 +4,7 @@ const { sendEmailOtp } = require('../email/emailProvider');
 const { OtpError } = require('../utils/otpError');
 const { applyCors } = require('../utils/cors');
 const { getClientIp } = require('../utils/request');
+const { randomUUID } = require('node:crypto');
 
 function createRegistrationHandler(action) {
   return async (req, res) => {
@@ -11,12 +12,14 @@ function createRegistrationHandler(action) {
     if (!applyCors(req, res)) return;
     if (req.method === 'OPTIONS') return res.status(204).end();
     if (req.method !== 'POST') return res.status(405).json({ error: { reason: 'method-not-allowed', message: 'Use POST.' } });
+    const requestId = randomUUID();
+    const otpStage = (stage) => console.info('[registration-otp]', JSON.stringify({ requestId, stage }));
     try {
       let body = req.body;
       if (typeof body === 'string') {
         try { body = JSON.parse(body); } catch { throw new OtpError(400, 'invalid-registration', 'Invalid request.'); }
       }
-      const service = createRegistrationService({ ...getFirebaseAdmin(), sendEmailOtp, hashSecret: process.env.EMAIL_OTP_HASH_SECRET });
+      const service = createRegistrationService({ ...getFirebaseAdmin(), sendEmailOtp, hashSecret: process.env.EMAIL_OTP_HASH_SECRET, otpStage });
       const ip = getClientIp(req);
       const result = action === 'request'
         ? await service.request(body?.email, body?.username, body?.registrationSessionId, ip)
@@ -28,6 +31,11 @@ function createRegistrationHandler(action) {
       return res.status(200).json(result);
     } catch (error) {
       const known = error instanceof OtpError;
+      if (action === 'request') console.error('[registration-otp]', JSON.stringify({
+        requestId,
+        stage: 'OTP_REQUEST_FAILED',
+        reason: known ? error.reason : 'SERVICE_UNAVAILABLE',
+      }));
       if (known && error.details.retryAfterSeconds) res.setHeader('Retry-After', String(error.details.retryAfterSeconds));
       const duplicate = error.code === 'auth/email-already-exists';
       return res.status(known ? error.status : duplicate ? 409 : 500).json({ error: {

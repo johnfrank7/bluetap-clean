@@ -154,9 +154,25 @@ test('already verified account skips sending', async () => {
   assert.equal(f.sent.length, 0);
 });
 
-test('Vercel endpoints reject unauthenticated requests and handle preflight', async () => {
-  for (const path of ['../../../api/auth/request-email-otp', '../../../api/auth/verify-email-otp']) {
-    const handler = require(path);
+test('missing OTP signing secret fails safely before storing or sending a code', async () => {
+  let touchedStorage = false;
+  let sent = false;
+  const service = createEmailOtpService({
+    auth: { getUser: async () => ({ uid: 'owner', email: 'owner@example.test', emailVerified: false }) },
+    db: { collection: () => { touchedStorage = true; throw new Error('must not store'); } },
+    sendEmailOtp: async () => { sent = true; },
+    hashSecret: '',
+  });
+  await assert.rejects(service.request('owner'), (error) =>
+    error.status === 503 && error.reason === 'OTP_SECRET_MISSING');
+  assert.equal(touchedStorage, false);
+  assert.equal(sent, false);
+});
+
+test('Render OTP handlers reject unauthenticated requests and handle preflight', async () => {
+  const { createOtpHandler } = require('../otpHandler');
+  for (const action of ['request', 'verify']) {
+    const handler = createOtpHandler(action);
     for (const [method, expected] of [['POST', 401], ['GET', 405], ['OPTIONS', 204]]) {
       const res = {
         headers: {}, setHeader(k, v) { this.headers[k] = v; },
@@ -176,7 +192,9 @@ test('Gmail SMTP transport uses server credentials and sanitizes failures', asyn
   const originalUser = process.env.GMAIL_USER;
   const originalPassword = process.env.GMAIL_APP_PASSWORD;
   const logs = [];
+  const infoLogs = [];
   t.mock.method(console, 'error', (...args) => logs.push(args));
+  t.mock.method(console, 'info', (...args) => infoLogs.push(args));
   let options;
   let mail;
   let failure;
@@ -206,29 +224,31 @@ test('Gmail SMTP transport uses server credentials and sanitizes failures', asyn
     assert.ok(mail.text.includes(message.code));
     assert.ok(mail.text.includes('10 minutes'));
     assert.equal(logs.length, 0);
-    const safeError = (error) => {
+    const safeError = (reason) => (error) => {
       assert.equal(error.status, 503);
-      assert.equal(error.reason, 'provider-unavailable');
-      assert.equal(error.message, 'Unable to send verification email. Please try again.');
+      assert.equal(error.reason, reason);
       return true;
     };
-    for (const code of ['EAUTH', 'ETIMEDOUT', 'secret-raw-error']) {
+    for (const [code, reason] of [['EAUTH', 'EMAIL_TRANSPORT_AUTH_FAILED'], ['ETIMEDOUT', 'EMAIL_SEND_FAILED'], ['secret-raw-error', 'EMAIL_SEND_FAILED']]) {
       failure = Object.assign(new Error('test-password-only recipient@example.test 123456'), { code, responseCode: 535 });
-      await assert.rejects(sendEmailOtp(message), safeError);
+      if (code !== 'EAUTH') failure.responseCode = undefined;
+      await assert.rejects(sendEmailOtp(message), safeError(reason));
     }
     failure = null;
     accepted = false;
-    await assert.rejects(sendEmailOtp(message), safeError);
+    await assert.rejects(sendEmailOtp(message), safeError('EMAIL_SEND_FAILED'));
     delete process.env.GMAIL_APP_PASSWORD;
     const calls = transport.mock.callCount();
-    await assert.rejects(sendEmailOtp(message), safeError);
+    await assert.rejects(sendEmailOtp(message), safeError('EMAIL_TRANSPORT_NOT_CONFIGURED'));
     assert.equal(transport.mock.callCount(), calls);
-    const serialized = JSON.stringify(logs);
+    const serialized = JSON.stringify([logs, infoLogs]);
     for (const sensitive of ['test-password-only', message.recipient, message.code, 'secret-raw-error']) {
       assert.equal(serialized.includes(sensitive), false);
     }
-    assert.ok(serialized.includes('EAUTH'));
-    assert.ok(serialized.includes('SMTP_ERROR'));
+    assert.ok(serialized.includes('EMAIL_TRANSPORT_AUTH_FAILED'));
+    assert.ok(serialized.includes('EMAIL_SEND_FAILED'));
+    assert.ok(serialized.includes('EMAIL_TRANSPORT_NOT_CONFIGURED'));
+    assert.ok(serialized.includes('EMAIL_TRANSPORT_READY'));
   } finally {
     if (originalUser === undefined) delete process.env.GMAIL_USER;
     else process.env.GMAIL_USER = originalUser;

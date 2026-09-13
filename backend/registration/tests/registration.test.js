@@ -16,6 +16,7 @@ function fixture() {
   let failEmail = false;
   let failProfile = false;
   let failEnrollment = false;
+  const otpStages = [];
   let creates = 0;
   let queue = Promise.resolve();
   const snapshot = (key) => ({ exists: records.has(key), data: () => records.get(key) });
@@ -58,6 +59,7 @@ function fixture() {
   };
   const renderCalls = [];
   const service = createRegistrationService({ auth, db, hashSecret: 'test-signing-key', now: () => time,
+    otpStage: (stage) => otpStages.push(stage),
     render: async (path, body) => {
       renderCalls.push({ path, body });
       if (path === '/ready') return { status: 'ready', modelLoaded: true };
@@ -85,7 +87,7 @@ function fixture() {
   const registrationService = { ...service, request: (email, ip, username = form.username) => service.request(email, username, sessionId, ip),
     complete: (challenge, code, input) => service.complete(challenge, code, input, finalFaceImage) };
   return { service: registrationService, users, records, sent, get creates() { return creates; },
-    sessionId, setSessionProfile, renderCalls, advance: (ms) => { time += ms; }, failEmail: () => { failEmail = true; }, failProfile: () => { failProfile = true; }, failEnrollment: () => { failEnrollment = true; }, restoreEnrollment: () => { failEnrollment = false; } };
+    sessionId, setSessionProfile, renderCalls, otpStages, advance: (ms) => { time += ms; }, failEmail: () => { failEmail = true; }, failProfile: () => { failProfile = true; }, failEnrollment: () => { failEnrollment = true; }, restoreEnrollment: () => { failEnrollment = false; } };
 }
 const reason = (expected) => (error) => error.reason === expected;
 
@@ -96,6 +98,7 @@ test('requesting and abandoning OTP creates neither Auth user nor user profile',
   assert.equal(f.creates, 0);
   assert.equal([...f.records.keys()].some((key) => key.startsWith('users/')), false);
   assert.equal([...f.records.values()].some((data) => JSON.stringify(data).includes(form.password)), false);
+  assert.deepEqual(f.otpStages, ['OTP_REQUEST_STARTED', 'OTP_SESSION_VALIDATED', 'OTP_CREATED', 'EMAIL_SEND_STARTED', 'OTP_REQUEST_COMPLETED']);
 });
 
 test('provider failure and wrong OTP never create an account', async () => {

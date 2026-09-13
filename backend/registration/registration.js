@@ -8,7 +8,7 @@ const { createRenderFaceClient } = require('../verification/renderFaceClient');
 
 const RESERVATION_TTL = 15 * 60 * 1000;
 
-function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, render = createRenderFaceClient(), now = Date.now }) {
+function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, render = createRenderFaceClient(), now = Date.now, otpStage = () => {} }) {
   // Operational breadcrumbs only: never include credentials, codes, images,
   // face data, email addresses, or full user identifiers in these logs.
   const logFinalization = (stage, registrationSessionId, extra = {}) => console.info('[registration-finalization]', JSON.stringify({
@@ -402,7 +402,7 @@ function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, render 
         return { registrationResult: await finish(email, usernameNormalized, registrationSessionId, input, finalFaceImage) };
       },
     };
-    return { uid, service: createEmailOtpService({ auth: pending, db, sendEmailOtp, hashSecret, now, allowConsumedRetry: true }) };
+    return { uid, service: createEmailOtpService({ auth: pending, db, sendEmailOtp, hashSecret, now, allowConsumedRetry: true, onStage: otpStage }) };
   }
   async function reserveUsername(email, usernameNormalized) {
     const registryRef = db.collection('usernames').doc(usernameNormalized);
@@ -431,9 +431,11 @@ function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, render 
     });
   }
   async function request(email, username, registrationSessionId, ip) {
+    otpStage('OTP_REQUEST_STARTED');
     email = normalizeEmail(email);
     const usernameNormalized = normalizeUsername(username);
     await verifiedSession(registrationSessionId);
+    otpStage('OTP_SESSION_VALIDATED');
     const retryingPendingEnrollment = await checkExistingAccount(await findUser(email), registrationSessionId);
     await limitIp(ip);
     if (!retryingPendingEnrollment) await reserveUsername(email, usernameNormalized);
