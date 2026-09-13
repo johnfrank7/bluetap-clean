@@ -138,15 +138,15 @@ test('capture waits for detector pass, cancels on back, and never passes via ela
 test('Render face client reports safe upstream failure stages without exposing credentials', async () => {
   const env = { DEEPFACE_API_URL: 'https://face.example.test', DEEPFACE_API_KEY: 'server-secret' };
   const cases = [
-    [401, 502, 'face-service-auth'],
-    [403, 502, 'face-service-auth'],
-    [404, 502, 'face-route-unavailable'],
-    [422, 400, 'invalid-face-image'],
-    [500, 502, 'face-upstream-error'],
-    [503, 503, 'face-service-preparing'],
+    [401, 502, 'FACE_SERVICE_AUTH_FAILED'],
+    [403, 502, 'FACE_SERVICE_AUTH_FAILED'],
+    [404, 502, 'FACE_SERVICE_ROUTE_MISMATCH'],
+    [422, 400, 'INVALID_FACE_IMAGE'],
+    [500, 503, 'FACE_SERVICE_UNAVAILABLE'],
+    [503, 503, 'FACE_SERVICE_UNAVAILABLE'],
   ];
   for (const [upstreamStatus, status, reason] of cases) {
-    const request = createRenderFaceClient({ env, fetchImpl: async () => ({ ok: false, status: upstreamStatus }) });
+    const request = createRenderFaceClient({ env, fetchImpl: async () => ({ ok: false, status: upstreamStatus }), readyRetryDelayMs: 0 });
     await assert.rejects(request('/verify-face', new FormData()), (error) => {
       assert.equal(error.status, status);
       assert.equal(error.reason, reason);
@@ -157,9 +157,73 @@ test('Render face client reports safe upstream failure stages without exposing c
   }
   const request = createRenderFaceClient({ env, fetchImpl: async () => { throw new Error('private network detail'); } });
   await assert.rejects(request('/check-duplicate', new FormData()), (error) => {
-    assert.equal(error.reason, 'face-service-network');
+    assert.equal(error.reason, 'FACE_SERVICE_UNAVAILABLE');
     assert.deepEqual(error.details, { upstreamPath: '/check-duplicate' });
     assert.equal(JSON.stringify(error).includes('private network detail'), false);
     return true;
   });
+});
+
+test('ready check retries are bounded and cold start leaves the registration challenge retryable', async () => {
+  const logs = [];
+  let calls = 0;
+  const request = createRenderFaceClient({
+    env: { DEEPFACE_API_URL: 'https://face.example.test', DEEPFACE_API_KEY: 'server-secret' },
+    fetchImpl: async () => { calls++; return { ok: false, status: 503 }; },
+    logger: { info: (...args) => logs.push(args), error: (...args) => logs.push(args) },
+    readyAttempts: 2,
+    readyRetryDelayMs: 0,
+  });
+  await assert.rejects(request('/ready'), (error) => error.status === 503 && error.reason === 'FACE_SERVICE_PREPARING');
+  assert.equal(calls, 2);
+  const serialized = JSON.stringify(logs);
+  assert.ok(serialized.includes('FACE_UPSTREAM_READY_CHECK'));
+  assert.ok(serialized.includes('FACE_UPSTREAM_STATUS'));
+  assert.ok(serialized.includes('FACE_UPSTREAM_FAILED'));
+  assert.equal(serialized.includes('server-secret'), false);
+
+  const f = fixture({ productionDetector: true, '/ready': Object.assign(new Error('warming'), { reason: 'FACE_SERVICE_PREPARING' }) });
+  await f.begin();
+  await assert.rejects(f.webComplete(), (error) => error.reason === 'FACE_SERVICE_PREPARING');
+  assert.equal(f.data().faceChallenge.state, 'issued');
+  assert.equal(f.data().faceVerification.status, 'unverified');
+});
+
+test('ready check can recover from one cold-start response and uses the trusted bearer contract', async () => {
+  const calls = [];
+  const request = createRenderFaceClient({
+    env: { DEEPFACE_API_URL: 'https://face.example.test', DEEPFACE_API_KEY: 'server-secret' },
+    fetchImpl: async (url, options) => {
+      calls.push({ url, options });
+      if (calls.length === 1) return { ok: false, status: 503 };
+      return { ok: true, status: 200, json: async () => ({ status: 'ready', modelLoaded: true }) };
+    },
+    logger: { info: () => {}, error: () => {} },
+    readyAttempts: 2,
+    readyRetryDelayMs: 0,
+  });
+  assert.deepEqual(await request('/ready'), { status: 'ready', modelLoaded: true });
+  assert.deepEqual(calls.map(({ url }) => url), [
+    'https://face.example.test/ready',
+    'https://face.example.test/ready',
+  ]);
+  assert.ok(calls.every(({ options }) => options.method === 'GET'));
+  assert.ok(calls.every(({ options }) => options.headers.Authorization === 'Bearer server-secret'));
+});
+
+test('face upstream timeout is safe and bounded', async () => {
+  const logs = [];
+  const request = createRenderFaceClient({
+    env: { DEEPFACE_API_URL: 'https://face.example.test', DEEPFACE_API_KEY: 'server-secret' },
+    fetchImpl: (url, options) => new Promise((resolve, reject) => {
+      options.signal.addEventListener('abort', () => reject(Object.assign(new Error('private timeout'), { name: 'AbortError' })), { once: true });
+    }),
+    logger: { info: (...args) => logs.push(args), error: (...args) => logs.push(args) },
+    readyAttempts: 1,
+    readyAttemptTimeoutMs: 5,
+    readyRetryDelayMs: 0,
+  });
+  await assert.rejects(request('/ready'), (error) => error.status === 504 && error.reason === 'FACE_SERVICE_TIMEOUT');
+  assert.ok(JSON.stringify(logs).includes('FACE_UPSTREAM_TIMEOUT'));
+  assert.equal(JSON.stringify(logs).includes('private timeout'), false);
 });

@@ -12,7 +12,7 @@ const ms = (v) => Number(v?.toMillis?.() || v || 0);
 const hash = (v) => createHash('sha256').update(v).digest('hex');
 const invalid = () => new OtpError(409, 'face-challenge-expired', 'Please start a new face challenge.');
 const unavailable = () => new OtpError(503, 'liveness-unavailable', 'The face challenge check is not available yet. Please try again later.');
-const contractError = () => new OtpError(502, 'invalid-face-response', 'Face verification could not confirm the result. Please contact support.');
+const contractError = () => new OtpError(502, 'INVALID_FACE_RESPONSE', 'Face verification could not confirm the result. Please contact support.');
 const publicFace = (face) => ({ status: face.status, duplicateCheck: face.duplicateCheck, livenessPassed: face.livenessPassed === true });
 
 function createRegistrationFaceService({ db, detector = defaultDetector, render = createRenderFaceClient(), now = Date.now, timestamp = () => FieldValue.serverTimestamp() }) {
@@ -85,7 +85,7 @@ function createRegistrationFaceService({ db, detector = defaultDetector, render 
     const lock = db.collection('faceServiceLocks').doc('enrollment');
     try {
       const ready = await render('/ready', undefined, signal);
-      if (ready?.modelLoaded === false || ready?.ready === false || !(ready?.status === 'ready' || ready?.ready === true)) throw new OtpError(503, 'face-service-preparing', 'Face verification service is preparing. Please try again in a moment.');
+      if (ready?.modelLoaded === false || ready?.ready === false || !(ready?.status === 'ready' || ready?.ready === true)) throw new OtpError(503, 'FACE_SERVICE_PREPARING', 'Face verification service is starting. Please try again in a moment.');
       const pair = new FormData(); pair.append('image1', reference, 'challenge.jpg'); pair.append('image2', probe, 'final.jpg');
       const match = await render('/verify-face', pair, signal);
       if (typeof match?.verified !== 'boolean') throw contractError();
@@ -129,8 +129,16 @@ function createRegistrationFaceService({ db, detector = defaultDetector, render 
       await update(id, (current, save) => { check(current, challengeId, 'processing'); save({ faceVerification: face, faceEnrollmentPending: false, faceChallenge: { ...current.faceChallenge, state: 'used' } }); });
       return { faceVerification: publicFace(face) };
     } catch (error) {
+      const retryable = ['FACE_SERVICE_PREPARING', 'FACE_SERVICE_UNAVAILABLE', 'FACE_SERVICE_TIMEOUT'].includes(error?.reason);
       await update(id, (current, save) => {
-        if (current.faceChallenge?.id === challengeId) save({ faceChallenge: { ...current.faceChallenge, state: 'failed' }, faceVerification: { status: 'unverified', verifiedAt: null, duplicateCheck: 'unknown', livenessPassed: null }, faceEnrollmentPending: false });
+        if (current.faceChallenge?.id === challengeId) save({
+          faceChallenge: { ...current.faceChallenge, state: retryable ? expectedChallengeState : 'failed' },
+          faceVerification: {
+            status: 'unverified', verifiedAt: null, duplicateCheck: 'unknown',
+            livenessPassed: retryable && !webCapture ? true : null,
+          },
+          faceEnrollmentPending: false,
+        });
       });
       throw error;
     } finally {

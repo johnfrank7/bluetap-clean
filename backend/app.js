@@ -1,6 +1,7 @@
 const http = require('node:http');
 
 const { routes } = require('./routes');
+const { faceUpstreamConfigStatus } = require('./verification/renderFaceClient');
 
 const MAX_REQUEST_BYTES = 5 * 1024 * 1024;
 
@@ -85,6 +86,10 @@ if (require.main === module) {
   const server = createAppServer();
   server.listen(port, '0.0.0.0', () => {
     console.log(`BlueTap backend listening on port ${port}`);
+    console.log('[face-upstream]', JSON.stringify({
+      stage: 'FACE_UPSTREAM_CONFIGURATION',
+      ...faceUpstreamConfigStatus(),
+    }));
   });
 }
 

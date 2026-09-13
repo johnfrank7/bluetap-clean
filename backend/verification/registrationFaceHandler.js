@@ -10,7 +10,7 @@ function createRegistrationFaceHandler(getService = () => createRegistrationFace
     if (req.method === 'OPTIONS') return res.status(204).end();
     if (req.method !== 'POST') return res.status(405).json({ error: { reason: 'method-not-allowed', message: 'Use POST.' } });
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 40000);
+    const timer = setTimeout(() => controller.abort(), 50000);
     try {
       if (!String(req.headers['content-type'] || '').startsWith('application/json')) throw new OtpError(415, 'invalid-request', 'Use application/json.');
       let body = req.body;
