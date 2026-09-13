@@ -298,6 +298,13 @@ export default function SignupPage() {
             <View style={[styles.card, step === 3 && styles.identityCard, step === 3 && mobile && styles.identityCardMobile]}>
               <RegistrationStepper
                 currentStep={step}
+                requiredSteps={[
+                  1,
+                  2,
+                  ...(securityPolicy.faceVerificationRequired ? [3] : []),
+                  4,
+                  ...(securityPolicy.emailOtpRequired ? [5] : []),
+                ]}
                 completedSteps={[
                   accountComplete && 1,
                   personalComplete && !!registrationSessionId && 2,

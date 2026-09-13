@@ -402,7 +402,11 @@ export default function EmailVerificationPage() {
           <RegistrationBrand />
 
           <View style={[styles.card, { maxWidth: width >= 768 ? 600 : 520 }]}>
-            {registration && !loading && <RegistrationStepper currentStep={5} completedSteps={[1, 2, 3, 4]} />}
+            {registration && !loading && <RegistrationStepper
+              currentStep={5}
+              completedSteps={[1, 2, 3, 4]}
+              requiredSteps={[1, 2, ...(draft?.profile?.securityPolicy?.faceVerificationRequired === false ? [] : [3]), 4, 5]}
+            />}
             {loading ? (
               <View style={styles.loadingState}>
                 <ActivityIndicator size="large" color="#187BCD" />
