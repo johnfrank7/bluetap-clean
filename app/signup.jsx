@@ -359,6 +359,7 @@ export default function SignupPage() {
 
               <RegistrationActions
                 stacked={mobile}
+                showBack={step !== 1}
                 onBack={back}
                 onPrimary={advanceOrGuide}
                 loading={loading}

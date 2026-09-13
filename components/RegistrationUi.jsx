@@ -21,14 +21,15 @@ export function RegistrationHeading({ title, subtitle }) {
 
 export function RegistrationStepper({ currentStep, completedSteps = [], onStepPress, disabled = false }) {
   return <View style={styles.stepper} accessibilityRole="progressbar" accessibilityValue={{ min: 1, max: 5, now: currentStep }}>
+    <View pointerEvents="none" style={styles.connectorTrack}>
+      {[1, 2, 3, 4].map((number) => <View key={number} style={[styles.connectorSegment, completedSteps.includes(number) && styles.connectorComplete]} />)}
+    </View>
     {REGISTRATION_STEPS.map((label, index) => {
       const number = index + 1;
       const complete = completedSteps.includes(number);
       const current = number === currentStep;
-      const warning = number < currentStep && !complete;
       const clickable = typeof onStepPress === 'function' && !disabled && !current;
       return <View key={label} style={styles.stepItem}>
-        {index > 0 && <View style={[styles.connector, completedSteps.includes(number - 1) && styles.connectorComplete]} />}
         <TouchableOpacity
           style={styles.stepButton}
           disabled={!clickable}
@@ -42,13 +43,12 @@ export function RegistrationStepper({ currentStep, completedSteps = [], onStepPr
             styles.stepCircle,
             complete && styles.stepCircleComplete,
             current && styles.stepCircleCurrent,
-            warning && styles.stepCircleWarning,
           ]}>
-            <Text style={[styles.stepNumber, (complete || current) && styles.stepNumberActive, warning && styles.stepNumberWarning]}>
-              {current ? number : complete ? '✓' : warning ? '!' : number}
+            <Text style={[styles.stepNumber, (complete || current) && styles.stepNumberActive]}>
+              {current ? number : complete ? '✓' : number}
             </Text>
           </View>
-          <Text numberOfLines={1} style={[styles.stepLabel, current && styles.stepLabelCurrent, warning && styles.stepLabelWarning]}>{label}</Text>
+          <Text numberOfLines={1} style={[styles.stepLabel, complete && styles.stepLabelComplete, current && styles.stepLabelCurrent]}>{label}</Text>
         </TouchableOpacity>
       </View>;
     })}
@@ -74,14 +74,15 @@ export function RegistrationActions({
   primaryLabel,
   onBack,
   onPrimary,
+  showBack = true,
   backDisabled = false,
   primaryDisabled = false,
   loading = false,
 }) {
   return <View style={[styles.actions, stacked && styles.actionsStacked]}>
-    <TouchableOpacity style={[styles.backButton, stacked && styles.stackedButton]} onPress={onBack} disabled={backDisabled || loading} accessibilityRole="button" accessibilityState={{ disabled: backDisabled || loading }}>
-      <Text style={styles.backText}>{backLabel}</Text>
-    </TouchableOpacity>
+    {showBack
+      ? <TouchableOpacity style={[styles.backButton, stacked && styles.stackedButton]} onPress={onBack} disabled={backDisabled || loading} accessibilityRole="button" accessibilityState={{ disabled: backDisabled || loading }}><Text style={styles.backText}>{backLabel}</Text></TouchableOpacity>
+      : !stacked && <View style={styles.backPlaceholder} />}
     <TouchableOpacity style={[styles.primaryButton, stacked && styles.stackedButton, primaryDisabled && styles.primaryDisabled]} onPress={onPrimary} disabled={primaryDisabled || loading} accessibilityRole="button" accessibilityState={{ disabled: primaryDisabled || loading, busy: loading }}>
       {loading ? <ActivityIndicator color="#FFF" /> : <Text style={[styles.primaryText, primaryDisabled && styles.primaryTextDisabled]}>{primaryLabel}</Text>}
     </TouchableOpacity>
@@ -96,21 +97,20 @@ const styles = StyleSheet.create({
   heading: { alignItems: 'center', marginBottom: 24 },
   headingTitle: { color: '#17324D', fontSize: 26, lineHeight: 33, fontWeight: '800', textAlign: 'center' },
   headingSubtitle: { color: '#607A90', fontSize: 14, lineHeight: 21, textAlign: 'center', marginTop: 7 },
-  stepper: { width: '100%', flexDirection: 'row', alignItems: 'flex-start', marginBottom: 24 },
-  stepItem: { flex: 1, alignItems: 'center', position: 'relative', minWidth: 0 },
-  connector: { position: 'absolute', height: 2, width: '100%', backgroundColor: '#D9E7F1', top: 14, left: '-50%', zIndex: 0 },
-  connectorComplete: { backgroundColor: '#65AEE7' },
+  stepper: { width: '100%', flexDirection: 'row', alignItems: 'flex-start', position: 'relative', marginBottom: 24 },
+  stepItem: { flex: 1, alignItems: 'center', minWidth: 0, zIndex: 2 },
+  connectorTrack: { position: 'absolute', height: 4, flexDirection: 'row', top: 13, left: '10%', right: '10%', zIndex: 0 },
+  connectorSegment: { flex: 1, height: 4, backgroundColor: '#D9E2E9' },
+  connectorComplete: { backgroundColor: '#1F9D61' },
   stepButton: { width: '100%', minHeight: 50, alignItems: 'center', position: 'relative', zIndex: 2 },
   stepCircle: { width: 30, height: 30, borderRadius: 15, backgroundColor: '#E8F1F8', borderWidth: 1, borderColor: '#D5E4EF', alignItems: 'center', justifyContent: 'center', position: 'relative', zIndex: 3 },
-  stepCircleComplete: { backgroundColor: '#E4F5EC', borderColor: '#87C9A4' },
+  stepCircleComplete: { backgroundColor: '#1F9D61', borderColor: '#16824E' },
   stepCircleCurrent: { backgroundColor: BLUETAP_COLORS.primary, borderColor: BLUETAP_COLORS.primary },
-  stepCircleWarning: { backgroundColor: '#FFF7E6', borderColor: '#E7B85B' },
   stepNumber: { color: '#68839A', fontSize: 12, fontWeight: '800' },
   stepNumberActive: { color: BLUETAP_COLORS.white },
-  stepNumberWarning: { color: '#9A6416' },
   stepLabel: { maxWidth: '100%', paddingHorizontal: 2, color: '#7890A3', fontSize: 10, marginTop: 6, textAlign: 'center' },
   stepLabelCurrent: { color: BLUETAP_COLORS.primary, fontWeight: '800' },
-  stepLabelWarning: { color: '#9A6416', fontWeight: '700' },
+  stepLabelComplete: { color: '#16824E', fontWeight: '800' },
   notice: { width: '100%', borderWidth: 1, borderColor: '#BBD8EE', backgroundColor: '#EFF7FD', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, marginBottom: 18 },
   noticeWarning: { borderColor: '#E8C77F', backgroundColor: '#FFF8E8' },
   noticeError: { borderColor: '#E7A6A1', backgroundColor: '#FFF1F0' },
@@ -123,6 +123,7 @@ const styles = StyleSheet.create({
   actions: { width: '100%', flexDirection: 'row', gap: 12, marginTop: 18 },
   actionsStacked: { flexDirection: 'column-reverse', gap: 10 },
   backButton: { minHeight: 50, minWidth: 92, paddingHorizontal: 20, borderWidth: 1, borderColor: BLUETAP_COLORS.primary, borderRadius: 11, alignItems: 'center', justifyContent: 'center', backgroundColor: BLUETAP_COLORS.primarySoft },
+  backPlaceholder: { minWidth: 92 },
   primaryButton: { flex: 1, minHeight: 50, paddingHorizontal: 18, borderRadius: 11, backgroundColor: BLUETAP_COLORS.primary, alignItems: 'center', justifyContent: 'center' },
   stackedButton: { width: '100%', flex: 0 },
   primaryDisabled: { backgroundColor: BLUETAP_COLORS.primary, opacity: 0.48 },
