@@ -18,9 +18,11 @@ services:
         sync: false
       - key: FIREBASE_WEB_API_KEY
         sync: false
-      - key: GMAIL_USER
+      - key: EMAIL_PROVIDER
+        value: resend
+      - key: RESEND_API_KEY
         sync: false
-      - key: GMAIL_APP_PASSWORD
+      - key: EMAIL_FROM_ADDRESS
         sync: false
       - key: EMAIL_OTP_HASH_SECRET
         sync: false

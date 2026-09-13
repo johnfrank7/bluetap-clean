@@ -2,10 +2,6 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "routes": [
-    {
-      "src": "/api/admin/registration-security",
-      "dest": "/api/auth/registration-session-status?bluetapHandler=admin-registration-security"
-    },
     { "handle": "filesystem" },
     { "src": "/api/(.*)", "status": 404 },
     { "src": "/(.*)", "dest": "/index.html" }

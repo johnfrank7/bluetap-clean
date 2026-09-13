@@ -187,74 +187,108 @@ test('Render OTP handlers reject unauthenticated requests and handle preflight',
   }
 });
 
-test('Gmail SMTP transport uses server credentials and sanitizes failures', async (t) => {
-  const nodemailer = require('nodemailer');
-  const originalUser = process.env.GMAIL_USER;
-  const originalPassword = process.env.GMAIL_APP_PASSWORD;
+test('Resend HTTPS provider sends BlueTap OTP content without SMTP', async () => {
+  const { createEmailProvider, RESEND_EMAILS_ENDPOINT } = require('../../email/emailProvider');
+  const calls = [];
   const logs = [];
-  const infoLogs = [];
-  t.mock.method(console, 'error', (...args) => logs.push(args));
-  t.mock.method(console, 'info', (...args) => infoLogs.push(args));
-  let options;
-  let mail;
-  let failure;
-  let accepted = true;
-  const transport = t.mock.method(nodemailer, 'createTransport', (config) => {
-    options = config;
-    return { sendMail: async (message) => {
-      mail = message;
-      if (failure) throw failure;
-      return { accepted: accepted ? [message.to] : [], rejected: accepted ? [] : [message.to] };
-    } };
+  const provider = createEmailProvider({
+    env: {
+      EMAIL_PROVIDER: 'resend',
+      RESEND_API_KEY: 'test-api-key',
+      EMAIL_FROM_ADDRESS: 'BlueTap <verify@example.test>',
+      GMAIL_USER: 'must-not-be-used@example.test',
+      GMAIL_APP_PASSWORD: 'must-not-be-used',
+    },
+    fetchImpl: async (...args) => {
+      calls.push(args);
+      return { ok: true, status: 200 };
+    },
+    logger: {
+      info: (...args) => logs.push(args),
+      error: (...args) => logs.push(args),
+    },
   });
-  try {
-    process.env.GMAIL_USER = 'sender@example.test';
-    process.env.GMAIL_APP_PASSWORD = 'test-password-only';
-    const { sendEmailOtp } = require('../../email/emailProvider');
-    const message = { recipient: 'recipient@example.test', code: '123456' };
-    await sendEmailOtp(message);
-    assert.equal(options.host, 'smtp.gmail.com');
-    assert.equal(options.port, 465);
-    assert.equal(options.secure, true);
-    assert.deepEqual(options.auth, { user: process.env.GMAIL_USER, pass: process.env.GMAIL_APP_PASSWORD });
-    assert.equal(options.logger, false);
-    assert.equal(options.debug, false);
-    assert.equal(mail.from, 'BlueTap <sender@example.test>');
-    assert.equal(mail.to, message.recipient);
-    assert.ok(mail.text.includes(message.code));
-    assert.ok(mail.text.includes('10 minutes'));
-    assert.equal(logs.length, 0);
-    const safeError = (reason) => (error) => {
-      assert.equal(error.status, 503);
-      assert.equal(error.reason, reason);
-      return true;
-    };
-    for (const [code, reason] of [['EAUTH', 'EMAIL_TRANSPORT_AUTH_FAILED'], ['ETIMEDOUT', 'EMAIL_SEND_FAILED'], ['secret-raw-error', 'EMAIL_SEND_FAILED']]) {
-      failure = Object.assign(new Error('test-password-only recipient@example.test 123456'), { code, responseCode: 535 });
-      if (code !== 'EAUTH') failure.responseCode = undefined;
-      await assert.rejects(sendEmailOtp(message), safeError(reason));
-    }
-    failure = null;
-    accepted = false;
-    await assert.rejects(sendEmailOtp(message), safeError('EMAIL_SEND_FAILED'));
-    delete process.env.GMAIL_APP_PASSWORD;
-    const calls = transport.mock.callCount();
-    await assert.rejects(sendEmailOtp(message), safeError('EMAIL_TRANSPORT_NOT_CONFIGURED'));
-    assert.equal(transport.mock.callCount(), calls);
-    const serialized = JSON.stringify([logs, infoLogs]);
-    for (const sensitive of ['test-password-only', message.recipient, message.code, 'secret-raw-error']) {
+  const message = { recipient: 'recipient@example.test', code: '123456', requestId: 'request-id' };
+  await provider.sendEmailOtp(message);
+
+  assert.equal(calls.length, 1);
+  const [url, options] = calls[0];
+  assert.equal(url, RESEND_EMAILS_ENDPOINT);
+  assert.equal(options.method, 'POST');
+  assert.equal(options.headers.Authorization, 'Bearer test-api-key');
+  assert.equal(options.headers['User-Agent'], 'BlueTap-Backend/1.0');
+  assert.equal(options.headers['Idempotency-Key'], 'bluetap-otp/request-id');
+  const body = JSON.parse(options.body);
+  assert.equal(body.from, 'BlueTap <verify@example.test>');
+  assert.deepEqual(body.to, [message.recipient]);
+  assert.ok(body.text.includes(message.code));
+  assert.ok(body.text.includes('10 minutes'));
+  assert.ok(body.text.includes('Do not share'));
+  assert.ok(body.html.includes(message.code));
+  assert.equal(JSON.stringify(calls).includes('smtp.gmail.com'), false);
+  assert.equal(JSON.stringify(calls).includes('must-not-be-used'), false);
+  assert.ok(JSON.stringify(logs).includes('EMAIL_TRANSPORT_READY'));
+  assert.ok(JSON.stringify(logs).includes('EMAIL_SEND_SUCCEEDED'));
+});
+
+test('Resend HTTPS provider maps configuration and provider failures safely', async () => {
+  const { createEmailProvider } = require('../../email/emailProvider');
+  const message = { recipient: 'recipient@example.test', code: '123456' };
+  const safeError = (reason) => (error) => {
+    assert.equal(error.status, 503);
+    assert.equal(error.reason, reason);
+    return true;
+  };
+  const response = (status, name, retryAfter) => ({
+    ok: false,
+    status,
+    headers: { get: (key) => key === 'retry-after' ? retryAfter : null },
+    json: async () => ({ name, message: 'secret provider detail recipient@example.test 123456' }),
+  });
+
+  for (const env of [
+    { EMAIL_FROM_ADDRESS: 'BlueTap <verify@example.test>' },
+    { RESEND_API_KEY: 'test-api-key' },
+    { EMAIL_PROVIDER: 'smtp', RESEND_API_KEY: 'test-api-key', EMAIL_FROM_ADDRESS: 'BlueTap <verify@example.test>' },
+  ]) {
+    let called = false;
+    const provider = createEmailProvider({
+      env,
+      fetchImpl: async () => { called = true; },
+      logger: { info() {}, error() {} },
+    });
+    await assert.rejects(provider.sendEmailOtp(message), safeError('EMAIL_TRANSPORT_NOT_CONFIGURED'));
+    assert.equal(called, false);
+  }
+
+  const cases = [
+    [response(403, 'invalid_api_key'), 'EMAIL_TRANSPORT_AUTH_FAILED'],
+    [response(403, 'validation_error'), 'EMAIL_SENDER_NOT_VERIFIED'],
+    [response(422, 'invalid_from_address'), 'EMAIL_SENDER_NOT_VERIFIED'],
+    [response(429, 'rate_limit_exceeded', '12'), 'EMAIL_SEND_RATE_LIMITED'],
+    [response(500, 'internal_server_error'), 'EMAIL_SEND_FAILED'],
+  ];
+  for (const [providerResponse, reason] of cases) {
+    const logs = [];
+    const provider = createEmailProvider({
+      env: { RESEND_API_KEY: 'test-api-key', EMAIL_FROM_ADDRESS: 'BlueTap <verify@example.test>' },
+      fetchImpl: async () => providerResponse,
+      logger: { info: (...args) => logs.push(args), error: (...args) => logs.push(args) },
+    });
+    await assert.rejects(provider.sendEmailOtp(message), safeError(reason));
+    const serialized = JSON.stringify(logs);
+    assert.ok(serialized.includes(reason));
+    for (const sensitive of ['test-api-key', message.recipient, message.code, 'secret provider detail']) {
       assert.equal(serialized.includes(sensitive), false);
     }
-    assert.ok(serialized.includes('EMAIL_TRANSPORT_AUTH_FAILED'));
-    assert.ok(serialized.includes('EMAIL_SEND_FAILED'));
-    assert.ok(serialized.includes('EMAIL_TRANSPORT_NOT_CONFIGURED'));
-    assert.ok(serialized.includes('EMAIL_TRANSPORT_READY'));
-  } finally {
-    if (originalUser === undefined) delete process.env.GMAIL_USER;
-    else process.env.GMAIL_USER = originalUser;
-    if (originalPassword === undefined) delete process.env.GMAIL_APP_PASSWORD;
-    else process.env.GMAIL_APP_PASSWORD = originalPassword;
   }
+
+  const networkProvider = createEmailProvider({
+    env: { RESEND_API_KEY: 'test-api-key', EMAIL_FROM_ADDRESS: 'BlueTap <verify@example.test>' },
+    fetchImpl: async () => { throw new Error('secret network error'); },
+    logger: { info() {}, error() {} },
+  });
+  await assert.rejects(networkProvider.sendEmailOtp(message), safeError('EMAIL_SEND_FAILED'));
 });
 
 test('handler rejects invalid tokens before touching account or Firestore', async () => {

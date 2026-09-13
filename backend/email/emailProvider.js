@@ -1,69 +1,133 @@
-// Server-only: imported by HTTP OTP handlers, never by Expo screens.
-const nodemailer = require('nodemailer');
+// Server-only provider boundary. Imported by backend HTTP handlers only.
 const { OtpError } = require('../utils/otpError');
 
-const logStage = (stage, details = {}) => console.info('[email-otp]', JSON.stringify({ stage, ...details }));
+const RESEND_EMAILS_ENDPOINT = 'https://api.resend.com/emails';
+const USER_AGENT = 'BlueTap-Backend/1.0';
 
-async function sendEmailOtp({ recipient, code }) {
+const providerError = (reason, message, details = {}) =>
+  new OtpError(503, reason, message, details);
+
+const notConfigured = () => providerError(
+  'EMAIL_TRANSPORT_NOT_CONFIGURED',
+  'Email delivery is not configured. Please contact support.',
+);
+
+const safeRetryAfter = (response) => {
+  const value = Number.parseInt(response?.headers?.get?.('retry-after') || '', 10);
+  return Number.isInteger(value) && value > 0 && value <= 3600
+    ? { retryAfterSeconds: value }
+    : {};
+};
+
+const readSafeProviderType = async (response) => {
   try {
-    if (!process.env.GMAIL_USER || !process.env.GMAIL_APP_PASSWORD) {
-      throw new OtpError(503, 'EMAIL_TRANSPORT_NOT_CONFIGURED', 'Email delivery is not configured. Please contact support.');
-    }
-    const gmailUser = process.env.GMAIL_USER.trim();
-    // Google displays App Passwords in groups. Ignore copied whitespace
-    // without changing any other credential characters.
-    const gmailAppPassword = process.env.GMAIL_APP_PASSWORD.replace(/\s/g, '');
-    if (!gmailUser || !gmailAppPassword) {
-      throw new OtpError(503, 'EMAIL_TRANSPORT_NOT_CONFIGURED', 'Email delivery is not configured. Please contact support.');
-    }
-    const transport = nodemailer.createTransport({
-      host: 'smtp.gmail.com',
-      port: 465,
-      secure: true,
-      auth: {
-        user: gmailUser,
-        pass: gmailAppPassword,
-      },
-      connectionTimeout: 10000,
-      greetingTimeout: 10000,
-      socketTimeout: 15000,
-      logger: false,
-      debug: false,
-      disableFileAccess: true,
-      disableUrlAccess: true,
-    });
-    logStage('EMAIL_TRANSPORT_READY');
-    const result = await transport.sendMail({
-      from: `BlueTap <${gmailUser}>`,
-      to: recipient,
-      subject: 'BlueTap Email Verification Code',
-      text: `BlueTap\nWater Within Reach\n\nVerify your email\n\nYour BlueTap verification code is:\n\n${code}\n\nThis code expires in 10 minutes.\n\nIf you did not request this code, you can safely ignore this email.`,
-    });
-    if (!result?.accepted?.length || result.rejected?.length) {
-      throw Object.assign(new Error(), { code: 'RECIPIENT_REJECTED' });
-    }
-    logStage('EMAIL_SEND_SUCCEEDED');
-  } catch (error) {
-    const responseCode = Number.isInteger(error?.responseCode) && error.responseCode >= 400 && error.responseCode <= 599
-      ? error.responseCode : undefined;
-    const authenticationFailure = error?.code === 'EAUTH' || [534, 535].includes(responseCode);
-    const reason = error instanceof OtpError
-      ? error.reason
-      : authenticationFailure
-        ? 'EMAIL_TRANSPORT_AUTH_FAILED'
-        : 'EMAIL_SEND_FAILED';
-    // SMTP messages can contain addresses or credentials. Emit only the safe
-    // failure category and numeric SMTP status.
-    console.error('[email-otp]', JSON.stringify({
-      stage: 'EMAIL_SEND_FAILED',
-      reason,
-      ...(responseCode ? { responseCode } : {}),
-    }));
-    if (error instanceof OtpError) throw error;
-    if (authenticationFailure) {
-      throw new OtpError(503, reason, 'Email delivery authentication failed. Please contact support.');
-    }
-    throw new OtpError(503, reason, 'Unable to send verification email. Please try again.');
+    const body = await response.json();
+    const value = body?.name || body?.type;
+    return typeof value === 'string' && /^[a-z0-9_-]{1,64}$/i.test(value) ? value : '';
+  } catch {
+    return '';
   }
+};
+
+const mapResendFailure = async (response) => {
+  const status = Number(response?.status) || 0;
+  const type = await readSafeProviderType(response);
+  const authenticationTypes = new Set(['missing_api_key', 'invalid_api_key', 'restricted_api_key']);
+  const senderTypes = new Set(['invalid_from_address']);
+
+  if (status === 401 || authenticationTypes.has(type) || (status === 403 && type === 'invalid_api_key')) {
+    return providerError(
+      'EMAIL_TRANSPORT_AUTH_FAILED',
+      'Email delivery authentication failed. Please contact support.',
+    );
+  }
+  if (senderTypes.has(type) || (status === 403 && type === 'validation_error')) {
+    return providerError(
+      'EMAIL_SENDER_NOT_VERIFIED',
+      'The verification email sender is not configured correctly. Please contact support.',
+    );
+  }
+  if (status === 429 || ['rate_limit_exceeded', 'daily_quota_exceeded', 'monthly_quota_exceeded'].includes(type)) {
+    return providerError(
+      'EMAIL_SEND_RATE_LIMITED',
+      'Verification email delivery is busy. Please try again shortly.',
+      safeRetryAfter(response),
+    );
+  }
+  return providerError(
+    'EMAIL_SEND_FAILED',
+    'Unable to send verification email. Please try again.',
+  );
+};
+
+function createEmailProvider({ env = process.env, fetchImpl = globalThis.fetch, logger = console } = {}) {
+  async function sendEmail({ to, subject, text, html, requestId }) {
+    const provider = String(env.EMAIL_PROVIDER || 'resend').trim().toLowerCase();
+    const apiKey = String(env.RESEND_API_KEY || '').trim();
+    const fromAddress = String(env.EMAIL_FROM_ADDRESS || '').trim();
+
+    // SMTP is deliberately not an implicit or production fallback. An omitted
+    // provider securely selects the configured HTTPS provider.
+    if (provider !== 'resend' || !apiKey || !fromAddress || typeof fetchImpl !== 'function') {
+      const error = notConfigured();
+      logger.error('[email-otp]', JSON.stringify({ stage: 'EMAIL_SEND_FAILED', reason: error.reason }));
+      throw error;
+    }
+
+    logger.info('[email-otp]', JSON.stringify({ stage: 'EMAIL_TRANSPORT_READY', provider: 'resend' }));
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15_000);
+    let response;
+    try {
+      response = await fetchImpl(RESEND_EMAILS_ENDPOINT, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+          'User-Agent': USER_AGENT,
+          ...(requestId ? { 'Idempotency-Key': `bluetap-otp/${requestId}` } : {}),
+        },
+        body: JSON.stringify({ from: fromAddress, to: [to], subject, text, html }),
+        signal: controller.signal,
+      });
+    } catch {
+      const error = providerError(
+        'EMAIL_SEND_FAILED',
+        'Unable to send verification email. Please try again.',
+      );
+      logger.error('[email-otp]', JSON.stringify({ stage: 'EMAIL_SEND_FAILED', reason: error.reason }));
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+    }
+
+    if (!response.ok) {
+      const error = await mapResendFailure(response);
+      logger.error('[email-otp]', JSON.stringify({
+        stage: 'EMAIL_SEND_FAILED',
+        reason: error.reason,
+        providerStatus: Number(response.status) || 0,
+      }));
+      throw error;
+    }
+    logger.info('[email-otp]', JSON.stringify({ stage: 'EMAIL_SEND_SUCCEEDED', provider: 'resend' }));
+  }
+
+  async function sendEmailOtp({ recipient, code, requestId }) {
+    const subject = 'BlueTap Email Verification Code';
+    const text = `BlueTap\nWater Within Reach\n\nVerify your email\n\nYour BlueTap verification code is:\n\n${code}\n\nThis code expires in 10 minutes. Do not share this code with anyone.\n\nIf you did not request this code, you can safely ignore this email.`;
+    const html = `<!doctype html><html><body><h1>BlueTap</h1><p>Water Within Reach</p><h2>Verify your email</h2><p>Your BlueTap verification code is:</p><p style="font-size:28px;font-weight:700;letter-spacing:6px">${code}</p><p>This code expires in 10 minutes. Do not share this code with anyone.</p><p>If you did not request this code, you can safely ignore this email.</p></body></html>`;
+    return sendEmail({ to: recipient, subject, text, html, requestId });
+  }
+
+  return { sendEmail, sendEmailOtp };
 }
-module.exports = { sendEmailOtp };
+
+const defaultProvider = createEmailProvider();
+
+module.exports = {
+  RESEND_EMAILS_ENDPOINT,
+  createEmailProvider,
+  sendEmail: defaultProvider.sendEmail,
+  sendEmailOtp: defaultProvider.sendEmailOtp,
+};
