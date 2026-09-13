@@ -121,6 +121,25 @@ export default function SignupPage() {
     setStep(target);
   };
 
+  const advanceOrGuide = () => {
+    if (prerequisiteNotice) {
+      setStep(prerequisiteNotice.target);
+      setNotice({ ...prerequisiteNotice, tone: 'warning' });
+      return;
+    }
+    if (step === 5) {
+      setStep(4);
+      setNotice({
+        tone: 'warning',
+        title: 'Verification code required',
+        message: 'Complete Credentials and tap Next to receive your secure email verification code.',
+      });
+      return;
+    }
+    if (step === 4) submit();
+    else next();
+  };
+
   React.useEffect(() => {
     if (step !== 4) return undefined;
     const validation = validateUsername(form.username);
@@ -290,7 +309,6 @@ export default function SignupPage() {
               />
               {mobile && <Text style={styles.stepText}>Step {step} of 5 · {STEPS[step - 1]}</Text>}
               <RegistrationHeading title={step === 3 ? 'Verify your identity' : title} subtitle={step === 3 ? 'Complete a quick face check to help protect your account and prevent duplicate registrations.' : subtitle} />
-              {!!prerequisiteNotice && <RegistrationNotice tone="warning" {...prerequisiteNotice} onAction={() => openStep(prerequisiteNotice.target)} />}
 
               {step === 1 && <View style={styles.roleList}>
                 {[
@@ -342,20 +360,18 @@ export default function SignupPage() {
               <RegistrationActions
                 stacked={mobile}
                 onBack={back}
-                onPrimary={step === 4 ? submit : next}
+                onPrimary={advanceOrGuide}
                 loading={loading}
-                primaryDisabled={!canContinue || retrySeconds > 0}
+                primaryDisabled={retrySeconds > 0 || (!prerequisiteNotice && step !== 5 && !canContinue)}
                 primaryLabel={retrySeconds > 0
                   ? `Try again in ${Math.floor(retrySeconds / 60)}:${String(retrySeconds % 60).padStart(2, '0')}`
-                  : step === 5 ? 'Complete previous steps'
-                    : step === 4 ? (securityPolicy.emailOtpRequired ? 'Send Verification Code' : 'Complete Registration')
-                      : 'Continue'}
+                  : step === 5 ? 'Continue' : 'Next'}
               />
               <Text style={styles.loginPrompt}>Already have an account? <Text style={styles.loginLink} onPress={() => router.replace('/login')}>Log in.</Text></Text>
             </View>
           </Animated.View>
         </ScrollView>
-        <Modal visible={!!notice} transparent animationType="fade"><View style={styles.modalBg}><View style={styles.modal}><RegistrationNotice tone="error" title={notice?.title} message={notice?.message} /><TouchableOpacity style={styles.primary} onPress={() => setNotice(null)}><Text style={styles.primaryText}>OK</Text></TouchableOpacity></View></View></Modal>
+        <Modal visible={!!notice} transparent animationType="fade"><View style={styles.modalBg}><View style={styles.modal}><RegistrationNotice tone={notice?.tone || 'error'} title={notice?.title} message={notice?.message} /><TouchableOpacity style={styles.primary} onPress={() => setNotice(null)}><Text style={styles.primaryText}>OK</Text></TouchableOpacity></View></View></Modal>
       </SafeAreaView>
     </LinearGradient>
   );
