@@ -83,7 +83,14 @@ export function RegistrationActions({
     {showBack
       ? <TouchableOpacity style={[styles.backButton, stacked && styles.stackedButton]} onPress={onBack} disabled={backDisabled || loading} accessibilityRole="button" accessibilityState={{ disabled: backDisabled || loading }}><Text style={styles.backText}>{backLabel}</Text></TouchableOpacity>
       : !stacked && <View style={styles.backPlaceholder} />}
-    <TouchableOpacity style={[styles.primaryButton, stacked && styles.stackedButton, primaryDisabled && styles.primaryDisabled]} onPress={onPrimary} disabled={primaryDisabled || loading} accessibilityRole="button" accessibilityState={{ disabled: primaryDisabled || loading, busy: loading }}>
+    <TouchableOpacity
+      nativeID="registration-primary-action"
+      style={[styles.primaryButton, stacked && styles.stackedButton, (primaryDisabled || loading) && styles.primaryDisabled]}
+      onPress={onPrimary}
+      disabled={primaryDisabled || loading}
+      accessibilityRole="button"
+      accessibilityState={{ disabled: primaryDisabled || loading, busy: loading }}
+    >
       {loading ? <ActivityIndicator color="#FFF" /> : <Text style={[styles.primaryText, primaryDisabled && styles.primaryTextDisabled]}>{primaryLabel}</Text>}
     </TouchableOpacity>
   </View>;
@@ -124,9 +131,9 @@ const styles = StyleSheet.create({
   actionsStacked: { flexDirection: 'column-reverse', gap: 10 },
   backButton: { minHeight: 50, minWidth: 92, paddingHorizontal: 20, borderWidth: 1, borderColor: BLUETAP_COLORS.primary, borderRadius: 11, alignItems: 'center', justifyContent: 'center', backgroundColor: BLUETAP_COLORS.primarySoft },
   backPlaceholder: { minWidth: 92 },
-  primaryButton: { flex: 1, minHeight: 50, paddingHorizontal: 18, borderRadius: 11, backgroundColor: BLUETAP_COLORS.primary, alignItems: 'center', justifyContent: 'center' },
+  primaryButton: { flex: 1, minHeight: 50, paddingHorizontal: 18, borderWidth: 1, borderColor: BLUETAP_COLORS.primary, borderRadius: 11, backgroundColor: BLUETAP_COLORS.primary, alignItems: 'center', justifyContent: 'center' },
   stackedButton: { width: '100%', flex: 0 },
-  primaryDisabled: { backgroundColor: BLUETAP_COLORS.primary, opacity: 0.48 },
+  primaryDisabled: { backgroundColor: '#78B4E3', borderColor: '#78B4E3', opacity: 1 },
   backText: { color: BLUETAP_COLORS.primaryDeep, fontSize: 15, fontWeight: '700', textAlign: 'center' },
   primaryText: { color: '#FFF', fontSize: 15, fontWeight: '800', textAlign: 'center' },
   primaryTextDisabled: { color: BLUETAP_COLORS.white },

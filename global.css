@@ -14,3 +14,16 @@
   background: var(--bluetap-primary);
   color: #ffffff;
 }
+
+/* Keep the shared registration CTA visible after the web CSS reset. */
+button#registration-primary-action {
+  background-color: var(--bluetap-primary) !important;
+  border-color: var(--bluetap-primary) !important;
+  color: #ffffff !important;
+}
+
+button#registration-primary-action[aria-disabled='true'] {
+  background-color: #78b4e3 !important;
+  border-color: #78b4e3 !important;
+  opacity: 1 !important;
+}
