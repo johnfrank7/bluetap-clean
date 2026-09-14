@@ -36,10 +36,12 @@ test('required Admin password change returns to Admin authentication and never t
 test('privileged login refreshes its token before reading the Firestore profile', () => {
   const root = resolve(__dirname, '..', '..', '..');
   const login = readFileSync(resolve(root, 'components/PrivilegedLogin.jsx'), 'utf8');
-  const refreshIndex = login.indexOf('await user.getIdToken(true)');
+  const refreshIndex = login.indexOf('await user.getIdTokenResult(true)');
   const profileReadIndex = login.indexOf("await getDocFromServer(doc(db, 'users', user.uid))");
   assert.ok(refreshIndex >= 0);
   assert.ok(profileReadIndex > refreshIndex);
+  assert.match(login, /ADMIN_TOKEN_REFRESH_FAILED/);
+  assert.doesNotMatch(login, /await user\.getIdToken\(true\)[\s\S]*await user\.getIdTokenResult/);
   assert.doesNotMatch(login, /Promise\.all\(\[\s*credential\.user\.getIdTokenResult\(true\)/);
 });
 
@@ -50,4 +52,35 @@ test('privileged route guard refreshes and validates claims before profile acces
   const profileReadIndex = authSession.indexOf('profile = await fetchFirestoreUserProfile(currentUser)');
   assert.ok(refreshIndex >= 0);
   assert.ok(profileReadIndex > refreshIndex);
+});
+
+test('Admin routes use one canonical dashboard and never redirect into Manager analytics', () => {
+  const root = resolve(__dirname, '..', '..', '..');
+  const analytics = readFileSync(resolve(root, 'app/admin/analytics.jsx'), 'utf8');
+  const authSession = readFileSync(resolve(root, 'services/authSession.js'), 'utf8');
+  assert.match(analytics, /Redirect href="\/admin\/dashboard"/);
+  assert.doesNotMatch(analytics, /\/manager\/analytics/);
+  assert.match(authSession, /admin: '\/admin\/dashboard'/);
+});
+
+test('RoleGate validates from Firebase auth once and does not recursively validate its own session writes', () => {
+  const root = resolve(__dirname, '..', '..', '..');
+  const gate = readFileSync(resolve(root, 'components/RoleGate.jsx'), 'utf8');
+  assert.match(gate, /onAuthStateChanged\(auth/);
+  assert.doesNotMatch(gate, /subscribeAuthSessionChanges/);
+});
+
+test('privileged auth failures return to their own portal without a cross-role loop', () => {
+  const root = resolve(__dirname, '..', '..', '..');
+  const authSession = readFileSync(resolve(root, 'services/authSession.js'), 'utf8');
+  assert.match(authSession, /expected === 'admin' \? '\/admin\/login' : expected === 'manager' \? '\/manager\/login' : '\/login'/);
+  assert.match(authSession, /status: 'token-refresh-failed'/);
+});
+
+test('trusted Admin bootstrap revokes stale refresh tokens after updating claims', () => {
+  const root = resolve(__dirname, '..', '..', '..');
+  const bootstrap = readFileSync(resolve(root, 'scripts/bootstrap-admin.js'), 'utf8');
+  assert.match(bootstrap, /setCustomUserClaims/);
+  assert.match(bootstrap, /role: 'admin'/);
+  assert.match(bootstrap, /revokeRefreshTokens\(user\.uid\)/);
 });

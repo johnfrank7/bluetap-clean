@@ -7,7 +7,6 @@ import { auth } from '../firebase';
 import {
   clearAllAuthSessions,
   clearModuleSession,
-  subscribeAuthSessionChanges,
   validateRoleAccess,
 } from '../services/authSession';
 
@@ -75,22 +74,13 @@ export default function RoleGate({ role, allowedRoles, children }) {
   }, [allowedRolesKey, router]);
 
   useEffect(() => {
-    let hasAuthStateLoaded = false;
-
     const unsubscribeAuth = onAuthStateChanged(auth, () => {
-      hasAuthStateLoaded = true;
       setGateState({ status: 'checking', message: '' });
       validateAccess();
-    });
-    const unsubscribeSession = subscribeAuthSessionChanges(() => {
-      if (hasAuthStateLoaded) {
-        validateAccess();
-      }
     });
 
     return () => {
       unsubscribeAuth();
-      unsubscribeSession();
 
       if (redirectTimerRef.current) {
         clearTimeout(redirectTimerRef.current);

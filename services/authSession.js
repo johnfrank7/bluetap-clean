@@ -271,7 +271,7 @@ export const validateRoleAccess = async (expectedRole) => {
     return {
       status: 'unauthenticated',
       message: 'Unauthorized Access',
-      redirectTo: '/login',
+      redirectTo: expected === 'admin' ? '/admin/login' : expected === 'manager' ? '/manager/login' : '/login',
       clearRole: expected,
     };
   }
@@ -280,13 +280,27 @@ export const validateRoleAccess = async (expectedRole) => {
   // Firestore evaluates any profile or branch access. This is especially
   // important immediately after an Admin/Manager claim is bootstrapped.
   if (expected === 'admin' || expected === 'manager') {
+    let token;
     try {
-      const token = await currentUser.getIdTokenResult(true);
-      const trustedClaim = expected === 'admin'
-        ? token.claims?.admin === true || token.claims?.role === 'admin'
-        : token.claims?.manager === true || token.claims?.role === 'manager';
-      if (!trustedClaim) throw new Error('Privileged claim missing.');
-    } catch {
+      token = await currentUser.getIdTokenResult(true);
+    } catch (error) {
+      console.warn('[role-validation]', {
+        stage: 'TOKEN_REFRESH_FAILED',
+        expectedRole: expected,
+        code: String(error?.code || '').startsWith('auth/') ? error.code : 'auth/token-refresh-failed',
+      });
+      return {
+        status: 'token-refresh-failed',
+        message: 'Your secure sign-in session expired. Please sign in again.',
+        redirectTo: expected === 'admin' ? '/admin/login' : '/manager/login',
+        shouldSignOut: true,
+        clearRole: expected,
+      };
+    }
+    const trustedClaim = expected === 'admin'
+      ? token.claims?.admin === true || token.claims?.role === 'admin'
+      : token.claims?.manager === true || token.claims?.role === 'manager';
+    if (!trustedClaim) {
       return {
         status: 'unauthorized',
         message: expected === 'admin' ? 'Administrator access is required.' : 'Manager access is required.',

@@ -13,7 +13,7 @@ import { loginWithUsername } from '../services/usernameAuth';
 
 const { hasTrustedRole } = require('../services/privilegedAccess');
 
-const accessError = (code) => Object.assign(new Error(code), { code });
+const accessError = (code, details = {}) => Object.assign(new Error(code), { code, ...details });
 
 const safeAccessMessage = (admin, code) => {
   if (code === 'ADMIN_PROFILE_READ_DENIED' || code === 'ADMIN_PROFILE_MISSING') {
@@ -21,6 +21,9 @@ const safeAccessMessage = (admin, code) => {
   }
   if (code === 'MANAGER_PROFILE_READ_DENIED' || code === 'MANAGER_PROFILE_MISSING') {
     return 'Manager profile could not be verified. Please contact support.';
+  }
+  if (code === 'ADMIN_TOKEN_REFRESH_FAILED' || code === 'MANAGER_TOKEN_REFRESH_FAILED') {
+    return 'Your secure sign-in session could not be refreshed. Please sign in again.';
   }
   return admin ? 'Administrator access required.' : 'Manager access required.';
 };
@@ -44,8 +47,17 @@ export default function PrivilegedLogin({ role }) {
     // Install a fresh token before Firestore evaluates request.auth. Running
     // this concurrently with the profile read can make a newly bootstrapped
     // account appear unauthenticated or omit its new privileged claim.
-    await user.getIdToken(true);
-    const token = await user.getIdTokenResult();
+    let token;
+    try {
+      // getIdTokenResult(true) performs one forced refresh and returns the
+      // claims from that same token. Avoid back-to-back refresh requests.
+      token = await user.getIdTokenResult(true);
+    } catch (refreshError) {
+      const firebaseCode = String(refreshError?.code || 'auth/token-refresh-failed');
+      throw accessError(admin ? 'ADMIN_TOKEN_REFRESH_FAILED' : 'MANAGER_TOKEN_REFRESH_FAILED', {
+        firebaseCode: firebaseCode.startsWith('auth/') ? firebaseCode : 'auth/token-refresh-failed',
+      });
+    }
     const hasClaim = admin
       ? token.claims?.admin === true || token.claims?.role === 'admin'
       : token.claims?.manager === true || token.claims?.role === 'manager';
@@ -83,7 +95,11 @@ export default function PrivilegedLogin({ role }) {
     try { await signOut(auth); } catch { /* already signed out */ }
     const code = String(loginError?.code || '');
     if (/^(ADMIN|MANAGER)_/.test(code)) {
-      console.warn('[privileged-login]', { stage: 'ACCESS_VALIDATION_FAILED', code });
+      console.warn('[privileged-login]', {
+        stage: 'ACCESS_VALIDATION_FAILED',
+        code,
+        ...(code.endsWith('TOKEN_REFRESH_FAILED') ? { firebaseCode: loginError.firebaseCode } : {}),
+      });
     }
     setError(code === 'BRANCH_INACTIVE'
       ? loginError.message

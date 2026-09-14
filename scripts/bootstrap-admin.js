@@ -113,6 +113,10 @@ const app = getApps()[0] || initializeApp({ credential: cert(account), projectId
       tx.set(db.collection('users').doc(user.uid), profile, { merge: true });
     });
     if (resetExistingAdmin) await auth.updateUser(user.uid, { password: temporaryPassword, emailVerified: true, displayName: username });
+    // Claims are authoritative only after the client obtains a new token.
+    // Revoking existing refresh tokens prevents a pre-bootstrap browser
+    // session from continuing with stale privilege state.
+    await auth.revokeRefreshTokens(user.uid);
   } catch (error) {
     if (created) {
       try { await auth.deleteUser(user.uid); } catch { /* report the original failure */ }
