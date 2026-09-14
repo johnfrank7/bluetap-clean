@@ -18,6 +18,7 @@ export default function PrivilegedLogin({ role }) {
   const admin = role === 'admin';
   const [identifier, setIdentifier] = React.useState('');
   const [password, setPassword] = React.useState('');
+  const [showPassword, setShowPassword] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState('');
 
@@ -69,7 +70,12 @@ export default function PrivilegedLogin({ role }) {
     <Text style={styles.label}>Username or email</Text>
     <TextInput value={identifier} onChangeText={setIdentifier} autoCapitalize="none" autoCorrect={false} style={styles.input} onSubmitEditing={submit} />
     <Text style={styles.label}>Password</Text>
-    <TextInput value={password} onChangeText={setPassword} secureTextEntry autoCapitalize="none" style={styles.input} onSubmitEditing={submit} />
+    <View style={styles.passwordField}>
+      <TextInput value={password} onChangeText={setPassword} secureTextEntry={!showPassword} autoCapitalize="none" style={styles.passwordInput} onSubmitEditing={submit} />
+      <TouchableOpacity accessibilityRole="button" accessibilityLabel={showPassword ? 'Hide password' : 'Show password'} onPress={() => setShowPassword((visible) => !visible)} style={styles.visibilityButton}>
+        <Text style={styles.visibilityText}>{showPassword ? 'Hide' : 'Show'}</Text>
+      </TouchableOpacity>
+    </View>
     {!!error && <Text accessibilityRole="alert" style={styles.error}>{error}</Text>}
     <TouchableOpacity disabled={loading} onPress={submit} style={[styles.button, loading && styles.disabled]}>{loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.buttonText}>{admin ? 'Sign in as Administrator' : 'Sign in as Manager'}</Text>}</TouchableOpacity>
     <TouchableOpacity disabled={loading} onPress={() => router.replace('/login')} style={styles.back}><Text style={styles.backText}>Back to public login</Text></TouchableOpacity>
@@ -84,6 +90,10 @@ const styles = StyleSheet.create({
   subtitle: { color: '#607A90', fontSize: 14, textAlign: 'center', marginTop: 5, marginBottom: 20 },
   label: { color: '#294C66', fontSize: 13, fontWeight: '800', marginTop: 12, marginBottom: 6 },
   input: { minHeight: 49, borderWidth: 1, borderColor: '#BDD5E6', backgroundColor: '#FAFCFE', borderRadius: 10, paddingHorizontal: 13, color: '#17324D' },
+  passwordField: { minHeight: 49, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#BDD5E6', backgroundColor: '#FAFCFE', borderRadius: 10 },
+  passwordInput: { flex: 1, minWidth: 0, minHeight: 47, paddingHorizontal: 13, color: '#17324D' },
+  visibilityButton: { minWidth: 60, minHeight: 47, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 10 },
+  visibilityText: { color: '#187BCD', fontSize: 13, fontWeight: '800' },
   error: { color: '#A72C25', backgroundColor: '#FFF1F0', borderRadius: 8, padding: 10, marginTop: 14, textAlign: 'center' },
   button: { minHeight: 50, borderRadius: 10, backgroundColor: '#187BCD', alignItems: 'center', justifyContent: 'center', marginTop: 20 },
   buttonText: { color: '#FFF', fontSize: 15, fontWeight: '800' }, disabled: { opacity: .65 },

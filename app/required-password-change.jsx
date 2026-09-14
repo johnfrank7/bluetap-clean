@@ -12,6 +12,8 @@ export default function RequiredPasswordChangePage() {
   const [ready, setReady] = React.useState(false);
   const [password, setPassword] = React.useState('');
   const [confirmPassword, setConfirmPassword] = React.useState('');
+  const [showPassword, setShowPassword] = React.useState(false);
+  const [showConfirmation, setShowConfirmation] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState('');
 
@@ -40,10 +42,10 @@ export default function RequiredPasswordChangePage() {
     <Text style={styles.title}>Create a new password</Text>
     <Text style={styles.help}>Your temporary Admin password must be replaced before you can access BlueTap administration.</Text>
     <Text style={styles.label}>New password</Text>
-    <TextInput secureTextEntry autoCapitalize="none" value={password} onChangeText={setPassword} style={styles.input} placeholder="Enter a new password" />
+    <View style={styles.passwordField}><TextInput secureTextEntry={!showPassword} autoCapitalize="none" value={password} onChangeText={setPassword} style={styles.passwordInput} placeholder="Enter a new password" /><TouchableOpacity accessibilityRole="button" accessibilityLabel={showPassword ? 'Hide new password' : 'Show new password'} onPress={() => setShowPassword((visible) => !visible)} style={styles.visibilityButton}><Text style={styles.visibilityText}>{showPassword ? 'Hide' : 'Show'}</Text></TouchableOpacity></View>
     <Text style={styles.hint}>Use at least 12 characters with uppercase, lowercase, and a number.</Text>
     <Text style={styles.label}>Confirm new password</Text>
-    <TextInput secureTextEntry autoCapitalize="none" value={confirmPassword} onChangeText={setConfirmPassword} style={styles.input} placeholder="Re-enter the new password" />
+    <View style={styles.passwordField}><TextInput secureTextEntry={!showConfirmation} autoCapitalize="none" value={confirmPassword} onChangeText={setConfirmPassword} style={styles.passwordInput} placeholder="Re-enter the new password" /><TouchableOpacity accessibilityRole="button" accessibilityLabel={showConfirmation ? 'Hide password confirmation' : 'Show password confirmation'} onPress={() => setShowConfirmation((visible) => !visible)} style={styles.visibilityButton}><Text style={styles.visibilityText}>{showConfirmation ? 'Hide' : 'Show'}</Text></TouchableOpacity></View>
     {!!error && <Text style={styles.error}>{error}</Text>}
     <TouchableOpacity disabled={saving} onPress={submit} style={[styles.button, saving && styles.disabled]}><Text style={styles.buttonText}>{saving ? 'Changing password...' : 'Change password'}</Text></TouchableOpacity>
     <TouchableOpacity disabled={saving} onPress={async () => { await signOutAndClearSessions(); router.replace('/login'); }} style={styles.signOut}><Text style={styles.signOutText}>Back to Login</Text></TouchableOpacity>
@@ -57,7 +59,10 @@ const styles = StyleSheet.create({
   title: { color: '#17324D', fontSize: 27, fontWeight: '900', textAlign: 'center', marginTop: 8 },
   help: { color: '#58758B', lineHeight: 21, textAlign: 'center', marginTop: 10, marginBottom: 20 },
   label: { color: '#294C66', fontSize: 13, fontWeight: '800', marginTop: 12, marginBottom: 6 },
-  input: { minHeight: 48, borderWidth: 1, borderColor: '#B8D3E6', borderRadius: 10, paddingHorizontal: 13, color: '#17324D', backgroundColor: '#FAFCFE' },
+  passwordField: { minHeight: 48, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#B8D3E6', borderRadius: 10, backgroundColor: '#FAFCFE' },
+  passwordInput: { flex: 1, minWidth: 0, minHeight: 46, paddingHorizontal: 13, color: '#17324D' },
+  visibilityButton: { minWidth: 60, minHeight: 46, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 10 },
+  visibilityText: { color: '#187BCD', fontSize: 13, fontWeight: '800' },
   hint: { color: '#6A8498', fontSize: 12, lineHeight: 17, marginTop: 6 },
   error: { color: '#B52F2F', backgroundColor: '#FCE9E8', borderRadius: 8, padding: 10, marginTop: 14 },
   button: { minHeight: 48, backgroundColor: '#187BCD', borderRadius: 10, alignItems: 'center', justifyContent: 'center', marginTop: 20 },

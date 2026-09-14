@@ -131,6 +131,7 @@ export default function LoginPage() {
 
   const [email, setEmail] = React.useState('');
   const [password, setPassword] = React.useState('');
+  const [showPassword, setShowPassword] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
   const [pendingUser, setPendingUser] = React.useState(null);
   const [restartPhase, setRestartPhase] = React.useState('idle');
@@ -569,18 +570,28 @@ export default function LoginPage() {
                       onSubmitEditing={() => passwordInputRef.current?.focus()}
                     />
                     <Text style={styles.inputLabel}>Password</Text>
-                    <TextInput
-                      ref={passwordInputRef}
-                      style={styles.input}
-                      placeholder="Enter password"
-                      placeholderTextColor="#FFFFFF"
-                      secureTextEntry
-                      value={password}
-                      onChangeText={setPassword}
-                      onFocus={() => handleInputFocus('password')}
-                      returnKeyType="done"
-                      onSubmitEditing={handleLogin}
-                    />
+                    <View style={styles.passwordField}>
+                      <TextInput
+                        ref={passwordInputRef}
+                        style={styles.passwordFieldInput}
+                        placeholder="Enter password"
+                        placeholderTextColor="#FFFFFF"
+                        secureTextEntry={!showPassword}
+                        value={password}
+                        onChangeText={setPassword}
+                        onFocus={() => handleInputFocus('password')}
+                        returnKeyType="done"
+                        onSubmitEditing={handleLogin}
+                      />
+                      <TouchableOpacity
+                        accessibilityRole="button"
+                        accessibilityLabel={showPassword ? 'Hide password' : 'Show password'}
+                        onPress={() => setShowPassword((visible) => !visible)}
+                        style={styles.passwordVisibility}
+                      >
+                        <Text style={styles.passwordVisibilityText}>{showPassword ? 'Hide' : 'Show'}</Text>
+                      </TouchableOpacity>
+                    </View>
                   </View>
                 </View>
 
@@ -805,6 +816,36 @@ const styles = StyleSheet.create({
     fontSize: 15,
     marginBottom: 12,
     color: '#FFFFFF',
+  },
+  passwordField: {
+    minHeight: 45,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.5)',
+    borderRadius: 10,
+    marginBottom: 12,
+  },
+  passwordFieldInput: {
+    flex: 1,
+    minWidth: 0,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    fontSize: 15,
+    color: '#FFFFFF',
+  },
+  passwordVisibility: {
+    minWidth: 58,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 10,
+  },
+  passwordVisibilityText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '800',
   },
   buttonContainer: {
     width: '100%',
