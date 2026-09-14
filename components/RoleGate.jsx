@@ -36,6 +36,11 @@ export default function RoleGate({ role, allowedRoles, children }) {
     const roles = allowedRolesKey.split(',').filter(Boolean);
     let result = null;
     for (const allowedRole of roles) {
+      if (allowedRole === 'admin' || allowedRole === 'manager') {
+        console.info('[role-validation]', {
+          stage: `${allowedRole.toUpperCase()}_VALIDATION_CALLED_FROM_ROLEGATE`,
+        });
+      }
       result = await validateRoleAccess(allowedRole);
       if (result.status === 'authorized') break;
     }

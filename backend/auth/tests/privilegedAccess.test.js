@@ -104,6 +104,20 @@ test('RoleGate validates from Firebase auth once and does not recursively valida
   assert.doesNotMatch(gate, /subscribeAuthSessionChanges/);
 });
 
+test('PrivilegedLogin keeps listener completion outside render-scoped effect variables', () => {
+  const root = resolve(__dirname, '..', '..', '..');
+  const login = readFileSync(resolve(root, 'components/PrivilegedLogin.jsx'), 'utf8');
+  assert.doesNotMatch(login, /let checkedExistingSession = false/);
+  assert.match(login, /shouldValidateExistingSession\(role, user, submitting\.current\)/);
+  assert.match(login, /runPrivilegedLoginValidation\(role, credential\.user/);
+  assert.match(login, /completePrivilegedLoginValidation\(role, user\.uid\)[\s\S]*ACCESS_GRANTED/);
+  assert.match(login, /VALIDATION_CALLED_FROM_AUTH_LISTENER/);
+  assert.match(login, /VALIDATION_CALLED_FROM_LOGIN/);
+  assert.match(login, /const routerRef = React\.useRef\(router\)/);
+  assert.match(login, /routerRef\.current\.replace\(admin \? '\/admin\/dashboard'/);
+  assert.doesNotMatch(login, /\}, \[admin, role, router\]\)/);
+});
+
 test('privileged auth failures return to their own portal without a cross-role loop', () => {
   const root = resolve(__dirname, '..', '..', '..');
   const authSession = readFileSync(resolve(root, 'services/authSession.js'), 'utf8');

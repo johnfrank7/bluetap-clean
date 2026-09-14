@@ -44,7 +44,7 @@ test('successful Admin navigation has one forced refresh and a cached canonical 
   const sessions = readFileSync(resolve(root, 'services/authSession.js'), 'utf8');
   const forcedRefreshes = `${login}\n${sessions}`.match(/await\s+\w+\.getIdTokenResult\(true\)/g) || [];
   assert.equal(forcedRefreshes.length, 1);
-  assert.match(login, /router\.replace\(admin \? '\/admin\/dashboard'/);
+  assert.match(login, /routerRef\.current\.replace\(admin \? '\/admin\/dashboard'/);
   assert.match(sessions, /admin: '\/admin\/dashboard'/);
   assert.match(sessions, /return \{ status: 'authorized', profile: cachedPrivilegedProfile, cached: true \}/);
 });

@@ -12,6 +12,12 @@ import { getManagerContext } from '../services/managerAccess';
 import { loginWithUsername } from '../services/usernameAuth';
 
 const { hasTrustedRole } = require('../services/privilegedAccess');
+const {
+  completePrivilegedLoginValidation,
+  resetPrivilegedLoginValidation,
+  runPrivilegedLoginValidation,
+  shouldValidateExistingSession,
+} = require('../services/privilegedLoginCoordinator');
 
 const accessError = (code, details = {}) => Object.assign(new Error(code), { code, ...details });
 
@@ -50,6 +56,8 @@ const safeSignInMessage = (admin, code) => {
 
 export default function PrivilegedLogin({ role }) {
   const router = useRouter();
+  const routerRef = React.useRef(router);
+  routerRef.current = router;
   const params = useLocalSearchParams();
   const admin = role === 'admin';
   const [identifier, setIdentifier] = React.useState('');
@@ -106,8 +114,9 @@ export default function PrivilegedLogin({ role }) {
       throw accessError(admin ? 'ADMIN_ROLE_MISMATCH' : 'MANAGER_ROLE_MISMATCH');
     }
     if (admin && profile.mustChangePassword === true) {
+      completePrivilegedLoginValidation(role, user.uid);
       clearAllAuthSessions();
-      router.replace('/required-password-change');
+      routerRef.current.replace('/required-password-change');
       return;
     }
 
@@ -118,11 +127,13 @@ export default function PrivilegedLogin({ role }) {
     }
     cacheValidatedPrivilegedAccess(trustedProfile);
     saveRoleSession(trustedProfile);
+    completePrivilegedLoginValidation(role, user.uid);
     logPrivilegedStage(admin, 'ACCESS_GRANTED');
-    router.replace(admin ? '/admin/dashboard' : '/manager/dashboard');
-  }, [admin, role, router]);
+    routerRef.current.replace(admin ? '/admin/dashboard' : '/manager/dashboard');
+  }, [admin, role]);
 
   const rejectLogin = React.useCallback(async (loginError) => {
+    resetPrivilegedLoginValidation(role);
     clearAllAuthSessions();
     try { await signOut(auth); } catch { /* already signed out */ }
     const code = String(loginError?.code || '');
@@ -140,27 +151,29 @@ export default function PrivilegedLogin({ role }) {
       : /^(ADMIN|MANAGER)_/.test(code)
         ? safeAccessMessage(admin, code)
         : safeSignInMessage(admin, safeFirebaseAuthCode(loginError, 'auth/invalid-credential')));
-  }, [admin]);
+  }, [admin, role]);
 
   React.useEffect(() => {
     let active = true;
-    let checkedExistingSession = false;
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      if (!active || checkedExistingSession || submitting.current || !user) return;
-      checkedExistingSession = true;
+      if (!active || !shouldValidateExistingSession(role, user, submitting.current)) return;
       setLoading(true);
       setError('');
-      try { await finishAuthenticatedLogin(user); }
+      logPrivilegedStage(admin, 'VALIDATION_CALLED_FROM_AUTH_LISTENER');
+      try {
+        await runPrivilegedLoginValidation(role, user, () => finishAuthenticatedLogin(user));
+      }
       catch (loginError) { if (active) await rejectLogin(loginError); }
       finally { if (active) setLoading(false); }
     });
     return () => { active = false; unsubscribe(); };
-  }, [finishAuthenticatedLogin, rejectLogin]);
+  }, [admin, finishAuthenticatedLogin, rejectLogin, role]);
 
   const submit = async () => {
     if (loading) return;
     if (!identifier.trim() || !password) return setError('Enter your username or email and password.');
     submitting.current = true;
+    resetPrivilegedLoginValidation(role);
     setLoading(true); setError('');
     try {
       const normalized = identifier.trim().toLowerCase();
@@ -184,7 +197,8 @@ export default function PrivilegedLogin({ role }) {
         ? await signInWithEmailAndPassword(auth, normalized, password)
         : await signInWithCustomToken(auth, await loginWithUsername(normalized, password));
       logPrivilegedStage(admin, 'SIGNIN_SUCCESS');
-      await finishAuthenticatedLogin(credential.user);
+      logPrivilegedStage(admin, 'VALIDATION_CALLED_FROM_LOGIN');
+      await runPrivilegedLoginValidation(role, credential.user, () => finishAuthenticatedLogin(credential.user));
     } catch (loginError) {
       if (!/^(ADMIN|MANAGER)_/.test(String(loginError?.code || ''))) {
         logPrivilegedStage(admin, 'SIGNIN_FAILED', {
