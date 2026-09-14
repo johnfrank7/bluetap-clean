@@ -124,5 +124,5 @@ const app = getApps()[0] || initializeApp({ credential: cert(account), projectId
     throw error;
   }
 
-  console.log(`Admin bootstrap completed for uid ${user.uid}. Existing sign-in tokens must be refreshed.`);
+  console.log(`Admin bootstrap completed for uid ${user.uid}. Existing sessions were revoked; sign out and sign in again.`);
 })().catch((error) => { console.error('Admin bootstrap failed:', error.message); process.exitCode = 1; });

@@ -45,6 +45,35 @@ test('privileged login refreshes its token before reading the Firestore profile'
   assert.doesNotMatch(login, /Promise\.all\(\[\s*credential\.user\.getIdTokenResult\(true\)/);
 });
 
+test('privileged login replaces stale shared Auth state before authenticating submitted credentials', () => {
+  const root = resolve(__dirname, '..', '..', '..');
+  const login = readFileSync(resolve(root, 'components/PrivilegedLogin.jsx'), 'utf8');
+  const submitIndex = login.indexOf('const submit = async () =>');
+  const staleSessionIndex = login.indexOf('if (auth.currentUser)', submitIndex);
+  const staleSignOutIndex = login.indexOf('await signOut(auth)', staleSessionIndex);
+  const emailSignInIndex = login.indexOf('signInWithEmailAndPassword(auth, normalized, password)', submitIndex);
+  const submittedUserIndex = login.indexOf('finishAuthenticatedLogin(credential.user)', submitIndex);
+  assert.ok(staleSessionIndex > submitIndex);
+  assert.ok(staleSignOutIndex > staleSessionIndex);
+  assert.ok(emailSignInIndex > staleSignOutIndex);
+  assert.ok(submittedUserIndex > emailSignInIndex);
+});
+
+test('privileged login emits only safe authentication stages and preserves Firebase SDK error codes', () => {
+  const root = resolve(__dirname, '..', '..', '..');
+  const login = readFileSync(resolve(root, 'components/PrivilegedLogin.jsx'), 'utf8');
+  for (const stage of [
+    'SIGNIN_STARTED', 'SIGNIN_SUCCESS', 'TOKEN_REFRESH_STARTED',
+    'TOKEN_REFRESH_FAILED', 'CLAIM_CHECK_STARTED', 'CLAIM_MISSING',
+    'PROFILE_CHECK_STARTED', 'PROFILE_CHECK_FAILED', 'ACCESS_GRANTED',
+    'STALE_SESSION_CLEAR_FAILED',
+  ]) assert.match(login, new RegExp(`'${stage}'`));
+  assert.match(login, /safeFirebaseAuthCode\(refreshError/);
+  assert.match(login, /code === 'auth\/user-disabled'/);
+  assert.match(login, /code === 'auth\/network-request-failed'/);
+  assert.doesNotMatch(login, /console\.(?:log|info|warn|error)\([^\n]*(?:password|idToken|refreshToken)/i);
+});
+
 test('privileged route guard refreshes and validates claims before profile access', () => {
   const root = resolve(__dirname, '..', '..', '..');
   const authSession = readFileSync(resolve(root, 'services/authSession.js'), 'utf8');

@@ -15,6 +15,18 @@ const { hasTrustedRole } = require('../services/privilegedAccess');
 
 const accessError = (code, details = {}) => Object.assign(new Error(code), { code, ...details });
 
+const safeFirebaseAuthCode = (error, fallback = 'auth/internal-error') => {
+  const code = String(error?.code || '');
+  return code.startsWith('auth/') ? code : fallback;
+};
+
+const logPrivilegedStage = (admin, stage, details = {}) => {
+  console.info('[privileged-login]', {
+    stage: `${admin ? 'ADMIN' : 'MANAGER'}_${stage}`,
+    ...details,
+  });
+};
+
 const safeAccessMessage = (admin, code) => {
   if (code === 'ADMIN_PROFILE_READ_DENIED' || code === 'ADMIN_PROFILE_MISSING') {
     return 'Administrator profile could not be verified. Please contact support.';
@@ -26,6 +38,13 @@ const safeAccessMessage = (admin, code) => {
     return 'Your secure sign-in session could not be refreshed. Please sign in again.';
   }
   return admin ? 'Administrator access required.' : 'Manager access required.';
+};
+
+const safeSignInMessage = (admin, code) => {
+  if (code === 'auth/user-disabled') return 'This account is disabled. Please contact support.';
+  if (code === 'auth/network-request-failed') return 'Unable to reach the sign-in service. Check your connection and try again.';
+  if (code === 'auth/too-many-requests') return 'Too many sign-in attempts. Please wait and try again.';
+  return admin ? 'Invalid credentials or Administrator access required.' : 'Invalid credentials or Manager access required.';
 };
 
 export default function PrivilegedLogin({ role }) {
@@ -49,24 +68,34 @@ export default function PrivilegedLogin({ role }) {
     // account appear unauthenticated or omit its new privileged claim.
     let token;
     try {
+      logPrivilegedStage(admin, 'TOKEN_REFRESH_STARTED');
       // getIdTokenResult(true) performs one forced refresh and returns the
       // claims from that same token. Avoid back-to-back refresh requests.
       token = await user.getIdTokenResult(true);
     } catch (refreshError) {
-      const firebaseCode = String(refreshError?.code || 'auth/token-refresh-failed');
+      const firebaseCode = safeFirebaseAuthCode(refreshError, 'auth/token-refresh-failed');
+      logPrivilegedStage(admin, 'TOKEN_REFRESH_FAILED', { firebaseCode });
       throw accessError(admin ? 'ADMIN_TOKEN_REFRESH_FAILED' : 'MANAGER_TOKEN_REFRESH_FAILED', {
-        firebaseCode: firebaseCode.startsWith('auth/') ? firebaseCode : 'auth/token-refresh-failed',
+        firebaseCode,
       });
     }
+    logPrivilegedStage(admin, 'CLAIM_CHECK_STARTED');
     const hasClaim = admin
       ? token.claims?.admin === true || token.claims?.role === 'admin'
       : token.claims?.manager === true || token.claims?.role === 'manager';
-    if (!hasClaim) throw accessError(admin ? 'ADMIN_CLAIM_MISSING' : 'MANAGER_CLAIM_MISSING');
+    if (!hasClaim) {
+      logPrivilegedStage(admin, 'CLAIM_MISSING');
+      throw accessError(admin ? 'ADMIN_CLAIM_MISSING' : 'MANAGER_CLAIM_MISSING');
+    }
 
     let profileSnapshot;
     try {
+      logPrivilegedStage(admin, 'PROFILE_CHECK_STARTED');
       profileSnapshot = await getDocFromServer(doc(db, 'users', user.uid));
-    } catch {
+    } catch (profileError) {
+      logPrivilegedStage(admin, 'PROFILE_CHECK_FAILED', {
+        firebaseCode: safeFirebaseAuthCode(profileError, 'firestore/profile-read-failed'),
+      });
       throw accessError(admin ? 'ADMIN_PROFILE_READ_DENIED' : 'MANAGER_PROFILE_READ_DENIED');
     }
     if (!profileSnapshot.exists()) throw accessError(admin ? 'ADMIN_PROFILE_MISSING' : 'MANAGER_PROFILE_MISSING');
@@ -87,6 +116,7 @@ export default function PrivilegedLogin({ role }) {
       trustedProfile = { ...profile, ...context.manager, branch: context.branch, branchName: context.branch?.name || '' };
     }
     saveRoleSession(trustedProfile);
+    logPrivilegedStage(admin, 'ACCESS_GRANTED');
     router.replace(admin ? '/admin/dashboard' : '/manager/dashboard');
   }, [admin, role, router]);
 
@@ -105,7 +135,7 @@ export default function PrivilegedLogin({ role }) {
       ? loginError.message
       : /^(ADMIN|MANAGER)_/.test(code)
         ? safeAccessMessage(admin, code)
-        : admin ? 'Invalid credentials or Administrator access required.' : 'Invalid credentials or Manager access required.');
+        : safeSignInMessage(admin, safeFirebaseAuthCode(loginError, 'auth/invalid-credential')));
   }, [admin]);
 
   React.useEffect(() => {
@@ -130,11 +160,33 @@ export default function PrivilegedLogin({ role }) {
     setLoading(true); setError('');
     try {
       const normalized = identifier.trim().toLowerCase();
+      logPrivilegedStage(admin, 'SIGNIN_STARTED');
+
+      // A public, Manager, or revoked Admin session may still be persisted in
+      // this shared Firebase Auth instance. End it before authenticating so
+      // every subsequent token operation belongs to this submission's user.
+      clearAllAuthSessions();
+      if (auth.currentUser) {
+        try {
+          await signOut(auth);
+        } catch (staleSessionError) {
+          logPrivilegedStage(admin, 'STALE_SESSION_CLEAR_FAILED', {
+            firebaseCode: safeFirebaseAuthCode(staleSessionError),
+          });
+        }
+      }
+
       const credential = normalized.includes('@')
         ? await signInWithEmailAndPassword(auth, normalized, password)
         : await signInWithCustomToken(auth, await loginWithUsername(normalized, password));
+      logPrivilegedStage(admin, 'SIGNIN_SUCCESS');
       await finishAuthenticatedLogin(credential.user);
     } catch (loginError) {
+      if (!/^(ADMIN|MANAGER)_/.test(String(loginError?.code || ''))) {
+        logPrivilegedStage(admin, 'SIGNIN_FAILED', {
+          firebaseCode: safeFirebaseAuthCode(loginError, 'auth/invalid-credential'),
+        });
+      }
       await rejectLogin(loginError);
     } finally {
       submitting.current = false;
