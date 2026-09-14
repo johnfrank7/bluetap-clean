@@ -32,3 +32,22 @@ test('required Admin password change returns to Admin authentication and never t
   assert.match(passwordChangePage, /router\.replace\('\/admin\/login\?passwordChanged=true'\)/);
   assert.doesNotMatch(passwordChangePage, /router\.replace\('\/login\?passwordChanged=true'\)/);
 });
+
+test('privileged login refreshes its token before reading the Firestore profile', () => {
+  const root = resolve(__dirname, '..', '..', '..');
+  const login = readFileSync(resolve(root, 'components/PrivilegedLogin.jsx'), 'utf8');
+  const refreshIndex = login.indexOf('await user.getIdToken(true)');
+  const profileReadIndex = login.indexOf("await getDocFromServer(doc(db, 'users', user.uid))");
+  assert.ok(refreshIndex >= 0);
+  assert.ok(profileReadIndex > refreshIndex);
+  assert.doesNotMatch(login, /Promise\.all\(\[\s*credential\.user\.getIdTokenResult\(true\)/);
+});
+
+test('privileged route guard refreshes and validates claims before profile access', () => {
+  const root = resolve(__dirname, '..', '..', '..');
+  const authSession = readFileSync(resolve(root, 'services/authSession.js'), 'utf8');
+  const refreshIndex = authSession.indexOf('await currentUser.getIdTokenResult(true)');
+  const profileReadIndex = authSession.indexOf('profile = await fetchFirestoreUserProfile(currentUser)');
+  assert.ok(refreshIndex >= 0);
+  assert.ok(profileReadIndex > refreshIndex);
+});

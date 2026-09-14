@@ -276,17 +276,46 @@ export const validateRoleAccess = async (expectedRole) => {
     };
   }
 
+  // Privileged route guards must install and inspect a fresh ID token before
+  // Firestore evaluates any profile or branch access. This is especially
+  // important immediately after an Admin/Manager claim is bootstrapped.
+  if (expected === 'admin' || expected === 'manager') {
+    try {
+      const token = await currentUser.getIdTokenResult(true);
+      const trustedClaim = expected === 'admin'
+        ? token.claims?.admin === true || token.claims?.role === 'admin'
+        : token.claims?.manager === true || token.claims?.role === 'manager';
+      if (!trustedClaim) throw new Error('Privileged claim missing.');
+    } catch {
+      return {
+        status: 'unauthorized',
+        message: expected === 'admin' ? 'Administrator access is required.' : 'Manager access is required.',
+        redirectTo: expected === 'admin' ? '/admin/login' : '/manager/login',
+        shouldSignOut: true,
+        clearRole: expected,
+      };
+    }
+  }
+
   let profile = null;
 
   try {
     profile = await fetchFirestoreUserProfile(currentUser);
   } catch (error) {
-    console.log('Role validation profile read error:', error.message);
+    console.warn('[role-validation]', {
+      stage: 'PROFILE_READ_DENIED',
+      expectedRole: expected,
+      code: error?.code || 'unknown',
+    });
 
     return {
       status: 'unauthorized',
-      message: 'Unauthorized Access',
-      redirectTo: '/login',
+      message: expected === 'admin'
+        ? 'Administrator profile could not be verified. Please contact support.'
+        : expected === 'manager'
+          ? 'Manager profile could not be verified. Please contact support.'
+          : 'Unauthorized Access',
+      redirectTo: expected === 'admin' ? '/admin/login' : expected === 'manager' ? '/manager/login' : '/login',
       shouldSignOut: true,
       clearRole: expected,
     };
@@ -352,15 +381,6 @@ export const validateRoleAccess = async (expectedRole) => {
       redirectTo: '/required-password-change',
       clearRole: expected,
     };
-  }
-
-  if (expected === 'admin') {
-    try {
-      const token = await currentUser.getIdTokenResult(true);
-      if (!(token.claims?.admin === true || token.claims?.role === 'admin')) throw new Error('Admin claim missing.');
-    } catch {
-      return { status: 'unauthorized', message: 'Administrator access is required.', redirectTo: '/login', shouldSignOut: true, clearRole: expected };
-    }
   }
 
   if (expected === 'manager') {

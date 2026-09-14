@@ -3,7 +3,7 @@ import { ActivityIndicator, Image, StyleSheet, Text, TextInput, TouchableOpacity
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { getDocFromServer, doc } from 'firebase/firestore';
-import { signInWithCustomToken, signInWithEmailAndPassword, signOut } from 'firebase/auth';
+import { onAuthStateChanged, signInWithCustomToken, signInWithEmailAndPassword, signOut } from 'firebase/auth';
 
 import { auth, db } from '../firebase';
 import { BLUETAP_LOGIN_GRADIENT } from '../constants/bluetapTheme';
@@ -12,6 +12,18 @@ import { getManagerContext } from '../services/managerAccess';
 import { loginWithUsername } from '../services/usernameAuth';
 
 const { hasTrustedRole } = require('../services/privilegedAccess');
+
+const accessError = (code) => Object.assign(new Error(code), { code });
+
+const safeAccessMessage = (admin, code) => {
+  if (code === 'ADMIN_PROFILE_READ_DENIED' || code === 'ADMIN_PROFILE_MISSING') {
+    return 'Administrator profile could not be verified. Please contact support.';
+  }
+  if (code === 'MANAGER_PROFILE_READ_DENIED' || code === 'MANAGER_PROFILE_MISSING') {
+    return 'Manager profile could not be verified. Please contact support.';
+  }
+  return admin ? 'Administrator access required.' : 'Manager access required.';
+};
 
 export default function PrivilegedLogin({ role }) {
   const router = useRouter();
@@ -22,46 +34,96 @@ export default function PrivilegedLogin({ role }) {
   const [showPassword, setShowPassword] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState('');
+  const submitting = React.useRef(false);
+
+  const finishAuthenticatedLogin = React.useCallback(async (user) => {
+    if (!user || !auth.currentUser || auth.currentUser.uid !== user.uid) {
+      throw accessError(admin ? 'ADMIN_AUTH_SESSION_MISSING' : 'MANAGER_AUTH_SESSION_MISSING');
+    }
+
+    // Install a fresh token before Firestore evaluates request.auth. Running
+    // this concurrently with the profile read can make a newly bootstrapped
+    // account appear unauthenticated or omit its new privileged claim.
+    await user.getIdToken(true);
+    const token = await user.getIdTokenResult();
+    const hasClaim = admin
+      ? token.claims?.admin === true || token.claims?.role === 'admin'
+      : token.claims?.manager === true || token.claims?.role === 'manager';
+    if (!hasClaim) throw accessError(admin ? 'ADMIN_CLAIM_MISSING' : 'MANAGER_CLAIM_MISSING');
+
+    let profileSnapshot;
+    try {
+      profileSnapshot = await getDocFromServer(doc(db, 'users', user.uid));
+    } catch {
+      throw accessError(admin ? 'ADMIN_PROFILE_READ_DENIED' : 'MANAGER_PROFILE_READ_DENIED');
+    }
+    if (!profileSnapshot.exists()) throw accessError(admin ? 'ADMIN_PROFILE_MISSING' : 'MANAGER_PROFILE_MISSING');
+
+    const profile = { uid: user.uid, ...profileSnapshot.data() };
+    if (profile.role !== role || !hasTrustedRole(role, token.claims, profile)) {
+      throw accessError(admin ? 'ADMIN_ROLE_MISMATCH' : 'MANAGER_ROLE_MISMATCH');
+    }
+    if (admin && profile.mustChangePassword === true) {
+      clearAllAuthSessions();
+      router.replace('/required-password-change');
+      return;
+    }
+
+    let trustedProfile = profile;
+    if (!admin) {
+      const context = await getManagerContext();
+      trustedProfile = { ...profile, ...context.manager, branch: context.branch, branchName: context.branch?.name || '' };
+    }
+    saveRoleSession(trustedProfile);
+    router.replace(admin ? '/admin/dashboard' : '/manager/dashboard');
+  }, [admin, role, router]);
+
+  const rejectLogin = React.useCallback(async (loginError) => {
+    clearAllAuthSessions();
+    try { await signOut(auth); } catch { /* already signed out */ }
+    const code = String(loginError?.code || '');
+    if (/^(ADMIN|MANAGER)_/.test(code)) {
+      console.warn('[privileged-login]', { stage: 'ACCESS_VALIDATION_FAILED', code });
+    }
+    setError(code === 'BRANCH_INACTIVE'
+      ? loginError.message
+      : /^(ADMIN|MANAGER)_/.test(code)
+        ? safeAccessMessage(admin, code)
+        : admin ? 'Invalid credentials or Administrator access required.' : 'Invalid credentials or Manager access required.');
+  }, [admin]);
+
+  React.useEffect(() => {
+    let active = true;
+    let checkedExistingSession = false;
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (!active || checkedExistingSession || submitting.current || !user) return;
+      checkedExistingSession = true;
+      setLoading(true);
+      setError('');
+      try { await finishAuthenticatedLogin(user); }
+      catch (loginError) { if (active) await rejectLogin(loginError); }
+      finally { if (active) setLoading(false); }
+    });
+    return () => { active = false; unsubscribe(); };
+  }, [finishAuthenticatedLogin, rejectLogin]);
 
   const submit = async () => {
     if (loading) return;
     if (!identifier.trim() || !password) return setError('Enter your username or email and password.');
+    submitting.current = true;
     setLoading(true); setError('');
     try {
       const normalized = identifier.trim().toLowerCase();
       const credential = normalized.includes('@')
         ? await signInWithEmailAndPassword(auth, normalized, password)
         : await signInWithCustomToken(auth, await loginWithUsername(normalized, password));
-      const [token, profileSnapshot] = await Promise.all([
-        credential.user.getIdTokenResult(true),
-        getDocFromServer(doc(db, 'users', credential.user.uid)),
-      ]);
-      const profile = profileSnapshot.exists() ? { uid: credential.user.uid, ...profileSnapshot.data() } : null;
-      if (!hasTrustedRole(role, token.claims, profile)) {
-        clearAllAuthSessions();
-        await signOut(auth);
-        setError(admin ? 'Administrator access required.' : 'Manager access required.');
-        return;
-      }
-      if (admin && profile.mustChangePassword === true) {
-        clearAllAuthSessions();
-        router.replace('/required-password-change');
-        return;
-      }
-      let trustedProfile = profile;
-      if (!admin) {
-        const context = await getManagerContext();
-        trustedProfile = { ...profile, ...context.manager, branch: context.branch, branchName: context.branch?.name || '' };
-      }
-      saveRoleSession(trustedProfile);
-      router.replace(admin ? '/admin/dashboard' : '/manager/dashboard');
+      await finishAuthenticatedLogin(credential.user);
     } catch (loginError) {
-      clearAllAuthSessions();
-      try { await signOut(auth); } catch { /* already signed out */ }
-      setError(loginError?.code === 'BRANCH_INACTIVE'
-        ? loginError.message
-        : admin ? 'Invalid credentials or Administrator access required.' : 'Invalid credentials or Manager access required.');
-    } finally { setLoading(false); }
+      await rejectLogin(loginError);
+    } finally {
+      submitting.current = false;
+      setLoading(false);
+    }
   };
 
   return <LinearGradient colors={BLUETAP_LOGIN_GRADIENT} style={styles.screen}><View style={styles.card}>
@@ -79,7 +141,7 @@ export default function PrivilegedLogin({ role }) {
     </View>
     {admin && params.passwordChanged === 'true' && !error && <Text style={styles.success}>Password changed successfully. Sign in with your new password.</Text>}
     {!!error && <Text accessibilityRole="alert" style={styles.error}>{error}</Text>}
-    <TouchableOpacity disabled={loading} onPress={submit} style={[styles.button, loading && styles.disabled]}>{loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.buttonText}>{admin ? 'Sign in as Administrator' : 'Sign in as Manager'}</Text>}</TouchableOpacity>
+    <TouchableOpacity disabled={loading} onPress={submit} style={[styles.button, loading && styles.disabled]}>{loading ? <View style={styles.loadingContent}><ActivityIndicator color="#FFF" size="small" /><Text style={styles.buttonText}>{admin ? 'Verifying administrator access...' : 'Verifying Manager access...'}</Text></View> : <Text style={styles.buttonText}>{admin ? 'Sign in as Administrator' : 'Sign in as Manager'}</Text>}</TouchableOpacity>
     <TouchableOpacity disabled={loading} onPress={() => router.replace('/login')} style={styles.back}><Text style={styles.backText}>Back to public login</Text></TouchableOpacity>
   </View></LinearGradient>;
 }
@@ -99,6 +161,7 @@ const styles = StyleSheet.create({
   success: { color: '#167347', backgroundColor: '#E3F7EC', borderRadius: 8, padding: 10, marginTop: 14, textAlign: 'center' },
   error: { color: '#A72C25', backgroundColor: '#FFF1F0', borderRadius: 8, padding: 10, marginTop: 14, textAlign: 'center' },
   button: { minHeight: 50, borderRadius: 10, backgroundColor: '#187BCD', alignItems: 'center', justifyContent: 'center', marginTop: 20 },
+  loadingContent: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 9 },
   buttonText: { color: '#FFF', fontSize: 15, fontWeight: '800' }, disabled: { opacity: .65 },
   back: { minHeight: 44, alignItems: 'center', justifyContent: 'center', marginTop: 8 }, backText: { color: '#187BCD', fontWeight: '700' },
 });

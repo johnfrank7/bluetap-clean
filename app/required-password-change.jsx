@@ -36,6 +36,7 @@ export default function RequiredPasswordChangePage() {
       try {
         if (!adminEmail) throw new Error('Admin email is unavailable.');
         const credential = await signInWithEmailAndPassword(auth, adminEmail, password);
+        await credential.user.getIdToken(true);
         const profile = await fetchFirestoreUserProfile(credential.user);
         if (!profile || profile.role !== 'admin' || profile.mustChangePassword === true) {
           throw new Error('Admin profile refresh failed.');
