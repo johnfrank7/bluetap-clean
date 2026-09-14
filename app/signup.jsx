@@ -13,6 +13,7 @@ import { clearAllAuthSessions } from '../services/authSession';
 import { clearPendingRegistration, completeRegistrationWithoutOtp, requestRegistrationOtp, setPendingRegistration } from '../services/emailVerification';
 import { checkUsername, normalizeUsername, validateUsername } from '../services/usernameAuth';
 import { acceptRegistrationTerms, createRegistrationSession } from '../services/registrationSession';
+import { useFaceServiceWarmup } from '../services/useFaceServiceWarmup';
 
 import RegistrationFaceCapture from '../components/RegistrationFaceCapture';
 import { RegistrationActions, RegistrationBrand, RegistrationHeading, RegistrationNotice, RegistrationStepper, REGISTRATION_STEPS as STEPS } from '../components/RegistrationUi';
@@ -65,6 +66,10 @@ export default function SignupPage() {
   const entrance = React.useRef(new Animated.Value(0)).current;
   const stepTransition = React.useRef(new Animated.Value(1)).current;
   const mobile = width < 600;
+  const faceService = useFaceServiceWarmup(
+    registrationSessionId,
+    securityPolicy.faceVerificationRequired === true,
+  );
 
   React.useEffect(() => {
     Animated.timing(entrance, {
@@ -363,6 +368,8 @@ export default function SignupPage() {
                 registrationSessionId={registrationSessionId}
                 verification={faceVerification}
                 onResult={setFaceVerification}
+                serviceStatus={faceService.status}
+                onCheckService={faceService.checkAgain}
               />}
 
               {step === 4 && <View>

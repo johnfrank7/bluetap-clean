@@ -79,6 +79,9 @@ export const startFaceVerification = async ({ registrationSessionId, referenceIm
 export const beginRegistrationFace = (registrationSessionId) => callRegistrationApi(
   '/api/verification/registration-face', { action: 'begin', registrationSessionId }
 );
+export const getFaceServiceStatus = (registrationSessionId) => callRegistrationApi(
+  '/api/verification/face-service-status', { registrationSessionId }, 12_000
+);
 export const evaluateRegistrationChallenge = (registrationSessionId, challengeId, frames) => callRegistrationApi(
   '/api/verification/registration-face', { action: 'evaluate', registrationSessionId, challengeId, frames }, 55000
 );

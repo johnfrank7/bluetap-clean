@@ -6,8 +6,9 @@ import { nativeChallengeAvailable, runNativeFaceChallenge } from '../services/na
 import WebRegistrationFaceCapture from './WebRegistrationFaceCapture';
 
 const { getRegistrationFaceCaptureMode, isTrustedRegistrationFaceVerification } = require('../services/webFaceCaptureCore');
+const { isFaceServicePreparationError } = require('../services/faceServiceWarmupCore');
 
-export default function RegistrationFaceCapture({ registrationSessionId, verification, onResult }) {
+export default function RegistrationFaceCapture({ registrationSessionId, verification, onResult, serviceStatus = 'ready', onCheckService }) {
   const captureMode = getRegistrationFaceCaptureMode(Platform.OS);
   const [permission, requestPermission, getPermission] = useCameraPermissions();
   const [state, setState] = React.useState('ready');
@@ -72,7 +73,12 @@ export default function RegistrationFaceCapture({ registrationSessionId, verific
         else if (!result.challengeType) setMessage('The face challenge service needs an update. Please try again later.');
         else if (!result.detectorAvailable) setMessage('You can complete the motion check on this device. Server-side liveness confirmation is still required before registration can continue.');
       } else if (!result.detectorAvailable) setMessage('You can position your face, but the challenge check is not available yet. Verification cannot continue.');
-    } catch (error) { if (active(attempt)) { setState('failed'); setMessage(error.message); } }
+    } catch (error) {
+      if (active(attempt) && isFaceServicePreparationError(error)) {
+        setState('ready');
+        onCheckService?.();
+      } else if (active(attempt)) { setState('failed'); setMessage(error.message); }
+    }
     finally { if (active(attempt)) busy.current = false; }
   };
   const perform = async () => {
@@ -96,20 +102,27 @@ export default function RegistrationFaceCapture({ registrationSessionId, verific
       setState(result.faceVerification.status === 'failed' ? 'failed' : 'ready');
       if (result.faceVerification.status === 'failed') setMessage("We couldn't verify your identity. Please try again.");
       setChallenge(null);
-    } catch (error) { if (active(attempt)) { setState('failed'); setMessage(error.message); } }
+    } catch (error) {
+      if (active(attempt) && isFaceServicePreparationError(error)) {
+        setState('ready');
+        setChallenge(null);
+        onCheckService?.();
+      } else if (active(attempt)) { setState('failed'); setMessage(error.message); }
+    }
     finally { if (active(attempt)) busy.current = false; }
   };
-  if (captureMode === 'browser') return <WebRegistrationFaceCapture registrationSessionId={registrationSessionId} verification={verification} onResult={onResult} />;
   if (isTrustedRegistrationFaceVerification(verification)) return <View style={styles.stack}><View style={[styles.box, styles.successPanel]}><View style={[styles.icon, styles.successIcon]}><Text style={styles.successMark}>✓</Text></View><Text style={styles.title}>Identity check completed</Text><Text style={styles.copy}>Complete email verification to finalize your secure face enrollment.</Text></View><PrivacyNote /></View>;
   if (verification.status === 'review_required') return <View style={styles.stack}><View style={[styles.box, styles.reviewPanel]}><View style={[styles.icon, styles.warningIcon]}><Text style={styles.warningMark}>!</Text></View><Text style={styles.title}>Verification needs review</Text><Text style={styles.copy}>We found a possible existing registration.</Text></View><PrivacyNote /></View>;
+  if (serviceStatus !== 'ready') return <FaceServicePreparation status={serviceStatus} onCheck={onCheckService} />;
+  if (captureMode === 'browser') return <WebRegistrationFaceCapture registrationSessionId={registrationSessionId} verification={verification} onResult={onResult} onServicePreparing={onCheckService} />;
   const cameraVisible = state === 'camera' || state === 'challenge';
   const servicePreparing = state === 'failed' && /starting|preparing|temporarily|moment/i.test(message);
   return <View style={styles.stack}><View style={[styles.box, state === 'failed' && styles.failedPanel]}>
     {!cameraVisible && <View style={[styles.icon, state === 'failed' && styles.warningIcon]}>
       {state === 'failed' ? <Text style={styles.warningMark}>!</Text> : <View accessible={false} style={styles.faceGlyph}><View style={styles.faceHead} /><View style={styles.faceShoulders} /></View>}
     </View>}
-    <Text style={styles.title}>{cameraVisible ? 'Position your face inside the frame' : state === 'failed' ? 'Verification unsuccessful' : 'Face Verification'}</Text>
-    <Text style={styles.copy}>{cameraVisible ? 'Keep your face centered and follow the instruction below.' : 'Use your camera to complete a short identity check.'}</Text>
+    <Text style={styles.title}>{cameraVisible ? 'Position your face inside the frame' : state === 'failed' ? 'Verification unsuccessful' : 'Ready for verification'}</Text>
+    <Text style={styles.copy}>{cameraVisible ? 'Keep your face centered and follow the instruction below.' : 'The secure face service is ready. Use your camera to complete a short identity check.'}</Text>
     {!cameraVisible && state !== 'failed' && state !== 'opening' && <View style={styles.benefits}>
       {['Helps prevent duplicate accounts', 'Protects your BlueTap identity', 'Takes only a few moments'].map((text) => <View key={text} style={styles.benefitRow}><Text style={styles.benefitCheck}>✓</Text><Text style={styles.benefitText}>{text}</Text></View>)}
     </View>}
@@ -132,6 +145,18 @@ export default function RegistrationFaceCapture({ registrationSessionId, verific
     {permission?.canAskAgain === false && !permission.granted && <TouchableOpacity style={styles.secondary} onPress={() => Linking.openSettings().catch(() => setMessage('Allow camera access in your browser or device settings.'))}><Text>Open settings</Text></TouchableOpacity>}
   </View><PrivacyNote /></View>;
 }
+function FaceServicePreparation({ status, onCheck }) {
+  const unavailable = status === 'unavailable';
+  return <View style={styles.stack}><View style={[styles.box, styles.preparingPanel]}>
+    {!unavailable && <ActivityIndicator color="#187BCD" size="large" />}
+    <Text style={styles.title}>{unavailable ? 'Face verification service unavailable' : 'Preparing face verification'}</Text>
+    <Text style={styles.copy}>{unavailable
+      ? 'BlueTap could not finish starting the verification service. Your registration is still saved and you can try again.'
+      : 'BlueTap is starting the verification service. This can take a moment after inactivity.'}</Text>
+    <Text accessibilityLiveRegion="polite" style={styles.preparingStatus}>{unavailable ? 'Ready to retry' : 'Checking service...'}</Text>
+    {unavailable && <TouchableOpacity style={styles.button} onPress={onCheck}><Text style={styles.buttonText}>Check again</Text></TouchableOpacity>}
+  </View><PrivacyNote /></View>;
+}
 function PrivacyNote() {
   return <View style={styles.privacyBox}><View style={styles.lockIcon} accessible={false}><View style={styles.lockShackle} /><View style={styles.lockBody} /></View><View style={styles.privacyContent}><Text style={styles.privacyTitle}>Privacy and security</Text><Text style={styles.privacy}>Your face check is used only for identity verification. BlueTap stores only verification metadata in your profile.</Text></View></View>;
 }
@@ -149,6 +174,7 @@ const styles = StyleSheet.create({
   benefitCheck: { color: '#187BCD', fontSize: 14, fontWeight: '600' },
   benefitText: { flex: 1, color: '#42637C', fontSize: 14, lineHeight: 20 },
   successPanel: { backgroundColor: '#F4FBF7', borderColor: '#D7EDE0' }, successIcon: { backgroundColor: '#E0F3E8' }, successMark: { color: '#238254', fontSize: 27 },
+  preparingPanel: { backgroundColor: '#F3F8FC', borderColor: '#BFD9EC' }, preparingStatus: { color: '#187BCD', fontSize: 14, fontWeight: '600' },
   reviewPanel: { backgroundColor: '#FFFCF5', borderColor: '#F0E5C9' }, failedPanel: { borderColor: '#E7A6A1', backgroundColor: '#FFF8F7' }, warningIcon: { backgroundColor: '#FCEDD8' }, warningMark: { color: '#9A6525', fontSize: 25, fontWeight: '600' },
   preview: { width: '100%', maxWidth: 300, aspectRatio: 3 / 4, borderRadius: 16, overflow: 'hidden', backgroundColor: '#12304A', alignItems: 'center', justifyContent: 'center' },
   frame: { width: '70%', height: '70%', borderRadius: 160, borderWidth: 3, borderColor: '#FFF' },

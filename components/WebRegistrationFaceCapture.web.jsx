@@ -2,6 +2,7 @@ import React from 'react';
 import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 import { beginRegistrationFace, completeWebRegistrationFace } from '../services/faceVerification';
+const { isFaceServicePreparationError } = require('../services/faceServiceWarmupCore');
 
 const {
   WEB_CAPTURE_MAX_DATA_URL_LENGTH,
@@ -47,7 +48,7 @@ function captureJpeg(video) {
   throw new Error('The camera image is too large. Move closer to the camera and try again.');
 }
 
-export default function WebRegistrationFaceCapture({ registrationSessionId, verification, onResult }) {
+export default function WebRegistrationFaceCapture({ registrationSessionId, verification, onResult, onServicePreparing }) {
   const videoRef = React.useRef(null);
   const streamRef = React.useRef(null);
   const mounted = React.useRef(true);
@@ -149,9 +150,14 @@ export default function WebRegistrationFaceCapture({ registrationSessionId, veri
     } catch (error) {
       if (!active(attempt)) return;
       stopCamera();
-      setState('failed');
-      const cameraError = ['NotAllowedError', 'PermissionDeniedError', 'NotFoundError', 'DevicesNotFoundError', 'OverconstrainedError', 'SecurityError'].includes(error?.name);
-      setMessage(cameraError ? browserCameraErrorMessage(error) : error?.message || 'The camera could not start. Please try again.');
+      if (isFaceServicePreparationError(error)) {
+        setState('ready');
+        onServicePreparing?.();
+      } else {
+        setState('failed');
+        const cameraError = ['NotAllowedError', 'PermissionDeniedError', 'NotFoundError', 'DevicesNotFoundError', 'OverconstrainedError', 'SecurityError'].includes(error?.name);
+        setMessage(cameraError ? browserCameraErrorMessage(error) : error?.message || 'The camera could not start. Please try again.');
+      }
     } finally {
       if (active(attempt)) busy.current = false;
     }
@@ -188,13 +194,19 @@ export default function WebRegistrationFaceCapture({ registrationSessionId, veri
       }
     } catch (error) {
       if (!active(attempt)) return;
-      setState('failed');
-      const code = String(error?.code || '');
-      setMessage(code.includes('registration-session-expired')
-        ? 'Your registration session expired. Go back and restart identity verification.'
-        : code.includes('face-review-required')
-          ? 'This face may already be associated with an existing BlueTap account.'
-          : error?.message || "We couldn't verify your face. Please try again.");
+      if (isFaceServicePreparationError(error)) {
+        setState('ready');
+        setChallenge(null);
+        onServicePreparing?.();
+      } else {
+        setState('failed');
+        const code = String(error?.code || '');
+        setMessage(code.includes('registration-session-expired')
+          ? 'Your registration session expired. Go back and restart identity verification.'
+          : code.includes('face-review-required')
+            ? 'This face may already be associated with an existing BlueTap account.'
+            : error?.message || "We couldn't verify your face. Please try again.");
+      }
     } finally {
       referenceImage = undefined;
       image = undefined;
@@ -213,8 +225,8 @@ export default function WebRegistrationFaceCapture({ registrationSessionId, veri
   const showPreview = cameraVisible && state !== 'failed';
   const servicePreparing = state === 'failed' && /starting|preparing|temporarily|moment/i.test(message);
   return <View style={styles.stack}><View style={[styles.box, state === 'failed' && styles.failedPanel]}>
-    <Text style={styles.title}>{showPreview ? 'Position your face inside the frame' : state === 'failed' ? 'Verification unsuccessful' : 'Verify your identity'}</Text>
-    <Text style={styles.copy}>{showPreview ? 'Look directly at the camera and keep only one face in the oval.' : 'Complete a quick face check to help protect your account and prevent duplicate registrations.'}</Text>
+    <Text style={styles.title}>{showPreview ? 'Position your face inside the frame' : state === 'failed' ? 'Verification unsuccessful' : 'Ready for verification'}</Text>
+    <Text style={styles.copy}>{showPreview ? 'Look directly at the camera and keep only one face in the oval.' : 'The secure face service is ready. Complete a quick face check to protect your account.'}</Text>
 
     {showPreview && <View style={styles.preview}>
       <video ref={videoRef} autoPlay muted playsInline aria-label="BlueTap face verification camera preview" style={videoStyle} />

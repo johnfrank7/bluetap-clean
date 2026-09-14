@@ -23,6 +23,7 @@ const EXPECTED_ROUTES = [
   '/api/auth/start-registration-face-verification',
   '/api/auth/verify-email-otp',
   '/api/manager/context',
+  '/api/verification/face-service-status',
   '/api/verification/registration-face',
   '/api/verification/verify-face',
 ];
