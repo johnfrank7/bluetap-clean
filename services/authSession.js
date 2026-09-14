@@ -19,6 +19,26 @@ const ROLE_HOME_PATHS = {
 };
 
 const validRoles = new Set(Object.keys(ROLE_HOME_PATHS));
+const PRIVILEGED_VALIDATION_TTL_MS = 2 * 60 * 1000;
+let privilegedValidationCache = null;
+
+const clearPrivilegedValidationCache = () => {
+  privilegedValidationCache = null;
+};
+
+export const cacheValidatedPrivilegedAccess = (profile = {}) => {
+  const role = normalizeRole(profile.role);
+  const uid = String(profile.uid || profile.id || '');
+  if (!uid || !['admin', 'manager'].includes(role)) return;
+  privilegedValidationCache = { uid, role, profile, validatedAt: Date.now() };
+};
+
+const getCachedPrivilegedAccess = (user, role) => {
+  const cached = privilegedValidationCache;
+  if (!cached || cached.uid !== user?.uid || cached.role !== role ||
+      Date.now() - cached.validatedAt > PRIVILEGED_VALIDATION_TTL_MS) return null;
+  return cached.profile;
+};
 
 const getMemorySessionStore = () => {
   if (!globalThis.__bluetapAuthSessionStore) {
@@ -175,6 +195,7 @@ export const clearModuleSession = (role) => {
 };
 
 export const clearAllAuthSessions = () => {
+  clearPrivilegedValidationCache();
   setSessions(null, {});
 };
 
@@ -268,6 +289,7 @@ export const validateRoleAccess = async (expectedRole) => {
   const currentUser = auth.currentUser;
 
   if (!currentUser) {
+    clearPrivilegedValidationCache();
     return {
       status: 'unauthenticated',
       message: 'Unauthorized Access',
@@ -276,13 +298,21 @@ export const validateRoleAccess = async (expectedRole) => {
     };
   }
 
-  // Privileged route guards must install and inspect a fresh ID token before
-  // Firestore evaluates any profile or branch access. This is especially
-  // important immediately after an Admin/Manager claim is bootstrapped.
+  const cachedPrivilegedProfile = ['admin', 'manager'].includes(expected)
+    ? getCachedPrivilegedAccess(currentUser, expected)
+    : null;
+  if (cachedPrivilegedProfile) {
+    return { status: 'authorized', profile: cachedPrivilegedProfile, cached: true };
+  }
+
+  // The fresh privileged sign-in already performed the one allowed forced
+  // token refresh. Route guards inspect the SDK's current token without
+  // forcing another Secure Token request. On a hard refresh Firebase can
+  // renew an expired token normally, while a valid token stays local.
   if (expected === 'admin' || expected === 'manager') {
     let token;
     try {
-      token = await currentUser.getIdTokenResult(true);
+      token = await currentUser.getIdTokenResult();
     } catch (error) {
       console.warn('[role-validation]', {
         stage: 'TOKEN_REFRESH_FAILED',
@@ -426,6 +456,7 @@ export const validateRoleAccess = async (expectedRole) => {
   }
 
   saveRoleSession(profile);
+  if (expected === 'admin' || expected === 'manager') cacheValidatedPrivilegedAccess(profile);
 
   return {
     status: 'authorized',

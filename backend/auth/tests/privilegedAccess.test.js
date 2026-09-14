@@ -71,16 +71,21 @@ test('privileged login emits only safe authentication stages and preserves Fireb
   assert.match(login, /safeFirebaseAuthCode\(refreshError/);
   assert.match(login, /code === 'auth\/user-disabled'/);
   assert.match(login, /code === 'auth\/network-request-failed'/);
+  assert.match(login, /code === 'auth\/quota-exceeded'/);
   assert.doesNotMatch(login, /console\.(?:log|info|warn|error)\([^\n]*(?:password|idToken|refreshToken)/i);
 });
 
-test('privileged route guard refreshes and validates claims before profile access', () => {
+test('privileged route guard validates claims without forcing a second token refresh', () => {
   const root = resolve(__dirname, '..', '..', '..');
   const authSession = readFileSync(resolve(root, 'services/authSession.js'), 'utf8');
-  const refreshIndex = authSession.indexOf('await currentUser.getIdTokenResult(true)');
+  const login = readFileSync(resolve(root, 'components/PrivilegedLogin.jsx'), 'utf8');
+  const refreshIndex = authSession.indexOf('await currentUser.getIdTokenResult()');
   const profileReadIndex = authSession.indexOf('profile = await fetchFirestoreUserProfile(currentUser)');
   assert.ok(refreshIndex >= 0);
   assert.ok(profileReadIndex > refreshIndex);
+  assert.doesNotMatch(authSession, /currentUser\.getIdTokenResult\(true\)/);
+  assert.match(authSession, /getCachedPrivilegedAccess\(currentUser, expected\)/);
+  assert.match(login, /cacheValidatedPrivilegedAccess\(trustedProfile\)/);
 });
 
 test('Admin routes use one canonical dashboard and never redirect into Manager analytics', () => {

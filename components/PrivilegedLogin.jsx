@@ -7,7 +7,7 @@ import { onAuthStateChanged, signInWithCustomToken, signInWithEmailAndPassword, 
 
 import { auth, db } from '../firebase';
 import { BLUETAP_LOGIN_GRADIENT } from '../constants/bluetapTheme';
-import { clearAllAuthSessions, saveRoleSession } from '../services/authSession';
+import { cacheValidatedPrivilegedAccess, clearAllAuthSessions, saveRoleSession } from '../services/authSession';
 import { getManagerContext } from '../services/managerAccess';
 import { loginWithUsername } from '../services/usernameAuth';
 
@@ -44,6 +44,7 @@ const safeSignInMessage = (admin, code) => {
   if (code === 'auth/user-disabled') return 'This account is disabled. Please contact support.';
   if (code === 'auth/network-request-failed') return 'Unable to reach the sign-in service. Check your connection and try again.';
   if (code === 'auth/too-many-requests') return 'Too many sign-in attempts. Please wait and try again.';
+  if (code === 'auth/quota-exceeded') return 'Authentication is temporarily rate-limited. Please wait and try again.';
   return admin ? 'Invalid credentials or Administrator access required.' : 'Invalid credentials or Manager access required.';
 };
 
@@ -115,6 +116,7 @@ export default function PrivilegedLogin({ role }) {
       const context = await getManagerContext();
       trustedProfile = { ...profile, ...context.manager, branch: context.branch, branchName: context.branch?.name || '' };
     }
+    cacheValidatedPrivilegedAccess(trustedProfile);
     saveRoleSession(trustedProfile);
     logPrivilegedStage(admin, 'ACCESS_GRANTED');
     router.replace(admin ? '/admin/dashboard' : '/manager/dashboard');
@@ -131,7 +133,9 @@ export default function PrivilegedLogin({ role }) {
         ...(code.endsWith('TOKEN_REFRESH_FAILED') ? { firebaseCode: loginError.firebaseCode } : {}),
       });
     }
-    setError(code === 'BRANCH_INACTIVE'
+    setError(code.endsWith('TOKEN_REFRESH_FAILED') && loginError?.firebaseCode === 'auth/quota-exceeded'
+      ? safeSignInMessage(admin, 'auth/quota-exceeded')
+      : code === 'BRANCH_INACTIVE'
       ? loginError.message
       : /^(ADMIN|MANAGER)_/.test(code)
         ? safeAccessMessage(admin, code)
