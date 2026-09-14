@@ -141,8 +141,8 @@ test('Render face client reports safe upstream failure stages without exposing c
     [401, 502, 'FACE_SERVICE_AUTH_FAILED'],
     [403, 502, 'FACE_SERVICE_AUTH_FAILED'],
     [404, 502, 'FACE_SERVICE_ROUTE_MISMATCH'],
-    [422, 400, 'INVALID_FACE_IMAGE'],
-    [500, 503, 'FACE_SERVICE_UNAVAILABLE'],
+    [422, 400, 'FACE_INPUT_INVALID'],
+    [500, 503, 'FACE_SERVICE_UPSTREAM_ERROR'],
     [503, 503, 'FACE_SERVICE_UNAVAILABLE'],
   ];
   for (const [upstreamStatus, status, reason] of cases) {
@@ -180,6 +180,8 @@ test('ready check retries are bounded and cold start leaves the registration cha
   assert.ok(serialized.includes('FACE_UPSTREAM_READY_CHECK'));
   assert.ok(serialized.includes('FACE_UPSTREAM_STATUS'));
   assert.ok(serialized.includes('FACE_UPSTREAM_FAILED'));
+  assert.ok(serialized.includes('FACE_READY_ATTEMPT'));
+  assert.ok(serialized.includes('FACE_READY_NOT_READY'));
   assert.equal(serialized.includes('server-secret'), false);
 
   const f = fixture({ productionDetector: true, '/ready': Object.assign(new Error('warming'), { reason: 'FACE_SERVICE_PREPARING' }) });
@@ -191,6 +193,7 @@ test('ready check retries are bounded and cold start leaves the registration cha
 
 test('ready check can recover from one cold-start response and uses the trusted bearer contract', async () => {
   const calls = [];
+  const logs = [];
   const request = createRenderFaceClient({
     env: { DEEPFACE_API_URL: 'https://face.example.test', DEEPFACE_API_KEY: 'server-secret' },
     fetchImpl: async (url, options) => {
@@ -198,7 +201,7 @@ test('ready check can recover from one cold-start response and uses the trusted 
       if (calls.length === 1) return { ok: false, status: 503 };
       return { ok: true, status: 200, json: async () => ({ status: 'ready', modelLoaded: true }) };
     },
-    logger: { info: () => {}, error: () => {} },
+    logger: { info: (...args) => logs.push(args), error: (...args) => logs.push(args) },
     readyAttempts: 2,
     readyRetryDelayMs: 0,
   });
@@ -209,6 +212,7 @@ test('ready check can recover from one cold-start response and uses the trusted 
   ]);
   assert.ok(calls.every(({ options }) => options.method === 'GET'));
   assert.ok(calls.every(({ options }) => options.headers.Authorization === 'Bearer server-secret'));
+  assert.ok(JSON.stringify(logs).includes('FACE_READY_200'));
 });
 
 test('face upstream timeout is safe and bounded', async () => {

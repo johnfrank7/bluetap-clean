@@ -43,7 +43,7 @@ test('face-service status reports ready through Node without exposing the upstre
   const f = fixture();
   await f.handler(f.req, f.res);
   assert.equal(f.res.statusCode, 200);
-  assert.deepEqual(f.res.body, { status: 'ready' });
+  assert.deepEqual(f.res.body, { status: 'ready', code: 'FACE_SERVICE_READY' });
   assert.equal(f.renderCalls(), 1);
 });
 
@@ -52,21 +52,23 @@ test('cold face service reports starting and never changes registration state', 
   const f = fixture({ renderResult: error });
   await f.handler(f.req, f.res);
   assert.equal(f.res.statusCode, 200);
-  assert.deepEqual(f.res.body, { status: 'starting' });
+  assert.deepEqual(f.res.body, { status: 'starting', code: 'FACE_SERVICE_PREPARING' });
   assert.equal(JSON.stringify(f.res.body).includes('private upstream detail'), false);
 });
 
 test('disabled face policy does not wake or poll the Python service', async () => {
   const f = fixture({ required: false });
   await f.handler(f.req, f.res);
-  assert.deepEqual(f.res.body, { status: 'not_required' });
+  assert.deepEqual(f.res.body, { status: 'not_required', code: 'FACE_SERVICE_NOT_REQUIRED' });
   assert.equal(f.renderCalls(), 0);
 });
 
-test('warm-up remains bounded while allowing a 40-50 second Render wake-up', () => {
-  assert.equal(FACE_SERVICE_WARMUP_WINDOW_MS, 60_000);
+test('warm-up remains bounded while allowing a 20-70 second Render wake-up', () => {
+  assert.equal(FACE_SERVICE_WARMUP_WINDOW_MS, 75_000);
+  assert.equal(shouldContinueFaceWarmup({ required: true, status: 'starting', startedAt: 1_000, now: 21_000 }), true);
   assert.equal(shouldContinueFaceWarmup({ required: true, status: 'starting', startedAt: 1_000, now: 51_000 }), true);
-  assert.equal(shouldContinueFaceWarmup({ required: true, status: 'starting', startedAt: 1_000, now: 61_000 }), false);
+  assert.equal(shouldContinueFaceWarmup({ required: true, status: 'starting', startedAt: 1_000, now: 71_000 }), true);
+  assert.equal(shouldContinueFaceWarmup({ required: true, status: 'starting', startedAt: 1_000, now: 76_000 }), false);
   assert.equal(shouldContinueFaceWarmup({ required: false, status: 'starting', startedAt: 1_000, now: 2_000 }), false);
 });
 
@@ -74,7 +76,18 @@ test('preparing errors stay distinct from actual verification failures', () => {
   assert.equal(isFaceServicePreparationError({ code: 'registration/FACE_SERVICE_PREPARING' }), true);
   assert.equal(isFaceServicePreparationError({ code: 'registration/FACE_SERVICE_TIMEOUT' }), true);
   assert.equal(isFaceServicePreparationError({ code: 'registration/FACE_SERVICE_UNAVAILABLE' }), true);
+  assert.equal(isFaceServicePreparationError({ code: 'registration/FACE_SERVICE_UPSTREAM_ERROR' }), true);
   assert.equal(isFaceServicePreparationError({ code: 'registration/FACE_VERIFICATION_FAILED' }), false);
+});
+
+test('non-retryable readiness failures preserve a safe diagnostic code', async () => {
+  for (const reason of ['FACE_SERVICE_AUTH_FAILED', 'FACE_SERVICE_ROUTE_MISMATCH', 'FACE_SERVICE_UPSTREAM_ERROR']) {
+    const f = fixture({ renderResult: Object.assign(new Error('private detail'), { reason }) });
+    await f.handler(f.req, f.res);
+    assert.equal(f.res.statusCode, 200);
+    assert.deepEqual(f.res.body, { status: 'unavailable', code: reason });
+    assert.equal(JSON.stringify(f.res.body).includes('private detail'), false);
+  }
 });
 
 test('signup prewarms only a face-required session and renders neutral preparation UI', () => {
@@ -83,7 +96,19 @@ test('signup prewarms only a face-required session and renders neutral preparati
   const capture = readFileSync(resolve(root, 'components/RegistrationFaceCapture.jsx'), 'utf8');
   assert.match(handler, /result\.securityPolicy\?\.faceVerificationRequired === true/);
   assert.match(handler, /Promise\.resolve\(\)\.then\(warmFaceService\)/);
+  assert.match(handler, /FACE_PREWARM_TRIGGERED/);
   assert.match(capture, /Preparing face verification/);
   assert.match(capture, /Checking service\.\.\./);
   assert.match(capture, /serviceStatus !== 'ready'/);
+});
+
+test('verification pipeline emits safe stage names around each upstream operation', () => {
+  const root = resolve(__dirname, '..', '..', '..');
+  const service = readFileSync(resolve(root, 'backend/verification/registrationFace.js'), 'utf8');
+  for (const stage of [
+    'FACE_VERIFY_STARTED', 'FACE_VERIFY_FAILED',
+    'FACE_DUPLICATE_CHECK_STARTED', 'FACE_DUPLICATE_CHECK_FAILED',
+    'FACE_STORE_STARTED', 'FACE_STORE_FAILED',
+  ]) assert.match(service, new RegExp(stage));
+  assert.doesNotMatch(service, /logger\[[^\]]+\].*(image|embedding|authorization)/i);
 });

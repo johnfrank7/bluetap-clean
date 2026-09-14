@@ -32,8 +32,13 @@ function createRegistrationSessionHandler(action, getAdmin = getFirebaseAdmin, w
       if (action === 'create' && result.securityPolicy?.faceVerificationRequired === true) {
         // Start the Render Free wake-up without delaying registration-session
         // creation. Failures remain retryable and never alter session state.
+        console.info('[face-upstream]', JSON.stringify({
+          stage: 'FACE_PREWARM_TRIGGERED',
+          timestamp: new Date().toISOString(),
+        }));
         Promise.resolve().then(warmFaceService).catch((error) => console.info('[face-upstream]', JSON.stringify({
           stage: 'FACE_UPSTREAM_PREWARM_PENDING',
+          timestamp: new Date().toISOString(),
           reason: error?.reason || 'FACE_SERVICE_UNAVAILABLE',
         })));
       }

@@ -15,7 +15,24 @@ const unavailable = () => new OtpError(503, 'liveness-unavailable', 'The face ch
 const contractError = () => new OtpError(502, 'INVALID_FACE_RESPONSE', 'Face verification could not confirm the result. Please contact support.');
 const publicFace = (face) => ({ status: face.status, duplicateCheck: face.duplicateCheck, livenessPassed: face.livenessPassed === true });
 
-function createRegistrationFaceService({ db, detector = defaultDetector, render = createRenderFaceClient(), now = Date.now, timestamp = () => FieldValue.serverTimestamp() }) {
+function createRegistrationFaceService({ db, detector = defaultDetector, render = createRenderFaceClient(), now = Date.now, timestamp = () => FieldValue.serverTimestamp(), logger = console }) {
+  const upstreamStage = (stage, details = {}, failed = false) => {
+    const method = failed ? 'error' : 'info';
+    logger[method]?.('[registration-face]', JSON.stringify({ stage, timestamp: new Date().toISOString(), ...details }));
+  };
+  const callFaceStage = async (startedStage, failedStage, path, form, signal) => {
+    upstreamStage(startedStage, { path });
+    try {
+      return await render(path, form, signal);
+    } catch (error) {
+      upstreamStage(failedStage, {
+        path,
+        reason: error?.reason || 'FACE_SERVICE_UNAVAILABLE',
+        ...(Number.isInteger(error?.details?.upstreamStatus) ? { upstreamStatus: error.details.upstreamStatus } : {}),
+      }, true);
+      throw error;
+    }
+  };
   async function update(id, mutate) {
     const { ref } = await readRegistrationSession(db, id, now);
     return db.runTransaction(async (tx) => {
@@ -87,7 +104,7 @@ function createRegistrationFaceService({ db, detector = defaultDetector, render 
       const ready = await render('/ready', undefined, signal);
       if (ready?.modelLoaded === false || ready?.ready === false || !(ready?.status === 'ready' || ready?.ready === true)) throw new OtpError(503, 'FACE_SERVICE_PREPARING', 'Face verification service is starting. Please try again in a moment.');
       const pair = new FormData(); pair.append('image1', reference, 'challenge.jpg'); pair.append('image2', probe, 'final.jpg');
-      const match = await render('/verify-face', pair, signal);
+      const match = await callFaceStage('FACE_VERIFY_STARTED', 'FACE_VERIFY_FAILED', '/verify-face', pair, signal);
       if (typeof match?.verified !== 'boolean') throw contractError();
       if (!match.verified) {
         const face = { status: 'failed', verifiedAt: null, duplicateCheck: 'unknown', livenessPassed: false,
@@ -104,7 +121,7 @@ function createRegistrationFaceService({ db, detector = defaultDetector, render 
       });
       leaseHeld = true;
       const search = new FormData(); search.append('image', probe, 'face.jpg');
-      const duplicate = await render('/check-duplicate', search, signal);
+      const duplicate = await callFaceStage('FACE_DUPLICATE_CHECK_STARTED', 'FACE_DUPLICATE_CHECK_FAILED', '/check-duplicate', search, signal);
       // Contract inspected in bluetap-face-api/app.py and face_service.py.
       // An empty database reports distance:null; threshold remains numeric.
       if (typeof duplicate?.duplicateDetected !== 'boolean' || typeof duplicate?.reviewRequired !== 'boolean' ||
@@ -120,7 +137,7 @@ function createRegistrationFaceService({ db, detector = defaultDetector, render 
       const temporary = new FormData();
       temporary.append('registration_session_id', id);
       temporary.append('image', probe, 'face.jpg');
-      const stored = await render('/store-registration-face', temporary, signal);
+      const stored = await callFaceStage('FACE_STORE_STARTED', 'FACE_STORE_FAILED', '/store-registration-face', temporary, signal);
       if (stored?.stored !== true || stored?.duplicateDetected !== false || stored?.reviewRequired !== false ||
           stored?.registrationSessionId !== id || typeof stored?.expiresAt !== 'string') throw contractError();
       const face = { status: 'passed_pending_finalization', verifiedAt: timestamp(), duplicateCheck: 'clear', livenessPassed: true,
@@ -129,7 +146,7 @@ function createRegistrationFaceService({ db, detector = defaultDetector, render 
       await update(id, (current, save) => { check(current, challengeId, 'processing'); save({ faceVerification: face, faceEnrollmentPending: false, faceChallenge: { ...current.faceChallenge, state: 'used' } }); });
       return { faceVerification: publicFace(face) };
     } catch (error) {
-      const retryable = ['FACE_SERVICE_PREPARING', 'FACE_SERVICE_UNAVAILABLE', 'FACE_SERVICE_TIMEOUT'].includes(error?.reason);
+      const retryable = ['FACE_SERVICE_PREPARING', 'FACE_SERVICE_UNAVAILABLE', 'FACE_SERVICE_TIMEOUT', 'FACE_SERVICE_UPSTREAM_ERROR'].includes(error?.reason);
       await update(id, (current, save) => {
         if (current.faceChallenge?.id === challengeId) save({
           faceChallenge: { ...current.faceChallenge, state: retryable ? expectedChallengeState : 'failed' },

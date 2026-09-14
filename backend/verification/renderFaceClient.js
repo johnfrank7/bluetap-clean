@@ -25,8 +25,8 @@ function createRenderFaceClient({
   readyAttemptTimeoutMs = READY_ATTEMPT_TIMEOUT_MS,
   readyRetryDelayMs = READY_RETRY_DELAY_MS,
 } = {}) {
-  const log = (stage, details = {}) => logger.info('[face-upstream]', JSON.stringify({ stage, ...details }));
-  const failLog = (stage, details = {}) => logger.error('[face-upstream]', JSON.stringify({ stage, ...details }));
+  const log = (stage, details = {}) => logger.info('[face-upstream]', JSON.stringify({ stage, timestamp: new Date().toISOString(), ...details }));
+  const failLog = (stage, details = {}) => logger.error('[face-upstream]', JSON.stringify({ stage, timestamp: new Date().toISOString(), ...details }));
 
   async function fetchUpstream(base, path, form, parentSignal, attempt) {
     const controller = new AbortController();
@@ -37,7 +37,10 @@ function createRenderFaceClient({
       ? setTimeout(() => controller.abort(), readyAttemptTimeoutMs)
       : null;
     log('FACE_UPSTREAM_REQUEST_STARTED', { path, method: form ? 'POST' : 'GET', attempt });
-    if (path === '/ready') log('FACE_UPSTREAM_READY_CHECK', { path, attempt });
+    if (path === '/ready') {
+      log('FACE_UPSTREAM_READY_CHECK', { path, attempt });
+      log('FACE_READY_ATTEMPT', { attempt });
+    }
     try {
       return await fetchImpl(`${base}${path}`, {
         method: form ? 'POST' : 'GET', body: form, signal: controller.signal, redirect: 'error',
@@ -46,9 +49,11 @@ function createRenderFaceClient({
     } catch (error) {
       if (controller.signal.aborted || error?.name === 'AbortError') {
         failLog('FACE_UPSTREAM_TIMEOUT', { path, attempt });
+        if (path === '/ready') failLog('FACE_READY_TIMEOUT', { attempt });
         throw new OtpError(504, 'FACE_SERVICE_TIMEOUT', 'Face verification service took too long to respond. Please try again.', { upstreamPath: path });
       }
       failLog('FACE_UPSTREAM_FAILED', { path, attempt, category: 'network' });
+      if (path === '/ready') failLog('FACE_READY_NETWORK_ERROR', { attempt });
       throw new OtpError(503, 'FACE_SERVICE_UNAVAILABLE', 'Face verification service is temporarily unavailable. Please try again later.', { upstreamPath: path });
     } finally {
       if (timer) clearTimeout(timer);
@@ -68,21 +73,27 @@ function createRenderFaceClient({
       throw new OtpError(502, 'FACE_SERVICE_ROUTE_MISMATCH', 'Face verification service requires an update. Please contact support.', details);
     }
     if ([400, 413, 422].includes(response.status)) {
-      throw new OtpError(400, 'INVALID_FACE_IMAGE', 'Use a clear image with exactly one visible face.', details);
+      throw new OtpError(400, 'FACE_INPUT_INVALID', 'Use a clear image with exactly one visible face.', details);
     }
     if ([408, 504].includes(response.status)) {
       failLog('FACE_UPSTREAM_TIMEOUT', { path, status: response.status, attempt });
+      if (path === '/ready') failLog('FACE_READY_TIMEOUT', { status: response.status, attempt });
       throw new OtpError(504, 'FACE_SERVICE_TIMEOUT', 'Face verification service took too long to respond. Please try again.', details);
     }
     if ([502, 503].includes(response.status)) {
       const preparing = path === '/ready';
       failLog('FACE_UPSTREAM_FAILED', { path, status: response.status, attempt, category: preparing ? 'preparing' : 'unavailable' });
+      if (preparing) failLog('FACE_READY_NOT_READY', { status: response.status, attempt });
       throw new OtpError(
         503,
         preparing ? 'FACE_SERVICE_PREPARING' : 'FACE_SERVICE_UNAVAILABLE',
         preparing ? 'Face verification service is starting. Please try again in a moment.' : 'Face verification service is temporarily unavailable. Please try again later.',
         details,
       );
+    }
+    if (response.status >= 500) {
+      failLog('FACE_UPSTREAM_FAILED', { path, status: response.status, attempt, category: 'upstream-error' });
+      throw new OtpError(503, 'FACE_SERVICE_UPSTREAM_ERROR', 'Face verification service encountered a temporary error. Please try again later.', details);
     }
     if (!response.ok) {
       failLog('FACE_UPSTREAM_FAILED', { path, status: response.status, attempt, category: 'provider' });
@@ -125,12 +136,14 @@ function createRenderFaceClient({
         (data?.modelLoaded !== false && data?.ready !== false && (data?.status === 'ready' || data?.ready === true));
       if (!ready) {
         failLog('FACE_UPSTREAM_FAILED', { path, status: response.status, attempt, category: 'preparing' });
+        if (path === '/ready') failLog('FACE_READY_NOT_READY', { status: response.status, attempt });
         if (attempt < attempts) {
           await wait(readyRetryDelayMs);
           continue;
         }
         throw new OtpError(503, 'FACE_SERVICE_PREPARING', 'Face verification service is starting. Please try again in a moment.', { upstreamPath: path, upstreamStatus: response.status });
       }
+      if (path === '/ready') log('FACE_READY_200', { status: response.status, attempt });
       return data;
     }
     throw new OtpError(503, 'FACE_SERVICE_PREPARING', 'Face verification service is starting. Please try again in a moment.', { upstreamPath: path });

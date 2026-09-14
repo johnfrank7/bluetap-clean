@@ -16,12 +16,15 @@ function createStatusRenderClient() {
 async function safeFaceServiceStatus(render, signal) {
   try {
     await render('/ready', undefined, signal);
-    return { status: 'ready' };
+    return { status: 'ready', code: 'FACE_SERVICE_READY' };
   } catch (error) {
     if (['FACE_SERVICE_PREPARING', 'FACE_SERVICE_TIMEOUT', 'FACE_SERVICE_UNAVAILABLE'].includes(error?.reason)) {
-      return { status: 'starting' };
+      return { status: 'starting', code: 'FACE_SERVICE_PREPARING' };
     }
-    return { status: 'unavailable' };
+    const safeReason = ['FACE_SERVICE_AUTH_FAILED', 'FACE_SERVICE_ROUTE_MISMATCH', 'FACE_SERVICE_UPSTREAM_ERROR', 'INVALID_FACE_RESPONSE'].includes(error?.reason)
+      ? error.reason
+      : 'FACE_SERVICE_UNAVAILABLE';
+    return { status: 'unavailable', code: safeReason };
   }
 }
 
@@ -47,7 +50,7 @@ function createFaceServiceStatusHandler({
       }
       const { data } = await readRegistrationSession(getAdmin().db, body?.registrationSessionId);
       if (data.securityPolicySnapshot?.faceVerificationRequired === false) {
-        return res.status(200).json({ status: 'not_required' });
+        return res.status(200).json({ status: 'not_required', code: 'FACE_SERVICE_NOT_REQUIRED' });
       }
       return res.status(200).json(await safeFaceServiceStatus(render, controller.signal));
     } catch (error) {

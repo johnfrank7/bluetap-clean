@@ -25,10 +25,16 @@ export function useFaceServiceWarmup(registrationSessionId, required) {
 
     let active = true;
     let timer;
+    let attempts = 0;
     const startedAt = Date.now();
     setStatus('starting');
 
     const poll = async () => {
+      if (attempts > 0 && !shouldContinueFaceWarmup({ required, status: 'starting', startedAt, now: Date.now() })) {
+        if (active) setStatus('unavailable');
+        return;
+      }
+      attempts += 1;
       let nextStatus = 'starting';
       try {
         const result = await getFaceServiceStatus(registrationSessionId);
