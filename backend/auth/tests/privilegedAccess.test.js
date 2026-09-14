@@ -23,3 +23,12 @@ test('Admin and Manager login routes bypass only their login screen while dashbo
   assert.match(managerLayout, /segments\[segments\.length - 1\] === 'login'/);
   assert.match(managerLayout, /RoleGate allowedRoles=\{\["manager"\]\}/);
 });
+
+test('required Admin password change returns to Admin authentication and never the public login', () => {
+  const root = resolve(__dirname, '..', '..', '..');
+  const passwordChangePage = readFileSync(resolve(root, 'app/required-password-change.jsx'), 'utf8');
+  assert.match(passwordChangePage, /signInWithEmailAndPassword\(auth, adminEmail, password\)/);
+  assert.match(passwordChangePage, /router\.replace\('\/admin\/dashboard'\)/);
+  assert.match(passwordChangePage, /router\.replace\('\/admin\/login\?passwordChanged=true'\)/);
+  assert.doesNotMatch(passwordChangePage, /router\.replace\('\/login\?passwordChanged=true'\)/);
+});

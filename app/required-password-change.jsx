@@ -1,14 +1,15 @@
 import React from 'react';
 import { ActivityIndicator, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useRouter } from 'expo-router';
-import { onAuthStateChanged } from 'firebase/auth';
+import { onAuthStateChanged, signInWithEmailAndPassword } from 'firebase/auth';
 
 import { auth } from '../firebase';
-import { clearAllAuthSessions, signOutAndClearSessions } from '../services/authSession';
+import { clearAllAuthSessions, fetchFirestoreUserProfile, saveRoleSession, signOutAndClearSessions } from '../services/authSession';
 import { completeRequiredPasswordChange } from '../services/requiredPasswordChange';
 
 export default function RequiredPasswordChangePage() {
   const router = useRouter();
+  const passwordChangeFlow = React.useRef(false);
   const [ready, setReady] = React.useState(false);
   const [password, setPassword] = React.useState('');
   const [confirmPassword, setConfirmPassword] = React.useState('');
@@ -18,20 +19,36 @@ export default function RequiredPasswordChangePage() {
   const [error, setError] = React.useState('');
 
   React.useEffect(() => onAuthStateChanged(auth, (user) => {
-    if (!user) router.replace('/login');
+    if (!user && !passwordChangeFlow.current) router.replace('/admin/login');
     else setReady(true);
   }), [router]);
 
   const submit = async () => {
     if (saving) return;
     if (password !== confirmPassword) return setError('Passwords do not match.');
+    passwordChangeFlow.current = true;
     setSaving(true); setError('');
     try {
+      const adminEmail = auth.currentUser?.email || '';
       await completeRequiredPasswordChange(password);
       clearAllAuthSessions();
       await signOutAndClearSessions();
-      router.replace('/login?passwordChanged=true');
+      try {
+        if (!adminEmail) throw new Error('Admin email is unavailable.');
+        const credential = await signInWithEmailAndPassword(auth, adminEmail, password);
+        const profile = await fetchFirestoreUserProfile(credential.user);
+        if (!profile || profile.role !== 'admin' || profile.mustChangePassword === true) {
+          throw new Error('Admin profile refresh failed.');
+        }
+        saveRoleSession(profile);
+        router.replace('/admin/dashboard');
+      } catch {
+        await signOutAndClearSessions();
+        passwordChangeFlow.current = false;
+        router.replace('/admin/login?passwordChanged=true');
+      }
     } catch (submitError) {
+      passwordChangeFlow.current = false;
       setError(submitError.message || 'The password could not be changed.');
     } finally { setSaving(false); }
   };
@@ -48,7 +65,7 @@ export default function RequiredPasswordChangePage() {
     <View style={styles.passwordField}><TextInput secureTextEntry={!showConfirmation} autoCapitalize="none" value={confirmPassword} onChangeText={setConfirmPassword} style={styles.passwordInput} placeholder="Re-enter the new password" /><TouchableOpacity accessibilityRole="button" accessibilityLabel={showConfirmation ? 'Hide password confirmation' : 'Show password confirmation'} onPress={() => setShowConfirmation((visible) => !visible)} style={styles.visibilityButton}><Text style={styles.visibilityText}>{showConfirmation ? 'Hide' : 'Show'}</Text></TouchableOpacity></View>
     {!!error && <Text style={styles.error}>{error}</Text>}
     <TouchableOpacity disabled={saving} onPress={submit} style={[styles.button, saving && styles.disabled]}><Text style={styles.buttonText}>{saving ? 'Changing password...' : 'Change password'}</Text></TouchableOpacity>
-    <TouchableOpacity disabled={saving} onPress={async () => { await signOutAndClearSessions(); router.replace('/login'); }} style={styles.signOut}><Text style={styles.signOutText}>Back to Login</Text></TouchableOpacity>
+    <TouchableOpacity disabled={saving} onPress={async () => { await signOutAndClearSessions(); router.replace('/admin/login'); }} style={styles.signOut}><Text style={styles.signOutText}>Back to Admin Login</Text></TouchableOpacity>
   </View></View>;
 }
 

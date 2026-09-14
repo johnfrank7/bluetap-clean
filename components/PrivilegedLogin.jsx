@@ -1,7 +1,7 @@
 import React from 'react';
 import { ActivityIndicator, Image, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { getDocFromServer, doc } from 'firebase/firestore';
 import { signInWithCustomToken, signInWithEmailAndPassword, signOut } from 'firebase/auth';
 
@@ -15,6 +15,7 @@ const { hasTrustedRole } = require('../services/privilegedAccess');
 
 export default function PrivilegedLogin({ role }) {
   const router = useRouter();
+  const params = useLocalSearchParams();
   const admin = role === 'admin';
   const [identifier, setIdentifier] = React.useState('');
   const [password, setPassword] = React.useState('');
@@ -76,6 +77,7 @@ export default function PrivilegedLogin({ role }) {
         <Text style={styles.visibilityText}>{showPassword ? 'Hide' : 'Show'}</Text>
       </TouchableOpacity>
     </View>
+    {admin && params.passwordChanged === 'true' && !error && <Text style={styles.success}>Password changed successfully. Sign in with your new password.</Text>}
     {!!error && <Text accessibilityRole="alert" style={styles.error}>{error}</Text>}
     <TouchableOpacity disabled={loading} onPress={submit} style={[styles.button, loading && styles.disabled]}>{loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.buttonText}>{admin ? 'Sign in as Administrator' : 'Sign in as Manager'}</Text>}</TouchableOpacity>
     <TouchableOpacity disabled={loading} onPress={() => router.replace('/login')} style={styles.back}><Text style={styles.backText}>Back to public login</Text></TouchableOpacity>
@@ -94,6 +96,7 @@ const styles = StyleSheet.create({
   passwordInput: { flex: 1, minWidth: 0, minHeight: 47, paddingHorizontal: 13, color: '#17324D' },
   visibilityButton: { minWidth: 60, minHeight: 47, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 10 },
   visibilityText: { color: '#187BCD', fontSize: 13, fontWeight: '800' },
+  success: { color: '#167347', backgroundColor: '#E3F7EC', borderRadius: 8, padding: 10, marginTop: 14, textAlign: 'center' },
   error: { color: '#A72C25', backgroundColor: '#FFF1F0', borderRadius: 8, padding: 10, marginTop: 14, textAlign: 'center' },
   button: { minHeight: 50, borderRadius: 10, backgroundColor: '#187BCD', alignItems: 'center', justifyContent: 'center', marginTop: 20 },
   buttonText: { color: '#FFF', fontSize: 15, fontWeight: '800' }, disabled: { opacity: .65 },
