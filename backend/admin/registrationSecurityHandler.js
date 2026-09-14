@@ -1,34 +1,13 @@
 const { getFirebaseAdmin } = require('../firebase/firebaseAdmin');
 const { OtpError } = require('../utils/otpError');
 const { applyCors } = require('../utils/cors');
+const { bearerToken, requireAdmin } = require('../auth/authorization');
 const {
   CONFIG_PATH,
   loadRegistrationSecurity,
   normalizeRegistrationSecurity,
   validateRegistrationSecurity,
 } = require('../registration/registrationSecurity');
-
-function bearerToken(req) {
-  const match = /^Bearer\s+(.+)$/i.exec(String(req.headers?.authorization || '').trim());
-  if (!match) throw new OtpError(401, 'AUTHENTICATION_REQUIRED', 'Authentication is required.');
-  return match[1];
-}
-
-async function requireAdmin(req, auth, db) {
-  let decoded;
-  try {
-    decoded = await auth.verifyIdToken(bearerToken(req), true);
-  } catch (error) {
-    if (error instanceof OtpError) throw error;
-    throw new OtpError(401, 'AUTHENTICATION_REQUIRED', 'Authentication is required.');
-  }
-  const profile = await db.collection('users').doc(decoded.uid).get();
-  const trustedRole = profile.data()?.role;
-  if (!profile.exists || !(decoded.admin === true || decoded.role === 'admin') || trustedRole !== 'admin') {
-    throw new OtpError(403, 'ADMIN_REQUIRED', 'Administrator access is required.');
-  }
-  return decoded;
-}
 
 const sanitized = (config) => ({
   faceVerificationEnabled: config.faceVerificationEnabled,

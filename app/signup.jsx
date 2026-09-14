@@ -63,6 +63,7 @@ export default function SignupPage() {
   const [now, setNow] = React.useState(Date.now());
   const submitting = React.useRef(false);
   const entrance = React.useRef(new Animated.Value(0)).current;
+  const stepTransition = React.useRef(new Animated.Value(1)).current;
   const mobile = width < 600;
 
   React.useEffect(() => {
@@ -73,6 +74,21 @@ export default function SignupPage() {
       useNativeDriver: Platform.OS !== 'web',
     }).start();
   }, [entrance]);
+
+  React.useEffect(() => {
+    Animated.timing(stepTransition, {
+      toValue: 1,
+      duration: 260,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: Platform.OS !== 'web',
+    }).start();
+  }, [step, stepTransition]);
+
+  const transitionToStep = React.useCallback((target) => {
+    stepTransition.stopAnimation();
+    stepTransition.setValue(0);
+    setStep(target);
+  }, [stepTransition]);
 
   const update = (key, value) => {
     setForm((current) => ({ ...current, [key]: value }));
@@ -118,17 +134,17 @@ export default function SignupPage() {
     if (loading || target === step || target < 1 || target > 5) return;
     setErrors({});
     setShowBarangays(false);
-    setStep(target);
+    transitionToStep(target);
   };
 
   const advanceOrGuide = () => {
     if (prerequisiteNotice) {
-      setStep(prerequisiteNotice.target);
+      transitionToStep(prerequisiteNotice.target);
       setNotice({ ...prerequisiteNotice, tone: 'warning' });
       return;
     }
     if (step === 5) {
-      setStep(4);
+      transitionToStep(4);
       setNotice({
         tone: 'warning',
         title: 'Verification code required',
@@ -194,7 +210,7 @@ export default function SignupPage() {
           ? { required: false, status: 'not_required', duplicateCheck: 'not_required' }
           : { required: true, status: 'unverified', duplicateCheck: 'unknown' });
         if (result.securityPolicy?.faceVerificationRequired === false) {
-          setStep(4);
+          transitionToStep(4);
           setErrors({});
           return;
         }
@@ -204,15 +220,15 @@ export default function SignupPage() {
       } finally { setLoading(false); }
     }
     const nextStep = Math.min(4, step + 1);
-    setStep(nextStep);
+    transitionToStep(nextStep);
     setErrors({});
   };
 
   const back = () => {
     if (loading) return;
     if (step === 1) router.replace('/login');
-    else if (step === 4 && !securityPolicy.faceVerificationRequired) setStep(2);
-    else setStep((current) => current - 1);
+    else if (step === 4 && !securityPolicy.faceVerificationRequired) transitionToStep(2);
+    else transitionToStep((current) => current - 1);
   };
 
   const submit = async () => {
@@ -315,6 +331,10 @@ export default function SignupPage() {
                 disabled={loading}
               />
               {mobile && <Text style={styles.stepText}>Step {step} of 5 · {STEPS[step - 1]}</Text>}
+              <Animated.View style={{
+                opacity: stepTransition,
+                transform: [{ translateY: stepTransition.interpolate({ inputRange: [0, 1], outputRange: [10, 0] }) }],
+              }}>
               <RegistrationHeading title={step === 3 ? 'Verify your identity' : title} subtitle={step === 3 ? 'Complete a quick face check to help protect your account and prevent duplicate registrations.' : subtitle} />
 
               {step === 1 && <View style={styles.roleList}>
@@ -376,6 +396,7 @@ export default function SignupPage() {
                   : step === 5 ? 'Continue' : 'Next'}
               />
               <Text style={styles.loginPrompt}>Already have an account? <Text style={styles.loginLink} onPress={() => router.replace('/login')}>Log in.</Text></Text>
+              </Animated.View>
             </View>
           </Animated.View>
         </ScrollView>

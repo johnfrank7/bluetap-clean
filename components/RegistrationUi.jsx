@@ -1,5 +1,5 @@
 import React from 'react';
-import { ActivityIndicator, Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Animated, Easing, Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 import { BLUETAP_COLORS } from '../constants/bluetapTheme';
 
@@ -10,6 +10,50 @@ const {
 } = require('../services/registrationStepStatus');
 
 export const REGISTRATION_STEPS = ['Account', 'Personal', 'Identity', 'Credentials', 'Verify'];
+
+function AnimatedConnector({ state }) {
+  const target = state === 'future' ? 0 : 1;
+  const progress = React.useRef(new Animated.Value(target)).current;
+  React.useEffect(() => {
+    Animated.timing(progress, {
+      toValue: target,
+      duration: 280,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: false,
+    }).start();
+  }, [progress, target]);
+  return <View style={styles.connectorSegment}>
+    <Animated.View style={[
+      styles.connectorFill,
+      state === 'completed' ? styles.connectorComplete : styles.connectorIncomplete,
+      { width: progress.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] }) },
+    ]} />
+  </View>;
+}
+
+function AnimatedStepCircle({ state, children }) {
+  const entrance = React.useRef(new Animated.Value(1)).current;
+  React.useEffect(() => {
+    entrance.stopAnimation();
+    entrance.setValue(0);
+    Animated.spring(entrance, {
+      toValue: 1,
+      speed: 18,
+      bounciness: 5,
+      useNativeDriver: true,
+    }).start();
+  }, [entrance, state]);
+  return <Animated.View style={[
+    styles.stepCircle,
+    state === 'completed' && styles.stepCircleComplete,
+    state === 'incomplete' && styles.stepCircleIncomplete,
+    state === 'current' && styles.stepCircleCurrent,
+    {
+      opacity: entrance.interpolate({ inputRange: [0, 1], outputRange: [0.72, 1] }),
+      transform: [{ scale: entrance.interpolate({ inputRange: [0, 1], outputRange: [0.82, 1] }) }],
+    },
+  ]}>{children}</Animated.View>;
+}
 
 export function RegistrationBrand() {
   return <View style={styles.brand}>
@@ -38,11 +82,7 @@ export function RegistrationStepper({
 
   return <View style={styles.stepper} accessibilityRole="progressbar" accessibilityValue={{ min: 1, max: 5, now: currentStep }}>
     <View pointerEvents="none" style={styles.connectorTrack}>
-      {connectorStates.map((state, index) => <View key={index} style={[
-        styles.connectorSegment,
-        state === 'completed' && styles.connectorComplete,
-        state === 'incomplete' && styles.connectorIncomplete,
-      ]} />)}
+      {connectorStates.map((state, index) => <AnimatedConnector key={index} state={state} />)}
     </View>
     {REGISTRATION_STEPS.map((label, index) => {
       const number = index + 1;
@@ -61,16 +101,11 @@ export function RegistrationStepper({
           accessibilityHint={clickable ? 'Open this registration step' : undefined}
           accessibilityState={{ selected: current, disabled: !clickable }}
         >
-          <View style={[
-            styles.stepCircle,
-            complete && styles.stepCircleComplete,
-            incomplete && styles.stepCircleIncomplete,
-            current && styles.stepCircleCurrent,
-          ]}>
+          <AnimatedStepCircle state={state}>
             <Text style={[styles.stepNumber, (complete || current || incomplete) && styles.stepNumberActive]}>
               {complete ? '\u2713' : incomplete ? '\u2715' : number}
             </Text>
-          </View>
+          </AnimatedStepCircle>
           <Text numberOfLines={1} style={[
             styles.stepLabel,
             complete && styles.stepLabelComplete,
@@ -135,7 +170,8 @@ const styles = StyleSheet.create({
   stepper: { width: '100%', flexDirection: 'row', alignItems: 'flex-start', position: 'relative', marginBottom: 24 },
   stepItem: { flex: 1, alignItems: 'center', minWidth: 0, zIndex: 2 },
   connectorTrack: { position: 'absolute', height: 4, flexDirection: 'row', top: 13, left: '10%', right: '10%', zIndex: 0 },
-  connectorSegment: { flex: 1, height: 4, backgroundColor: '#D9E2E9' },
+  connectorSegment: { flex: 1, height: 4, backgroundColor: '#D9E2E9', overflow: 'hidden' },
+  connectorFill: { height: 4 },
   connectorComplete: { backgroundColor: '#1F9D61' },
   connectorIncomplete: { backgroundColor: '#E7A6A1' },
   stepButton: { width: '100%', minHeight: 50, alignItems: 'center', position: 'relative', zIndex: 2 },

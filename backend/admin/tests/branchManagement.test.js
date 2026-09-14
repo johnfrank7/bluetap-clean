@@ -1,0 +1,132 @@
+const assert = require('node:assert/strict');
+const test = require('node:test');
+
+const { createAdminBranchesHandler, createAdminManagersHandler } = require('../branchManagementHandler');
+const { createManagerContextHandler } = require('../../manager/managerContextHandler');
+const { requireActiveManager, requireManagerBranch } = require('../../auth/authorization');
+
+function fixture() {
+  const records = new Map([
+    ['users/admin-1', { role: 'admin', email: 'admin@example.test' }],
+    ['users/manager-1', { role: 'requester', email: 'manager@example.test', usernameNormalized: 'managerone', firstName: 'Manager', lastName: 'One' }],
+  ]);
+  const authUsers = new Map([
+    ['admin-1', { uid: 'admin-1', email: 'admin@example.test', customClaims: { admin: true, role: 'admin' } }],
+    ['manager-1', { uid: 'manager-1', email: 'manager@example.test', customClaims: {} }],
+  ]);
+  let autoId = 0;
+  const snapshot = (path) => ({ id: path.split('/').pop(), exists: records.has(path), data: () => records.get(path) });
+  const collection = (name) => ({
+    doc(id = `auto-${++autoId}`) {
+      const path = `${name}/${id}`;
+      return { id, path, get: async () => snapshot(path) };
+    },
+    where(field, op, value) {
+      let limit = Infinity;
+      return {
+        limit(valueToSet) { limit = valueToSet; return this; },
+        async get() {
+          const docs = [...records.entries()].filter(([path, data]) => path.startsWith(`${name}/`) && data[field] === value).slice(0, limit).map(([path]) => snapshot(path));
+          return { docs };
+        },
+      };
+    },
+    async get() { return { docs: [...records.keys()].filter((path) => path.startsWith(`${name}/`)).map(snapshot) }; },
+  });
+  const db = {
+    collection,
+    async runTransaction(run) {
+      return run({
+        create(ref, data) { if (records.has(ref.path)) throw new Error('exists'); records.set(ref.path, data); },
+        set(ref, data) { records.set(ref.path, data); },
+        update(ref, data) { records.set(ref.path, { ...(records.get(ref.path) || {}), ...data }); },
+      });
+    },
+  };
+  const tokenUids = { 'admin-token': 'admin-1', 'manager-token': 'manager-1' };
+  const auth = {
+    async verifyIdToken(token) { const user = authUsers.get(tokenUids[token]); if (!user) throw new Error('bad token'); return { uid: user.uid, ...user.customClaims }; },
+    async getUser(uid) { return authUsers.get(uid); },
+    async getUserByEmail(email) { const user = [...authUsers.values()].find((item) => item.email === email); if (!user) throw new Error('missing'); return user; },
+    async setCustomUserClaims(uid, claims) { authUsers.get(uid).customClaims = claims; },
+  };
+  return { auth, db, records, getAdmin: () => ({ auth, db }) };
+}
+
+function response() {
+  return {
+    statusCode: 200, body: null, headers: {},
+    setHeader(key, value) { this.headers[key] = value; },
+    status(code) { this.statusCode = code; return this; },
+    json(value) { this.body = value; return this; },
+    end() { return this; },
+  };
+}
+
+async function call(handler, method, token, body) {
+  const res = response();
+  await handler({ method, headers: token ? { authorization: `Bearer ${token}` } : {}, body }, res);
+  return res;
+}
+
+const branch = (code) => ({ name: `Branch ${code}`, code, barangay: 'Central', city: 'Toledo', address: `${code} Main Street` });
+
+test('Admin creates branches and assigns, reassigns, then deactivates a Manager', async () => {
+  const f = fixture();
+  const branches = createAdminBranchesHandler(f.getAdmin);
+  const managers = createAdminManagersHandler(f.getAdmin);
+  const managerContext = createManagerContextHandler(f.getAdmin);
+  assert.equal((await call(branches, 'POST', 'admin-token', branch('A1'))).statusCode, 201);
+  assert.equal((await call(branches, 'POST', 'admin-token', branch('B1'))).statusCode, 201);
+
+  let result = await call(managers, 'POST', 'admin-token', { identifier: 'manager@example.test', branchId: 'a1' });
+  assert.equal(result.statusCode, 200);
+  assert.equal(result.body.manager.branchId, 'a1');
+  assert.equal(f.records.get('users/manager-1').managerStatus, 'active');
+  let context = await call(managerContext, 'GET', 'manager-token');
+  assert.equal(context.statusCode, 200);
+  assert.equal(context.body.branch.id, 'a1');
+
+  const branchList = await call(branches, 'GET', 'admin-token');
+  const branchA = branchList.body.branches.find((item) => item.id === 'a1');
+  assert.equal(branchA.managers[0].uid, 'manager-1');
+
+  result = await call(managers, 'PATCH', 'admin-token', { managerUid: 'manager-1', branchId: 'b1', managerStatus: 'active' });
+  assert.equal(result.body.manager.branchId, 'b1');
+  assert.ok([...f.records.values()].some((entry) => entry.action === 'MANAGER_REASSIGNED'));
+  context = await call(managerContext, 'GET', 'manager-token');
+  assert.equal(context.statusCode, 200);
+  assert.equal(context.body.branch.id, 'b1');
+
+  result = await call(managers, 'PATCH', 'admin-token', { managerUid: 'manager-1', managerStatus: 'inactive' });
+  assert.equal(result.body.manager.managerStatus, 'inactive');
+  assert.equal(result.body.manager.branchId, '');
+  context = await call(managerContext, 'GET', 'manager-token');
+  assert.equal(context.statusCode, 403);
+  assert.equal(context.body.error.reason, 'MANAGER_INACTIVE');
+});
+
+test('Manager context derives its active Branch and rejects cross-branch or inactive access', async () => {
+  const f = fixture();
+  f.records.set('branches/a', { ...branch('A'), status: 'active' });
+  f.records.set('branches/b', { ...branch('B'), status: 'active' });
+  f.records.set('users/manager-1', { ...f.records.get('users/manager-1'), role: 'manager', managerStatus: 'active', branchId: 'a' });
+  await f.auth.setCustomUserClaims('manager-1', { role: 'manager', manager: true });
+  const context = await requireActiveManager({ headers: { authorization: 'Bearer manager-token' } }, f.auth, f.db);
+  assert.equal(requireManagerBranch(context, 'a'), 'a');
+  assert.throws(() => requireManagerBranch(context, 'b'), (error) => error.reason === 'BRANCH_ACCESS_DENIED');
+
+  f.records.set('branches/a', { ...f.records.get('branches/a'), status: 'inactive' });
+  await assert.rejects(requireActiveManager({ headers: { authorization: 'Bearer manager-token' } }, f.auth, f.db), (error) => error.reason === 'BRANCH_INACTIVE');
+});
+
+test('Manager cannot call Admin branch or Manager-management endpoints', async () => {
+  const f = fixture();
+  f.records.set('users/manager-1', { ...f.records.get('users/manager-1'), role: 'manager', managerStatus: 'active', branchId: 'a' });
+  await f.auth.setCustomUserClaims('manager-1', { role: 'manager', manager: true });
+  const deniedBranch = await call(createAdminBranchesHandler(f.getAdmin), 'POST', 'manager-token', branch('NO'));
+  const deniedManager = await call(createAdminManagersHandler(f.getAdmin), 'GET', 'manager-token');
+  assert.equal(deniedBranch.statusCode, 403);
+  assert.equal(deniedManager.statusCode, 403);
+  assert.equal(deniedManager.body.error.reason, 'ADMIN_REQUIRED');
+});

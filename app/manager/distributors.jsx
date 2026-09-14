@@ -12,6 +12,7 @@ import { collection, doc, onSnapshot, query, serverTimestamp, setDoc, where } fr
 import { db } from '../../firebase';
 import { getLocalUsers, subscribeLocalUsers, updateLocalUserStatus } from '../../localUsers';
 import { getProfileUniqueId } from '../../services/uniqueIds';
+import { getModuleSession } from '../../services/authSession';
 import ManagerShell, { MANAGER_COLORS, ManagerPill } from '../../components/ManagerShell';
 
 const normalizeApplicationStatus = (status) =>
@@ -27,10 +28,11 @@ const getDistributorApplicationStatus = (distributor) =>
       'pending'
   );
 
-const getRegisteredLocalDistributors = (firestoreDistributors = []) =>
+const getRegisteredLocalDistributors = (firestoreDistributors = [], branchId = '') =>
   getLocalUsers()
     .filter(
       (user) =>
+        user.branchId === branchId &&
         normalizeRole(user.role) === 'distributor' &&
         getDistributorApplicationStatus(user) === 'approved'
     )
@@ -80,6 +82,7 @@ const getJoinedLabel = (user = {}) => {
 };
 
 export default function ManagerDistributorsPage() {
+  const branchId = getModuleSession('manager')?.branchId || '';
   const [registeredDistributors, setRegisteredDistributors] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
@@ -95,7 +98,7 @@ export default function ManagerDistributorsPage() {
       firestoreRegistered = nextFirestoreRegistered;
       setRegisteredDistributors([
         ...firestoreRegistered,
-        ...getRegisteredLocalDistributors(firestoreRegistered),
+        ...getRegisteredLocalDistributors(firestoreRegistered, branchId),
       ]);
       setLoading(false);
     };
@@ -107,7 +110,8 @@ export default function ManagerDistributorsPage() {
 
     const registeredQuery = query(
       collection(db, 'users'),
-      where('role', '==', 'distributor')
+      where('role', '==', 'distributor'),
+      where('branchId', '==', branchId)
     );
 
     const unsubscribe = onSnapshot(
@@ -135,7 +139,7 @@ export default function ManagerDistributorsPage() {
       unsubscribe();
       unsubscribeLocalUsers();
     };
-  }, []);
+  }, [branchId]);
 
   const filteredDistributors = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase();

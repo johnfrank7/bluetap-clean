@@ -7,9 +7,11 @@ import {
   query,
   serverTimestamp,
   setDoc,
+  where,
 } from 'firebase/firestore';
 import { deleteObject, getDownloadURL, ref, uploadBytes } from 'firebase/storage';
 import { db, storage } from '../firebase';
+import { getModuleSession } from './authSession';
 
 export const PRODUCTS_COLLECTION = 'products';
 export const PRODUCT_SCHEMA_FIELDS = [
@@ -63,6 +65,7 @@ const normalizeProduct = (id, data = {}) => ({
   image: data.image || '',
   imagePath: data.imagePath || '',
   capacity: data.capacity || data.subtext || '',
+  branchId: (data.branchId || '').toString().trim(),
   created_at: data.created_at || data.createdAt || null,
   updated_at: data.updated_at || data.updatedAt || null,
   isLocal: !!data.isLocal,
@@ -205,13 +208,22 @@ let cachedProductsSignature = '';
 let unsubscribeSharedFirestoreProducts = null;
 let unsubscribeSharedLocalProducts = null;
 let stopProductsSubscriptionTimer = null;
+let sharedProductsScopeKey = '';
 const productSubscribers = new Set();
+
+const getProductsScope = () => {
+  const managerBranchId = getModuleSession('manager')?.branchId || '';
+  return {
+    managerBranchId,
+    key: managerBranchId ? `manager:${managerBranchId}` : 'all',
+  };
+};
 
 const getProductSignature = (products) =>
   products
     .map(
       (product) =>
-        `${product.id}|${product.product_name}|${product.price}|${product.image}|${product.capacity}|${timestampToMillis(product.updated_at)}`
+        `${product.id}|${product.branchId}|${product.product_name}|${product.price}|${product.image}|${product.capacity}|${timestampToMillis(product.updated_at)}`
     )
     .join('::');
 
@@ -222,7 +234,11 @@ const notifyProductSubscribers = () => {
 };
 
 const emitSharedProducts = (force = false) => {
-  const nextProducts = mergeProducts(sharedFirestoreProducts, getLocalProducts());
+  const { managerBranchId } = getProductsScope();
+  const mergedProducts = mergeProducts(sharedFirestoreProducts, getLocalProducts());
+  const nextProducts = managerBranchId
+    ? mergedProducts.filter((product) => product.branchId === managerBranchId)
+    : mergedProducts;
   const nextSignature = getProductSignature(nextProducts);
 
   if (!force && cachedProducts && nextSignature === cachedProductsSignature) {
@@ -239,6 +255,7 @@ const stopSharedProductsSubscription = () => {
   unsubscribeSharedLocalProducts?.();
   unsubscribeSharedFirestoreProducts = null;
   unsubscribeSharedLocalProducts = null;
+  sharedProductsScopeKey = '';
   stopProductsSubscriptionTimer = null;
 };
 
@@ -258,16 +275,34 @@ const startSharedProductsSubscription = () => {
     stopProductsSubscriptionTimer = null;
   }
 
-  if (unsubscribeSharedFirestoreProducts && unsubscribeSharedLocalProducts) {
+  const { managerBranchId, key: nextScopeKey } = getProductsScope();
+  if (
+    unsubscribeSharedFirestoreProducts &&
+    unsubscribeSharedLocalProducts &&
+    sharedProductsScopeKey === nextScopeKey
+  ) {
     return;
   }
 
+  // A role or Branch change must never reuse a listener/cache created for a
+  // different authorization scope. This also prevents a brief stale catalog
+  // flash while navigating between public and Manager sessions.
+  if (unsubscribeSharedFirestoreProducts || unsubscribeSharedLocalProducts) {
+    unsubscribeSharedFirestoreProducts?.();
+    unsubscribeSharedLocalProducts?.();
+    unsubscribeSharedFirestoreProducts = null;
+    unsubscribeSharedLocalProducts = null;
+  }
+  sharedFirestoreProducts = [];
+  cachedProducts = null;
+  cachedProductsSignature = '';
+  sharedProductsScopeKey = nextScopeKey;
+
   unsubscribeSharedLocalProducts = subscribeLocalProducts(() => emitSharedProducts());
 
-  const productsQuery = query(
-    collection(db, PRODUCTS_COLLECTION),
-    orderBy('created_at', 'asc')
-  );
+  const productsQuery = managerBranchId
+    ? query(collection(db, PRODUCTS_COLLECTION), where('branchId', '==', managerBranchId))
+    : query(collection(db, PRODUCTS_COLLECTION), orderBy('created_at', 'asc'));
 
   unsubscribeSharedFirestoreProducts = onSnapshot(
     productsQuery,
@@ -289,14 +324,14 @@ export const subscribeProducts = (listener, onError) => {
   const subscriber = { listener, onError };
   productSubscribers.add(subscriber);
 
+  startSharedProductsSubscription();
+
   const previousCachedProducts = cachedProducts;
   emitSharedProducts(!cachedProducts);
 
   if (cachedProducts && cachedProducts === previousCachedProducts) {
     listener(cachedProducts);
   }
-
-  startSharedProductsSubscription();
 
   return () => {
     productSubscribers.delete(subscriber);
@@ -377,6 +412,7 @@ const syncCreatedProductToFirebase = async ({
     imagePath: imagePayload.imagePath,
     created_at: serverTimestamp(),
     updated_at: serverTimestamp(),
+    branchId: localProduct.branchId,
   };
 
   try {
@@ -421,6 +457,7 @@ const syncUpdatedProductToFirebase = async ({
     imagePath: imagePayload.imagePath,
     created_at: existingProduct.created_at || serverTimestamp(),
     updated_at: serverTimestamp(),
+    branchId: localProduct.branchId,
   };
 
   try {
@@ -451,12 +488,15 @@ export const createProduct = async ({
   imageFile,
   imageDataUrl,
 }) => {
+  const branchId = getModuleSession('manager')?.branchId || '';
+  if (!branchId) throw new Error('An active Manager Branch assignment is required.');
   const productRef = doc(collection(db, PRODUCTS_COLLECTION));
   const localProduct = buildLocalProduct(productRef.id, {
     product_name: product_name.trim(),
     price: normalizePrice(price),
     image: imageDataUrl || '',
     imagePath: '',
+    branchId,
   });
 
   upsertLocalProduct(localProduct);
@@ -475,6 +515,8 @@ export const updateProduct = async (
   productId,
   { product_name, price, imageFile, imageDataUrl, existingProduct = {} }
 ) => {
+  const branchId = getModuleSession('manager')?.branchId || existingProduct.branchId || '';
+  if (!branchId || (existingProduct.branchId && existingProduct.branchId !== branchId)) throw new Error('Branch access denied.');
   const localProduct = buildLocalProduct(
     productId,
     {
@@ -483,6 +525,7 @@ export const updateProduct = async (
       price: normalizePrice(price),
       image: imageDataUrl || existingProduct.image || '',
       imagePath: existingProduct.imagePath || '',
+      branchId,
     },
     existingProduct
   );

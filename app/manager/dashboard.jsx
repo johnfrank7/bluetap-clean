@@ -16,6 +16,7 @@ import { db } from '../../firebase';
 import { getLocalUsers, subscribeLocalUsers, updateLocalUserStatus } from '../../localUsers';
 import { getLocalRequests } from '../../services/requests';
 import { getProfileUniqueId } from '../../services/uniqueIds';
+import { getModuleSession } from '../../services/authSession';
 import ManagerShell, {
   MANAGER_COLORS,
   ManagerPill,
@@ -41,10 +42,11 @@ const getDistributorApplicationStatus = (distributor) =>
       'pending'
   );
 
-const getRegisteredLocalDistributors = (firestoreDistributors = []) =>
+const getRegisteredLocalDistributors = (firestoreDistributors = [], branchId = '') =>
   getLocalUsers()
     .filter(
       (user) =>
+        user.branchId === branchId &&
         normalizeRole(user.role) === 'distributor' &&
         getDistributorApplicationStatus(user) === 'approved'
     )
@@ -781,6 +783,7 @@ const StationsPanel = ({ progress, stations }) => {
 };
 
 export default function ManagerDashboard() {
+  const branchId = getModuleSession('manager')?.branchId || '';
   const [registeredDistributors, setRegisteredDistributors] = useState([]);
   const [allUsers, setAllUsers] = useState([]);
   const [search, setSearch] = useState('');
@@ -829,7 +832,7 @@ export default function ManagerDashboard() {
 
       setRegisteredDistributors([
         ...firestoreRegistered,
-        ...getRegisteredLocalDistributors(firestoreRegistered),
+        ...getRegisteredLocalDistributors(firestoreRegistered, branchId),
       ]);
       setLoading(false);
     };
@@ -840,7 +843,8 @@ export default function ManagerDashboard() {
 
     const registeredQuery = query(
       collection(db, 'users'),
-      where('role', '==', 'distributor')
+      where('role', '==', 'distributor'),
+      where('branchId', '==', branchId)
     );
 
     const unsubscribe = onSnapshot(
@@ -872,7 +876,7 @@ export default function ManagerDashboard() {
       unsubscribe();
       unsubscribeLocalUsers();
     };
-  }, []);
+  }, [branchId]);
 
   useEffect(() => {
     let firestoreUsers = [];
@@ -887,9 +891,9 @@ export default function ManagerDashboard() {
 
       const mergedUsers = mergeByIdentity([
         ...firestoreUsers,
-        ...getLocalUsers(),
+        ...getLocalUsers().filter((user) => user.branchId === branchId),
       ]);
-      const localRequests = getLocalRequests();
+      const localRequests = getLocalRequests().filter((request) => request.branchId === branchId);
       const requestIds = new Set(firestoreRequests.map((item) => item.id));
       const allRequests = [
         ...firestoreRequests,
@@ -926,7 +930,7 @@ export default function ManagerDashboard() {
     const unsubscribeLocalUsers = subscribeLocalUsers(refreshDashboardStats);
 
     const unsubscribeUsers = onSnapshot(
-      collection(db, 'users'),
+      query(collection(db, 'users'), where('branchId', '==', branchId)),
       (snapshot) => {
         firestoreUsers = snapshot.docs.map((item) => ({
           id: item.id,
@@ -944,7 +948,7 @@ export default function ManagerDashboard() {
     );
 
     const unsubscribeRequests = onSnapshot(
-      collection(db, 'requests'),
+      query(collection(db, 'requests'), where('branchId', '==', branchId)),
       (snapshot) => {
         firestoreRequests = snapshot.docs.map((item) => ({
           id: item.id,
@@ -965,7 +969,7 @@ export default function ManagerDashboard() {
       unsubscribeRequests();
       unsubscribeLocalUsers();
     };
-  }, []);
+  }, [branchId]);
 
   const filteredDistributors = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase();

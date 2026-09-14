@@ -5,6 +5,9 @@ const { createUsernameHandler } = require('../username/usernameHandler');
 const { createFaceVerificationHandler } = require('../verification/faceVerification');
 const { createRegistrationFaceHandler } = require('../verification/registrationFaceHandler');
 const { createAdminRegistrationSecurityHandler } = require('../admin/registrationSecurityHandler');
+const { createAdminBranchesHandler, createAdminManagersHandler } = require('../admin/branchManagementHandler');
+const { createRequiredPasswordChangeHandler } = require('../auth/requiredPasswordChangeHandler');
+const { createManagerContextHandler } = require('../manager/managerContextHandler');
 
 const routes = new Map([
   ['/api/auth/check-username', createUsernameHandler('check')],
@@ -20,6 +23,10 @@ const routes = new Map([
   ['/api/verification/verify-face', createFaceVerificationHandler()],
   ['/api/verification/registration-face', createRegistrationFaceHandler()],
   ['/api/admin/registration-security', createAdminRegistrationSecurityHandler()],
+  ['/api/admin/branches', createAdminBranchesHandler()],
+  ['/api/admin/managers', createAdminManagersHandler()],
+  ['/api/manager/context', createManagerContextHandler()],
+  ['/api/auth/complete-required-password-change', createRequiredPasswordChangeHandler()],
 ]);
 
 module.exports = { routes };

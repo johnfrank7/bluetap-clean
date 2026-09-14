@@ -7,11 +7,12 @@ import {
   Text,
   View,
 } from 'react-native';
-import { collection, onSnapshot } from 'firebase/firestore';
+import { collection, onSnapshot, query, where } from 'firebase/firestore';
 
 import { db } from '../../firebase';
 import { getLocalUsers, subscribeLocalUsers } from '../../localUsers';
 import { getLocalRequests } from '../../services/requests';
+import { getModuleSession } from '../../services/authSession';
 import ManagerShell, {
   MANAGER_COLORS,
   ManagerPill,
@@ -762,6 +763,7 @@ const StationsPanel = ({ progress, rows }) => (
 );
 
 export default function ManagerAnalyticsPage() {
+  const branchId = getModuleSession('manager')?.branchId || '';
   const [search, setSearch] = useState('');
   const [users, setUsers] = useState([]);
   const [requests, setRequests] = useState([]);
@@ -791,9 +793,9 @@ export default function ManagerAnalyticsPage() {
     const refreshAnalytics = () => {
       const mergedUsers = mergeByIdentity([
         ...firestoreUsers,
-        ...getLocalUsers(),
+        ...getLocalUsers().filter((user) => user.branchId === branchId),
       ]);
-      const localRequests = getLocalRequests();
+      const localRequests = getLocalRequests().filter((request) => request.branchId === branchId);
       const requestIds = new Set(firestoreRequests.map((item) => item.id));
       const allRequests = [
         ...firestoreRequests,
@@ -812,7 +814,7 @@ export default function ManagerAnalyticsPage() {
     const unsubscribeLocalUsers = subscribeLocalUsers(refreshAnalytics);
 
     const unsubscribeUsers = onSnapshot(
-      collection(db, 'users'),
+      query(collection(db, 'users'), where('branchId', '==', branchId)),
       (snapshot) => {
         firestoreUsers = snapshot.docs.map((item) => ({
           id: item.id,
@@ -828,7 +830,7 @@ export default function ManagerAnalyticsPage() {
     );
 
     const unsubscribeRequests = onSnapshot(
-      collection(db, 'requests'),
+      query(collection(db, 'requests'), where('branchId', '==', branchId)),
       (snapshot) => {
         firestoreRequests = snapshot.docs.map((item) => ({
           id: item.id,
@@ -847,7 +849,7 @@ export default function ManagerAnalyticsPage() {
       unsubscribeRequests();
       unsubscribeLocalUsers();
     };
-  }, []);
+  }, [branchId]);
 
   useEffect(() => {
     if (!dataReady || hasAnimated.current) return;

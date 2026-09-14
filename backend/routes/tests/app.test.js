@@ -8,10 +8,13 @@ const { routes } = require('..');
 const { getClientIp } = require('../../utils/request');
 
 const EXPECTED_ROUTES = [
+  '/api/admin/branches',
+  '/api/admin/managers',
   '/api/admin/registration-security',
   '/api/auth/accept-registration-terms',
   '/api/auth/check-username',
   '/api/auth/complete-registration',
+  '/api/auth/complete-required-password-change',
   '/api/auth/create-registration-session',
   '/api/auth/login-with-username',
   '/api/auth/registration-session-status',
@@ -19,6 +22,7 @@ const EXPECTED_ROUTES = [
   '/api/auth/request-registration-otp',
   '/api/auth/start-registration-face-verification',
   '/api/auth/verify-email-otp',
+  '/api/manager/context',
   '/api/verification/registration-face',
   '/api/verification/verify-face',
 ];

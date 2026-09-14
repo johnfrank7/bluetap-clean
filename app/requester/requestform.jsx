@@ -64,6 +64,7 @@ const buildOrderItem = (product, quantity = 1) => ({
   product_price: Number(product.price || 0),
   image: product.image || '',
   quantity,
+  branchId: product.branchId || '',
 });
 
 export default function RequestFormPage() {
@@ -256,6 +257,12 @@ export default function RequestFormPage() {
       return false;
     }
 
+    const branchIds = new Set(syncedOrderItems.map((item) => item.branchId).filter(Boolean));
+    if (branchIds.size !== 1 || syncedOrderItems.some((item) => !item.branchId)) {
+      Alert.alert('Choose one branch', 'All products in a request must belong to the same active BlueTap branch.');
+      return false;
+    }
+
     if (!waterStation) {
       Alert.alert('Choose station', 'Please choose a water station.');
       return false;
@@ -277,6 +284,7 @@ export default function RequestFormPage() {
       setSubmitting(true);
 
       await createRequest({
+        branchId: syncedOrderItems[0]?.branchId || '',
         requester_id: requesterInfo.id,
         requester_unique_id: requesterInfo.uniqueId,
         requester_name: requesterInfo.fullName,
@@ -290,6 +298,7 @@ export default function RequestFormPage() {
           product_price: item.product_price,
           quantity: item.quantity,
           line_total: item.line_total,
+          branchId: item.branchId,
         })),
         container,
         water_station: waterStation,

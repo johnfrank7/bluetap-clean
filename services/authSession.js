@@ -5,6 +5,7 @@ import { auth, db } from '../firebase';
 import { saveLocalUser } from '../localUsers';
 import { isFaceVerified, normalizeFaceVerification } from './faceVerification';
 import { ensureUserUniqueId } from './uniqueIds';
+import { getManagerContext } from './managerAccess';
 
 const ACTIVE_SESSION_KEY = 'bluetapActiveAuthSession';
 const MODULE_SESSIONS_KEY = 'bluetapModuleAuthSessions';
@@ -106,6 +107,7 @@ const isFaceRequirementSatisfied = (profile = {}) =>
 
 export const getPostAuthenticationDestination = (profile = {}) => {
   const role = normalizeRole(profile.role);
+  if (role === 'admin' && profile.mustChangePassword === true) return '/required-password-change';
   if (role === 'admin') return '/admin/dashboard';
   if (role === 'manager') return '/manager/dashboard';
   if (!['requester', 'distributor'].includes(role)) return '/login';
@@ -137,14 +139,17 @@ export const saveRoleSession = (profile = {}) => {
     uid: profile.uid || profile.id || '',
     email: (profile.email || '').toString().trim().toLowerCase(),
     role,
-    isManagerSecret: !!profile.isManagerSecret,
+    branchId: (profile.branchId || '').toString().trim(),
+    branchName: (profile.branchName || profile.branch?.name || '').toString().trim(),
+    managerStatus: (profile.managerStatus || '').toString().trim().toLowerCase(),
   };
   const hasSameIdentity =
     existingSession &&
     existingSession.uid === nextSession.uid &&
     existingSession.email === nextSession.email &&
     existingSession.role === nextSession.role &&
-    !!existingSession.isManagerSecret === nextSession.isManagerSecret;
+    existingSession.branchId === nextSession.branchId &&
+    existingSession.managerStatus === nextSession.managerStatus;
   const session = hasSameIdentity
     ? existingSession
     : {
@@ -155,14 +160,6 @@ export const saveRoleSession = (profile = {}) => {
   setSessions(session, { [role]: session });
   return session;
 };
-
-export const saveManagerSession = () =>
-  saveRoleSession({
-    uid: 'legacy-secret-manager',
-    email: 'bluetapmanager',
-    role: 'manager',
-    isManagerSecret: true,
-  });
 
 export const clearModuleSession = (role) => {
   const normalizedRole = normalizeRole(role);
@@ -256,19 +253,6 @@ export const fetchFirestoreUserProfile = async (user) => {
   return profile;
 };
 
-const getManagerSessionAccess = () => {
-  const managerSession = getModuleSession('manager');
-
-  if (!managerSession?.isManagerSecret) {
-    return null;
-  }
-
-  return {
-    status: 'authorized',
-    profile: managerSession,
-  };
-};
-
 export const validateRoleAccess = async (expectedRole) => {
   const expected = normalizeRole(expectedRole);
 
@@ -282,14 +266,6 @@ export const validateRoleAccess = async (expectedRole) => {
   }
 
   const currentUser = auth.currentUser;
-
-  if (expected === 'manager' && !currentUser) {
-    const managerAccess = getManagerSessionAccess();
-
-    if (managerAccess) {
-      return managerAccess;
-    }
-  }
 
   if (!currentUser) {
     return {
@@ -367,6 +343,40 @@ export const validateRoleAccess = async (expectedRole) => {
       clearRole: expected,
       actualRole: profile.role,
     };
+  }
+
+  if (expected === 'admin' && profile.mustChangePassword === true) {
+    return {
+      status: 'password-change-required',
+      message: 'Change your temporary Admin password to continue.',
+      redirectTo: '/required-password-change',
+      clearRole: expected,
+    };
+  }
+
+  if (expected === 'admin') {
+    try {
+      const token = await currentUser.getIdTokenResult(true);
+      if (!(token.claims?.admin === true || token.claims?.role === 'admin')) throw new Error('Admin claim missing.');
+    } catch {
+      return { status: 'unauthorized', message: 'Administrator access is required.', redirectTo: '/login', shouldSignOut: true, clearRole: expected };
+    }
+  }
+
+  if (expected === 'manager') {
+    try {
+      const context = await getManagerContext();
+      profile = { ...profile, ...context.manager, branch: context.branch, branchName: context.branch?.name || '' };
+    } catch (error) {
+      const inactive = ['MANAGER_INACTIVE', 'BRANCH_INACTIVE', 'BRANCH_ACCESS_DENIED'].includes(error.code);
+      return {
+        status: inactive ? 'manager-inactive' : 'unauthorized',
+        message: error.message || 'Manager access is unavailable.',
+        redirectTo: inactive ? `/manager-access-status?reason=${encodeURIComponent(error.code)}` : '/login',
+        shouldSignOut: !inactive,
+        clearRole: expected,
+      };
+    }
   }
 
   if (

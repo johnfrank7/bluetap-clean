@@ -14,7 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 
 import { BLUETAP_COLORS } from '../constants/bluetapTheme';
-import { signOutAndClearSessions } from '../services/authSession';
+import { getModuleSession, signOutAndClearSessions } from '../services/authSession';
 
 export const MANAGER_COLORS = {
   navy: BLUETAP_COLORS.primary,
@@ -94,6 +94,7 @@ export default function ManagerShell({
   const [internalSearch, setInternalSearch] = useState('');
   const isCompactLayout = width < 768;
   const visibleSearchValue = searchValue ?? internalSearch;
+  const managerSession = getModuleSession('manager');
   const handleSearchChange = onSearchChange || setInternalSearch;
 
   const handleLogout = async () => {
@@ -136,6 +137,7 @@ export default function ManagerShell({
             />
             <Text style={styles.brandText}>BlueTap</Text>
           </View>
+          {!!managerSession?.branchName && <Text style={[styles.branchName, isCompactLayout && styles.branchNameCompact]} numberOfLines={1}>{managerSession.branchName}</Text>}
 
           {isCompactLayout ? (
             <ScrollView
@@ -246,6 +248,17 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 19,
     fontWeight: 'bold',
+  },
+  branchName: {
+    color: '#CBEAFF',
+    fontSize: 12,
+    fontWeight: '700',
+    paddingHorizontal: 28,
+    paddingTop: 10,
+  },
+  branchNameCompact: {
+    paddingHorizontal: 20,
+    paddingTop: 7,
   },
   navList: {
     paddingTop: 14,

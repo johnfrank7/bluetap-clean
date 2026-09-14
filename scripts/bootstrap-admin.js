@@ -12,19 +12,22 @@ const email = value('--email').trim().toLowerCase();
 const username = value('--username').trim();
 const usernameNormalized = username.toLowerCase();
 const create = args.includes('--create');
+const resetExistingAdmin = args.includes('--reset-existing-admin');
 
 function usage() {
   return 'Usage:\n' +
     '  Promote existing: node scripts/bootstrap-admin.js --uid <firebase-uid> --apply --confirm BOOTSTRAP_BLUETAP_ADMIN\n' +
-    '  Create new:       node scripts/bootstrap-admin.js --create --email <email> --username <username> --password-stdin --apply --confirm BOOTSTRAP_BLUETAP_ADMIN';
+    '  Create new:       node scripts/bootstrap-admin.js --create --email <email> --username <username> --password-stdin --apply --confirm BOOTSTRAP_BLUETAP_ADMIN\n' +
+    '  Reset Admin:      node scripts/bootstrap-admin.js --reset-existing-admin --email <email> --username <username> --password-stdin --apply --confirm BOOTSTRAP_BLUETAP_ADMIN';
 }
 
 if (!args.includes('--apply') || value('--confirm') !== 'BOOTSTRAP_BLUETAP_ADMIN') throw new Error(usage());
 if (!process.env.FIREBASE_SERVICE_ACCOUNT_PATH) throw new Error('FIREBASE_SERVICE_ACCOUNT_PATH is required.');
-if (create && (!/^\S+@\S+\.\S+$/.test(email) || !/^[a-z0-9._-]{3,20}$/.test(usernameNormalized) || !args.includes('--password-stdin'))) {
+if (create && resetExistingAdmin) throw new Error(usage());
+if ((create || resetExistingAdmin) && (!/^\S+@\S+\.\S+$/.test(email) || !/^[a-z0-9._-]{3,20}$/.test(usernameNormalized) || !args.includes('--password-stdin'))) {
   throw new Error(usage());
 }
-if (!create && !/^[A-Za-z0-9_-]{1,128}$/.test(uidArgument)) throw new Error(usage());
+if (!create && !resetExistingAdmin && !/^[A-Za-z0-9_-]{1,128}$/.test(uidArgument)) throw new Error(usage());
 
 async function readPassword() {
   const password = await new Promise((resolve, reject) => {
@@ -49,6 +52,7 @@ const app = getApps()[0] || initializeApp({ credential: cert(account), projectId
   const db = getFirestore(app);
   let user;
   let created = false;
+  let temporaryPassword = '';
 
   if (create) {
     try {
@@ -62,6 +66,17 @@ const app = getApps()[0] || initializeApp({ credential: cert(account), projectId
     const password = await readPassword();
     user = await auth.createUser({ email, password, emailVerified: true, displayName: username });
     created = true;
+  } else if (resetExistingAdmin) {
+    user = await auth.getUserByEmail(email);
+    const existingProfile = await db.collection('users').doc(user.uid).get();
+    if (!existingProfile.exists || existingProfile.data()?.role !== 'admin' || !(user.customClaims?.admin === true || user.customClaims?.role === 'admin')) {
+      throw new Error('Refusing to reset an account that is not already proven to be an Admin by both Auth claims and Firestore profile.');
+    }
+    const existingUsername = String(existingProfile.data()?.usernameNormalized || '').trim().toLowerCase();
+    if (existingUsername && existingUsername !== usernameNormalized) throw new Error('The supplied username does not match this Admin profile.');
+    const usernameSnapshot = await db.collection('usernames').doc(usernameNormalized).get();
+    if (usernameSnapshot.exists && usernameSnapshot.data()?.uid !== user.uid) throw new Error('The requested username belongs to another account.');
+    temporaryPassword = await readPassword();
   } else {
     user = await auth.getUser(uidArgument);
   }
@@ -74,7 +89,7 @@ const app = getApps()[0] || initializeApp({ credential: cert(account), projectId
       manager: false,
     });
     await db.runTransaction(async (tx) => {
-      if (create) {
+      if (create || resetExistingAdmin) {
         const usernameRef = db.collection('usernames').doc(usernameNormalized);
         const claimed = await tx.get(usernameRef);
         if (claimed.exists && claimed.data()?.uid !== user.uid) throw new Error('The requested username was claimed concurrently.');
@@ -84,16 +99,20 @@ const app = getApps()[0] || initializeApp({ credential: cert(account), projectId
         uid: user.uid,
         email: user.email || email,
         role: 'admin',
-        emailVerified: user.emailVerified === true,
+        emailVerified: create || resetExistingAdmin ? true : user.emailVerified === true,
         registrationCompleted: true,
         onboardingStatus: 'complete',
         approvalStatus: 'approved',
         status: 'Approved',
+        mustChangePassword: create || resetExistingAdmin ? true : undefined,
         updatedAt: new Date(),
       };
-      if (create) Object.assign(profile, { username, usernameNormalized, createdAt: new Date() });
+      if (!create && !resetExistingAdmin) delete profile.mustChangePassword;
+      if (create || resetExistingAdmin) Object.assign(profile, { username, usernameNormalized });
+      if (create) profile.createdAt = new Date();
       tx.set(db.collection('users').doc(user.uid), profile, { merge: true });
     });
+    if (resetExistingAdmin) await auth.updateUser(user.uid, { password: temporaryPassword, emailVerified: true, displayName: username });
   } catch (error) {
     if (created) {
       try { await auth.deleteUser(user.uid); } catch { /* report the original failure */ }

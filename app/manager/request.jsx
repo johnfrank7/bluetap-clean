@@ -22,6 +22,7 @@ import {
 import { db } from '../../firebase';
 import { getLocalUsers, subscribeLocalUsers, updateLocalUserStatus } from '../../localUsers';
 import { getProfileUniqueId, saveUserProfileWithUniqueId } from '../../services/uniqueIds';
+import { getModuleSession } from '../../services/authSession';
 import ManagerShell, {
   MANAGER_COLORS,
   ManagerPill,
@@ -49,10 +50,11 @@ const getDistributorApplicationStatus = (distributor) =>
       'pending'
   );
 
-const getPendingLocalDistributors = (firestoreDistributors = []) =>
+const getPendingLocalDistributors = (firestoreDistributors = [], branchId = '') =>
   getLocalUsers()
     .filter(
       (user) =>
+        user.branchId === branchId &&
         normalizeRole(user.role) === 'distributor' &&
         getDistributorApplicationStatus(user) === 'pending'
     )
@@ -104,6 +106,7 @@ const buildDistributorUpdate = (distributor, approvalStatus, rejectionReason = '
 };
 
 export default function ManagerRequestPage() {
+  const branchId = getModuleSession('manager')?.branchId || '';
   const [pendingDistributors, setPendingDistributors] = useState([]);
   const [loading, setLoading] = useState(true);
   const [updatingId, setUpdatingId] = useState(null);
@@ -120,7 +123,7 @@ export default function ManagerRequestPage() {
       firestorePending = nextFirestorePending;
       setPendingDistributors([
         ...firestorePending,
-        ...getPendingLocalDistributors(firestorePending),
+        ...getPendingLocalDistributors(firestorePending, branchId),
       ]);
       setLoading(false);
     };
@@ -130,7 +133,8 @@ export default function ManagerRequestPage() {
 
     const pendingQuery = query(
       collection(db, 'users'),
-      where('role', '==', 'distributor')
+      where('role', '==', 'distributor'),
+      where('branchId', '==', branchId)
     );
 
     const unsubscribe = onSnapshot(
@@ -158,7 +162,7 @@ export default function ManagerRequestPage() {
       unsubscribe();
       unsubscribeLocalUsers();
     };
-  }, []);
+  }, [branchId]);
 
   const filteredDistributors = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase();

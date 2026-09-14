@@ -12,6 +12,7 @@ import {
   Keyboard,
   Modal,
   Platform,
+  Pressable,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -31,7 +32,6 @@ import { findLocalUserByEmail, saveLocalUser } from '../localUsers';
 import {
   clearAllAuthSessions,
   getPostAuthenticationDestination,
-  saveManagerSession,
   saveRoleSession,
 } from '../services/authSession';
 import { ensureUserUniqueId } from '../services/uniqueIds';
@@ -39,6 +39,8 @@ import { loginWithUsername } from '../services/usernameAuth';
 import { recoverTrustedProfile } from '../services/profileRecovery';
 import { restartIncompleteRegistration } from '../services/profileRecovery';
 import { clearPendingRegistration } from '../services/emailVerification';
+
+const { createHiddenAdminEntryTracker } = require('../services/hiddenAdminEntry');
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const applicationPendingTitle = 'Application Pending';
@@ -117,7 +119,7 @@ const getFieldKeyboardGap = (field) =>
 
 export default function LoginPage() {
   const router = useRouter();
-  const { signup } = useLocalSearchParams();
+  const { signup, passwordChanged } = useLocalSearchParams();
   const emailInputRef = React.useRef(null);
   const passwordInputRef = React.useRef(null);
   const scrollViewRef = React.useRef(null);
@@ -140,12 +142,23 @@ export default function LoginPage() {
   const [notification, setNotification] = React.useState(null);
   const [keyboardBottomInset, setKeyboardBottomInset] = React.useState(0);
   const isLoginSuccessVisible = notification?.title === 'Successfully logged in';
+  const adminEntryTracker = React.useMemo(() => createHiddenAdminEntryTracker({
+    onTrigger: () => router.push('/admin/login'),
+  }), [router]);
+
+  React.useEffect(() => () => adminEntryTracker.reset(), [adminEntryTracker]);
 
   React.useEffect(() => {
     if (signup === 'true') {
       router.replace('/signup');
     }
   }, [router, signup]);
+
+  React.useEffect(() => {
+    if (passwordChanged === 'true') {
+      setNotification({ title: 'Password changed', message: 'Your Admin password was changed. Sign in with your new password.', onConfirm: null });
+    }
+  }, [passwordChanged]);
 
   const clearFocusScrollTimeout = React.useCallback(() => {
     if (focusScrollTimeoutRef.current) {
@@ -311,25 +324,6 @@ export default function LoginPage() {
     try {
       setLoading(true);
 
-      // Legacy operational Manager credentials. This client-side mechanism is
-      // intentionally not accepted for the higher-privilege Admin role.
-      if (normalizedEmail === 'bluetapmanager' && enteredPassword === '12345678') {
-        try {
-          await signOut(auth);
-        } catch (error) {
-          console.log('Manager Firebase sign out error:', error.message);
-        }
-
-        saveManagerSession();
-        setLoading(false);
-        showNotification(
-          'Successfully logged in',
-          'You have successfully logged in.',
-          () => router.replace('/manager/dashboard')
-        );
-        return;
-      }
-
       // Legacy accounts may continue signing in with email. New accounts use
       // the server-side username registry and receive a Firebase custom token.
       const userCredential = loginIdentifier.includes('@')
@@ -378,7 +372,14 @@ export default function LoginPage() {
         rejectionReason: userData.rejectionReason || null,
       };
 
-      if (!['admin', 'manager', 'requester', 'distributor'].includes(profileRole)) {
+      if (profileRole === 'admin' || profileRole === 'manager') {
+        clearAllAuthSessions();
+        await signOut(auth);
+        showNotification('Login failed', 'This account must use its authorized sign-in portal.');
+        return;
+      }
+
+      if (!['requester', 'distributor'].includes(profileRole)) {
         clearAllAuthSessions();
         await signOut(auth);
         showNotification('Login failed', 'This account has no valid role.');
@@ -535,11 +536,18 @@ export default function LoginPage() {
             <View style={styles.authCardFrame}>
               <View style={styles.authCard}>
                 <View style={styles.logoSection}>
-                  <Image
-                    source={require('../assets/icons/bluetapwhitelogo.png')}
-                    style={styles.logo}
-                    resizeMode="contain"
-                  />
+                  <Pressable
+                    onPress={() => adminEntryTracker.tap()}
+                    accessibilityRole="image"
+                    accessibilityLabel="BlueTap logo"
+                  >
+                    <Image
+                      accessible={false}
+                      source={require('../assets/icons/bluetapwhitelogo.png')}
+                      style={styles.logo}
+                      resizeMode="contain"
+                    />
+                  </Pressable>
                   <Text style={styles.appName}>BlueTap</Text>
                   <Text style={styles.tagline}>Water Within Reach</Text>
                 </View>
