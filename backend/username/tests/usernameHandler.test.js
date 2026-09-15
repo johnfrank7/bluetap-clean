@@ -56,10 +56,12 @@ test('username login verifies password through Firebase REST and returns only cu
     const res = response();
     await handler({ method: 'POST', headers: {}, socket: { remoteAddress: 'test-ip' }, body: { username: 'JohnBlueTap', password: 'private-password' } }, res);
     assert.equal(res.statusCode, 200);
-    assert.deepEqual(res.body, { customToken: 'custom-expected-user' });
+    assert.equal(res.body.customToken, 'custom-expected-user');
+    assert.deepEqual(res.body.profile, { uid: 'expected-user', email: 'private@example.test', role: 'requester', approvalStatus: null, status: null, rejectionReason: null, registrationCompleted: true, onboardingStatus: 'complete', emailVerificationRequired: false, faceVerification: null, unique_id: null });
     assert.match(request.url, /accounts:signInWithPassword/);
     assert.deepEqual(JSON.parse(request.options.body), { email: 'private@example.test', password: 'private-password', returnSecureToken: true });
-    assert.equal(JSON.stringify(res.body).includes('private@example.test'), false);
+    assert.equal(JSON.stringify(res.body).includes('private-password'), false);
+    assert.equal(JSON.stringify(res.body).includes('must-not-return'), false);
   } finally {
     if (originalSecret === undefined) delete process.env.EMAIL_OTP_HASH_SECRET; else process.env.EMAIL_OTP_HASH_SECRET = originalSecret;
     if (originalKey === undefined) delete process.env.FIREBASE_WEB_API_KEY; else process.env.FIREBASE_WEB_API_KEY = originalKey;
@@ -209,7 +211,8 @@ test('public login business outcomes retain production CORS through the HTTP ser
         assert.equal(minted, 0);
         if (scenario.code === 'INVALID_CREDENTIALS') assert.equal(body.error.message, 'Invalid username or password.');
       } else {
-        assert.deepEqual(body, { customToken: 'test-custom-token' });
+        assert.equal(body.customToken, 'test-custom-token');
+        assert.equal(body.profile.uid, 'expected-user');
         assert.equal(minted, 1);
       }
     } finally {

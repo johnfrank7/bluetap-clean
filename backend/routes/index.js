@@ -5,6 +5,7 @@ const { createUsernameHandler } = require('../username/usernameHandler');
 const { createFaceVerificationHandler } = require('../verification/faceVerification');
 const { createRegistrationFaceHandler } = require('../verification/registrationFaceHandler');
 const { createFaceServiceStatusHandler } = require('../verification/faceServiceStatusHandler');
+const { createFaceServiceWarmupHandler } = require('../verification/faceServiceWarmupHandler');
 const { createAdminRegistrationSecurityHandler } = require('../admin/registrationSecurityHandler');
 const { createAdminBranchesHandler, createAdminManagersHandler } = require('../admin/branchManagementHandler');
 const { createRequiredPasswordChangeHandler } = require('../auth/requiredPasswordChangeHandler');
@@ -24,6 +25,7 @@ const routes = new Map([
   ['/api/verification/verify-face', createFaceVerificationHandler()],
   ['/api/verification/registration-face', createRegistrationFaceHandler()],
   ['/api/verification/face-service-status', createFaceServiceStatusHandler()],
+  ['/api/verification/warm-face-service', createFaceServiceWarmupHandler()],
   ['/api/admin/registration-security', createAdminRegistrationSecurityHandler()],
   ['/api/admin/branches', createAdminBranchesHandler()],
   ['/api/admin/managers', createAdminManagersHandler()],

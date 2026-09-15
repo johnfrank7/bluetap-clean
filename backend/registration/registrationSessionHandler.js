@@ -3,12 +3,9 @@ const { OtpError } = require('../utils/otpError');
 const { createRegistrationSessionService } = require('./registrationSession');
 const { applyCors } = require('../utils/cors');
 const { getClientIp } = require('../utils/request');
-const { createRenderFaceClient } = require('../verification/renderFaceClient');
+const { getWarmFaceService } = require('../verification/faceServiceWarmup');
 
-function createRegistrationSessionHandler(action, getAdmin = getFirebaseAdmin, warmFaceService = () => createRenderFaceClient({
-  readyAttempts: 1,
-  readyAttemptTimeoutMs: 8_000,
-})('/ready')) {
+function createRegistrationSessionHandler(action, getAdmin = getFirebaseAdmin, warmFaceService = getWarmFaceService) {
   return async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     if (!applyCors(req, res)) return;

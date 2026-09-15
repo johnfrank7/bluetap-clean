@@ -4,6 +4,7 @@ const { resolve } = require('node:path');
 const test = require('node:test');
 
 const { createFaceServiceStatusHandler } = require('../faceServiceStatusHandler');
+const { createFaceServiceWarmupHandler } = require('../faceServiceWarmupHandler');
 const {
   FACE_SERVICE_WARMUP_WINDOW_MS,
   isFaceServicePreparationError,
@@ -63,6 +64,29 @@ test('disabled face policy does not wake or poll the Python service', async () =
   assert.equal(f.renderCalls(), 0);
 });
 
+test('signup click endpoint respects current policy and never waits for Python', async () => {
+  for (const [enabled, expectedStatus, expectedCalls] of [[true, 202, 1], [false, 200, 0]]) {
+    let calls = 0;
+    const db = {
+      collection: () => ({
+        doc: () => ({ get: async () => ({
+          exists: true,
+          data: () => ({ faceVerificationEnabled: enabled, emailOtpEnabled: true, maxAccountsPerDevice: 3, maxAccountsPerIp: 3 }),
+        }) }),
+      }),
+    };
+    const handler = createFaceServiceWarmupHandler({
+      getAdmin: () => ({ db }),
+      warmFaceService: () => { calls += 1; return new Promise(() => {}); },
+    });
+    const res = { setHeader: () => {}, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } };
+    await handler({ method: 'POST', headers: {} }, res);
+    await Promise.resolve();
+    assert.equal(res.statusCode, expectedStatus);
+    assert.equal(calls, expectedCalls);
+  }
+});
+
 test('warm-up remains bounded while allowing a 20-70 second Render wake-up', () => {
   assert.equal(FACE_SERVICE_WARMUP_WINDOW_MS, 75_000);
   assert.equal(shouldContinueFaceWarmup({ required: true, status: 'starting', startedAt: 1_000, now: 21_000 }), true);
@@ -93,13 +117,22 @@ test('non-retryable readiness failures preserve a safe diagnostic code', async (
 test('signup prewarms only a face-required session and renders neutral preparation UI', () => {
   const root = resolve(__dirname, '..', '..', '..');
   const handler = readFileSync(resolve(root, 'backend/registration/registrationSessionHandler.js'), 'utf8');
+  const statusHandler = readFileSync(resolve(root, 'backend/verification/faceServiceStatusHandler.js'), 'utf8');
   const capture = readFileSync(resolve(root, 'components/RegistrationFaceCapture.jsx'), 'utf8');
+  const login = readFileSync(resolve(root, 'app/login.jsx'), 'utf8');
+  const landing = readFileSync(resolve(root, 'app/index.jsx'), 'utf8');
+  const warmup = readFileSync(resolve(root, 'services/apiWarmup.js'), 'utf8');
   assert.match(handler, /result\.securityPolicy\?\.faceVerificationRequired === true/);
   assert.match(handler, /Promise\.resolve\(\)\.then\(warmFaceService\)/);
   assert.match(handler, /FACE_PREWARM_TRIGGERED/);
+  assert.match(statusHandler, /render = getWarmFaceService/);
   assert.match(capture, /Preparing face verification/);
   assert.match(capture, /Checking service\.\.\./);
   assert.match(capture, /serviceStatus !== 'ready'/);
+  assert.match(login, /warmFaceServiceForSignup\(\)/);
+  assert.match(landing, /warmFaceServiceForSignup\(\)/);
+  assert.match(warmup, /inFlight/);
+  assert.match(warmup, /warmLoginBackend/);
 });
 
 test('verification pipeline emits safe stage names around each upstream operation', () => {

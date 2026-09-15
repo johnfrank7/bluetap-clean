@@ -2,16 +2,9 @@ const { getFirebaseAdmin } = require('../firebase/firebaseAdmin');
 const { readRegistrationSession } = require('../registration/registrationSession');
 const { OtpError } = require('../utils/otpError');
 const { applyCors } = require('../utils/cors');
-const { createRenderFaceClient } = require('./renderFaceClient');
+const { getWarmFaceService } = require('./faceServiceWarmup');
 
 const STATUS_READY_TIMEOUT_MS = 8_000;
-
-function createStatusRenderClient() {
-  return createRenderFaceClient({
-    readyAttempts: 1,
-    readyAttemptTimeoutMs: STATUS_READY_TIMEOUT_MS,
-  });
-}
 
 async function safeFaceServiceStatus(render, signal) {
   try {
@@ -30,7 +23,9 @@ async function safeFaceServiceStatus(render, signal) {
 
 function createFaceServiceStatusHandler({
   getAdmin = getFirebaseAdmin,
-  render = createStatusRenderClient(),
+  // The status request joins a signup-triggered warm-up instead of creating a
+  // second upstream readiness call while Render is starting.
+  render = getWarmFaceService,
 } = {}) {
   return async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');

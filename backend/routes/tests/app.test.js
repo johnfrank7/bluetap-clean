@@ -26,6 +26,7 @@ const EXPECTED_ROUTES = [
   '/api/verification/face-service-status',
   '/api/verification/registration-face',
   '/api/verification/verify-face',
+  '/api/verification/warm-face-service',
 ];
 
 test('web and native API clients share the Render Node backend resolver', () => {

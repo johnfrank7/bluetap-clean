@@ -92,6 +92,13 @@ test('privileged route guard validates claims without forcing a second token ref
   assert.match(login, /cacheValidatedPrivilegedAccess\(trustedProfile\)/);
 });
 
+test('Manager context uses the current token after privileged validation', () => {
+  const root = resolve(__dirname, '..', '..', '..');
+  const managerAccess = readFileSync(resolve(root, 'services/managerAccess.js'), 'utf8');
+  assert.match(managerAccess, /getIdToken\(\)/);
+  assert.doesNotMatch(managerAccess, /getIdToken\(true\)/);
+});
+
 test('Admin routes use one canonical dashboard and never redirect into Manager analytics', () => {
   const root = resolve(__dirname, '..', '..', '..');
   const analytics = readFileSync(resolve(root, 'app/admin/analytics.jsx'), 'utf8');

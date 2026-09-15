@@ -20,6 +20,19 @@ const errorCodes = {
   'account-disabled': 'ACCOUNT_DISABLED',
   'portal-role-mismatch': 'PORTAL_ROLE_MISMATCH',
 };
+const publicProfile = (profile, uid, email) => ({
+  uid,
+  email: String(profile.email || email || '').trim().toLowerCase(),
+  role: profile.role,
+  approvalStatus: profile.approvalStatus || profile.status || null,
+  status: profile.status || profile.approvalStatus || null,
+  rejectionReason: profile.rejectionReason || null,
+  registrationCompleted: profile.registrationCompleted,
+  onboardingStatus: profile.onboardingStatus || null,
+  emailVerificationRequired: profile.emailVerificationRequired === true,
+  faceVerification: profile.faceVerification || null,
+  unique_id: profile.unique_id || null,
+});
 let verifiedWebKey = null;
 async function getPasswordApiKey() {
   const apiKey = process.env.FIREBASE_WEB_API_KEY || firebaseWebConfig.apiKey;
@@ -165,7 +178,7 @@ function createUsernameHandler(action, getAdmin = getFirebaseAdmin) {
       // Onboarding/approval is a routing decision after authentication.
       const customToken = await auth.createCustomToken(expectedUid);
       stage('SUCCESS');
-      return res.status(200).json({ customToken });
+      return res.status(200).json({ customToken, profile: publicProfile(profile, expectedUid, user.email) });
     } catch (error) {
       const known = error instanceof OtpError;
       if (error.reason === 'invalid-credential') stage('INVALID_CREDENTIALS');

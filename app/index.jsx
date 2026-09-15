@@ -16,6 +16,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useRouter } from 'expo-router';
 
 import { BLUETAP_COLORS } from '../constants/bluetapTheme';
+import { warmFaceServiceForSignup } from '../services/apiWarmup';
 
 const BLUE = BLUETAP_COLORS.primary;
 const BLUE_DARK = BLUETAP_COLORS.primaryDeep;
@@ -299,6 +300,10 @@ function WebLanding({ router, width }) {
   const isNarrow = width < 420;
   const contentPadding = isDesktop ? 42 : isTablet ? 30 : 20;
   const theme = isDark ? DARK_THEME : LIGHT_THEME;
+  const openSignup = (role) => {
+    warmFaceServiceForSignup();
+    router.push(role ? { pathname: '/signup', params: { role } } : '/login?signup=true');
+  };
 
   useEffect(() => {
     Animated.timing(themeProgress, {
@@ -394,7 +399,7 @@ function WebLanding({ router, width }) {
               )}
               <ActionButton
                 label="Get Started"
-                onPress={() => router.push('/login?signup=true')}
+                onPress={() => openSignup()}
                 isDark={isDark}
                 style={[styles.navGetStarted, !isDesktop && styles.navGetStartedCompact]}
               />
@@ -423,13 +428,13 @@ function WebLanding({ router, width }) {
               <View style={[styles.heroActions, !isDesktop && styles.heroActionsCompact]}>
                 <ActionButton
                   label="Order Water"
-                  onPress={() => router.push({ pathname: '/signup', params: { role: 'requester' } })}
+                  onPress={() => openSignup('requester')}
                   isDark={isDark}
                   style={!isDesktop && styles.heroActionCompact}
                 />
                 <ActionButton
                   label="Become a Distributor"
-                  onPress={() => router.push({ pathname: '/signup', params: { role: 'distributor' } })}
+                  onPress={() => openSignup('distributor')}
                   variant="outline"
                   isDark={isDark}
                   style={!isDesktop && styles.heroActionCompact}
@@ -534,7 +539,7 @@ function WebLanding({ router, width }) {
               </View>
               <ActionButton
                 label="Apply as Distributor"
-                onPress={() => router.push('/login?signup=true')}
+                onPress={() => openSignup()}
                 isDark={isDark}
                 style={styles.distributorAction}
               />
@@ -560,7 +565,7 @@ function WebLanding({ router, width }) {
             <View style={[styles.ctaActions, !isDesktop && styles.ctaActionsCompact]}>
               <ActionButton
                 label="Get Started"
-                onPress={() => router.push('/login?signup=true')}
+                onPress={() => openSignup()}
                 variant="light"
                 style={!isDesktop && styles.ctaActionCompact}
               />
@@ -597,6 +602,10 @@ function WebLanding({ router, width }) {
 
 function NativeLanding({ router, width }) {
   const isSmallPhone = width < 360;
+  const openSignup = () => {
+    warmFaceServiceForSignup();
+    router.push('/login?signup=true');
+  };
 
   return (
     <SafeAreaView style={styles.nativeSafeArea}>
@@ -629,7 +638,7 @@ function NativeLanding({ router, width }) {
           <View style={styles.nativeActions}>
             <ActionButton
               label="Get Started"
-              onPress={() => router.push('/login?signup=true')}
+              onPress={openSignup}
               variant="light"
               style={styles.nativeActionButton}
             />

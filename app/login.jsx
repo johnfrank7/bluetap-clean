@@ -26,7 +26,6 @@ import {
   signInWithCustomToken,
   signOut,
 } from 'firebase/auth';
-import { doc, getDocFromServer } from 'firebase/firestore';
 import { findLocalUserByEmail, saveLocalUser } from '../localUsers';
 import {
   clearAllAuthSessions,
@@ -34,9 +33,10 @@ import {
   saveRoleSession,
 } from '../services/authSession';
 import { ensureUserUniqueId } from '../services/uniqueIds';
-import { loginWithUsername } from '../services/usernameAuth';
+import { loginWithUsernameResult } from '../services/usernameAuth';
 import { restartIncompleteRegistration } from '../services/profileRecovery';
 import { clearPendingRegistration } from '../services/emailVerification';
+import { warmFaceServiceForSignup, warmLoginBackend } from '../services/apiWarmup';
 
 const { createHiddenAdminEntryTracker } = require('../services/hiddenAdminEntry');
 const { getPublicLoginErrorMessage } = require('../services/publicLoginErrors');
@@ -117,6 +117,7 @@ export default function LoginPage() {
   const [password, setPassword] = React.useState('');
   const [showPassword, setShowPassword] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
+  const loginInFlight = React.useRef(false);
   const [pendingUser, setPendingUser] = React.useState(null);
   const [restartPhase, setRestartPhase] = React.useState('idle');
   const [restartError, setRestartError] = React.useState('');
@@ -132,6 +133,8 @@ export default function LoginPage() {
   }), [router]);
 
   React.useEffect(() => () => adminEntryTracker.reset(), [adminEntryTracker]);
+
+  React.useEffect(() => { warmLoginBackend(); }, []);
 
   React.useEffect(() => {
     if (signup === 'true') {
@@ -254,6 +257,7 @@ export default function LoginPage() {
   };
 
   const openSignupOptions = () => {
+    warmFaceServiceForSignup();
     router.push('/signup');
   };
 
@@ -291,7 +295,7 @@ export default function LoginPage() {
   };
 
   const handleLogin = async () => {
-    if (loading) return;
+    if (loading || loginInFlight.current) return;
 
     const loginIdentifier = email.trim();
     const normalizedEmail = loginIdentifier.toLowerCase();
@@ -303,23 +307,26 @@ export default function LoginPage() {
     }
 
     let authenticatedUser = null;
+    loginInFlight.current = true;
     try {
       setLoading(true);
+      const startedAt = Date.now();
+      console.info('[public-login]', { stage: 'LOGIN_REQUEST_STARTED' });
 
       // Both identifiers use password verification and public-role checks on
       // the backend before establishing the matching Firebase client session.
-      const userCredential = await signInWithCustomToken(auth,
-        await loginWithUsername(loginIdentifier, enteredPassword));
+      const loginResult = await loginWithUsernameResult(loginIdentifier, enteredPassword);
+      const userCredential = await signInWithCustomToken(auth, loginResult.customToken);
 
       const user = userCredential.user;
       authenticatedUser = user;
+      console.info('[public-login]', { stage: 'LOGIN_AUTH_COMPLETED', durationMs: Date.now() - startedAt });
 
-      const userDoc = await getDocFromServer(doc(db, 'users', user.uid));
-      if (!userDoc?.exists()) {
+      const userData = loginResult.profile;
+      if (!userData || userData.uid !== user.uid) {
         throw Object.assign(new Error('Account setup incomplete'), { code: 'ACCOUNT_SETUP_INCOMPLETE' });
       }
-
-      const userData = userDoc.data();
+      console.info('[public-login]', { stage: 'LOGIN_PROFILE_LOADED', durationMs: Date.now() - startedAt });
       const { role } = userData;
       const profileRole = normalizeRole(role);
       const profileApplicationStatus = getApplicationStatus(
@@ -358,6 +365,7 @@ export default function LoginPage() {
 
       saveLocalUser(profileData);
       finishSuccessfulLogin(profileData);
+      console.info('[public-login]', { stage: 'LOGIN_ROUTED', durationMs: Date.now() - startedAt });
 
     } catch (error) {
       if (authenticatedUser && auth.currentUser?.uid === authenticatedUser.uid) {
@@ -369,6 +377,7 @@ export default function LoginPage() {
         getPublicLoginErrorMessage(error)
       );
     } finally {
+      loginInFlight.current = false;
       setLoading(false);
     }
   };

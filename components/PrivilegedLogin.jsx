@@ -10,6 +10,7 @@ import { BLUETAP_LOGIN_GRADIENT } from '../constants/bluetapTheme';
 import { cacheValidatedPrivilegedAccess, clearAllAuthSessions, saveRoleSession } from '../services/authSession';
 import { getManagerContext } from '../services/managerAccess';
 import { loginWithUsername } from '../services/usernameAuth';
+import { warmLoginBackend } from '../services/apiWarmup';
 
 const { hasTrustedRole } = require('../services/privilegedAccess');
 const {
@@ -91,6 +92,8 @@ export default function PrivilegedLogin({ role }) {
       setError('Navigation could not complete. Try opening your dashboard again.');
     }
   }, [admin, currentPathname, pendingDestination, rootNavigationState?.key, navigationAttempt]);
+
+  React.useEffect(() => { warmLoginBackend(); }, []);
 
   const finishAuthenticatedLogin = React.useCallback(async (user) => {
     if (!user || !auth.currentUser || auth.currentUser.uid !== user.uid) {

@@ -72,19 +72,18 @@ test('public form establishes the client session before profile lookup and role 
         const body = JSON.parse(options.body);
         assert.equal(body.portal, 'public');
         assert.equal(body.username, scenario.email || 'test_user');
-        return { ok: !scenario.error, json: async () => scenario.error ? { error: { code: scenario.error } } : { customToken: 'test-custom-token' } };
+        return { ok: !scenario.error, json: async () => scenario.error ? { error: { code: scenario.error } } : { customToken: 'test-custom-token', profile: { uid: 'public-user', email: 'public@example.test', role: scenario.role, registrationCompleted: true, faceVerification: { required: false, status: 'not_required' }, ...scenario.profile } } };
       },
-    }, 'loginWithUsername');
+    }, 'loginWithUsernameResult');
     const context = {
       auth, db: {}, loading: false, email: scenario.email || 'test_user', password: 'test-password',
-      getPublicLoginErrorMessage, loginWithUsername: usernameLogin,
+      loginInFlight: { current: false }, console: { info: () => {} },
+      getPublicLoginErrorMessage, loginWithUsernameResult: usernameLogin,
       signInWithCustomToken: async (_auth, token) => {
         assert.equal(token, 'test-custom-token'); events.push('client-session');
         auth.currentUser = { uid: 'public-user', email: 'public@example.test', emailVerified: true };
         return { user: auth.currentUser };
       },
-      doc: (_db, _collection, uid) => uid,
-      getDocFromServer: async (uid) => { assert.equal(uid, auth.currentUser.uid); events.push('profile'); return { exists: () => true, data: () => profile }; },
       ensureUserUniqueId: async (_user, data) => data,
       saveLocalUser: () => {}, saveRoleSession: () => events.push('shared-session'),
       clearAllAuthSessions: () => events.push('clear'), signOut: async () => { auth.currentUser = null; },
@@ -98,7 +97,7 @@ test('public form establishes the client session before profile lookup and role 
       assert.deepEqual(events, ['backend', scenario.message]);
       assert.equal(auth.currentUser, null);
     } else {
-      assert.deepEqual(events, ['backend', 'client-session', 'profile', 'shared-session', scenario.path]);
+      assert.deepEqual(events, ['backend', 'client-session', 'shared-session', scenario.path]);
       assert.equal(auth.currentUser.uid, 'public-user');
     }
   });

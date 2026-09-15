@@ -41,12 +41,13 @@ export const validateUsername = (value) => {
   return '';
 };
 export const checkUsername = async (username) => call('/api/auth/check-username', { username });
-export const loginWithUsername = async (username, password, { portal = 'public' } = {}) => {
+export const loginWithUsernameResult = async (username, password, { portal = 'public' } = {}) => {
   const result = await call('/api/auth/login-with-username', { username, password, portal });
   if (typeof result?.customToken !== 'string' || !result.customToken) {
     const error = new Error('The login service returned an invalid response.');
     error.code = 'username/service-unavailable';
     throw error;
   }
-  return result.customToken;
+  return result;
 };
+export const loginWithUsername = async (username, password, options) => (await loginWithUsernameResult(username, password, options)).customToken;
