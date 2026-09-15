@@ -104,14 +104,17 @@ test('preparing errors stay distinct from actual verification failures', () => {
   assert.equal(isFaceServicePreparationError({ code: 'registration/FACE_VERIFICATION_FAILED' }), false);
 });
 
-test('non-retryable readiness failures preserve a safe diagnostic code', async () => {
-  for (const reason of ['FACE_SERVICE_AUTH_FAILED', 'FACE_SERVICE_ROUTE_MISMATCH', 'FACE_SERVICE_UPSTREAM_ERROR']) {
+test('configuration failures remain unavailable while startup errors remain warming', async () => {
+  for (const reason of ['FACE_SERVICE_AUTH_FAILED', 'FACE_SERVICE_ROUTE_MISMATCH']) {
     const f = fixture({ renderResult: Object.assign(new Error('private detail'), { reason }) });
     await f.handler(f.req, f.res);
     assert.equal(f.res.statusCode, 200);
     assert.deepEqual(f.res.body, { status: 'unavailable', code: reason });
     assert.equal(JSON.stringify(f.res.body).includes('private detail'), false);
   }
+  const starting = fixture({ renderResult: Object.assign(new Error('private detail'), { reason: 'FACE_SERVICE_UPSTREAM_ERROR' }) });
+  await starting.handler(starting.req, starting.res);
+  assert.deepEqual(starting.res.body, { status: 'starting', code: 'FACE_SERVICE_PREPARING' });
 });
 
 test('signup prewarms only a face-required session and renders neutral preparation UI', () => {

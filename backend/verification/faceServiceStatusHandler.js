@@ -11,7 +11,7 @@ async function safeFaceServiceStatus(render, signal) {
     await render('/ready', undefined, signal);
     return { status: 'ready', code: 'FACE_SERVICE_READY' };
   } catch (error) {
-    if (['FACE_SERVICE_PREPARING', 'FACE_SERVICE_TIMEOUT', 'FACE_SERVICE_UNAVAILABLE'].includes(error?.reason)) {
+    if (['FACE_SERVICE_PREPARING', 'FACE_SERVICE_TIMEOUT', 'FACE_SERVICE_UNAVAILABLE', 'FACE_SERVICE_UPSTREAM_ERROR', 'INVALID_FACE_RESPONSE'].includes(error?.reason)) {
       return { status: 'starting', code: 'FACE_SERVICE_PREPARING' };
     }
     const safeReason = ['FACE_SERVICE_AUTH_FAILED', 'FACE_SERVICE_ROUTE_MISMATCH', 'FACE_SERVICE_UPSTREAM_ERROR', 'INVALID_FACE_RESPONSE'].includes(error?.reason)

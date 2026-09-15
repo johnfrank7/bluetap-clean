@@ -93,6 +93,13 @@ function createRenderFaceClient({
     }
     if (response.status >= 500) {
       failLog('FACE_UPSTREAM_FAILED', { path, status: response.status, attempt, category: 'upstream-error' });
+      // Render can return a 5xx while the Python process is booting or models
+      // are loading. For readiness this remains retryable inside the caller's
+      // bounded warm-up window; verification operations stay unavailable.
+      if (path === '/ready') {
+        failLog('FACE_READY_NOT_READY', { status: response.status, attempt });
+        throw new OtpError(503, 'FACE_SERVICE_PREPARING', 'Face verification service is starting. Please try again in a moment.', details);
+      }
       throw new OtpError(503, 'FACE_SERVICE_UPSTREAM_ERROR', 'Face verification service encountered a temporary error. Please try again later.', details);
     }
     if (!response.ok) {
@@ -118,6 +125,7 @@ function createRenderFaceClient({
         const retryReady = path === '/ready' && attempt < attempts &&
           ['FACE_SERVICE_PREPARING', 'FACE_SERVICE_TIMEOUT', 'FACE_SERVICE_UNAVAILABLE'].includes(error?.reason);
         if (!retryReady) throw error;
+        log('FACE_READY_CHECK_RETRY', { attempt, reason: error.reason });
         await wait(readyRetryDelayMs);
         continue;
       }

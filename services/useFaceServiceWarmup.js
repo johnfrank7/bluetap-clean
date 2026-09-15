@@ -31,7 +31,10 @@ export function useFaceServiceWarmup(registrationSessionId, required) {
 
     const poll = async () => {
       if (attempts > 0 && !shouldContinueFaceWarmup({ required, status: 'starting', startedAt, now: Date.now() })) {
-        if (active) setStatus('unavailable');
+        if (active) {
+          console.info('[face-warmup]', { stage: 'FACE_WARMUP_BUDGET_EXPIRED', elapsedMs: Date.now() - startedAt, attempts });
+          setStatus('unavailable');
+        }
         return;
       }
       attempts += 1;
@@ -51,6 +54,7 @@ export function useFaceServiceWarmup(registrationSessionId, required) {
         return;
       }
       if (!shouldContinueFaceWarmup({ required, status: nextStatus, startedAt, now: Date.now() })) {
+        console.info('[face-warmup]', { stage: 'FACE_WARMUP_BUDGET_EXPIRED', elapsedMs: Date.now() - startedAt, attempts });
         setStatus('unavailable');
         return;
       }

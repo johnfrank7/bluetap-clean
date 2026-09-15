@@ -6,7 +6,7 @@ let inFlightWarmup = null;
 function warmFaceService() {
   if (inFlightWarmup) return inFlightWarmup;
   const startedAt = Date.now();
-  console.info('[face-upstream]', JSON.stringify({ stage: 'SIGNUP_FACE_PREWARM_STARTED', timestamp: new Date().toISOString() }));
+  console.info('[face-upstream]', JSON.stringify({ stage: 'FACE_WARMUP_STARTED', timestamp: new Date().toISOString() }));
   const render = createRenderFaceClient({ readyAttempts: 1, readyAttemptTimeoutMs: WARMUP_TIMEOUT_MS });
   inFlightWarmup = render('/ready')
     .then(() => console.info('[face-upstream]', JSON.stringify({ stage: 'FACE_SERVICE_READY', durationMs: Date.now() - startedAt })))

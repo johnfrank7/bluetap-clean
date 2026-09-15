@@ -182,6 +182,7 @@ test('ready check retries are bounded and cold start leaves the registration cha
   assert.ok(serialized.includes('FACE_UPSTREAM_FAILED'));
   assert.ok(serialized.includes('FACE_READY_ATTEMPT'));
   assert.ok(serialized.includes('FACE_READY_NOT_READY'));
+  assert.ok(serialized.includes('FACE_READY_CHECK_RETRY'));
   assert.equal(serialized.includes('server-secret'), false);
 
   const f = fixture({ productionDetector: true, '/ready': Object.assign(new Error('warming'), { reason: 'FACE_SERVICE_PREPARING' }) });
@@ -189,6 +190,14 @@ test('ready check retries are bounded and cold start leaves the registration cha
   await assert.rejects(f.webComplete(), (error) => error.reason === 'FACE_SERVICE_PREPARING');
   assert.equal(f.data().faceChallenge.state, 'issued');
   assert.equal(f.data().faceVerification.status, 'unverified');
+});
+
+test('readiness treats temporary Python 500 responses as warming but verification still fails safely', async () => {
+  const env = { DEEPFACE_API_URL: 'https://face.example.test', DEEPFACE_API_KEY: 'server-secret' };
+  const ready = createRenderFaceClient({ env, fetchImpl: async () => ({ ok: false, status: 500 }), readyAttempts: 1 });
+  await assert.rejects(ready('/ready'), (error) => error.reason === 'FACE_SERVICE_PREPARING');
+  const verify = createRenderFaceClient({ env, fetchImpl: async () => ({ ok: false, status: 500 }) });
+  await assert.rejects(verify('/verify-face', new FormData()), (error) => error.reason === 'FACE_SERVICE_UPSTREAM_ERROR');
 });
 
 test('ready check can recover from one cold-start response and uses the trusted bearer contract', async () => {
