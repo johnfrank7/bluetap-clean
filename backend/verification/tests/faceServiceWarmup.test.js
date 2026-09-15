@@ -132,6 +132,9 @@ test('signup prewarms only a face-required session and renders neutral preparati
   assert.match(capture, /Preparing face verification/);
   assert.match(capture, /Checking service\.\.\./);
   assert.match(capture, /serviceStatus !== 'ready'/);
+  assert.match(capture, /FACE_STEP3_SHARED_READY_DETECTED/);
+  assert.match(capture, /FACE_STEP3_TRANSITION_TO_VERIFICATION/);
+  assert.match(warmup, /faceServiceWarmupStore/);
   assert.match(login, /warmFaceServiceForSignup\(\)/);
   assert.match(landing, /warmFaceServiceForSignup\(\)/);
   assert.match(warmup, /inFlight/);

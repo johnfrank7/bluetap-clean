@@ -23,8 +23,19 @@ export default function RegistrationFaceCapture({ registrationSessionId, verific
   const busy = React.useRef(false);
   const mounted = React.useRef(true);
   const permissionPending = React.useRef(false);
+  const readyDiagnosticEmitted = React.useRef(false);
   const nativeReady = captureMode === 'native' && nativeChallengeAvailable();
   const canAnalyze = nativeReady && !!challenge?.challengeType;
+  React.useEffect(() => {
+    console.info('[face-step3]', { stage: 'FACE_STEP3_MOUNTED' });
+    console.info('[face-step3]', { stage: 'FACE_STEP3_INITIAL_STATE', status: serviceStatus });
+  }, []);
+  React.useEffect(() => {
+    if (serviceStatus !== 'ready' || readyDiagnosticEmitted.current) return;
+    readyDiagnosticEmitted.current = true;
+    console.info('[face-step3]', { stage: 'FACE_STEP3_SHARED_READY_DETECTED' });
+    console.info('[face-step3]', { stage: 'FACE_STEP3_TRANSITION_TO_VERIFICATION' });
+  }, [serviceStatus]);
   React.useEffect(() => {
     mounted.current = true;
     const subscription = AppState.addEventListener('change', (value) => {
