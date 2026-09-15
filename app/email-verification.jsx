@@ -56,7 +56,7 @@ const getOtpError = (error) => {
     return 'Unable to send verification email. Please try again.';
   }
   if (reason === 'no-active-code') return 'Please request a new verification code.';
-  if (['registration-expired', 'invalid-registration', 'account-exists'].includes(reason)) return error.message;
+  if (['registration-expired', 'invalid-registration', 'account-exists', 'username-taken'].includes(reason)) return error.message;
   if (['face-service-preparing', 'FACE_SERVICE_PREPARING'].includes(reason)) {
     return 'Face verification service is preparing. Please try again in a moment.';
   }
@@ -322,6 +322,10 @@ export default function EmailVerificationPage() {
       await continueAfterVerification(account);
     } catch (error) {
       const reason = error?.details?.reason;
+      if (registration && reason === 'username-taken') {
+        router.replace({ pathname: '/signup', params: { role: draft?.profile?.role || 'requester', usernameTaken: 'true' } });
+        return;
+      }
       if (registration && ['face-service-preparing', 'FACE_SERVICE_PREPARING', 'invalid-face-response', 'INVALID_FACE_RESPONSE', 'face-review-required', 'registration-finalization-failed'].includes(reason)) {
         setRegistrationFinalizationFailed(true);
         setOtp('');

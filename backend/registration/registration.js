@@ -162,7 +162,7 @@ function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, render 
       const reservationValid = reservation?.ownerHash === ownerHash && Number(reservation?.expiresAt?.toMillis?.() || reservation?.expiresAt || 0) > now();
       const retryingPendingEnrollment = existing && existing.registrationCompleted === false &&
         ['face_enrollment_pending', 'finalization_pending'].includes(existing.onboardingStatus) &&
-        session?.userUid === user.uid && session?.completed !== true && claimed?.uid === user.uid;
+        session?.userUid === user.uid && session?.completed !== true;
       if ((claimed?.uid && claimed.uid !== user.uid) || (!reservationValid && !retryingPendingEnrollment)) {
         throw new OtpError(409, 'username-taken', 'This username is already taken.');
       }
@@ -204,14 +204,14 @@ function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, render 
         registrationCompleted: false, onboardingStatus,
         faceVerification: trustedFaceVerification, termsAcceptance,
       };
-      tx.set(usernameRef, { uid: user.uid, createdAt: new Date(now()) });
-      tx.delete(reservationRef);
+      // A reservation only protects the verification window. The permanent
+      // username mapping is claimed atomically with successful finalization.
       if (existing) {
         // Recover an unfinished registration without changing permissions or approval.
         if (!['requester', 'distributor'].includes(existing.role)) {
           throw new OtpError(409, 'account-exists', 'This account already exists. Please log in.');
         }
-        if (existing.usernameNormalized && existing.usernameNormalized !== profile.usernameNormalized) {
+        if (existing.usernameNormalized && existing.usernameNormalized !== profile.usernameNormalized && !retryingPendingEnrollment) {
           throw new OtpError(409, 'account-exists', 'This account already exists. Please log in.');
         }
         tx.update(ref, { uid: user.uid, email: user.email, emailVerified: emailOtpVerified === true,
@@ -241,6 +241,17 @@ function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, render 
         finalization: { status: 'pending', uid: user.uid, startedAt: new Date(now()) }, profileRecovery: recoveryProfile });
     });
   }
+  async function claimFinalUsername(tx, profile, user) {
+    const usernameRef = db.collection('usernames').doc(profile.usernameNormalized);
+    const reservationRef = db.collection('usernameReservations').doc(profile.usernameNormalized);
+    const claimed = await tx.get(usernameRef);
+    if (claimed.exists && claimed.data()?.uid !== user.uid) {
+      throw new OtpError(409, 'username-taken', 'This username is already taken.');
+    }
+    tx.set(usernameRef, { uid: user.uid, createdAt: new Date(now()) }, { merge: true });
+    // This delete is safe even after a reservation expiry or an idempotent retry.
+    tx.delete(reservationRef);
+  }
   async function finalizeFaceEnrollment(user, registrationSessionId) {
     const ready = await render('/ready');
     if (ready?.modelLoaded === false || ready?.ready === false || !(ready?.status === 'ready' || ready?.ready === true)) throw new OtpError(503, 'face-service-preparing', 'Face verification service is preparing. Please try again in a moment.');
@@ -257,6 +268,7 @@ function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, render 
       const profile = (await tx.get(profileRef)).data();
       const session = (await tx.get(sessionRef)).data();
       if (!profile || !session || session.userUid !== user.uid || session.completed || !isRegistrationFaceVerified(session.faceVerification)) throw new OtpError(409, 'registration-session-invalid', 'Registration finalization could not be completed.');
+      await claimFinalUsername(tx, profile, user);
       await applyRegistrationLimitReservation(tx, sessionRef, session, user.uid, true);
       const face = session.faceVerification;
       const finalizedFaceVerification = {
@@ -286,6 +298,7 @@ function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, render 
       if (!profile || !session || requiresFace(session) || session.userUid !== user.uid || session.completed) {
         throw new OtpError(409, 'registration-session-invalid', 'Registration finalization could not be completed.');
       }
+      await claimFinalUsername(tx, profile, user);
       await applyRegistrationLimitReservation(tx, sessionRef, session, user.uid, true);
       tx.update(profileRef, { onboardingStatus: 'complete', registrationCompleted: true, updatedAt: new Date(now()) });
       tx.update(sessionRef, { completed: true, completedAt: new Date(now()), expiresAt: new Date(now()), faceEnrollmentPending: false,
@@ -436,9 +449,11 @@ function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, render 
     const usernameNormalized = normalizeUsername(username);
     await verifiedSession(registrationSessionId);
     otpStage('OTP_SESSION_VALIDATED');
-    const retryingPendingEnrollment = await checkExistingAccount(await findUser(email), registrationSessionId);
+    await checkExistingAccount(await findUser(email), registrationSessionId);
     await limitIp(ip);
-    if (!retryingPendingEnrollment) await reserveUsername(email, usernameNormalized);
+    // A recovery may use a new username after a finalization race. Reserve
+    // that new value temporarily; this still creates no permanent mapping.
+    await reserveUsername(email, usernameNormalized);
     const session = await verifiedSession(registrationSessionId);
     if (!requiresOtp(session)) {
       return { challenge: challengeFor(email, usernameNormalized, registrationSessionId), otpRequired: false,

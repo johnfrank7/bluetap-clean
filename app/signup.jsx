@@ -10,7 +10,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 
 import { BLUETAP_COLORS, BLUETAP_LOGIN_GRADIENT } from '../constants/bluetapTheme';
 import { clearAllAuthSessions } from '../services/authSession';
-import { clearPendingRegistration, completeRegistrationWithoutOtp, requestRegistrationOtp, setPendingRegistration } from '../services/emailVerification';
+import { clearPendingRegistration, completeRegistrationWithoutOtp, getPendingRegistration, requestRegistrationOtp, setPendingRegistration } from '../services/emailVerification';
 import { checkUsername, normalizeUsername, validateUsername } from '../services/usernameAuth';
 import { acceptRegistrationTerms, createRegistrationSession } from '../services/registrationSession';
 import { useFaceServiceWarmup } from '../services/useFaceServiceWarmup';
@@ -26,6 +26,7 @@ const { isTrustedRegistrationFaceVerification } = require('../services/webFaceCa
 const BARANGAYS = ['Awihao', 'Bagakay', 'Bato', 'Biga', 'Bulongan', 'Bunga', 'Cabitoonan', 'Calongcalong', 'Cambang-ug', 'Camp 8', 'Canlumampao', 'Cantabaco', 'Capitan Claudio', 'Carmen', 'Daanglungsod', 'Don Andres Soriano', 'Dumlog', 'Gen. Climaco', 'Ibo', 'Ilihan', 'Juan Climaco, Sr.', 'Landahan', 'Loay', 'Luray II', 'Matab-ang', 'Media Once', 'Pangamihan', 'Poblacion', 'Poog', 'Putingbato', 'Sagay', 'Sam-ang', 'Sangi', 'Santo Niño', 'Subayon', 'Talavera', 'Tubod', 'Tungkay'];
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PHONE = /^9\d{9}$/;
+const firstParam = (value) => Array.isArray(value) ? value[0] : value;
 
 const normalizePhone = (value) => {
   const digits = value.replace(/\D/g, '');
@@ -48,21 +49,36 @@ export default function SignupPage() {
   const params = useLocalSearchParams();
   const { width } = useWindowDimensions();
   const initialRole = params.role === 'requester' || params.role === 'distributor' ? params.role : '';
-  const [step, setStep] = React.useState(1);
-  const [form, setForm] = React.useState({ role: initialRole, firstName: '', lastName: '', phone: '', barangay: '', address: '', username: '', email: '', password: '', confirmPassword: '' });
-  const [errors, setErrors] = React.useState({});
+  // Preserve the in-memory registration draft only for a server-reported
+  // username race. The server still validates every session field.
+  const usernameRetryDraft = React.useRef(firstParam(params.usernameTaken) === 'true' ? getPendingRegistration() : null).current;
+  const [step, setStep] = React.useState(usernameRetryDraft ? 4 : 1);
+  const [form, setForm] = React.useState(() => ({
+    role: usernameRetryDraft?.profile?.role || initialRole,
+    firstName: usernameRetryDraft?.profile?.firstName || '', lastName: usernameRetryDraft?.profile?.lastName || '',
+    phone: String(usernameRetryDraft?.profile?.phone || '').replace(/^\+63/, ''),
+    barangay: usernameRetryDraft?.profile?.barangay || '', address: usernameRetryDraft?.profile?.address || '',
+    username: usernameRetryDraft?.profile?.username || '', email: usernameRetryDraft?.profile?.email || '',
+    password: usernameRetryDraft?.profile?.password || '', confirmPassword: usernameRetryDraft?.profile?.password || '',
+  }));
+  const [errors, setErrors] = React.useState(() => usernameRetryDraft ? { username: 'This username was just taken. Please choose another.' } : {});
   const [showBarangays, setShowBarangays] = React.useState(false);
   const [showPassword, setShowPassword] = React.useState(false);
-  const [usernameState, setUsernameState] = React.useState({ checking: false, available: null, checked: '' });
+  const [usernameState, setUsernameState] = React.useState(() => usernameRetryDraft
+    ? { status: 'taken', checked: normalizeUsername(usernameRetryDraft.profile.username) }
+    : { status: 'idle', checked: '' });
   const [loading, setLoading] = React.useState(false);
   const [notice, setNotice] = React.useState(null);
   const [retryAt, setRetryAt] = React.useState(0);
-  const [registrationSessionId, setRegistrationSessionId] = React.useState('');
-  const [faceVerification, setFaceVerification] = React.useState({ status: 'unverified', duplicateCheck: 'unknown' });
-  const [termsAccepted, setTermsAccepted] = React.useState(false);
-  const [securityPolicy, setSecurityPolicy] = React.useState({ faceVerificationRequired: true, emailOtpRequired: true });
+  const [registrationSessionId, setRegistrationSessionId] = React.useState(usernameRetryDraft?.profile?.registrationSessionId || '');
+  const [faceVerification, setFaceVerification] = React.useState(() => usernameRetryDraft
+    ? { status: 'verified', duplicateCheck: 'clear', providerVerified: true, livenessPassed: true }
+    : { status: 'unverified', duplicateCheck: 'unknown' });
+  const [termsAccepted, setTermsAccepted] = React.useState(Boolean(usernameRetryDraft));
+  const [securityPolicy, setSecurityPolicy] = React.useState(usernameRetryDraft?.profile?.securityPolicy || { faceVerificationRequired: true, emailOtpRequired: true });
   const [now, setNow] = React.useState(Date.now());
   const submitting = React.useRef(false);
+  const usernameCheckVersion = React.useRef(0);
   const entrance = React.useRef(new Animated.Value(0)).current;
   const stepTransition = React.useRef(new Animated.Value(1)).current;
   const mobile = width < 600;
@@ -98,7 +114,10 @@ export default function SignupPage() {
   const update = (key, value) => {
     setForm((current) => ({ ...current, [key]: value }));
     setErrors((current) => ({ ...current, [key]: '' }));
-    if (key === 'username') setUsernameState({ checking: false, available: null, checked: '' });
+    if (key === 'username') {
+      usernameCheckVersion.current += 1;
+      setUsernameState({ status: 'idle', checked: '' });
+    }
     if (['role', 'firstName', 'lastName', 'phone', 'barangay', 'address'].includes(key) && registrationSessionId) {
       setRegistrationSessionId('');
       setFaceVerification({ status: 'unverified', duplicateCheck: 'unknown' });
@@ -114,7 +133,7 @@ export default function SignupPage() {
   const accountComplete = !!form.role;
   const personalComplete = !!form.firstName.trim() && !!form.lastName.trim() && PHONE.test(form.phone) && !!form.barangay && !!form.address.trim();
   const identityComplete = !!registrationSessionId && (!securityPolicy.faceVerificationRequired || isTrustedRegistrationFaceVerification(faceVerification));
-  const credentialsComplete = !validateUsername(form.username) && EMAIL.test(form.email.trim()) && form.password.length >= 8 && form.password === form.confirmPassword && usernameState.available === true && termsAccepted;
+  const credentialsComplete = !validateUsername(form.username) && EMAIL.test(form.email.trim()) && form.password.length >= 8 && form.password === form.confirmPassword && usernameState.status === 'available' && termsAccepted;
   const canContinue = step === 1 ? accountComplete
     : step === 2 ? accountComplete && personalComplete
       : step === 3 ? accountComplete && personalComplete && identityComplete
@@ -164,18 +183,23 @@ export default function SignupPage() {
   React.useEffect(() => {
     if (step !== 4) return undefined;
     const validation = validateUsername(form.username);
-    if (validation) return undefined;
+    if (validation) {
+      setUsernameState({ status: form.username.trim() ? 'invalid' : 'idle', checked: '' });
+      return undefined;
+    }
     const normalized = normalizeUsername(form.username);
+    const version = usernameCheckVersion.current + 1;
+    usernameCheckVersion.current = version;
     const timer = setTimeout(async () => {
-      setUsernameState({ checking: true, available: null, checked: normalized });
+      setUsernameState({ status: 'checking', checked: normalized });
       try {
         const result = await checkUsername(form.username);
-        setUsernameState({ checking: false, available: result.available === true, checked: normalized });
+        if (usernameCheckVersion.current === version) setUsernameState({ status: result.available === true ? 'available' : 'taken', checked: normalized });
       } catch {
-        setUsernameState({ checking: false, available: null, checked: normalized });
+        if (usernameCheckVersion.current === version) setUsernameState({ status: 'unavailable', checked: normalized });
       }
-    }, 450);
-    return () => clearTimeout(timer);
+    }, 500);
+    return () => { clearTimeout(timer); usernameCheckVersion.current += 1; };
   }, [form.username, step]);
 
   const validateStep = (target = step) => {
@@ -191,7 +215,9 @@ export default function SignupPage() {
     if (target === 4) {
       const usernameError = validateUsername(form.username);
       if (usernameError) next.username = usernameError;
-      else if (usernameState.checked === normalizeUsername(form.username) && usernameState.available === false) next.username = 'This username is already taken.';
+      else if (usernameState.status === 'taken' && usernameState.checked === normalizeUsername(form.username)) next.username = 'This username is already taken.';
+      else if (usernameState.status === 'checking') next.username = 'Checking username availability. Please wait.';
+      else if (usernameState.status === 'unavailable') next.username = 'Unable to check username. Please try again.';
       if (!EMAIL.test(form.email.trim())) next.email = 'Enter a valid email address.';
       if (form.password.length < 8) next.password = 'Password must be at least 8 characters.';
       if (form.password !== form.confirmPassword) next.confirmPassword = 'Passwords do not match.';
@@ -281,7 +307,7 @@ export default function SignupPage() {
       if (retry > 0) { setRetryAt(Date.now() + retry * 1000); setNow(Date.now()); }
       if (reason === 'username-taken') {
         setErrors((current) => ({ ...current, username: 'This username is already taken.' }));
-        setUsernameState({ checking: false, available: false, checked: normalizeUsername(form.username) });
+        setUsernameState({ status: 'taken', checked: normalizeUsername(form.username) });
       }
       setNotice({
         title: reason === 'account-exists' ? 'Email already registered' : reason === 'username-taken' ? 'Username unavailable' : 'Signup failed',
@@ -373,8 +399,8 @@ export default function SignupPage() {
               />}
 
               {step === 4 && <View>
-                <Field label="Username" error={errors.username} hint={usernameState.checking ? 'Checking availability…' : usernameState.available === true ? 'Username is available.' : '4–20 characters; letters, numbers, and underscores.'}>
-                  <TextInput style={[styles.input, errors.username && styles.inputError, usernameState.available === true && styles.inputSuccess]} value={form.username} onChangeText={(v) => update('username', v.replace(/\s/g, ''))} autoCapitalize="none" autoCorrect={false} maxLength={20} />
+                <Field label="Username" error={errors.username} hint={usernameState.status === 'checking' ? 'Checking username availability...' : usernameState.status === 'available' ? 'Username is available.' : usernameState.status === 'taken' ? 'Username is already taken.' : usernameState.status === 'invalid' ? 'Invalid username format' : usernameState.status === 'unavailable' ? 'Unable to check username' : '4-20 characters; letters, numbers, and underscores.'}>
+                  <TextInput style={[styles.input, errors.username && styles.inputError, usernameState.status === 'available' && styles.inputSuccess]} value={form.username} onChangeText={(v) => update('username', v.replace(/\s/g, ''))} autoCapitalize="none" autoCorrect={false} maxLength={20} />
                 </Field>
                 <Field label="Recovery email" error={errors.email}><TextInput style={[styles.input, errors.email && styles.inputError]} value={form.email} onChangeText={(v) => update('email', v)} keyboardType="email-address" autoCapitalize="none" autoComplete="email" /></Field>
                 <Field label="Password" error={errors.password} hint="Use at least 8 characters."><View style={[styles.password, errors.password && styles.inputError]}><TextInput style={styles.passwordInput} value={form.password} onChangeText={(v) => update('password', v)} secureTextEntry={!showPassword} autoCapitalize="none" /><TouchableOpacity onPress={() => setShowPassword((v) => !v)}><Text style={styles.show}>{showPassword ? 'Hide' : 'Show'}</Text></TouchableOpacity></View></Field>

@@ -282,7 +282,7 @@ test('profile write failure rolls back only the newly created Auth account', asy
   assert.equal(f.records.has('users/new-user'), false);
 });
 
-test('final face enrollment failure leaves the account and session explicitly pending', async () => {
+test('final face enrollment failure leaves no permanent username claim', async () => {
   const f = fixture();
   const result = await f.service.request('new@example.test', 'test-ip');
   f.failEnrollment();
@@ -295,7 +295,7 @@ test('final face enrollment failure leaves the account and session explicitly pe
   assert.equal(session.faceEnrollmentPending, true);
   assert.equal(f.records.get('registrationLimits/device_device-hash').finalizedCount, 0);
   assert.equal(f.records.get('registrationLimits/device_device-hash').reservedCount, 0);
-  assert.equal(f.records.get('usernames/test_user').uid, 'new-user');
+  assert.equal(f.records.has('usernames/test_user'), false);
 });
 
 test('a pending face-enrollment finalization can safely retry without another account or username claim', async () => {
@@ -310,6 +310,30 @@ test('a pending face-enrollment finalization can safely retry without another ac
   assert.equal(f.records.get('usernames/test_user').uid, 'new-user');
   assert.equal(f.records.get('registrationSessions/' + f.sessionId).completed, true);
   assert.equal(completed.finalized, true);
+});
+
+test('a pending finalization can reserve and finalize a replacement username', async () => {
+  const f = fixture();
+  const first = await f.service.request('new@example.test', 'test-ip');
+  f.failEnrollment();
+  await assert.rejects(f.service.complete(first.challenge, f.sent[0].code, form));
+  f.restoreEnrollment();
+  f.advance(60 * 1000);
+  const retry = await f.service.request('new@example.test', 'test-ip', 'Replacement_Name');
+  const completed = await f.service.complete(retry.challenge, f.sent[1].code, { ...form, username: 'Replacement_Name' });
+  assert.equal(completed.finalized, true);
+  assert.equal(f.records.has('usernames/test_user'), false);
+  assert.equal(f.records.get('usernames/replacement_name').uid, 'new-user');
+});
+
+test('a finalization username race preserves the existing owner and creates no replacement claim', async () => {
+  const f = fixture();
+  const first = await f.service.request('new@example.test', 'test-ip');
+  f.records.set('usernames/test_user', { uid: 'other-user', createdAt: new Date() });
+  await assert.rejects(f.service.complete(first.challenge, f.sent[0].code, form), reason('username-taken'));
+  assert.equal(f.records.get('usernames/test_user').uid, 'other-user');
+  assert.equal(f.records.has('users/new-user'), false);
+  assert.equal(f.users.has('new-user'), false);
 });
 
 test('expired registration challenge requires restarting and does not create an account', async () => {
