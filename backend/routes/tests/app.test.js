@@ -114,3 +114,19 @@ test('Render routes accept configured origins and reject unlisted production ori
     else process.env.ALLOWED_ORIGINS = previousAllowedOrigins;
   }
 });
+
+test('outer server failures and missing routes retain CORS before business logic', async () => {
+  const server = createAppServer(new Map([['/api/failure', () => { throw new Error('test'); }]]));
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  try {
+    for (const [path, status] of [['/api/missing', 404], ['/api/failure', 500]]) {
+      const res = await fetch(`http://127.0.0.1:${server.address().port}${path}`, {
+        method: 'POST', headers: { Origin: 'https://bluetap-beta.vercel.app', 'Content-Type': 'application/json' }, body: '{}',
+      });
+      assert.equal(res.status, status);
+      assert.equal(res.headers.get('access-control-allow-origin'), 'https://bluetap-beta.vercel.app');
+      assert.match(res.headers.get('vary'), /Origin/);
+      await res.json();
+    }
+  } finally { await new Promise((resolve) => server.close(resolve)); }
+});

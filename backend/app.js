@@ -3,6 +3,7 @@ const http = require('node:http');
 const { routes } = require('./routes');
 const { faceUpstreamConfigStatus } = require('./verification/renderFaceClient');
 const { emailProviderConfigStatus } = require('./email/emailProvider');
+const { applyCors } = require('./utils/cors');
 
 const MAX_REQUEST_BYTES = 5 * 1024 * 1024;
 
@@ -45,6 +46,9 @@ function readBody(req) {
 function createRequestListener(routeMap = routes) {
   return async (req, rawRes) => {
     const res = addResponseHelpers(rawRes);
+    // Apply before route lookup and body parsing so outer errors retain CORS.
+    if (!applyCors(req, res)) return;
+    if (req.method === 'OPTIONS') return res.status(204).end();
     const pathname = new URL(req.url, 'http://localhost').pathname.replace(/\/+$/, '') || '/';
 
     if (pathname === '/health') {

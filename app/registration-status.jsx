@@ -50,10 +50,13 @@ export default function RegistrationStatusPage() {
 
   const enrollmentPending = profile?.onboardingStatus === 'face_enrollment_pending' ||
     profile?.registrationCompleted === false;
-  const title = enrollmentPending ? 'Finishing secure enrollment' : 'Application submitted';
+  const applicationRejected = String(profile?.approvalStatus || profile?.status || '').toLowerCase() === 'rejected';
+  const title = enrollmentPending ? 'Finishing secure enrollment' : applicationRejected ? 'Application rejected' : 'Application submitted';
   const message = enrollmentPending
     ? 'Your email and identity verification succeeded. BlueTap is still finalizing the secure face enrollment. Please try again shortly; if this continues, contact support.'
-    : 'Your identity verification succeeded. Your distributor application is awaiting administrator approval before you can access the distributor dashboard.';
+    : applicationRejected
+      ? `Your distributor application was rejected. ${profile?.rejectionReason || 'Please contact support for more information.'}`
+      : 'Your identity verification succeeded. Your distributor application is awaiting administrator approval before you can access the distributor dashboard.';
 
   return (
     <LinearGradient colors={BLUETAP_LOGIN_GRADIENT} style={styles.gradient}>

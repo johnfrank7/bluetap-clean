@@ -40,6 +40,9 @@ function isAllowedOrigin(req, origin, env = process.env) {
 
 function applyCors(req, res, env = process.env) {
   const origin = req.headers.origin;
+  const vary = String(res.getHeader?.('Vary') || '').split(',').map((value) => value.trim()).filter(Boolean);
+  if (!vary.some((value) => value.toLowerCase() === 'origin')) vary.push('Origin');
+  res.setHeader('Vary', vary.join(', '));
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
 
@@ -55,7 +58,6 @@ function applyCors(req, res, env = process.env) {
 
   if (origin) {
     res.setHeader('Access-Control-Allow-Origin', origin);
-    res.setHeader('Vary', 'Origin');
   }
   return true;
 }

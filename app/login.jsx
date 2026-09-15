@@ -23,7 +23,6 @@ import { auth, db } from '../firebase';
 import {
   fetchSignInMethodsForEmail,
   sendPasswordResetEmail,
-  signInWithEmailAndPassword,
   signInWithCustomToken,
   signOut,
 } from 'firebase/auth';
@@ -36,11 +35,11 @@ import {
 } from '../services/authSession';
 import { ensureUserUniqueId } from '../services/uniqueIds';
 import { loginWithUsername } from '../services/usernameAuth';
-import { recoverTrustedProfile } from '../services/profileRecovery';
 import { restartIncompleteRegistration } from '../services/profileRecovery';
 import { clearPendingRegistration } from '../services/emailVerification';
 
 const { createHiddenAdminEntryTracker } = require('../services/hiddenAdminEntry');
+const { getPublicLoginErrorMessage } = require('../services/publicLoginErrors');
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const applicationPendingTitle = 'Application Pending';
@@ -50,19 +49,6 @@ const getApplicationRejectedMessage = (rejectionReason) =>
   `Unfortunately, your distributor application has been rejected.\n\nReason:\n${rejectionReason || 'No rejection reason was provided.'}\n\nPlease submit a new application with valid and complete documents.`;
 const distributorRegistrationMessage =
   'Your application has been submitted successfully.\n\nYour account is currently Pending Approval.\n\nPlease wait for the administrator to review and approve your application before you can log in.';
-
-const authErrorMessages = {
-  'auth/invalid-email': 'Please enter a valid email address.',
-  'auth/invalid-credential': 'Wrong username or password.',
-  'auth/user-not-found': 'Wrong username or password.',
-  'auth/wrong-password': 'Wrong username or password.',
-  'auth/missing-password': 'Please enter your password.',
-  'auth/network-request-failed': 'Network error. Please check your connection and try again.',
-  'permission-denied': 'Your account was found, but the app cannot read your profile. Please check Firestore rules.',
-};
-
-const getAuthErrorMessage = (error) =>
-  authErrorMessages[error?.code] || error?.message || 'Something went wrong. Please try again.';
 
 const passwordResetErrorMessages = {
   'auth/invalid-email': 'Please enter a valid email address.',
@@ -78,8 +64,6 @@ const getPasswordResetErrorMessage = (error) =>
   'Something went wrong. Please try again.';
 
 const isValidEmail = (value) => emailPattern.test(value.trim().toLowerCase());
-const isWrongLoginError = (error) =>
-  ['auth/invalid-credential', 'auth/user-not-found', 'auth/wrong-password'].includes(error?.code);
 const normalizeApprovalStatus = (status) =>
   (status || 'pending').toString().trim().toLowerCase();
 const normalizeRole = (role) => (role || '').toString().trim().toLowerCase();
@@ -93,7 +77,7 @@ const toApplicationStatus = (status) => {
 };
 const getApplicationStatus = (profile, defaultStatus = 'pending') =>
   normalizeApprovalStatus(
-    profile?.status || profile?.approvalStatus || profile?.accountStatus || defaultStatus
+    profile?.approvalStatus || profile?.status || profile?.accountStatus || defaultStatus
   );
 const requiresEmailVerification = (profile) => profile?.emailVerificationRequired === true;
 const BASE_SCROLL_PADDING_BOTTOM = 20;
@@ -303,11 +287,7 @@ export default function LoginPage() {
     const destination = getPostAuthenticationDestination(profile);
 
     setLoading(false);
-    showNotification(
-      'Successfully logged in',
-      'You have successfully logged in.',
-      () => router.replace(destination)
-    );
+    router.replace(destination);
   };
 
   const handleLogin = async () => {
@@ -322,38 +302,21 @@ export default function LoginPage() {
       return;
     }
 
+    let authenticatedUser = null;
     try {
       setLoading(true);
 
-      // Legacy accounts may continue signing in with email. New accounts use
-      // the server-side username registry and receive a Firebase custom token.
-      const userCredential = loginIdentifier.includes('@')
-        ? await signInWithEmailAndPassword(auth, normalizedEmail, enteredPassword)
-        : await signInWithCustomToken(auth, await loginWithUsername(loginIdentifier, enteredPassword));
+      // Both identifiers use password verification and public-role checks on
+      // the backend before establishing the matching Firebase client session.
+      const userCredential = await signInWithCustomToken(auth,
+        await loginWithUsername(loginIdentifier, enteredPassword));
 
       const user = userCredential.user;
+      authenticatedUser = user;
 
-      let userDoc = null;
-
-      try {
-        userDoc = await getDocFromServer(doc(db, 'users', user.uid));
-      } catch (error) {
-        console.log('Login profile read error:', error.message);
-      }
-
+      const userDoc = await getDocFromServer(doc(db, 'users', user.uid));
       if (!userDoc?.exists()) {
-        try {
-          const recovery = await recoverTrustedProfile();
-          if (recovery?.recovered) userDoc = await getDocFromServer(doc(db, 'users', user.uid));
-        } catch (error) {
-          console.log('Trusted profile recovery unavailable:', error.message);
-        }
-        if (!userDoc?.exists()) {
-          setPendingUser(user);
-          setRestartPhase('idle');
-          setRestartError('');
-          return;
-        }
+        throw Object.assign(new Error('Account setup incomplete'), { code: 'ACCOUNT_SETUP_INCOMPLETE' });
       }
 
       const userData = userDoc.data();
@@ -364,8 +327,8 @@ export default function LoginPage() {
         profileRole === 'distributor' ? 'pending' : 'approved'
       );
       let profileData = {
-        uid: user.uid,
         ...userData,
+        uid: user.uid,
         role: profileRole,
         email: (userData.email || user.email || normalizedEmail).trim().toLowerCase(),
         approvalStatus: profileApplicationStatus,
@@ -381,10 +344,7 @@ export default function LoginPage() {
       }
 
       if (!['requester', 'distributor'].includes(profileRole)) {
-        clearAllAuthSessions();
-        await signOut(auth);
-        showNotification('Login failed', 'This account has no valid role.');
-        return;
+        throw Object.assign(new Error('Account setup incomplete'), { code: 'ACCOUNT_SETUP_INCOMPLETE' });
       }
 
       if (profileRole === 'requester' || profileRole === 'distributor') {
@@ -396,28 +356,17 @@ export default function LoginPage() {
         };
       }
 
-      if (profileRole === 'distributor' && profileApplicationStatus !== 'approved') {
-        saveLocalUser(profileData);
-        clearAllAuthSessions();
-        await signOut(auth);
-        showDistributorStatusNotification(
-          profileApplicationStatus,
-          userData.rejectionReason
-        );
-        return;
-      }
-
       saveLocalUser(profileData);
       finishSuccessfulLogin(profileData);
 
     } catch (error) {
-      console.log('Login error:', error.message);
-      const invalidUsernameCredential = error?.code === 'username/invalid-credential';
+      if (authenticatedUser && auth.currentUser?.uid === authenticatedUser.uid) {
+        clearAllAuthSessions();
+        await signOut(auth).catch(() => {});
+      }
       showNotification(
         'Login failed',
-        isWrongLoginError(error) || invalidUsernameCredential
-          ? 'Invalid username or password.'
-          : getAuthErrorMessage(error)
+        getPublicLoginErrorMessage(error)
       );
     } finally {
       setLoading(false);

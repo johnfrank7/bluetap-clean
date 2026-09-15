@@ -13,7 +13,8 @@ const call = async (path, body) => {
     const data = await response.json().catch(() => null);
     if (!response.ok) {
       const error = new Error(data?.error?.message || 'The authentication service is unavailable.');
-      error.code = `username/${data?.error?.reason || 'service-unavailable'}`;
+      error.code = data?.error?.code || `username/${data?.error?.reason || 'service-unavailable'}`;
+      error.authenticationServiceError = true;
       throw error;
     }
     if (!data || typeof data !== 'object') {
@@ -23,8 +24,8 @@ const call = async (path, body) => {
     }
     return data;
   } catch (error) {
-    if (String(error.code || '').startsWith('username/')) throw error;
-    const network = new Error('We could not reach the authentication service. Check your connection and try again.');
+    if (error.authenticationServiceError || String(error.code || '').startsWith('username/')) throw error;
+    const network = new Error('We could not reach the authentication service. Please try again.');
     network.code = 'username/network';
     throw network;
   } finally {
@@ -40,8 +41,8 @@ export const validateUsername = (value) => {
   return '';
 };
 export const checkUsername = async (username) => call('/api/auth/check-username', { username });
-export const loginWithUsername = async (username, password) => {
-  const result = await call('/api/auth/login-with-username', { username, password });
+export const loginWithUsername = async (username, password, { portal = 'public' } = {}) => {
+  const result = await call('/api/auth/login-with-username', { username, password, portal });
   if (typeof result?.customToken !== 'string' || !result.customToken) {
     const error = new Error('The login service returned an invalid response.');
     error.code = 'username/service-unavailable';

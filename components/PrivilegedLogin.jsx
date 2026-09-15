@@ -225,7 +225,7 @@ export default function PrivilegedLogin({ role }) {
 
       const credential = normalized.includes('@')
         ? await signInWithEmailAndPassword(auth, normalized, password)
-        : await signInWithCustomToken(auth, await loginWithUsername(normalized, password));
+        : await signInWithCustomToken(auth, await loginWithUsername(normalized, password, { portal: role }));
       logPrivilegedStage(admin, 'SIGNIN_SUCCESS');
       logPrivilegedStage(admin, 'VALIDATION_CALLED_FROM_LOGIN');
       await runPrivilegedLoginValidation(role, credential.user, () => finishAuthenticatedLogin(credential.user));
