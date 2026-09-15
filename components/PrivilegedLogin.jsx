@@ -1,7 +1,7 @@
 import React from 'react';
 import { ActivityIndicator, Image, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams, usePathname, useRootNavigationState, useRouter } from 'expo-router';
 import { getDocFromServer, doc } from 'firebase/firestore';
 import { onAuthStateChanged, signInWithCustomToken, signInWithEmailAndPassword, signOut } from 'firebase/auth';
 
@@ -59,6 +59,8 @@ export default function PrivilegedLogin({ role }) {
   const routerRef = React.useRef(router);
   routerRef.current = router;
   const params = useLocalSearchParams();
+  const currentPathname = usePathname();
+  const rootNavigationState = useRootNavigationState();
   const admin = role === 'admin';
   const [identifier, setIdentifier] = React.useState('');
   const [password, setPassword] = React.useState('');
@@ -66,6 +68,29 @@ export default function PrivilegedLogin({ role }) {
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState('');
   const submitting = React.useRef(false);
+  const navigationCompletedRef = React.useRef(false);
+  const [pendingDestination, setPendingDestination] = React.useState(null);
+  const [navigationAttempt, setNavigationAttempt] = React.useState(0);
+  const pathnameRef = React.useRef(currentPathname);
+  pathnameRef.current = currentPathname;
+  const retryNavigation = () => {
+    setError('');
+    setNavigationAttempt((attempt) => attempt + 1);
+  };
+
+  React.useEffect(() => {
+    if (!pendingDestination || !rootNavigationState?.key || navigationCompletedRef.current) return;
+    logPrivilegedStage(admin, 'NAVIGATION_ROUTER_READY', { currentPathname });
+    navigationCompletedRef.current = true;
+    try {
+      routerRef.current.replace(pendingDestination);
+      logPrivilegedStage(admin, 'NAVIGATION_EXECUTED', { currentPathname });
+    } catch {
+      navigationCompletedRef.current = false;
+      logPrivilegedStage(admin, 'NAVIGATION_FAILED', { currentPathname });
+      setError('Navigation could not complete. Try opening your dashboard again.');
+    }
+  }, [admin, currentPathname, pendingDestination, rootNavigationState?.key, navigationAttempt]);
 
   const finishAuthenticatedLogin = React.useCallback(async (user) => {
     if (!user || !auth.currentUser || auth.currentUser.uid !== user.uid) {
@@ -129,7 +154,12 @@ export default function PrivilegedLogin({ role }) {
     saveRoleSession(trustedProfile);
     completePrivilegedLoginValidation(role, user.uid);
     logPrivilegedStage(admin, 'ACCESS_GRANTED');
-    routerRef.current.replace(admin ? '/admin/dashboard' : '/manager/dashboard');
+    if (admin) {
+      logPrivilegedStage(admin, 'NAVIGATION_REQUESTED', { currentPathname: pathnameRef.current });
+      setPendingDestination('/admin/dashboard');
+    } else {
+      routerRef.current.replace('/manager/dashboard');
+    }
   }, [admin, role]);
 
   const rejectLogin = React.useCallback(async (loginError) => {
@@ -170,7 +200,7 @@ export default function PrivilegedLogin({ role }) {
   }, [admin, finishAuthenticatedLogin, rejectLogin, role]);
 
   const submit = async () => {
-    if (loading) return;
+    if (loading || submitting.current || pendingDestination) return;
     if (!identifier.trim() || !password) return setError('Enter your username or email and password.');
     submitting.current = true;
     resetPrivilegedLoginValidation(role);
@@ -227,7 +257,7 @@ export default function PrivilegedLogin({ role }) {
     </View>
     {admin && params.passwordChanged === 'true' && !error && <Text style={styles.success}>Password changed successfully. Sign in with your new password.</Text>}
     {!!error && <Text accessibilityRole="alert" style={styles.error}>{error}</Text>}
-    <TouchableOpacity disabled={loading} onPress={submit} style={[styles.button, loading && styles.disabled]}>{loading ? <View style={styles.loadingContent}><ActivityIndicator color="#FFF" size="small" /><Text style={styles.buttonText}>{admin ? 'Verifying administrator access...' : 'Verifying Manager access...'}</Text></View> : <Text style={styles.buttonText}>{admin ? 'Sign in as Administrator' : 'Sign in as Manager'}</Text>}</TouchableOpacity>
+    <TouchableOpacity disabled={loading || (!!pendingDestination && !error)} onPress={pendingDestination ? retryNavigation : submit} style={[styles.button, loading && styles.disabled]}>{loading || (pendingDestination && !error) ? <View style={styles.loadingContent}><ActivityIndicator color="#FFF" size="small" /><Text style={styles.buttonText}>{pendingDestination ? 'Opening dashboard...' : admin ? 'Verifying administrator access...' : 'Verifying Manager access...'}</Text></View> : <Text style={styles.buttonText}>{pendingDestination ? 'Open dashboard' : admin ? 'Sign in as Administrator' : 'Sign in as Manager'}</Text>}</TouchableOpacity>
     <TouchableOpacity disabled={loading} onPress={() => router.replace('/login')} style={styles.back}><Text style={styles.backText}>Back to public login</Text></TouchableOpacity>
   </View></LinearGradient>;
 }

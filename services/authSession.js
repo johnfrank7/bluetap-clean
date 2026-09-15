@@ -33,7 +33,7 @@ export const cacheValidatedPrivilegedAccess = (profile = {}) => {
   privilegedValidationCache = { uid, role, profile, validatedAt: Date.now() };
 };
 
-const getCachedPrivilegedAccess = (user, role) => {
+export const getCachedPrivilegedAccess = (user, role) => {
   const cached = privilegedValidationCache;
   if (!cached || cached.uid !== user?.uid || cached.role !== role ||
       Date.now() - cached.validatedAt > PRIVILEGED_VALIDATION_TTL_MS) return null;

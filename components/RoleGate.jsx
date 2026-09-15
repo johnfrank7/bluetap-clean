@@ -7,6 +7,7 @@ import { auth } from '../firebase';
 import {
   clearAllAuthSessions,
   clearModuleSession,
+  getCachedPrivilegedAccess,
   validateRoleAccess,
 } from '../services/authSession';
 
@@ -96,6 +97,7 @@ export default function RoleGate({ role, allowedRoles, children, bypass = false 
     });
 
     return () => {
+      validationRunRef.current += 1;
       unsubscribeAuth();
 
       if (redirectTimerRef.current) {
@@ -105,6 +107,11 @@ export default function RoleGate({ role, allowedRoles, children, bypass = false 
   }, [bypass, validateAccess]);
 
   if (bypass) return children;
+
+  // Preserve the mounted navigator during the login-to-dashboard handoff.
+  // This is the same UID/role/TTL-checked cache used by validateRoleAccess.
+  if (allowedRolesKey.split(',').some((allowedRole) =>
+    getCachedPrivilegedAccess(auth.currentUser, allowedRole))) return children;
 
   if (gateState.status !== 'authorized') {
     const isChecking = gateState.status === 'checking';

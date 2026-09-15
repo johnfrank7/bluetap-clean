@@ -121,7 +121,7 @@ test('PrivilegedLogin keeps listener completion outside render-scoped effect var
   assert.match(login, /VALIDATION_CALLED_FROM_AUTH_LISTENER/);
   assert.match(login, /VALIDATION_CALLED_FROM_LOGIN/);
   assert.match(login, /const routerRef = React\.useRef\(router\)/);
-  assert.match(login, /routerRef\.current\.replace\(admin \? '\/admin\/dashboard'/);
+  assert.match(login, /setPendingDestination\('\/admin\/dashboard'\)/);
   assert.doesNotMatch(login, /\}, \[admin, role, router\]\)/);
 });
 
