@@ -18,10 +18,14 @@ test('Admin and Manager login routes bypass only their login screen while dashbo
   const root = resolve(__dirname, '..', '..', '..');
   const adminLayout = readFileSync(resolve(root, 'app/admin/_layout.jsx'), 'utf8');
   const managerLayout = readFileSync(resolve(root, 'app/manager/_layout.jsx'), 'utf8');
-  assert.match(adminLayout, /segments\[segments\.length - 1\] === 'login'/);
+  assert.match(adminLayout, /usePathname\(\)/);
+  assert.match(adminLayout, /bypass=\{pathname === '\/admin\/login'\}/);
   assert.match(adminLayout, /RoleGate allowedRoles=\{\["admin"\]\}/);
-  assert.match(managerLayout, /segments\[segments\.length - 1\] === 'login'/);
+  assert.match(managerLayout, /usePathname\(\)/);
+  assert.match(managerLayout, /bypass=\{pathname === '\/manager\/login'\}/);
   assert.match(managerLayout, /RoleGate allowedRoles=\{\["manager"\]\}/);
+  assert.equal((adminLayout.match(/<Stack /g) || []).length, 1);
+  assert.equal((managerLayout.match(/<Stack /g) || []).length, 1);
 });
 
 test('required Admin password change returns to Admin authentication and never the public login', () => {
@@ -102,6 +106,9 @@ test('RoleGate validates from Firebase auth once and does not recursively valida
   const gate = readFileSync(resolve(root, 'components/RoleGate.jsx'), 'utf8');
   assert.match(gate, /onAuthStateChanged\(auth/);
   assert.doesNotMatch(gate, /subscribeAuthSessionChanges/);
+  assert.match(gate, /if \(bypass\) return children/);
+  assert.match(gate, /routerRef\.current\.replace/);
+  assert.doesNotMatch(gate, /\[allowedRolesKey, router\]/);
 });
 
 test('PrivilegedLogin keeps listener completion outside render-scoped effect variables', () => {

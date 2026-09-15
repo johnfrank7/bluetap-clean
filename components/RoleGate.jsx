@@ -10,8 +10,10 @@ import {
   validateRoleAccess,
 } from '../services/authSession';
 
-export default function RoleGate({ role, allowedRoles, children }) {
+export default function RoleGate({ role, allowedRoles, children, bypass = false }) {
   const router = useRouter();
+  const routerRef = useRef(router);
+  routerRef.current = router;
   const allowedRolesKey = (Array.isArray(allowedRoles) && allowedRoles.length
     ? allowedRoles
     : [role]).join(',');
@@ -74,11 +76,20 @@ export default function RoleGate({ role, allowedRoles, children }) {
     });
 
     redirectTimerRef.current = setTimeout(() => {
-      router.replace(result.redirectTo || '/login');
+      routerRef.current.replace(result.redirectTo || '/login');
     }, 0);
-  }, [allowedRolesKey, router]);
+  }, [allowedRolesKey]);
 
   useEffect(() => {
+    if (bypass) {
+      validationRunRef.current += 1;
+      if (redirectTimerRef.current) clearTimeout(redirectTimerRef.current);
+      redirectTimerRef.current = null;
+      setGateState({ status: 'bypassed', message: '' });
+      return undefined;
+    }
+
+    setGateState({ status: 'checking', message: '' });
     const unsubscribeAuth = onAuthStateChanged(auth, () => {
       setGateState({ status: 'checking', message: '' });
       validateAccess();
@@ -91,7 +102,9 @@ export default function RoleGate({ role, allowedRoles, children }) {
         clearTimeout(redirectTimerRef.current);
       }
     };
-  }, [validateAccess]);
+  }, [bypass, validateAccess]);
+
+  if (bypass) return children;
 
   if (gateState.status !== 'authorized') {
     const isChecking = gateState.status === 'checking';
