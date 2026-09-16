@@ -22,5 +22,6 @@ export const getBranches = async () => (await request('/api/admin/branches')).br
 export const createBranch = async (branch) => (await request('/api/admin/branches', 'POST', branch)).branch;
 export const updateBranch = async (branchId, changes) => (await request('/api/admin/branches', 'PATCH', { branchId, ...changes })).branch;
 export const getManagers = async () => (await request('/api/admin/managers')).managers || [];
-export const promoteManager = async (identifier, branchId) => (await request('/api/admin/managers', 'POST', { identifier, branchId, managerStatus: 'active' })).manager;
+export const getAdminCreatedAccounts = async () => (await request('/api/admin/accounts')).accounts || [];
+export const createAdminAccount = async (account) => (await request('/api/admin/accounts', 'POST', account)).account;
 export const updateManagerAssignment = async (managerUid, changes) => (await request('/api/admin/managers', 'PATCH', { managerUid, ...changes })).manager;

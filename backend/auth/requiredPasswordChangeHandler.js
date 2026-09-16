@@ -31,8 +31,8 @@ function createRequiredPasswordChangeHandler(getAdmin = getFirebaseAdmin, now = 
       const profileRef = db.collection('users').doc(decoded.uid);
       const profileSnapshot = await profileRef.get();
       const profile = profileSnapshot.data() || {};
-      if (!profileSnapshot.exists || profile.role !== 'admin' || !(decoded.admin === true || decoded.role === 'admin')) {
-        throw new OtpError(403, 'ADMIN_REQUIRED', 'Administrator access is required.');
+      if (!profileSnapshot.exists || !['admin', 'manager', 'requester', 'distributor'].includes(profile.role)) {
+        throw new OtpError(403, 'ACCOUNT_REQUIRED', 'A BlueTap account is required.');
       }
       if (profile.mustChangePassword !== true) {
         throw new OtpError(409, 'PASSWORD_CHANGE_NOT_REQUIRED', 'This account does not require a temporary-password change.');
@@ -46,6 +46,7 @@ function createRequiredPasswordChangeHandler(getAdmin = getFirebaseAdmin, now = 
       await auth.updateUser(decoded.uid, { password: newPassword });
       await profileRef.update({ mustChangePassword: false, passwordChangedAt: changedAt, updatedAt: changedAt });
       await auth.revokeRefreshTokens(decoded.uid);
+      await db.collection('adminAuditLogs').doc().set({ action: 'FORCED_PASSWORD_CHANGE_COMPLETED', targetUid: decoded.uid, role: profile.role, timestamp: changedAt });
       return res.status(200).json({ changed: true });
     } catch (error) {
       const known = error instanceof OtpError;

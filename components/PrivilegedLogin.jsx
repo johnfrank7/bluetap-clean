@@ -141,7 +141,7 @@ export default function PrivilegedLogin({ role }) {
     if (profile.role !== role || !hasTrustedRole(role, token.claims, profile)) {
       throw accessError(admin ? 'ADMIN_ROLE_MISMATCH' : 'MANAGER_ROLE_MISMATCH');
     }
-    if (admin && profile.mustChangePassword === true) {
+    if (profile.mustChangePassword === true) {
       completePrivilegedLoginValidation(role, user.uid);
       clearAllAuthSessions();
       routerRef.current.replace('/required-password-change');

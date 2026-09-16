@@ -4,7 +4,7 @@ import { useRouter } from 'expo-router';
 import { onAuthStateChanged, signInWithEmailAndPassword } from 'firebase/auth';
 
 import { auth } from '../firebase';
-import { clearAllAuthSessions, fetchFirestoreUserProfile, saveRoleSession, signOutAndClearSessions } from '../services/authSession';
+import { clearAllAuthSessions, fetchFirestoreUserProfile, getRoleHomePath, saveRoleSession, signOutAndClearSessions } from '../services/authSession';
 import { completeRequiredPasswordChange } from '../services/requiredPasswordChange';
 
 export default function RequiredPasswordChangePage() {
@@ -19,7 +19,7 @@ export default function RequiredPasswordChangePage() {
   const [error, setError] = React.useState('');
 
   React.useEffect(() => onAuthStateChanged(auth, (user) => {
-    if (!user && !passwordChangeFlow.current) router.replace('/admin/login');
+    if (!user && !passwordChangeFlow.current) router.replace('/login');
     else setReady(true);
   }), [router]);
 
@@ -29,24 +29,24 @@ export default function RequiredPasswordChangePage() {
     passwordChangeFlow.current = true;
     setSaving(true); setError('');
     try {
-      const adminEmail = auth.currentUser?.email || '';
+      const accountEmail = auth.currentUser?.email || '';
       await completeRequiredPasswordChange(password);
       clearAllAuthSessions();
       await signOutAndClearSessions();
       try {
-        if (!adminEmail) throw new Error('Admin email is unavailable.');
-        const credential = await signInWithEmailAndPassword(auth, adminEmail, password);
+        if (!accountEmail) throw new Error('Account email is unavailable.');
+        const credential = await signInWithEmailAndPassword(auth, accountEmail, password);
         await credential.user.getIdToken(true);
         const profile = await fetchFirestoreUserProfile(credential.user);
-        if (!profile || profile.role !== 'admin' || profile.mustChangePassword === true) {
-          throw new Error('Admin profile refresh failed.');
+        if (!profile || profile.mustChangePassword === true) {
+          throw new Error('Account profile refresh failed.');
         }
         saveRoleSession(profile);
-        router.replace('/admin/dashboard');
+        router.replace(getRoleHomePath(profile.role));
       } catch {
         await signOutAndClearSessions();
         passwordChangeFlow.current = false;
-        router.replace('/admin/login?passwordChanged=true');
+        router.replace('/login?passwordChanged=true');
       }
     } catch (submitError) {
       passwordChangeFlow.current = false;
@@ -56,9 +56,9 @@ export default function RequiredPasswordChangePage() {
 
   if (!ready) return <View style={styles.screen}><ActivityIndicator color="#187BCD" size="large" /></View>;
   return <View style={styles.screen}><View style={styles.card}>
-    <Text style={styles.eyebrow}>BLUETAP ADMIN SECURITY</Text>
+    <Text style={styles.eyebrow}>BLUETAP ACCOUNT SECURITY</Text>
     <Text style={styles.title}>Create a new password</Text>
-    <Text style={styles.help}>Your temporary Admin password must be replaced before you can access BlueTap administration.</Text>
+    <Text style={styles.help}>Your temporary password must be replaced before you can access BlueTap.</Text>
     <Text style={styles.label}>New password</Text>
     <View style={styles.passwordField}><TextInput secureTextEntry={!showPassword} autoCapitalize="none" value={password} onChangeText={setPassword} style={styles.passwordInput} placeholder="Enter a new password" /><TouchableOpacity accessibilityRole="button" accessibilityLabel={showPassword ? 'Hide new password' : 'Show new password'} onPress={() => setShowPassword((visible) => !visible)} style={styles.visibilityButton}><Text style={styles.visibilityText}>{showPassword ? 'Hide' : 'Show'}</Text></TouchableOpacity></View>
     <Text style={styles.hint}>Use at least 12 characters with uppercase, lowercase, and a number.</Text>
@@ -66,7 +66,7 @@ export default function RequiredPasswordChangePage() {
     <View style={styles.passwordField}><TextInput secureTextEntry={!showConfirmation} autoCapitalize="none" value={confirmPassword} onChangeText={setConfirmPassword} style={styles.passwordInput} placeholder="Re-enter the new password" /><TouchableOpacity accessibilityRole="button" accessibilityLabel={showConfirmation ? 'Hide password confirmation' : 'Show password confirmation'} onPress={() => setShowConfirmation((visible) => !visible)} style={styles.visibilityButton}><Text style={styles.visibilityText}>{showConfirmation ? 'Hide' : 'Show'}</Text></TouchableOpacity></View>
     {!!error && <Text style={styles.error}>{error}</Text>}
     <TouchableOpacity disabled={saving} onPress={submit} style={[styles.button, saving && styles.disabled]}><Text style={styles.buttonText}>{saving ? 'Changing password...' : 'Change password'}</Text></TouchableOpacity>
-    <TouchableOpacity disabled={saving} onPress={async () => { await signOutAndClearSessions(); router.replace('/admin/login'); }} style={styles.signOut}><Text style={styles.signOutText}>Back to Admin Login</Text></TouchableOpacity>
+    <TouchableOpacity disabled={saving} onPress={async () => { await signOutAndClearSessions(); router.replace('/login'); }} style={styles.signOut}><Text style={styles.signOutText}>Sign out</Text></TouchableOpacity>
   </View></View>;
 }
 

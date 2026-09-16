@@ -28,13 +28,12 @@ test('Admin and Manager login routes bypass only their login screen while dashbo
   assert.equal((managerLayout.match(/<Stack /g) || []).length, 1);
 });
 
-test('required Admin password change returns to Admin authentication and never the public login', () => {
+test('required password change routes every account through a fresh role-based session', () => {
   const root = resolve(__dirname, '..', '..', '..');
   const passwordChangePage = readFileSync(resolve(root, 'app/required-password-change.jsx'), 'utf8');
-  assert.match(passwordChangePage, /signInWithEmailAndPassword\(auth, adminEmail, password\)/);
-  assert.match(passwordChangePage, /router\.replace\('\/admin\/dashboard'\)/);
-  assert.match(passwordChangePage, /router\.replace\('\/admin\/login\?passwordChanged=true'\)/);
-  assert.doesNotMatch(passwordChangePage, /router\.replace\('\/login\?passwordChanged=true'\)/);
+  assert.match(passwordChangePage, /signInWithEmailAndPassword\(auth, accountEmail, password\)/);
+  assert.match(passwordChangePage, /router\.replace\(getRoleHomePath\(profile\.role\)\)/);
+  assert.match(passwordChangePage, /router\.replace\('\/login\?passwordChanged=true'\)/);
 });
 
 test('privileged login refreshes its token before reading the Firestore profile', () => {

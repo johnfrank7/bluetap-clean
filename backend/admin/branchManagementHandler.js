@@ -50,24 +50,6 @@ async function activeBranch(db, branchId) {
   return { id, ...snapshot.data() };
 }
 
-async function resolveCandidate(auth, db, identifier) {
-  const normalized = clean(identifier, 160).toLowerCase();
-  if (!normalized) throw new OtpError(400, 'MANAGER_IDENTIFIER_REQUIRED', 'Enter an existing username or email.');
-  let uid = '';
-  if (normalized.includes('@')) {
-    try { uid = (await auth.getUserByEmail(normalized)).uid; }
-    catch { throw new OtpError(404, 'USER_NOT_FOUND', 'No BlueTap account matches that email.'); }
-  } else {
-    const matches = await db.collection('users').where('usernameNormalized', '==', normalized).limit(1).get();
-    uid = matches.docs?.[0]?.id || '';
-    if (!uid) throw new OtpError(404, 'USER_NOT_FOUND', 'No BlueTap account matches that username.');
-  }
-  const snapshot = await db.collection('users').doc(uid).get();
-  if (!snapshot.exists) throw new OtpError(404, 'USER_NOT_FOUND', 'The Firebase account has no completed BlueTap profile.');
-  if (snapshot.data()?.role === 'admin') throw new OtpError(409, 'PROTECTED_ACCOUNT', 'Administrator accounts cannot be converted to Managers.');
-  return { uid, profile: snapshot.data() };
-}
-
 async function listBranches(db) {
   const [branchesSnapshot, managersSnapshot] = await Promise.all([
     db.collection('branches').get(),
@@ -152,15 +134,13 @@ function createAdminManagersHandler(getAdmin = getFirebaseAdmin) {
     res.setHeader('Cache-Control', 'no-store');
     if (!applyCors(req, res)) return;
     if (req.method === 'OPTIONS') return res.status(204).end();
-    if (!['GET', 'POST', 'PATCH'].includes(req.method)) return res.status(405).json({ error: { reason: 'method-not-allowed', message: 'Use GET, POST, or PATCH.' } });
+    if (!['GET', 'PATCH'].includes(req.method)) return res.status(405).json({ error: { reason: 'method-not-allowed', message: 'Use GET or PATCH.' } });
     try {
       const { auth, db } = getAdmin();
       const admin = await requireAdmin(req, auth, db);
       if (req.method === 'GET') return res.status(200).json({ managers: await listManagers(db) });
       const body = bodyOf(req);
-      const candidate = req.method === 'POST'
-        ? await resolveCandidate(auth, db, body.identifier)
-        : { uid: clean(body.managerUid, 128), profile: null };
+      const candidate = { uid: clean(body.managerUid, 128), profile: null };
       if (!candidate.uid) throw new OtpError(400, 'MANAGER_ID_REQUIRED', 'Manager ID is required.');
       const managerRef = db.collection('users').doc(candidate.uid);
       const managerSnapshot = await managerRef.get();

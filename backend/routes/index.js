@@ -10,6 +10,7 @@ const { createAdminRegistrationSecurityHandler } = require('../admin/registratio
 const { createAdminBranchesHandler, createAdminManagersHandler } = require('../admin/branchManagementHandler');
 const { createRequiredPasswordChangeHandler } = require('../auth/requiredPasswordChangeHandler');
 const { createManagerContextHandler } = require('../manager/managerContextHandler');
+const { createAdminAccountsHandler } = require('../admin/accountManagementHandler');
 
 const routes = new Map([
   ['/api/auth/check-username', createUsernameHandler('check')],
@@ -29,6 +30,7 @@ const routes = new Map([
   ['/api/admin/registration-security', createAdminRegistrationSecurityHandler()],
   ['/api/admin/branches', createAdminBranchesHandler()],
   ['/api/admin/managers', createAdminManagersHandler()],
+  ['/api/admin/accounts', createAdminAccountsHandler()],
   ['/api/manager/context', createManagerContextHandler()],
   ['/api/auth/complete-required-password-change', createRequiredPasswordChangeHandler()],
 ]);

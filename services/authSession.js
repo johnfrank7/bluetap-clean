@@ -127,7 +127,7 @@ const isFaceRequirementSatisfied = (profile = {}) =>
 
 export const getPostAuthenticationDestination = (profile = {}) => {
   const role = normalizeRole(profile.role);
-  if (role === 'admin' && profile.mustChangePassword === true) return '/required-password-change';
+  if (profile.mustChangePassword === true) return '/required-password-change';
   if (role === 'admin') return '/admin/dashboard';
   if (role === 'manager') return '/manager/dashboard';
   if (!['requester', 'distributor'].includes(role)) return '/login';
@@ -375,6 +375,10 @@ export const validateRoleAccess = async (expectedRole) => {
     };
   }
 
+  if (profile.mustChangePassword === true) {
+    return { status: 'password-change-required', message: 'Change your temporary password to continue.', redirectTo: '/required-password-change', clearRole: expected };
+  }
+
   if (
     (profile.role === 'requester' || profile.role === 'distributor') &&
     profile.emailVerificationRequired === true &&
@@ -418,14 +422,6 @@ export const validateRoleAccess = async (expectedRole) => {
     };
   }
 
-  if (expected === 'admin' && profile.mustChangePassword === true) {
-    return {
-      status: 'password-change-required',
-      message: 'Change your temporary Admin password to continue.',
-      redirectTo: '/required-password-change',
-      clearRole: expected,
-    };
-  }
 
   if (expected === 'manager') {
     try {

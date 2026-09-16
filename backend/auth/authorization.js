@@ -34,6 +34,7 @@ async function requireActiveManager(req, auth, db) {
   if (!profileSnapshot.exists || !(decoded.manager === true || decoded.role === 'manager') || profile.role !== 'manager') {
     throw new OtpError(403, 'MANAGER_REQUIRED', 'Manager access is required.');
   }
+  if (profile.mustChangePassword === true) throw new OtpError(403, 'PASSWORD_CHANGE_REQUIRED', 'You must change your temporary password before accessing BlueTap.');
   if (profile.managerStatus !== 'active') {
     throw new OtpError(403, 'MANAGER_INACTIVE', 'This Manager account is inactive. Please contact the BlueTap administrator.');
   }

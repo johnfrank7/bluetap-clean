@@ -11,6 +11,7 @@ function fixture({ role = 'admin', mustChangePassword = true, claims = { admin: 
   const profileRef = {
     async get() { return { exists: true, data: () => ({ ...profile }) }; },
     async update(changes) { Object.assign(profile, changes); },
+    async set() {},
   };
   const auth = {
     async verifyIdToken(token) {
@@ -39,7 +40,7 @@ async function call(handler, token, body) {
   return res;
 }
 
-test('required Admin password change updates Auth before clearing the enforcement flag', async () => {
+test('required password change updates Auth before clearing the enforcement flag', async () => {
   const f = fixture();
   const res = await call(createRequiredPasswordChangeHandler(f.getAdmin, () => now), 'valid-token', { newPassword: 'FreshAdmin2026' });
   assert.equal(res.statusCode, 200);
@@ -50,10 +51,12 @@ test('required Admin password change updates Auth before clearing the enforcemen
   assert.deepEqual(f.calls.revoked, ['admin-1']);
 });
 
-test('password change rejects weak passwords, non-Admins, stale login, and accounts without the flag', async () => {
+test('password change permits every trusted account role but rejects invalid profiles, stale login, and missing flags', async () => {
   assert.throws(() => validateNewPassword('short'), (error) => error.reason === 'WEAK_PASSWORD');
   let f = fixture({ role: 'requester', claims: {} });
-  assert.equal((await call(createRequiredPasswordChangeHandler(f.getAdmin, () => now), 'valid-token', { newPassword: 'FreshAdmin2026' })).body.error.reason, 'ADMIN_REQUIRED');
+  assert.equal((await call(createRequiredPasswordChangeHandler(f.getAdmin, () => now), 'valid-token', { newPassword: 'FreshAdmin2026' })).statusCode, 200);
+  f = fixture({ role: 'unknown' });
+  assert.equal((await call(createRequiredPasswordChangeHandler(f.getAdmin, () => now), 'valid-token', { newPassword: 'FreshAdmin2026' })).body.error.reason, 'ACCOUNT_REQUIRED');
   f = fixture({ mustChangePassword: false });
   assert.equal((await call(createRequiredPasswordChangeHandler(f.getAdmin, () => now), 'valid-token', { newPassword: 'FreshAdmin2026' })).body.error.reason, 'PASSWORD_CHANGE_NOT_REQUIRED');
   f = fixture();

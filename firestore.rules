@@ -10,13 +10,14 @@ service cloud.firestore {
     }
 
     function isRequester() {
-      return signedIn() && currentUser().role == 'requester';
+      return signedIn() && currentUser().role == 'requester' && currentUser().mustChangePassword != true;
     }
 
     function isManager() {
       return signedIn()
         && currentUser().role == 'manager'
         && currentUser().managerStatus == 'active'
+        && currentUser().mustChangePassword != true
         && currentUser().branchId is string
         && (request.auth.token.manager == true || request.auth.token.role == 'manager')
         && get(/databases/$(database)/documents/branches/$(currentUser().branchId)).data.status == 'active';

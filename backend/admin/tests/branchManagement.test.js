@@ -71,39 +71,14 @@ async function call(handler, method, token, body) {
 
 const branch = (code) => ({ name: `Branch ${code}`, code, barangay: 'Central', city: 'Toledo', address: `${code} Main Street` });
 
-test('Admin creates branches and assigns, reassigns, then deactivates a Manager', async () => {
+test('legacy Manager promotion endpoint is retired', async () => {
   const f = fixture();
   const branches = createAdminBranchesHandler(f.getAdmin);
   const managers = createAdminManagersHandler(f.getAdmin);
-  const managerContext = createManagerContextHandler(f.getAdmin);
   assert.equal((await call(branches, 'POST', 'admin-token', branch('A1'))).statusCode, 201);
-  assert.equal((await call(branches, 'POST', 'admin-token', branch('B1'))).statusCode, 201);
-
-  let result = await call(managers, 'POST', 'admin-token', { identifier: 'manager@example.test', branchId: 'a1' });
-  assert.equal(result.statusCode, 200);
-  assert.equal(result.body.manager.branchId, 'a1');
-  assert.equal(f.records.get('users/manager-1').managerStatus, 'active');
-  let context = await call(managerContext, 'GET', 'manager-token');
-  assert.equal(context.statusCode, 200);
-  assert.equal(context.body.branch.id, 'a1');
-
-  const branchList = await call(branches, 'GET', 'admin-token');
-  const branchA = branchList.body.branches.find((item) => item.id === 'a1');
-  assert.equal(branchA.managers[0].uid, 'manager-1');
-
-  result = await call(managers, 'PATCH', 'admin-token', { managerUid: 'manager-1', branchId: 'b1', managerStatus: 'active' });
-  assert.equal(result.body.manager.branchId, 'b1');
-  assert.ok([...f.records.values()].some((entry) => entry.action === 'MANAGER_REASSIGNED'));
-  context = await call(managerContext, 'GET', 'manager-token');
-  assert.equal(context.statusCode, 200);
-  assert.equal(context.body.branch.id, 'b1');
-
-  result = await call(managers, 'PATCH', 'admin-token', { managerUid: 'manager-1', managerStatus: 'inactive' });
-  assert.equal(result.body.manager.managerStatus, 'inactive');
-  assert.equal(result.body.manager.branchId, '');
-  context = await call(managerContext, 'GET', 'manager-token');
-  assert.equal(context.statusCode, 403);
-  assert.equal(context.body.error.reason, 'MANAGER_INACTIVE');
+  const result = await call(managers, 'POST', 'admin-token', { identifier: 'manager@example.test', branchId: 'a1' });
+  assert.equal(result.statusCode, 405);
+  assert.equal(f.records.get('users/manager-1').role, 'requester');
 });
 
 test('Manager context derives its active Branch and rejects cross-branch or inactive access', async () => {
