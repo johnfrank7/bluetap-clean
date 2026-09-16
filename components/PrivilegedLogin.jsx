@@ -35,6 +35,7 @@ const logPrivilegedStage = (admin, stage, details = {}) => {
 };
 
 const safeAccessMessage = (admin, code) => {
+  if (code === 'MANAGER_EMAIL_REQUIRED') return 'Use the email address assigned to your Manager account.';
   if (code === 'ADMIN_PROFILE_READ_DENIED' || code === 'ADMIN_PROFILE_MISSING') {
     return 'Administrator profile could not be verified. Please contact support.';
   }
@@ -204,7 +205,7 @@ export default function PrivilegedLogin({ role }) {
 
   const submit = async () => {
     if (loading || submitting.current || pendingDestination) return;
-    if (!identifier.trim() || !password) return setError('Enter your username or email and password.');
+    if (!identifier.trim() || !password) return setError(admin ? 'Enter your username or email and password.' : 'Enter your email and password.');
     submitting.current = true;
     resetPrivilegedLoginValidation(role);
     setLoading(true); setError('');
@@ -226,9 +227,12 @@ export default function PrivilegedLogin({ role }) {
         }
       }
 
-      const credential = normalized.includes('@')
+      if (!admin && !normalized.includes('@')) throw accessError('MANAGER_EMAIL_REQUIRED');
+      const credential = !admin
         ? await signInWithEmailAndPassword(auth, normalized, password)
-        : await signInWithCustomToken(auth, await loginWithUsername(normalized, password, { portal: role }));
+        : normalized.includes('@')
+          ? await signInWithEmailAndPassword(auth, normalized, password)
+          : await signInWithCustomToken(auth, await loginWithUsername(normalized, password, { portal: role }));
       logPrivilegedStage(admin, 'SIGNIN_SUCCESS');
       logPrivilegedStage(admin, 'VALIDATION_CALLED_FROM_LOGIN');
       await runPrivilegedLoginValidation(role, credential.user, () => finishAuthenticatedLogin(credential.user));
@@ -247,10 +251,10 @@ export default function PrivilegedLogin({ role }) {
 
   return <LinearGradient colors={BLUETAP_LOGIN_GRADIENT} style={styles.screen}><View style={styles.card}>
     <Image source={require('../assets/icons/bluetaplogo.png')} style={styles.logo} resizeMode="contain" />
-    <Text style={styles.title}>{admin ? 'BlueTap Administrator' : 'BlueTap Manager'}</Text>
+    <Text style={styles.title}>{admin ? 'BlueTap Administrator' : 'Manager Sign In'}</Text>
     <Text style={styles.subtitle}>{admin ? 'Authorized personnel only' : 'Branch operations access'}</Text>
-    <Text style={styles.label}>Username or email</Text>
-    <TextInput value={identifier} onChangeText={setIdentifier} autoCapitalize="none" autoCorrect={false} style={styles.input} onSubmitEditing={submit} />
+    <Text style={styles.label}>{admin ? 'Username or email' : 'Email'}</Text>
+    <TextInput value={identifier} onChangeText={setIdentifier} autoCapitalize="none" autoCorrect={false} keyboardType={admin ? 'default' : 'email-address'} style={styles.input} onSubmitEditing={submit} />
     <Text style={styles.label}>Password</Text>
     <View style={styles.passwordField}>
       <TextInput value={password} onChangeText={setPassword} secureTextEntry={!showPassword} autoCapitalize="none" style={styles.passwordInput} onSubmitEditing={submit} />

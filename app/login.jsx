@@ -234,8 +234,8 @@ export default function LoginPage() {
     };
   }, [clearFocusScrollTimeout, scrollFocusedInputIntoView]);
 
-  const showNotification = (title, message, onConfirm) => {
-    setNotification({ title, message, onConfirm });
+  const showNotification = (title, message, onConfirm, actionLabel = '') => {
+    setNotification({ title, message, onConfirm, actionLabel });
   };
 
   const showDistributorStatusNotification = (applicationStatus, rejectionReason) => {
@@ -372,10 +372,8 @@ export default function LoginPage() {
         clearAllAuthSessions();
         await signOut(auth).catch(() => {});
       }
-      showNotification(
-        'Login failed',
-        getPublicLoginErrorMessage(error)
-      );
+      const privileged = error?.code === 'PRIVILEGED_LOGIN_REQUIRED' || error?.code === 'username/privileged-login-required';
+      showNotification('Login failed', getPublicLoginErrorMessage(error), privileged ? () => router.replace('/manager/login') : undefined, privileged ? 'Go to Manager Login' : '');
     } finally {
       loginInFlight.current = false;
       setLoading(false);
@@ -680,7 +678,7 @@ export default function LoginPage() {
               <Text style={styles.notificationMessage}>{notification?.message}</Text>
 
               <TouchableOpacity style={styles.modalButton} onPress={closeNotification}>
-                <Text style={styles.modalButtonText}>OK</Text>
+                <Text style={styles.modalButtonText}>{notification?.actionLabel || 'OK'}</Text>
               </TouchableOpacity>
             </View>
           </View>
