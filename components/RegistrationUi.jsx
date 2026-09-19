@@ -85,9 +85,10 @@ export function RegistrationStepper({
   const visibleStates = visibleNumbers.map((number) => stepStates[number - 1]);
   const connectorStates = getRegistrationConnectorStates(visibleStates);
   const currentVisibleIndex = Math.max(0, visibleNumbers.indexOf(currentStep));
+  const connectorInset = `${50 / visibleNumbers.length}%`;
 
   return <View style={styles.stepper} accessibilityRole="progressbar" accessibilityValue={{ min: 1, max: visibleNumbers.length, now: currentVisibleIndex + 1 }}>
-    <View pointerEvents="none" style={styles.connectorTrack}>
+    <View pointerEvents="none" style={[styles.connectorTrack, { left: connectorInset, right: connectorInset }]}>
       {connectorStates.map((state, index) => <AnimatedConnector key={index} state={state} />)}
     </View>
     {visibleNumbers.map((number, visibleIndex) => {

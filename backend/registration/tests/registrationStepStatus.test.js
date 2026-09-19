@@ -23,6 +23,13 @@ test('ordinary future steps remain neutral', () => {
   );
 });
 
+test('compact steppers create connectors only between visible steps', () => {
+  assert.deepEqual(
+    getRegistrationConnectorStates(['completed', 'current', 'future', 'future']),
+    ['completed', 'future', 'future']
+  );
+});
+
 test('policy-disabled face and OTP steps are never marked incomplete', () => {
   assert.deepEqual(
     getRegistrationStepStates({

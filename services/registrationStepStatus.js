@@ -27,7 +27,7 @@ function getRegistrationStepStates({
 }
 
 function getRegistrationConnectorStates(stepStates = []) {
-  return REGISTRATION_STEP_NUMBERS.slice(0, -1).map((_, index) => {
+  return stepStates.slice(0, -1).map((_, index) => {
     const left = stepStates[index];
     const right = stepStates[index + 1];
     if (left === 'completed' && (right === 'completed' || right === 'current')) {
