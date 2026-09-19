@@ -99,7 +99,7 @@ function createUsernameHandler(action, getAdmin = getFirebaseAdmin) {
       if (action === 'check') return res.status(200).json(await checkUsername(db, body.username));
       stage('REQUEST_RECEIVED');
       const portal = body.portal || 'public';
-      if (!['public', 'admin', 'manager'].includes(portal) || typeof body.username !== 'string' ||
+      if (!['public', 'admin', 'manager', 'unified'].includes(portal) || typeof body.username !== 'string' ||
           typeof body.password !== 'string' || !body.password || body.password.length > 128) {
         throw new OtpError(400, 'invalid-request', 'Enter your username or email and password.');
       }
@@ -174,7 +174,7 @@ function createUsernameHandler(action, getAdmin = getFirebaseAdmin) {
         stage('PRIVILEGED_ACCOUNT');
         throw new OtpError(403, 'privileged-login-required', 'This account must use its authorized sign-in portal.');
       }
-      if (portal !== 'public' && profile.role !== portal) throw new OtpError(403, 'portal-role-mismatch', 'This account cannot use this sign-in portal.');
+      if (!['public', 'unified'].includes(portal) && profile.role !== portal) throw new OtpError(403, 'portal-role-mismatch', 'This account cannot use this sign-in portal.');
       // Onboarding/approval is a routing decision after authentication.
       const customToken = await auth.createCustomToken(expectedUid);
       stage('SUCCESS');

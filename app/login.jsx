@@ -315,7 +315,7 @@ export default function LoginPage() {
 
       // Both identifiers use password verification and public-role checks on
       // the backend before establishing the matching Firebase client session.
-      const loginResult = await loginWithUsernameResult(loginIdentifier, enteredPassword);
+      const loginResult = await loginWithUsernameResult(loginIdentifier, enteredPassword, { portal: 'unified' });
       const userCredential = await signInWithCustomToken(auth, loginResult.customToken);
 
       const user = userCredential.user;
@@ -343,14 +343,7 @@ export default function LoginPage() {
         rejectionReason: userData.rejectionReason || null,
       };
 
-      if (profileRole === 'admin' || profileRole === 'manager') {
-        clearAllAuthSessions();
-        await signOut(auth);
-        showNotification('Login failed', 'This account must use its authorized sign-in portal.');
-        return;
-      }
-
-      if (!['requester', 'distributor'].includes(profileRole)) {
+      if (!['requester', 'distributor', 'admin', 'manager'].includes(profileRole)) {
         throw Object.assign(new Error('Account setup incomplete'), { code: 'ACCOUNT_SETUP_INCOMPLETE' });
       }
 
