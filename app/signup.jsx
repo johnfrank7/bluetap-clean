@@ -76,6 +76,7 @@ export default function SignupPage() {
     : { status: 'unverified', duplicateCheck: 'unknown' });
   const [termsAccepted, setTermsAccepted] = React.useState(Boolean(usernameRetryDraft));
   const [securityPolicy, setSecurityPolicy] = React.useState(usernameRetryDraft?.profile?.securityPolicy || { faceVerificationRequired: true, emailOtpRequired: true });
+  const [securityPolicyReady, setSecurityPolicyReady] = React.useState(Boolean(usernameRetryDraft?.profile?.securityPolicy));
   const [now, setNow] = React.useState(Date.now());
   const submitting = React.useRef(false);
   const usernameCheckVersion = React.useRef(0);
@@ -98,11 +99,13 @@ export default function SignupPage() {
 
   React.useEffect(() => {
     let active = true;
+    if (!registrationSessionId) setSecurityPolicyReady(false);
     getRegistrationSecurityPolicy()
       .then((policy) => { if (active && !registrationSessionId) setSecurityPolicy(policy); })
       // Keep the secure default while the policy endpoint is unavailable. The
       // session-creation endpoint remains the final, authoritative policy read.
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => { if (active) setSecurityPolicyReady(true); });
     return () => { active = false; };
   }, [registrationSessionId]);
 
@@ -355,26 +358,28 @@ export default function SignupPage() {
           ]}>
             <RegistrationBrand />
             <View style={[styles.card, step === 3 && styles.identityCard, step === 3 && mobile && styles.identityCardMobile]}>
-              <RegistrationStepper
-                currentStep={step}
-                requiredSteps={[
-                  1,
-                  2,
-                  ...(securityPolicy.faceVerificationRequired ? [3] : []),
-                  4,
-                  ...(securityPolicy.emailOtpRequired ? [5] : []),
-                ]}
-                visibleSteps={visibleRegistrationSteps}
-                completedSteps={[
-                  accountComplete && 1,
-                  personalComplete && !!registrationSessionId && 2,
-                  identityComplete && 3,
-                  credentialsComplete && 4,
-                ].filter(Boolean)}
-                onStepPress={openStep}
-                disabled={loading}
-              />
-              {mobile && <Text style={styles.stepText}>Step {visibleStepNumber} of {visibleRegistrationSteps.length} · {STEPS[step - 1]}</Text>}
+              {securityPolicyReady ? <>
+                <RegistrationStepper
+                  currentStep={step}
+                  requiredSteps={[
+                    1,
+                    2,
+                    ...(securityPolicy.faceVerificationRequired ? [3] : []),
+                    4,
+                    ...(securityPolicy.emailOtpRequired ? [5] : []),
+                  ]}
+                  visibleSteps={visibleRegistrationSteps}
+                  completedSteps={[
+                    accountComplete && 1,
+                    personalComplete && !!registrationSessionId && 2,
+                    identityComplete && 3,
+                    credentialsComplete && 4,
+                  ].filter(Boolean)}
+                  onStepPress={openStep}
+                  disabled={loading}
+                />
+                {mobile && <Text style={styles.stepText}>Step {visibleStepNumber} of {visibleRegistrationSteps.length} · {STEPS[step - 1]}</Text>}
+              </> : <View style={styles.stepperLoading} accessibilityRole="progressbar" accessibilityLabel="Loading registration steps"><Text style={styles.stepperLoadingText}>Loading registration steps…</Text></View>}
               <Animated.View style={{
                 opacity: stepTransition,
                 transform: [{ translateY: stepTransition.interpolate({ inputRange: [0, 1], outputRange: [10, 0] }) }],
@@ -459,6 +464,7 @@ const styles = StyleSheet.create({
   verifyPreviewText: { color: '#526E84', fontSize: 14, lineHeight: 21, textAlign: 'center' },
   screen: { flex: 1 }, safe: { flex: 1 }, scroll: { flexGrow: 1, alignItems: 'center', justifyContent: 'center', padding: 20 }, shell: { width: '100%' },
   card: { backgroundColor: '#FFF', borderRadius: 24, padding: 26, shadowColor: '#07518E', shadowOpacity: .24, shadowRadius: 18, shadowOffset: { width: 0, height: 10 }, elevation: 8 },
+  stepperLoading: { minHeight: 62, alignItems: 'center', justifyContent: 'center' }, stepperLoadingText: { color: BLUETAP_COLORS.muted, fontSize: 12, fontWeight: '600' },
   stepText: { color: BLUETAP_COLORS.primary, fontSize: 12, fontWeight: '700', textAlign: 'center', marginTop: -12, marginBottom: 12 },
   roleList: { gap: 12 }, roleCard: { flexDirection: 'row', alignItems: 'center', minHeight: 94, padding: 16, borderRadius: 14, borderWidth: 1.5, borderColor: '#D8E5EF', backgroundColor: '#FAFCFE' }, roleCardSelected: { borderColor: BLUETAP_COLORS.primary, backgroundColor: '#EDF7FF' }, roleIcon: { fontSize: 28, marginRight: 14 }, roleCopy: { flex: 1 }, roleTitle: { color: '#17324D', fontSize: 16, fontWeight: '800' }, roleDescription: { color: '#607A90', fontSize: 13, lineHeight: 18, marginTop: 3 }, radio: { width: 18, height: 18, borderRadius: 9, borderWidth: 2, borderColor: '#A8BCCB' }, radioSelected: { borderWidth: 5, borderColor: BLUETAP_COLORS.primary },
   row: { flexDirection: 'row', gap: 12 }, half: { flex: 1 }, field: { marginBottom: 15 }, label: { color: '#29465F', fontSize: 13, fontWeight: '700', marginBottom: 6 }, input: { minHeight: 50, borderWidth: 1, borderColor: '#C8D9E6', borderRadius: 11, backgroundColor: '#FAFCFE', paddingHorizontal: 14, color: '#17324D', fontSize: 15 }, inputError: { borderColor: '#DC5757', backgroundColor: '#FFF8F8' }, inputSuccess: { borderColor: '#36A269' }, error: { color: '#B93A3A', fontSize: 12, marginTop: 5 }, hint: { color: '#68839A', fontSize: 12, marginTop: 5 },
