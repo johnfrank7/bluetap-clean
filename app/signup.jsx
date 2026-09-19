@@ -12,7 +12,7 @@ import { BLUETAP_COLORS, BLUETAP_LOGIN_GRADIENT } from '../constants/bluetapThem
 import { clearAllAuthSessions } from '../services/authSession';
 import { clearPendingRegistration, completeRegistrationWithoutOtp, getPendingRegistration, requestRegistrationOtp, setPendingRegistration } from '../services/emailVerification';
 import { checkUsername, normalizeUsername, validateUsername } from '../services/usernameAuth';
-import { acceptRegistrationTerms, createRegistrationSession } from '../services/registrationSession';
+import { acceptRegistrationTerms, createRegistrationSession, getRegistrationSecurityPolicy } from '../services/registrationSession';
 import { useFaceServiceWarmup } from '../services/useFaceServiceWarmup';
 
 import RegistrationFaceCapture from '../components/RegistrationFaceCapture';
@@ -95,6 +95,16 @@ export default function SignupPage() {
       useNativeDriver: Platform.OS !== 'web',
     }).start();
   }, [entrance]);
+
+  React.useEffect(() => {
+    let active = true;
+    getRegistrationSecurityPolicy()
+      .then((policy) => { if (active && !registrationSessionId) setSecurityPolicy(policy); })
+      // Keep the secure default while the policy endpoint is unavailable. The
+      // session-creation endpoint remains the final, authoritative policy read.
+      .catch(() => {});
+    return () => { active = false; };
+  }, [registrationSessionId]);
 
   React.useEffect(() => {
     Animated.timing(stepTransition, {

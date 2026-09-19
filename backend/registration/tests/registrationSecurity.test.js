@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { SECURE_DEFAULTS, normalizeRegistrationSecurity, policySnapshot, validateRegistrationSecurity } = require('../registrationSecurity');
 const { createAdminRegistrationSecurityHandler } = require('../../admin/registrationSecurityHandler');
+const { createRegistrationSessionHandler } = require('../registrationSessionHandler');
 
 test('registration security accepts three valid verification combinations and rejects both off', () => {
   for (const [faceVerificationEnabled, emailOtpEnabled] of [[true, true], [true, false], [false, true]]) {
@@ -55,4 +56,23 @@ test('only Firebase-authenticated trusted admin can change registration security
   assert.equal(res.statusCode, 200);
   assert.equal(f.records.get('systemConfig/registrationSecurity').maxAccountsPerDevice, 5);
   assert.equal([...f.records.values()].some((value) => value.action === 'REGISTRATION_SECURITY_UPDATED'), true);
+});
+
+test('public registration policy exposes only the step requirements', async () => {
+  const f = adminFixture('admin', { admin: true });
+  f.records.set('systemConfig/registrationSecurity', {
+    faceVerificationEnabled: false, emailOtpEnabled: true,
+    maxAccountsPerDevice: 7, maxAccountsPerIp: 6, version: 4,
+  });
+  const res = response();
+  await createRegistrationSessionHandler('policy', () => ({ db: {
+    collection: (name) => ({ doc: (id) => ({ key: `${name}/${id}`, get: async function () {
+      const value = f.records.get(this.key);
+      return { exists: value !== undefined, data: () => value };
+    } }) }),
+  } }))({ method: 'POST', headers: {}, body: {} }, res);
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body, { securityPolicy: {
+    faceVerificationRequired: false, emailOtpRequired: true, policyVersion: 4,
+  } });
 });

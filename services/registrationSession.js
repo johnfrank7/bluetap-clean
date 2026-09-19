@@ -44,5 +44,15 @@ export const createRegistrationSession = async (personalInfo) => {
   }
   return result;
 };
+export const getRegistrationSecurityPolicy = async () => {
+  const result = await callRegistrationApi('/api/auth/registration-policy', {});
+  const policy = result?.securityPolicy;
+  if (typeof policy?.faceVerificationRequired !== 'boolean' || typeof policy?.emailOtpRequired !== 'boolean') {
+    const error = new Error('The registration policy is unavailable. Please try again.');
+    error.code = 'registration/invalid-response';
+    throw error;
+  }
+  return policy;
+};
 export const getRegistrationSessionStatus = (registrationSessionId) => callRegistrationApi('/api/auth/registration-session-status', { registrationSessionId });
 export const acceptRegistrationTerms = (registrationSessionId) => callRegistrationApi('/api/auth/accept-registration-terms', { registrationSessionId });
