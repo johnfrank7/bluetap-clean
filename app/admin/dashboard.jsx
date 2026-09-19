@@ -2,16 +2,19 @@ import React from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import AdminShell from '../../components/AdminShell';
+import { SectionCard } from '../../components/DashboardUi';
+import { BLUETAP_COLORS } from '../../constants/bluetapTheme';
 
+const destinations = [
+  ['Branches', 'Create locations and control whether assigned Managers can operate.', '/admin/branches', 'Manage branches'],
+  ['Account management', 'Create requester, distributor, and Manager accounts with secure first sign-in.', '/admin/managers', 'Manage accounts'],
+  ['Registration security', 'Configure verification methods and account limits for new registrations.', '/admin/registration-security', 'Review policy'],
+];
 export default function AdminDashboard() {
   const router = useRouter();
   return <AdminShell title="Administrator Dashboard" subtitle="System-level BlueTap administration">
-    <View style={styles.grid}>
-      <TouchableOpacity style={styles.card} onPress={() => router.push('/admin/branches')}><Text style={styles.cardTitle}>Branches</Text><Text style={styles.muted}>Create, edit, activate, and deactivate BlueTap branches.</Text><Text style={styles.link}>Manage branches</Text></TouchableOpacity>
-      <TouchableOpacity style={styles.card} onPress={() => router.push('/admin/managers')}><Text style={styles.cardTitle}>Managers</Text><Text style={styles.muted}>Assign trusted Manager accounts to one active branch.</Text><Text style={styles.link}>Manage Managers</Text></TouchableOpacity>
-      {['System Overview', 'Users', 'Audit Logs'].map((title) => <View key={title} style={styles.card}><Text style={styles.cardTitle}>{title}</Text><Text style={styles.muted}>Administrative tooling placeholder</Text></View>)}
-      <TouchableOpacity style={styles.card} onPress={() => router.push('/admin/registration-security')}><Text style={styles.cardTitle}>Registration Security</Text><Text style={styles.link}>Manage verification policy and account limits</Text></TouchableOpacity>
-    </View>
+    <View style={styles.welcome}><Text style={styles.eyebrow}>BLUETAP CONTROL CENTER</Text><Text style={styles.welcomeTitle}>Keep every branch and account operating securely.</Text><Text style={styles.welcomeText}>Use the administration tools below to manage the live BlueTap workspace.</Text></View>
+    <Text style={styles.sectionTitle}>Quick access</Text><View style={styles.grid}>{destinations.map(([title, body, path, action]) => <TouchableOpacity key={path} activeOpacity={.85} onPress={() => router.push(path)} style={styles.touch}><SectionCard style={styles.card}><View style={styles.icon}><Text style={styles.iconText}>{title.charAt(0)}</Text></View><Text style={styles.cardTitle}>{title}</Text><Text style={styles.body}>{body}</Text><Text style={styles.link}>{action} →</Text></SectionCard></TouchableOpacity>)}</View>
   </AdminShell>;
 }
-const styles = StyleSheet.create({ grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 16 }, card: { width: 280, minHeight: 130, padding: 20, borderRadius: 16, backgroundColor: '#FFF', borderWidth: 1, borderColor: '#D7ECFF' }, cardTitle: { fontSize: 18, fontWeight: '800', color: '#183B56' }, muted: { color: '#7890A3', marginTop: 10 }, link: { color: '#187BCD', marginTop: 10, fontWeight: '700' } });
+const styles = StyleSheet.create({ welcome:{backgroundColor:BLUETAP_COLORS.primarySoft,borderRadius:16,padding:24,borderWidth:1,borderColor:'#C8E6FB',marginBottom:26},eyebrow:{color:BLUETAP_COLORS.primary,fontSize:11,fontWeight:'800',letterSpacing:1},welcomeTitle:{color:BLUETAP_COLORS.textPrimary,fontSize:22,fontWeight:'800',marginTop:7},welcomeText:{color:BLUETAP_COLORS.textSecondary,marginTop:7,lineHeight:20},sectionTitle:{color:BLUETAP_COLORS.textPrimary,fontSize:17,fontWeight:'800',marginBottom:12},grid:{flexDirection:'row',flexWrap:'wrap',gap:16},touch:{flexGrow:1,flexBasis:250,maxWidth:390},card:{minHeight:205},icon:{width:34,height:34,borderRadius:10,alignItems:'center',justifyContent:'center',backgroundColor:BLUETAP_COLORS.primarySoft},iconText:{color:BLUETAP_COLORS.primary,fontWeight:'800'},cardTitle:{color:BLUETAP_COLORS.textPrimary,fontSize:17,fontWeight:'800',marginTop:16},body:{color:BLUETAP_COLORS.textSecondary,lineHeight:20,marginTop:8},link:{color:BLUETAP_COLORS.primary,fontWeight:'800',marginTop:16} });

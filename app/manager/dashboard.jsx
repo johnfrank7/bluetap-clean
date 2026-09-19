@@ -1366,7 +1366,7 @@ const styles = StyleSheet.create({
     backgroundColor: MANAGER_COLORS.card,
     borderWidth: 1,
     borderColor: MANAGER_COLORS.border,
-    borderRadius: 8,
+    borderRadius: 16,
     paddingHorizontal: 20,
     paddingVertical: 18,
     justifyContent: 'space-between',
@@ -1397,6 +1397,7 @@ const styles = StyleSheet.create({
   },
   panelGrid: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 16,
     marginBottom: 16,
   },
@@ -1404,23 +1405,27 @@ const styles = StyleSheet.create({
     backgroundColor: MANAGER_COLORS.card,
     borderWidth: 1,
     borderColor: MANAGER_COLORS.border,
-    borderRadius: 8,
+    borderRadius: 16,
     padding: 20,
   },
   trendPanel: {
     flex: 1.3,
+    flexBasis: 400,
     minHeight: 310,
   },
   compositionPanel: {
     flex: 1.3,
+    flexBasis: 320,
     minHeight: 310,
   },
   barangayPanel: {
     flex: 1,
+    flexBasis: 280,
     minHeight: 320,
   },
   stationsPanel: {
     flex: 1,
+    flexBasis: 280,
     minHeight: 320,
   },
   panelTitle: {

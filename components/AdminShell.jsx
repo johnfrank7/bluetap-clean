@@ -1,42 +1,15 @@
 import React from 'react';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { usePathname, useRouter } from 'expo-router';
+import { BLUETAP_COLORS } from '../constants/bluetapTheme';
 import { signOutAndClearSessions } from '../services/authSession';
 
-const links = [
-  ['Dashboard', '/admin/dashboard'],
-  ['Branches', '/admin/branches'],
-  ['Managers', '/admin/managers'],
-  ['Registration Security', '/admin/registration-security'],
-];
-
+const links = [['D', 'Dashboard', '/admin/dashboard'], ['B', 'Branches', '/admin/branches'], ['A', 'Accounts', '/admin/managers'], ['S', 'Registration Security', '/admin/registration-security']];
 export default function AdminShell({ title, subtitle, children }) {
-  const router = useRouter();
-  const compact = useWindowDimensions().width < 820;
+  const router = useRouter(); const pathname = usePathname(); const compact = useWindowDimensions().width < 768;
   const logout = async () => { await signOutAndClearSessions(); router.replace('/login'); };
-  return <SafeAreaView style={[styles.root, compact && styles.rootCompact]}>
-    <View style={[styles.sidebar, compact && styles.sidebarCompact]}>
-      <Text style={styles.brand}>BlueTap Administrator</Text>
-      <View style={[styles.nav, compact && styles.navCompact]}>{links.map(([label, path]) => <TouchableOpacity key={path} style={styles.link} onPress={() => router.replace(path)}><Text style={styles.linkText}>{label}</Text></TouchableOpacity>)}</View>
-      <TouchableOpacity style={[styles.logout, compact && styles.logoutCompact]} onPress={logout}><Text style={styles.logoutText}>Logout</Text></TouchableOpacity>
-    </View>
-    <ScrollView style={styles.mainScroll} contentContainerStyle={[styles.main, compact && styles.mainCompact]}><Text style={[styles.title, compact && styles.titleCompact]}>{title}</Text><Text style={styles.subtitle}>{subtitle}</Text>{children}</ScrollView>
-  </SafeAreaView>;
+  const nav = links.map(([icon, label, path]) => <TouchableOpacity key={path} accessibilityRole="link" style={[styles.link, pathname === path && styles.linkActive]} onPress={() => router.replace(path)}><View style={[styles.navIcon, pathname === path && styles.navIconActive]}><Text style={[styles.navIconText, pathname === path && styles.navIconTextActive]}>{icon}</Text></View><Text style={[styles.linkText, pathname === path && styles.linkTextActive]}>{label}</Text></TouchableOpacity>);
+  return <SafeAreaView style={styles.root}><View style={[styles.layout, compact && styles.layoutCompact]}><View style={[styles.sidebar, compact && styles.sidebarCompact]}><View style={styles.brand}><Image source={require('../assets/icons/bluetapwhitelogo.png')} style={styles.logo} resizeMode="contain" tintColor="#FFF" /><View><Text style={styles.brandName}>BlueTap</Text><Text style={styles.role}>Administrator</Text></View></View>{compact ? <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.navCompact}>{nav}<TouchableOpacity style={styles.link} onPress={logout}><View style={styles.navIcon}><Text style={styles.navIconText}>L</Text></View><Text style={styles.linkText}>Logout</Text></TouchableOpacity></ScrollView> : <><View style={styles.nav}>{nav}</View><TouchableOpacity style={styles.logout} onPress={logout}><Text style={styles.logoutText}>Logout</Text></TouchableOpacity></>}</View><View style={styles.main}><View style={[styles.topbar, compact && styles.topbarCompact]}><View><Text style={styles.title}>{title}</Text>{!!subtitle && <Text style={styles.subtitle}>{subtitle}</Text>}</View>{!compact && <View style={styles.identity}><Text style={styles.identityText}>Administrator</Text></View>}</View><ScrollView contentContainerStyle={[styles.content, compact && styles.contentCompact]} showsVerticalScrollIndicator={false}>{children}</ScrollView></View></View></SafeAreaView>;
 }
-
-const styles = StyleSheet.create({
-  root: { flex: 1, flexDirection: 'row', backgroundColor: '#F4F9FD' },
-  rootCompact: { flexDirection: 'column' },
-  sidebar: { width: 240, padding: 24, backgroundColor: '#123451' },
-  sidebarCompact: { width: '100%', paddingHorizontal: 18, paddingVertical: 14 },
-  brand: { color: '#FFF', fontSize: 20, fontWeight: '800', marginBottom: 20 },
-  nav: {}, navCompact: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
-  link: { paddingVertical: 13 }, linkText: { color: '#DCEEFF', fontWeight: '700' },
-  logout: { marginTop: 'auto', paddingVertical: 13 }, logoutText: { color: '#FFBBC0', fontWeight: '700' },
-  logoutCompact: { position: 'absolute', right: 18, top: 10 },
-  mainScroll: { flex: 1 },
-  main: { flexGrow: 1, padding: 32 }, mainCompact: { padding: 18 },
-  title: { fontSize: 30, fontWeight: '900', color: '#16334C' }, titleCompact: { fontSize: 25 },
-  subtitle: { color: '#66839B', marginTop: 6, marginBottom: 24 },
-});
+const styles = StyleSheet.create({ root:{flex:1,backgroundColor:BLUETAP_COLORS.background},layout:{flex:1,flexDirection:'row'},layoutCompact:{flexDirection:'column'},sidebar:{width:238,backgroundColor:BLUETAP_COLORS.primary,borderRightWidth:1,borderRightColor:'rgba(255,255,255,.12)'},sidebarCompact:{width:'100%'},brand:{height:82,flexDirection:'row',alignItems:'center',paddingHorizontal:24,borderBottomWidth:1,borderBottomColor:'rgba(255,255,255,.14)'},logo:{width:30,height:30,marginRight:10},brandName:{color:'#FFF',fontSize:19,fontWeight:'800'},role:{color:'#CBEAFF',fontSize:12,fontWeight:'700',marginTop:2},nav:{padding:14},navCompact:{paddingHorizontal:10,paddingVertical:9},link:{minHeight:45,flexDirection:'row',alignItems:'center',paddingHorizontal:12,borderRadius:10,marginBottom:5},linkActive:{backgroundColor:'rgba(255,255,255,.18)',borderWidth:1,borderColor:'rgba(255,255,255,.5)'},navIcon:{width:25,height:25,borderRadius:7,alignItems:'center',justifyContent:'center',backgroundColor:'rgba(203,234,255,.16)',marginRight:10},navIconActive:{backgroundColor:'#FFF'},navIconText:{color:'#DCEEFF',fontSize:11,fontWeight:'900'},navIconTextActive:{color:BLUETAP_COLORS.primary},linkText:{color:'#E3F2FD',fontSize:14,fontWeight:'700'},linkTextActive:{color:'#FFF'},logout:{marginTop:'auto',padding:22,borderTopWidth:1,borderTopColor:'rgba(255,255,255,.14)'},logoutText:{color:'#FFF',fontWeight:'800'},main:{flex:1,minWidth:0},topbar:{minHeight:94,flexDirection:'row',alignItems:'center',justifyContent:'space-between',paddingHorizontal:28,paddingTop:16,paddingBottom:12},topbarCompact:{minHeight:0,paddingHorizontal:16,paddingVertical:16},title:{fontSize:24,fontWeight:'800',color:BLUETAP_COLORS.textPrimary},subtitle:{fontSize:13,color:BLUETAP_COLORS.textSecondary,marginTop:4},identity:{borderRadius:999,backgroundColor:BLUETAP_COLORS.primarySoft,paddingHorizontal:14,paddingVertical:8},identityText:{color:BLUETAP_COLORS.primary,fontSize:12,fontWeight:'800'},content:{paddingHorizontal:28,paddingBottom:32},contentCompact:{paddingHorizontal:16,paddingBottom:24} });

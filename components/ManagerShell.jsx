@@ -24,10 +24,10 @@ export const MANAGER_COLORS = {
   green: '#1B8F4C',
   red: '#FF5B64',
   bg: BLUETAP_COLORS.background,
-  card: '#FFFFFF',
-  border: '#D7ECFF',
-  text: '#20384D',
-  muted: '#6F8EA8',
+  card: BLUETAP_COLORS.surface,
+  border: BLUETAP_COLORS.border,
+  text: BLUETAP_COLORS.textPrimary,
+  muted: BLUETAP_COLORS.textSecondary,
 };
 
 const NAV_ITEMS = [

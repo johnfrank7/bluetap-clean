@@ -4,6 +4,7 @@ import {
   Alert,
   Image,
   Modal,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -243,6 +244,8 @@ export default function ManagerProductsPage() {
           </TouchableOpacity>
         </View>
 
+        <ScrollView horizontal showsHorizontalScrollIndicator contentContainerStyle={styles.tableScroll}>
+        <View style={styles.table}>
         <View style={[styles.tableRow, styles.tableHeadRow]}>
           <Text style={[styles.th, styles.productCol]}>PRODUCT</Text>
           <Text style={[styles.th, styles.priceCol]}>PRICE</Text>
@@ -315,6 +318,8 @@ export default function ManagerProductsPage() {
             );
           })
         )}
+        </View>
+        </ScrollView>
       </View>
 
       <Modal visible={modalVisible} transparent animationType="fade">
@@ -392,11 +397,13 @@ const styles = StyleSheet.create({
     backgroundColor: MANAGER_COLORS.card,
     borderWidth: 1,
     borderColor: MANAGER_COLORS.border,
-    borderRadius: 8,
+    borderRadius: 16,
     paddingHorizontal: 20,
     paddingTop: 18,
     paddingBottom: 20,
   },
+  tableScroll: { flexGrow: 1 },
+  table: { minWidth: 620, flexGrow: 1 },
   cardHeader: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Alert,
   Modal,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -290,6 +291,8 @@ export default function ManagerRequestPage() {
           </Text>
         </View>
 
+        <ScrollView horizontal showsHorizontalScrollIndicator contentContainerStyle={styles.tableScroll}>
+        <View style={styles.table}>
         <View style={[styles.tableRow, styles.tableHeadRow]}>
           <Text style={[styles.th, styles.nameCol]}>NAME</Text>
           <Text style={[styles.th, styles.idCol]}>UNIQUE ID</Text>
@@ -358,6 +361,8 @@ export default function ManagerRequestPage() {
             );
           })
         )}
+        </View>
+        </ScrollView>
       </View>
 
       <Modal visible={!!rejectingDistributor} transparent animationType="fade">
@@ -424,11 +429,13 @@ const styles = StyleSheet.create({
     backgroundColor: MANAGER_COLORS.card,
     borderWidth: 1,
     borderColor: MANAGER_COLORS.border,
-    borderRadius: 8,
+    borderRadius: 16,
     paddingHorizontal: 20,
     paddingTop: 20,
     paddingBottom: 20,
   },
+  tableScroll: { flexGrow: 1 },
+  table: { minWidth: 980, flexGrow: 1 },
   cardHeader: {
     marginBottom: 18,
   },
