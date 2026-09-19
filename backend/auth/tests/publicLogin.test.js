@@ -70,7 +70,7 @@ test('public form establishes the client session before profile lookup and role 
       fetch: async (_url, options) => {
         events.push('backend');
         const body = JSON.parse(options.body);
-        assert.equal(body.portal, 'public');
+        assert.equal(body.portal, 'unified');
         assert.equal(body.username, scenario.email || 'test_user');
         return { ok: !scenario.error, json: async () => scenario.error ? { error: { code: scenario.error } } : { customToken: 'test-custom-token', profile: { uid: 'public-user', email: 'public@example.test', role: scenario.role, registrationCompleted: true, faceVerification: { required: false, status: 'not_required' }, ...scenario.profile } } };
       },

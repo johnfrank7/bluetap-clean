@@ -22,8 +22,13 @@ export const getBranches = async () => (await request('/api/admin/branches')).br
 export const createBranch = async (branch) => (await request('/api/admin/branches', 'POST', branch)).branch;
 export const updateBranch = async (branchId, changes) => (await request('/api/admin/branches', 'PATCH', { branchId, ...changes })).branch;
 export const getManagers = async () => (await request('/api/admin/managers')).managers || [];
-export const getAdminCreatedAccounts = async () => (await request('/api/admin/accounts')).accounts || [];
+export const getAccountsWorkspace = async () => {
+  const result = await request('/api/admin/accounts');
+  return { accounts: result.accounts || [], activity: result.activity || [] };
+};
+export const getAdminCreatedAccounts = async () => (await getAccountsWorkspace()).accounts;
 export const createAdminAccount = async (account) => (await request('/api/admin/accounts', 'POST', account)).account;
+export const manageAdminAccount = async (uid, action, changes = {}) => (await request('/api/admin/accounts', 'PATCH', { uid, action, ...changes })).account;
 export const getDistributors = async () => (await request('/api/admin/distributors')).distributors || [];
 export const updateDistributor = async (uid, action, rejectionReason = '') => (await request('/api/admin/distributors', 'POST', { uid, action, rejectionReason })).distributor;
 export const updateManagerAssignment = async (managerUid, changes) => (await request('/api/admin/managers', 'PATCH', { managerUid, ...changes })).manager;
