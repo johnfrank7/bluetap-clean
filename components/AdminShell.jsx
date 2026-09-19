@@ -5,7 +5,7 @@ import { usePathname, useRouter } from 'expo-router';
 import { BLUETAP_COLORS } from '../constants/bluetapTheme';
 import { signOutAndClearSessions } from '../services/authSession';
 
-const links = [['D', 'Dashboard', '/admin/dashboard'], ['B', 'Branches', '/admin/branches'], ['A', 'Accounts', '/admin/managers'], ['S', 'Registration Security', '/admin/registration-security']];
+const links = [['D', 'Dashboard', '/admin/dashboard'], ['B', 'Branches', '/admin/branches'], ['A', 'Accounts', '/admin/managers'], ['D', 'Distributors', '/admin/distributors'], ['S', 'Registration Security', '/admin/registration-security']];
 export default function AdminShell({ title, subtitle, children }) {
   const router = useRouter(); const pathname = usePathname(); const compact = useWindowDimensions().width < 768;
   const logout = async () => { await signOutAndClearSessions(); router.replace('/login'); };

@@ -10,6 +10,7 @@ const { getClientIp } = require('../../utils/request');
 const EXPECTED_ROUTES = [
   '/api/admin/accounts',
   '/api/admin/branches',
+  '/api/admin/distributors',
   '/api/admin/managers',
   '/api/admin/registration-security',
   '/api/auth/accept-registration-terms',

@@ -24,4 +24,6 @@ export const updateBranch = async (branchId, changes) => (await request('/api/ad
 export const getManagers = async () => (await request('/api/admin/managers')).managers || [];
 export const getAdminCreatedAccounts = async () => (await request('/api/admin/accounts')).accounts || [];
 export const createAdminAccount = async (account) => (await request('/api/admin/accounts', 'POST', account)).account;
+export const getDistributors = async () => (await request('/api/admin/distributors')).distributors || [];
+export const updateDistributor = async (uid, action, rejectionReason = '') => (await request('/api/admin/distributors', 'POST', { uid, action, rejectionReason })).distributor;
 export const updateManagerAssignment = async (managerUid, changes) => (await request('/api/admin/managers', 'PATCH', { managerUid, ...changes })).manager;

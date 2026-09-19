@@ -135,7 +135,7 @@ export const getPostAuthenticationDestination = (profile = {}) => {
     return '/registration-status';
   }
   if (!isFaceRequirementSatisfied(profile)) return '/verification';
-  if (role === 'distributor' && getDistributorApplicationStatus(profile) !== 'approved') {
+  if (role === 'distributor' && !['approved', 'active'].includes(getDistributorApplicationStatus(profile))) {
     return '/registration-status';
   }
   return getRoleHomePath(role);
@@ -441,7 +441,7 @@ export const validateRoleAccess = async (expectedRole) => {
 
   if (
     profile.role === 'distributor' &&
-    getDistributorApplicationStatus(profile) !== 'approved'
+    !['approved', 'active'].includes(getDistributorApplicationStatus(profile))
   ) {
     return {
       status: 'unauthorized',

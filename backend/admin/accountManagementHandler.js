@@ -67,7 +67,7 @@ function createAdminAccountsHandler(getAdmin = getFirebaseAdmin) {
           mustChangePassword, createdAt: now, updatedAt: now, createdBy: admin.uid,
           emailVerificationRequired: false, emailVerified: false, faceVerification: { required: false, status: 'not_required', verificationSource: 'admin_created' },
           registrationCompleted: true, onboardingStatus: 'complete',
-          ...(role === 'manager' ? { branchId: branch.id, managerStatus: 'active' } : { username, usernameNormalized, approvalStatus: role === 'distributor' ? 'pending' : 'approved', status: role === 'distributor' ? 'Pending' : 'Approved' }),
+          ...(role === 'manager' ? { branchId: branch.id, managerStatus: 'active' } : { username, usernameNormalized, approvalStatus: 'active', status: 'Active' }),
         };
         await db.runTransaction(async (tx) => {
           if (usernameNormalized) { const ref = db.collection('usernames').doc(usernameNormalized); const existing = await tx.get(ref); if (existing.exists) throw new OtpError(409, 'USERNAME_ALREADY_IN_USE', 'This username is already in use.'); tx.create(ref, { uid: user.uid, createdAt: now }); }
