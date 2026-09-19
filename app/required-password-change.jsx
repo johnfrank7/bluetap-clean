@@ -4,7 +4,7 @@ import { useRouter } from 'expo-router';
 import { onAuthStateChanged, signInWithEmailAndPassword } from 'firebase/auth';
 
 import { auth } from '../firebase';
-import { clearAllAuthSessions, fetchFirestoreUserProfile, getRoleHomePath, saveRoleSession, signOutAndClearSessions } from '../services/authSession';
+import { clearAllAuthSessions, getPostAuthenticationDestination, saveRoleSession, signOutAndClearSessions } from '../services/authSession';
 import { completeRequiredPasswordChange } from '../services/requiredPasswordChange';
 
 export default function RequiredPasswordChangePage() {
@@ -30,19 +30,19 @@ export default function RequiredPasswordChangePage() {
     setSaving(true); setError('');
     try {
       const accountEmail = auth.currentUser?.email || '';
-      await completeRequiredPasswordChange(password);
+      const completion = await completeRequiredPasswordChange(password);
       clearAllAuthSessions();
       await signOutAndClearSessions();
       try {
         if (!accountEmail) throw new Error('Account email is unavailable.');
         const credential = await signInWithEmailAndPassword(auth, accountEmail, password);
         await credential.user.getIdToken(true);
-        const profile = await fetchFirestoreUserProfile(credential.user);
+        const profile = completion.profile;
         if (!profile || profile.mustChangePassword === true) {
           throw new Error('Account profile refresh failed.');
         }
         saveRoleSession(profile);
-        router.replace(getRoleHomePath(profile.role));
+        router.replace(getPostAuthenticationDestination(profile));
       } catch {
         await signOutAndClearSessions();
         passwordChangeFlow.current = false;

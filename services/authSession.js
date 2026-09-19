@@ -4,7 +4,6 @@ import { doc, getDocFromServer } from 'firebase/firestore';
 import { auth, db } from '../firebase';
 import { saveLocalUser } from '../localUsers';
 import { isFaceVerified, normalizeFaceVerification } from './faceVerification';
-import { ensureUserUniqueId } from './uniqueIds';
 import { getManagerContext } from './managerAccess';
 
 const ACTIVE_SESSION_KEY = 'bluetapActiveAuthSession';
@@ -257,15 +256,6 @@ export const fetchFirestoreUserProfile = async (user) => {
     ...buildFirestoreProfile(user, snapshot.data()),
     faceVerification: normalizeFaceVerification(snapshot.data()),
   };
-
-  if (profile.role === 'requester' || profile.role === 'distributor') {
-    const { faceVerification, ...profileWithoutFaceVerification } = profile;
-    const profileWithUniqueId = await ensureUserUniqueId(user, profileWithoutFaceVerification);
-    profile = {
-      ...profileWithUniqueId,
-      faceVerification,
-    };
-  }
 
   if (profile.role) {
     saveLocalUser(profile);

@@ -32,7 +32,6 @@ import {
   getPostAuthenticationDestination,
   saveRoleSession,
 } from '../services/authSession';
-import { ensureUserUniqueId } from '../services/uniqueIds';
 import { loginWithUsernameResult } from '../services/usernameAuth';
 import { restartIncompleteRegistration } from '../services/profileRecovery';
 import { clearPendingRegistration } from '../services/emailVerification';
@@ -345,15 +344,6 @@ export default function LoginPage() {
 
       if (!['requester', 'distributor', 'admin', 'manager'].includes(profileRole)) {
         throw Object.assign(new Error('Account setup incomplete'), { code: 'ACCOUNT_SETUP_INCOMPLETE' });
-      }
-
-      if (profileRole === 'requester' || profileRole === 'distributor') {
-        const { faceVerification, ...profileWithoutFaceVerification } = profileData;
-        const profileWithUniqueId = await ensureUserUniqueId(user, profileWithoutFaceVerification);
-        profileData = {
-          ...profileWithUniqueId,
-          faceVerification,
-        };
       }
 
       saveLocalUser(profileData);
