@@ -134,6 +134,8 @@ export default function SignupPage() {
   const personalComplete = !!form.firstName.trim() && !!form.lastName.trim() && PHONE.test(form.phone) && !!form.barangay && !!form.address.trim();
   const identityComplete = !!registrationSessionId && (!securityPolicy.faceVerificationRequired || isTrustedRegistrationFaceVerification(faceVerification));
   const credentialsComplete = !validateUsername(form.username) && EMAIL.test(form.email.trim()) && form.password.length >= 8 && form.password === form.confirmPassword && usernameState.status === 'available' && termsAccepted;
+  const visibleRegistrationSteps = [1, 2, ...(securityPolicy.faceVerificationRequired ? [3] : []), 4, ...(securityPolicy.emailOtpRequired ? [5] : [])];
+  const visibleStepNumber = Math.max(1, visibleRegistrationSteps.indexOf(step) + 1);
   const canContinue = step === 1 ? accountComplete
     : step === 2 ? accountComplete && personalComplete
       : step === 3 ? accountComplete && personalComplete && identityComplete
@@ -352,6 +354,7 @@ export default function SignupPage() {
                   4,
                   ...(securityPolicy.emailOtpRequired ? [5] : []),
                 ]}
+                visibleSteps={visibleRegistrationSteps}
                 completedSteps={[
                   accountComplete && 1,
                   personalComplete && !!registrationSessionId && 2,
@@ -361,7 +364,7 @@ export default function SignupPage() {
                 onStepPress={openStep}
                 disabled={loading}
               />
-              {mobile && <Text style={styles.stepText}>Step {step} of 5 · {STEPS[step - 1]}</Text>}
+              {mobile && <Text style={styles.stepText}>Step {visibleStepNumber} of {visibleRegistrationSteps.length} · {STEPS[step - 1]}</Text>}
               <Animated.View style={{
                 opacity: stepTransition,
                 transform: [{ translateY: stepTransition.interpolate({ inputRange: [0, 1], outputRange: [10, 0] }) }],

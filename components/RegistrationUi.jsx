@@ -74,19 +74,25 @@ export function RegistrationStepper({
   completedSteps = [],
   requiredSteps = REGISTRATION_STEP_NUMBERS,
   incompleteSteps = [],
+  visibleSteps = REGISTRATION_STEP_NUMBERS,
   onStepPress,
   disabled = false,
 }) {
   const stepStates = getRegistrationStepStates({ currentStep, completedSteps, requiredSteps, incompleteSteps });
-  const connectorStates = getRegistrationConnectorStates(stepStates);
+  const visibleNumbers = Array.isArray(visibleSteps) && visibleSteps.length
+    ? visibleSteps.filter((number) => REGISTRATION_STEP_NUMBERS.includes(number))
+    : REGISTRATION_STEP_NUMBERS;
+  const visibleStates = visibleNumbers.map((number) => stepStates[number - 1]);
+  const connectorStates = getRegistrationConnectorStates(visibleStates);
+  const currentVisibleIndex = Math.max(0, visibleNumbers.indexOf(currentStep));
 
-  return <View style={styles.stepper} accessibilityRole="progressbar" accessibilityValue={{ min: 1, max: 5, now: currentStep }}>
+  return <View style={styles.stepper} accessibilityRole="progressbar" accessibilityValue={{ min: 1, max: visibleNumbers.length, now: currentVisibleIndex + 1 }}>
     <View pointerEvents="none" style={styles.connectorTrack}>
       {connectorStates.map((state, index) => <AnimatedConnector key={index} state={state} />)}
     </View>
-    {REGISTRATION_STEPS.map((label, index) => {
-      const number = index + 1;
-      const state = stepStates[index];
+    {visibleNumbers.map((number, visibleIndex) => {
+      const label = REGISTRATION_STEPS[number - 1];
+      const state = stepStates[number - 1];
       const complete = state === 'completed';
       const current = state === 'current';
       const incomplete = state === 'incomplete';
@@ -97,13 +103,13 @@ export function RegistrationStepper({
           disabled={!clickable}
           onPress={() => onStepPress?.(number)}
           accessibilityRole="button"
-          accessibilityLabel={`Step ${number}: ${label}, ${state}`}
+          accessibilityLabel={`Step ${visibleIndex + 1}: ${label}, ${state}`}
           accessibilityHint={clickable ? 'Open this registration step' : undefined}
           accessibilityState={{ selected: current, disabled: !clickable }}
         >
           <AnimatedStepCircle state={state}>
             <Text style={[styles.stepNumber, (complete || current || incomplete) && styles.stepNumberActive]}>
-              {complete ? '\u2713' : incomplete ? '\u2715' : number}
+              {complete ? '\u2713' : incomplete ? '\u2715' : visibleIndex + 1}
             </Text>
           </AnimatedStepCircle>
           <Text numberOfLines={1} style={[

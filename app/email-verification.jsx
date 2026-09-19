@@ -410,6 +410,7 @@ export default function EmailVerificationPage() {
               currentStep={5}
               completedSteps={[1, 2, 3, 4]}
               requiredSteps={[1, 2, ...(draft?.profile?.securityPolicy?.faceVerificationRequired === false ? [] : [3]), 4, 5]}
+              visibleSteps={[1, 2, ...(draft?.profile?.securityPolicy?.faceVerificationRequired === false ? [] : [3]), 4, 5]}
             />}
             {loading ? (
               <View style={styles.loadingState}>
