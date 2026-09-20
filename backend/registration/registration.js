@@ -5,10 +5,12 @@ const { normalizeUsername } = require('../username/username');
 const { readRegistrationSession, isRegistrationFaceVerified } = require('./registrationSession');
 const { decodeImage } = require('../verification/faceVerification');
 const { createRenderFaceClient } = require('../verification/renderFaceClient');
+const { createRegistrationLimitService } = require('./registrationLimits');
 
 const RESERVATION_TTL = 15 * 60 * 1000;
 
 function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, render = createRenderFaceClient(), now = Date.now, otpStage = () => {} }) {
+  const registrationLimits = createRegistrationLimitService({ db, now });
   // Operational breadcrumbs only: never include credentials, codes, images,
   // face data, email addresses, or full user identifiers in these logs.
   const logFinalization = (stage, registrationSessionId, extra = {}) => console.info('[registration-finalization]', JSON.stringify({
@@ -86,52 +88,6 @@ function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, render 
   const hasEligibleFaceStep = isRegistrationFaceVerified;
   const requiresFace = (session) => session?.securityPolicySnapshot?.faceVerificationRequired !== false;
   const requiresOtp = (session) => session?.securityPolicySnapshot?.emailOtpRequired !== false;
-  const registrationLimitRefs = (session) => {
-    const keys = session?.registrationLimitKeys;
-    if (!keys?.deviceHash || !keys?.ipHash) throw new OtpError(403, 'registration-session-invalid', 'Registration security information is missing. Please restart signup.');
-    return [db.collection('registrationLimits').doc(`device_${keys.deviceHash}`), db.collection('registrationLimits').doc(`ip_${keys.ipHash}`)];
-  };
-  async function reserveRegistrationLimits(registrationSessionId, userUid) {
-    await db.runTransaction(async (tx) => {
-      const sessionRef = db.collection('registrationSessions').doc(registrationSessionId);
-      const session = (await tx.get(sessionRef)).data();
-      if (!session || session.completed) throw new OtpError(403, 'registration-session-invalid', 'Registration session is invalid.');
-      if (session.registrationLimitReservation?.uid === userUid && session.registrationLimitReservation?.status === 'reserved') return;
-      const refs = registrationLimitRefs(session);
-      const snapshots = await Promise.all(refs.map((ref) => tx.get(ref)));
-      const limits = [session.securityPolicySnapshot.maxAccountsPerDevice, session.securityPolicySnapshot.maxAccountsPerIp];
-      const reasons = ['DEVICE_ACCOUNT_LIMIT_REACHED', 'IP_ACCOUNT_LIMIT_REACHED'];
-      snapshots.forEach((snapshot, index) => {
-        const data = snapshot.data() || {};
-        if (Number(data.finalizedCount || 0) + Number(data.reservedCount || 0) >= limits[index]) {
-          throw new OtpError(403, reasons[index], 'Registration limit reached. This device or network has already created the maximum number of BlueTap accounts.');
-        }
-      });
-      refs.forEach((ref, index) => tx.set(ref, { reservedCount: Number(snapshots[index].data()?.reservedCount || 0) + 1, updatedAt: new Date(now()) }, { merge: true }));
-      tx.update(sessionRef, { registrationLimitReservation: { uid: userUid, status: 'reserved', reservedAt: new Date(now()) } });
-    });
-  }
-  async function applyRegistrationLimitReservation(tx, sessionRef, session, userUid, commit) {
-    if (session?.registrationLimitReservation?.uid !== userUid || session.registrationLimitReservation.status !== 'reserved') {
-      throw new OtpError(409, 'registration-session-invalid', 'Registration account limits were not reserved.');
-    }
-    const refs = registrationLimitRefs(session);
-    const snapshots = await Promise.all(refs.map((ref) => tx.get(ref)));
-    refs.forEach((ref, index) => {
-      const data = snapshots[index].data() || {};
-      tx.set(ref, { reservedCount: Math.max(0, Number(data.reservedCount || 0) - 1),
-        finalizedCount: Number(data.finalizedCount || 0) + (commit ? 1 : 0), updatedAt: new Date(now()) }, { merge: true });
-    });
-    tx.update(sessionRef, { registrationLimitReservation: { uid: userUid, status: commit ? 'committed' : 'released', updatedAt: new Date(now()) } });
-  }
-  async function releaseRegistrationLimits(registrationSessionId, userUid) {
-    await db.runTransaction(async (tx) => {
-      const sessionRef = db.collection('registrationSessions').doc(registrationSessionId);
-      const session = (await tx.get(sessionRef)).data();
-      if (session?.registrationLimitReservation?.uid !== userUid || session.registrationLimitReservation.status !== 'reserved') return;
-      await applyRegistrationLimitReservation(tx, sessionRef, session, userUid, false);
-    });
-  }
   async function verifiedSession(registrationSessionId, profile) {
     const { data } = await readRegistrationSession(db, registrationSessionId, now);
     if (!requiresFace(data) && !requiresOtp(data)) {
@@ -269,7 +225,7 @@ function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, render 
       const session = (await tx.get(sessionRef)).data();
       if (!profile || !session || session.userUid !== user.uid || session.completed || !isRegistrationFaceVerified(session.faceVerification)) throw new OtpError(409, 'registration-session-invalid', 'Registration finalization could not be completed.');
       await claimFinalUsername(tx, profile, user);
-      await applyRegistrationLimitReservation(tx, sessionRef, session, user.uid, true);
+      await registrationLimits.apply(tx, sessionRef, session, user.uid, true);
       const face = session.faceVerification;
       const finalizedFaceVerification = {
         status: 'verified', verifiedAt: face.verifiedAt || new Date(now()), verificationId: user.uid, verificationReference: user.uid,
@@ -299,7 +255,7 @@ function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, render 
         throw new OtpError(409, 'registration-session-invalid', 'Registration finalization could not be completed.');
       }
       await claimFinalUsername(tx, profile, user);
-      await applyRegistrationLimitReservation(tx, sessionRef, session, user.uid, true);
+      await registrationLimits.apply(tx, sessionRef, session, user.uid, true);
       tx.update(profileRef, { onboardingStatus: 'complete', registrationCompleted: true, updatedAt: new Date(now()) });
       tx.update(sessionRef, { completed: true, completedAt: new Date(now()), expiresAt: new Date(now()), faceEnrollmentPending: false,
         finalization: { status: 'completed', uid: user.uid, completedAt: new Date(now()) },
@@ -355,11 +311,11 @@ function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, render 
       logFinalization('auth-created', registrationSessionId, { created: true });
     }
     try {
-      await reserveRegistrationLimits(registrationSessionId, user.uid);
+      await registrationLimits.reserve(registrationSessionId, user.uid);
       await saveProfile(user, profile, email, registrationSessionId, emailOtpVerified);
       logFinalization('profile-and-username-persisted', registrationSessionId, { created });
     } catch (error) {
-      try { await releaseRegistrationLimits(registrationSessionId, user.uid); } catch { /* retain original error */ }
+      try { await registrationLimits.release(registrationSessionId, user.uid); } catch { /* retain original error */ }
       // Firestore transactions are atomic: if saveProfile throws, its profile
       // and username writes did not commit. Never retain an Auth-only account.
       if (created) {
@@ -383,7 +339,7 @@ function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, render 
       else await finalizeWithoutFace(user, registrationSessionId);
       logFinalization('face-finalized', registrationSessionId, { created });
     } catch (error) {
-      try { await releaseRegistrationLimits(registrationSessionId, user.uid); } catch { /* retain original error */ }
+      try { await registrationLimits.release(registrationSessionId, user.uid); } catch { /* retain original error */ }
       if (requiresFace(session)) await markEnrollmentPending(user, registrationSessionId);
       logFinalization('face-finalization-pending', registrationSessionId, { created });
       throw error;

@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const INSTALLATION_ID_KEY = 'bluetapInstallationId';
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+let installationIdPromise = null;
 
 function createUuid() {
   if (typeof globalThis.crypto?.randomUUID === 'function') return globalThis.crypto.randomUUID();
@@ -17,9 +18,17 @@ function createUuid() {
 }
 
 export async function getInstallationId() {
-  const existing = await AsyncStorage.getItem(INSTALLATION_ID_KEY);
-  if (UUID_PATTERN.test(existing || '')) return existing;
-  const created = createUuid();
-  await AsyncStorage.setItem(INSTALLATION_ID_KEY, created);
-  return created;
+  if (!installationIdPromise) {
+    installationIdPromise = (async () => {
+      const existing = await AsyncStorage.getItem(INSTALLATION_ID_KEY);
+      if (UUID_PATTERN.test(existing || '')) return existing;
+      const created = createUuid();
+      await AsyncStorage.setItem(INSTALLATION_ID_KEY, created);
+      return created;
+    })().catch((error) => {
+      installationIdPromise = null;
+      throw error;
+    });
+  }
+  return installationIdPromise;
 }

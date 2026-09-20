@@ -48,9 +48,15 @@ function createAdminRegistrationSecurityHandler(getAdmin = getFirebaseAdmin) {
         tx.set(configRef, saved);
         tx.set(auditRef, {
           action: 'REGISTRATION_SECURITY_UPDATED',
-          adminUid: admin.uid,
-          before: sanitized(before),
-          after: sanitized(saved),
+          actorUid: admin.uid,
+          previousFaceVerificationEnabled: before.faceVerificationEnabled,
+          newFaceVerificationEnabled: saved.faceVerificationEnabled,
+          previousEmailOtpEnabled: before.emailOtpEnabled,
+          newEmailOtpEnabled: saved.emailOtpEnabled,
+          previousMaxAccountsPerDevice: before.maxAccountsPerDevice,
+          newMaxAccountsPerDevice: saved.maxAccountsPerDevice,
+          previousMaxAccountsPerIp: before.maxAccountsPerIp,
+          newMaxAccountsPerIp: saved.maxAccountsPerIp,
           createdAt: new Date(),
         });
         return saved;

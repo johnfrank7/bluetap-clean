@@ -74,3 +74,22 @@ test('new sessions snapshot admin policy and face-disabled sessions skip face se
   assert.equal((await f.service.acceptTerms(result.registrationSessionId)).accepted, true);
   await assert.rejects(setTrustedFaceVerification(f.db, result.registrationSessionId, { livenessPassed: true, duplicateCheck: 'clear' }, f.now), (error) => error.reason === 'face-verification-not-required');
 });
+
+test('admin limit changes affect only new registration session snapshots', async () => {
+  const f = fixture();
+  const configKey = 'systemConfig/registrationSecurity';
+  f.records.set(configKey, { faceVerificationEnabled: true, emailOtpEnabled: false, maxAccountsPerDevice: 3, maxAccountsPerIp: 3, version: 1 });
+  const first = await f.service.create(personal, 'ip');
+
+  f.records.set(configKey, { faceVerificationEnabled: false, emailOtpEnabled: true, maxAccountsPerDevice: 2, maxAccountsPerIp: 1, version: 2 });
+  const second = await f.service.create(personal, 'ip');
+  f.records.set(configKey, { faceVerificationEnabled: true, emailOtpEnabled: true, maxAccountsPerDevice: 5, maxAccountsPerIp: 5, version: 3 });
+  const third = await f.service.create(personal, 'ip');
+
+  assert.deepEqual(f.records.get(`registrationSessions/${first.registrationSessionId}`).securityPolicySnapshot,
+    { faceVerificationRequired: true, emailOtpRequired: false, maxAccountsPerDevice: 3, maxAccountsPerIp: 3, policyVersion: 1 });
+  assert.deepEqual(f.records.get(`registrationSessions/${second.registrationSessionId}`).securityPolicySnapshot,
+    { faceVerificationRequired: false, emailOtpRequired: true, maxAccountsPerDevice: 2, maxAccountsPerIp: 1, policyVersion: 2 });
+  assert.deepEqual(f.records.get(`registrationSessions/${third.registrationSessionId}`).securityPolicySnapshot,
+    { faceVerificationRequired: true, emailOtpRequired: true, maxAccountsPerDevice: 5, maxAccountsPerIp: 5, policyVersion: 3 });
+});

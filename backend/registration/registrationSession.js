@@ -1,6 +1,7 @@
 const { createHmac, randomUUID } = require('node:crypto');
 const { OtpError } = require('../utils/otpError');
 const { loadRegistrationSecurity, policySnapshot } = require('./registrationSecurity');
+const { checkFinalizedRegistrationLimits } = require('./registrationLimits');
 
 const SESSION_TTL = 60 * 60 * 1000;
 const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -44,19 +45,6 @@ function createRegistrationSessionService({ db, hashSecret, deviceHashSecret, ip
     if (!secret) throw new Error(`Missing ${namespace} registration limit configuration`);
     return createHmac('sha256', secret).update(`${namespace}:${value}`).digest('hex');
   };
-  async function checkPermanentLimits(deviceHash, ipHash, policy) {
-    await db.runTransaction(async (tx) => {
-      const deviceRef = db.collection('registrationLimits').doc(`device_${deviceHash}`);
-      const ipRef = db.collection('registrationLimits').doc(`ip_${ipHash}`);
-      const [device, network] = await Promise.all([tx.get(deviceRef), tx.get(ipRef)]);
-      if (Number(device.data()?.finalizedCount || 0) >= policy.maxAccountsPerDevice) {
-        throw new OtpError(403, 'DEVICE_ACCOUNT_LIMIT_REACHED', 'Registration limit reached. This device or network has already created the maximum number of BlueTap accounts.');
-      }
-      if (Number(network.data()?.finalizedCount || 0) >= policy.maxAccountsPerIp) {
-        throw new OtpError(403, 'IP_ACCOUNT_LIMIT_REACHED', 'Registration limit reached. This device or network has already created the maximum number of BlueTap accounts.');
-      }
-    });
-  }
   async function limit(ip) {
     const ref = db.collection('authRateLimits').doc(digest('registration-session:' + ip));
     await db.runTransaction(async (tx) => {
@@ -78,7 +66,7 @@ function createRegistrationSessionService({ db, hashSecret, deviceHashSecret, ip
     const securityPolicySnapshot = policySnapshot(config);
     const deviceHash = abuseDigest(deviceHashSecret, 'device', input.installationId);
     const ipHash = abuseDigest(ipHashSecret, 'ip', ip);
-    await checkPermanentLimits(deviceHash, ipHash, securityPolicySnapshot);
+    await checkFinalizedRegistrationLimits({ db, deviceHash, ipHash, policy: securityPolicySnapshot });
     const id = randomUUID();
     const time = now();
     await db.collection('registrationSessions').doc(id).set({

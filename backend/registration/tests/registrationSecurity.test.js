@@ -1,8 +1,11 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { readFileSync } = require('node:fs');
+const { resolve } = require('node:path');
 const { SECURE_DEFAULTS, normalizeRegistrationSecurity, policySnapshot, validateRegistrationSecurity } = require('../registrationSecurity');
 const { createAdminRegistrationSecurityHandler } = require('../../admin/registrationSecurityHandler');
 const { createRegistrationSessionHandler } = require('../registrationSessionHandler');
+const { getClientIp } = require('../../utils/request');
 
 test('registration security accepts three valid verification combinations and rejects both off', () => {
   for (const [faceVerificationEnabled, emailOtpEnabled] of [[true, true], [true, false], [false, true]]) {
@@ -55,7 +58,59 @@ test('only Firebase-authenticated trusted admin can change registration security
   await f.handler({ method: 'PATCH', headers: { authorization: 'Bearer valid' }, body: { faceVerificationEnabled: true, emailOtpEnabled: false, maxAccountsPerDevice: 5, maxAccountsPerIp: 4 } }, res);
   assert.equal(res.statusCode, 200);
   assert.equal(f.records.get('systemConfig/registrationSecurity').maxAccountsPerDevice, 5);
-  assert.equal([...f.records.values()].some((value) => value.action === 'REGISTRATION_SECURITY_UPDATED'), true);
+  const audit = [...f.records.values()].find((value) => value.action === 'REGISTRATION_SECURITY_UPDATED');
+  assert.deepEqual({
+    actorUid: audit.actorUid,
+    previousFaceVerificationEnabled: audit.previousFaceVerificationEnabled,
+    newFaceVerificationEnabled: audit.newFaceVerificationEnabled,
+    previousEmailOtpEnabled: audit.previousEmailOtpEnabled,
+    newEmailOtpEnabled: audit.newEmailOtpEnabled,
+    previousMaxAccountsPerDevice: audit.previousMaxAccountsPerDevice,
+    newMaxAccountsPerDevice: audit.newMaxAccountsPerDevice,
+    previousMaxAccountsPerIp: audit.previousMaxAccountsPerIp,
+    newMaxAccountsPerIp: audit.newMaxAccountsPerIp,
+  }, {
+    actorUid: 'user-1',
+    previousFaceVerificationEnabled: true,
+    newFaceVerificationEnabled: true,
+    previousEmailOtpEnabled: true,
+    newEmailOtpEnabled: false,
+    previousMaxAccountsPerDevice: 3,
+    newMaxAccountsPerDevice: 5,
+    previousMaxAccountsPerIp: 3,
+    newMaxAccountsPerIp: 4,
+  });
+  assert.equal('adminUid' in audit, false);
+
+  const missingClaim = adminFixture('admin');
+  const missingClaimResponse = response();
+  await missingClaim.handler({ method: 'PATCH', headers: { authorization: 'Bearer valid' }, body: {
+    faceVerificationEnabled: true, emailOtpEnabled: true, maxAccountsPerDevice: 3, maxAccountsPerIp: 3,
+  } }, missingClaimResponse);
+  assert.equal(missingClaimResponse.statusCode, 403);
+
+  const missingProfileRole = adminFixture('requester', { admin: true });
+  const missingProfileRoleResponse = response();
+  await missingProfileRole.handler({ method: 'PATCH', headers: { authorization: 'Bearer valid' }, body: {
+    faceVerificationEnabled: true, emailOtpEnabled: true, maxAccountsPerDevice: 3, maxAccountsPerIp: 3,
+  } }, missingProfileRoleResponse);
+  assert.equal(missingProfileRoleResponse.statusCode, 403);
+});
+
+test('admin endpoint rejects both verification methods disabled without persisting or auditing', async () => {
+  const f = adminFixture('admin', { admin: true });
+  const res = response();
+  await f.handler({ method: 'PATCH', headers: { authorization: 'Bearer valid' }, body: {
+    faceVerificationEnabled: false,
+    emailOtpEnabled: false,
+    maxAccountsPerDevice: 3,
+    maxAccountsPerIp: 3,
+  } }, res);
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.error.reason, 'VERIFICATION_METHOD_REQUIRED');
+  assert.equal(res.body.error.message, 'At least one registration verification method must remain enabled.');
+  assert.equal(f.records.has('systemConfig/registrationSecurity'), false);
+  assert.equal([...f.records.values()].some((value) => value.action === 'REGISTRATION_SECURITY_UPDATED'), false);
 });
 
 test('public registration policy exposes only the step requirements', async () => {
@@ -75,4 +130,33 @@ test('public registration policy exposes only the step requirements', async () =
   assert.deepEqual(res.body, { securityPolicy: {
     faceVerificationRequired: false, emailOtpRequired: true, policyVersion: 4,
   } });
+});
+
+test('Admin UI loads authoritative policy, updates from save response, and reverts a failed save', () => {
+  const source = readFileSync(resolve(__dirname, '..', '..', '..', 'app', 'admin', 'registration-security.jsx'), 'utf8');
+  assert.match(source, /await getRegistrationSecurity\(\)/);
+  assert.match(source, /setSavedSettings\(authoritative\)/);
+  assert.match(source, /setDraftSettings\(authoritative\)/);
+  assert.match(source, /await updateRegistrationSecurity\(next\)/);
+  assert.match(source, /setDraftSettings\(savedSettings\)/);
+});
+
+test('installation identity is persisted once and registration secrets remain server-only', () => {
+  const root = resolve(__dirname, '..', '..', '..');
+  const installation = readFileSync(resolve(root, 'services', 'installationId.js'), 'utf8');
+  const registrationClient = readFileSync(resolve(root, 'services', 'registrationSession.js'), 'utf8');
+  const registrationHandler = readFileSync(resolve(root, 'backend', 'registration', 'registrationSessionHandler.js'), 'utf8');
+  assert.match(installation, /AsyncStorage\.getItem\(INSTALLATION_ID_KEY\)/);
+  assert.match(installation, /AsyncStorage\.setItem\(INSTALLATION_ID_KEY, created\)/);
+  assert.match(installation, /installationIdPromise/);
+  assert.match(registrationClient, /installationId: await getInstallationId\(\)/);
+  assert.match(registrationHandler, /process\.env\.REGISTRATION_DEVICE_HASH_SECRET/);
+  assert.match(registrationHandler, /process\.env\.REGISTRATION_IP_HASH_SECRET/);
+  assert.doesNotMatch(registrationClient + installation, /REGISTRATION_(DEVICE|IP)_HASH_SECRET|EXPO_PUBLIC.*HASH_SECRET/);
+});
+
+test('production client IP comes from the trusted proxy chain, never request data', () => {
+  const req = { headers: { 'x-forwarded-for': '203.0.113.7, 10.0.0.2' }, socket: { remoteAddress: '10.0.0.1' }, body: { ip: '198.51.100.9' } };
+  assert.equal(getClientIp(req, { RENDER: 'true' }), '203.0.113.7');
+  assert.equal(getClientIp(req, {}), '10.0.0.1');
 });

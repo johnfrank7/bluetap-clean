@@ -97,6 +97,7 @@ test('requesting and abandoning OTP creates neither Auth user nor user profile',
   assert.equal(f.users.size, 0);
   assert.equal(f.creates, 0);
   assert.equal([...f.records.keys()].some((key) => key.startsWith('users/')), false);
+  assert.equal([...f.records.keys()].some((key) => key.startsWith('registrationLimits/')), false);
   assert.equal([...f.records.values()].some((data) => JSON.stringify(data).includes(form.password)), false);
   assert.deepEqual(f.otpStages, ['OTP_REQUEST_STARTED', 'OTP_SESSION_VALIDATED', 'OTP_CREATED', 'EMAIL_SEND_STARTED', 'OTP_REQUEST_COMPLETED']);
 });
@@ -110,6 +111,7 @@ test('provider failure and wrong OTP never create an account', async () => {
   const result = await f.service.request('new@example.test', 'test-ip');
   await assert.rejects(f.service.complete(result.challenge, '000000', form), reason('incorrect-code'));
   assert.equal(f.creates, 0);
+  assert.equal([...f.records.keys()].some((key) => key.startsWith('registrationLimits/')), false);
 });
 
 test('correct OTP creates verified Auth account and server-owned profile exactly once', async () => {
@@ -280,6 +282,8 @@ test('profile write failure rolls back only the newly created Auth account', asy
   await assert.rejects(f.service.complete(result.challenge, f.sent[0].code, form));
   assert.equal(f.users.size, 0);
   assert.equal(f.records.has('users/new-user'), false);
+  assert.equal(f.records.get('registrationLimits/device_device-hash').finalizedCount, 0);
+  assert.equal(f.records.get('registrationLimits/device_device-hash').reservedCount, 0);
 });
 
 test('final face enrollment failure leaves no permanent username claim', async () => {
