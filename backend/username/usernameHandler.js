@@ -9,7 +9,14 @@ const firebaseWebConfig = require('../../firebase-web-config.json');
 const genericLogin = () => new OtpError(401, 'invalid-credential', 'Invalid username or password.');
 const mappingError = () => new OtpError(409, 'account-mapping-invalid', 'Your account sign-in setup needs attention. Please contact support.');
 const setupError = () => new OtpError(409, 'account-setup-incomplete', 'Your account setup is incomplete. Please contact support.');
-const stage = (name) => console.info('[public-login]', { stage: `PUBLIC_LOGIN_${name}` });
+const stage = (name, details = {}) => console.info('[public-login]', {
+  stage: `PUBLIC_LOGIN_${name}`,
+  ...details,
+});
+const loginDiagnostic = (name, details = {}) => console.info('[public-login]', {
+  stage: name,
+  ...details,
+});
 const errorCodes = {
   'invalid-credential': 'INVALID_CREDENTIALS',
   'privileged-login-required': 'PRIVILEGED_LOGIN_REQUIRED',
@@ -132,7 +139,7 @@ function createUsernameHandler(action, getAdmin = getFirebaseAdmin) {
       }
       if (user.uid !== expectedUid) throw mappingError();
       if (!user.email) throw setupError();
-      stage('USERNAME_RESOLVED');
+      stage('USERNAME_RESOLVED', { expectedUid });
       // Firebase Web API keys identify the public Firebase project and are
       // already shipped in every Firebase client. Prefer an environment
       // override, but keep the server and client on the same checked-in public
@@ -156,21 +163,30 @@ function createUsernameHandler(action, getAdmin = getFirebaseAdmin) {
         throw new Error('Firebase password provider unavailable');
       }
       if (!result?.localId || !result?.idToken) throw new Error('Invalid Firebase response');
-      if (result.localId !== expectedUid) throw mappingError();
+      if (result.localId !== expectedUid) {
+        loginDiagnostic('USERNAME_UID_MISMATCH', { expectedUid, authenticatedUid: result.localId });
+        throw mappingError();
+      }
       // Verify project/audience as well as UID before minting a custom token.
       const verified = await auth.verifyIdToken(result.idToken);
-      if (verified.uid !== expectedUid) throw mappingError();
+      if (verified.uid !== expectedUid) {
+        loginDiagnostic('USERNAME_UID_MISMATCH', { expectedUid, authenticatedUid: verified.uid });
+        throw mappingError();
+      }
       if (user.disabled) throw new OtpError(403, 'account-disabled', 'This account is disabled. Please contact support.');
       stage('FIREBASE_AUTH_SUCCESS');
+      loginDiagnostic('LOGIN_AUTH_UID', { uid: verified.uid });
       stage('PROFILE_CHECK_STARTED');
       const profile = (await db.collection('users').doc(expectedUid).get()).data();
       if (!profile || !['requester', 'distributor', 'admin', 'manager'].includes(profile.role)) throw setupError();
       if ((profile.uid && profile.uid !== expectedUid) ||
           (!isEmail && profile.usernameNormalized && profile.usernameNormalized !== normalized)) throw mappingError();
+      loginDiagnostic('LOGIN_PROFILE_UID', { uid: expectedUid });
+      loginDiagnostic('LOGIN_PROFILE_ROLE', { uid: expectedUid, role: profile.role });
       stage('ROLE_IDENTIFIED');
       const privileged = ['admin', 'manager'].includes(profile.role) || user.customClaims?.admin === true ||
         user.customClaims?.manager === true || ['admin', 'manager'].includes(user.customClaims?.role);
-      if (portal === 'public' && privileged) {
+      if (['public', 'unified'].includes(portal) && privileged) {
         stage('PRIVILEGED_ACCOUNT');
         throw new OtpError(403, 'privileged-login-required', 'This account must use its authorized sign-in portal.');
       }

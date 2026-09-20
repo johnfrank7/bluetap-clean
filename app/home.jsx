@@ -4,7 +4,7 @@ import { useRouter } from 'expo-router';
 import { onAuthStateChanged } from 'firebase/auth';
 
 import { auth } from '../firebase';
-import { validateRoleAccess } from '../services/authSession';
+import { getRoleHomePath, validateRoleAccess } from '../services/authSession';
 
 /**
  * Authenticated landing route used for direct links such as /home.
@@ -23,7 +23,10 @@ export default function HomeRoute() {
       }
 
       if (isActive) {
-        router.replace(result.redirectTo || '/admin/dashboard');
+        const destination = result.status === 'authorized'
+          ? getRoleHomePath(result.profile?.role)
+          : result.redirectTo || '/login';
+        router.replace(destination);
       }
     };
 

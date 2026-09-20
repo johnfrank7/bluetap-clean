@@ -3,10 +3,21 @@ const test = require('node:test');
 
 const {
   completePrivilegedLoginValidation,
+  resetAllPrivilegedLoginValidations,
   resetPrivilegedLoginValidation,
   runPrivilegedLoginValidation,
   shouldValidateExistingSession,
 } = require('../../../services/privilegedLoginCoordinator');
+
+test('account switching clears completed privileged validation state for every role', () => {
+  completePrivilegedLoginValidation('admin', 'admin-before-switch');
+  completePrivilegedLoginValidation('manager', 'manager-before-switch');
+  resetAllPrivilegedLoginValidations();
+
+  assert.equal(shouldValidateExistingSession('admin', { uid: 'admin-before-switch' }), true);
+  assert.equal(shouldValidateExistingSession('manager', { uid: 'manager-before-switch' }), true);
+  resetAllPrivilegedLoginValidations();
+});
 
 test('auth listener handles one persisted user once across repeated effect callbacks', () => {
   const role = 'admin-listener-test';

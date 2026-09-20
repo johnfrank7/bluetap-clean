@@ -10,6 +10,15 @@ function resetPrivilegedLoginValidation(role) {
   states.delete(String(role || '').toLowerCase());
 }
 
+function resetAllPrivilegedLoginValidations() {
+  states.clear();
+}
+
+// authSession is loaded before the privileged screen in some bundles. A
+// namespaced reset hook avoids a module cycle while ensuring account switches
+// also discard completed/in-flight privileged-login coordination state.
+globalThis.__bluetapResetPrivilegedLoginValidations = resetAllPrivilegedLoginValidations;
+
 function completePrivilegedLoginValidation(role, uid) {
   const state = getState(role);
   state.completedUid = String(uid || '');
@@ -45,6 +54,7 @@ function runPrivilegedLoginValidation(role, user, validate) {
 
 module.exports = {
   completePrivilegedLoginValidation,
+  resetAllPrivilegedLoginValidations,
   resetPrivilegedLoginValidation,
   runPrivilegedLoginValidation,
   shouldValidateExistingSession,

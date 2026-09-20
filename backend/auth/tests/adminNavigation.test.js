@@ -46,7 +46,7 @@ test('router failure stays outside auth rejection and permits navigation-only re
   assert.equal(calls.filter((item) => item === '/admin/dashboard').length, 1);
 });
 
-test('shared handoff cache requires matching UID, role and unexpired validation', () => {
+test('shared handoff cache discards authorization on UID or role changes and expiry', () => {
   const source = readFileSync(resolve(root, 'services/authSession.js'), 'utf8');
   const cacheCode = source.slice(source.indexOf('const PRIVILEGED_VALIDATION_TTL_MS'), source.indexOf('const getMemorySessionStore'))
     .replaceAll('export const', 'const');
@@ -55,8 +55,12 @@ test('shared handoff cache requires matching UID, role and unexpired validation'
   context.cache({ uid: 'admin-1', role: 'admin' });
   assert.equal(context.read({ uid: 'admin-1' }, 'admin').role, 'admin');
   assert.equal(context.read({ uid: 'manager-1' }, 'admin'), null);
+  assert.equal(context.read({ uid: 'admin-1' }, 'admin'), null);
+  context.cache({ uid: 'admin-1', role: 'admin' });
   assert.equal(context.read({ uid: 'admin-1' }, 'manager'), null);
+  context.cache({ uid: 'admin-1', role: 'admin' });
   assert.equal(context.read(null, 'admin'), null);
+  context.cache({ uid: 'admin-1', role: 'admin' });
   vm.runInContext('privilegedValidationCache.validatedAt -= 120001', context);
   assert.equal(context.read({ uid: 'admin-1' }, 'admin'), null);
   context.cache({ uid: 'admin-1', role: 'admin' });

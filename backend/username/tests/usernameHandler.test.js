@@ -155,6 +155,8 @@ test('public login business outcomes retain production CORS through the HTTP ser
     { name: 'wrong admin password never shows privileged message', role: 'admin', provider: 'INVALID_PASSWORD', status: 401, code: 'INVALID_CREDENTIALS' },
     { name: 'admin public login', role: 'admin', status: 403, code: 'PRIVILEGED_LOGIN_REQUIRED' },
     { name: 'manager public login', role: 'manager', status: 403, code: 'PRIVILEGED_LOGIN_REQUIRED' },
+    { name: 'legacy unified login cannot admit admin', role: 'admin', portal: 'unified', status: 403, code: 'PRIVILEGED_LOGIN_REQUIRED' },
+    { name: 'legacy unified login cannot admit manager', role: 'manager', portal: 'unified', status: 403, code: 'PRIVILEGED_LOGIN_REQUIRED' },
     { name: 'admin authorized portal remains available', role: 'admin', portal: 'admin', status: 200 },
     { name: 'manager authorized portal remains available', role: 'manager', portal: 'manager', status: 200 },
     { name: 'public user cannot enter privileged portal', role: 'requester', portal: 'admin', status: 403, code: 'PORTAL_ROLE_MISMATCH' },

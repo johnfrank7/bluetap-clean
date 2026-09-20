@@ -138,7 +138,7 @@ export default function PrivilegedLogin({ role }) {
     }
     if (!profileSnapshot.exists()) throw accessError(admin ? 'ADMIN_PROFILE_MISSING' : 'MANAGER_PROFILE_MISSING');
 
-    const profile = { uid: user.uid, ...profileSnapshot.data() };
+    const profile = { ...profileSnapshot.data(), uid: user.uid };
     if (profile.role !== role || !hasTrustedRole(role, token.claims, profile)) {
       throw accessError(admin ? 'ADMIN_ROLE_MISMATCH' : 'MANAGER_ROLE_MISMATCH');
     }

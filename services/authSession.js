@@ -34,8 +34,12 @@ export const cacheValidatedPrivilegedAccess = (profile = {}) => {
 
 export const getCachedPrivilegedAccess = (user, role) => {
   const cached = privilegedValidationCache;
-  if (!cached || cached.uid !== user?.uid || cached.role !== role ||
-      Date.now() - cached.validatedAt > PRIVILEGED_VALIDATION_TTL_MS) return null;
+  if (!cached) return null;
+  if (cached.uid !== user?.uid || cached.role !== role ||
+      Date.now() - cached.validatedAt > PRIVILEGED_VALIDATION_TTL_MS) {
+    clearPrivilegedValidationCache();
+    return null;
+  }
   return cached.profile;
 };
 
@@ -147,15 +151,23 @@ export const getModuleSession = (role) =>
 
 export const saveRoleSession = (profile = {}) => {
   const role = normalizeRole(profile.role);
+  const uid = String(profile.uid || profile.id || '');
 
-  if (!isValidRole(role)) {
+  if (!uid || !isValidRole(role)) {
     clearAllAuthSessions();
     return null;
   }
 
+  if (
+    privilegedValidationCache &&
+    (privilegedValidationCache.uid !== uid || privilegedValidationCache.role !== role)
+  ) {
+    clearPrivilegedValidationCache();
+  }
+
   const existingSession = getModuleSession(role);
   const nextSession = {
-    uid: profile.uid || profile.id || '',
+    uid,
     email: (profile.email || '').toString().trim().toLowerCase(),
     role,
     branchId: (profile.branchId || '').toString().trim(),
@@ -195,7 +207,31 @@ export const clearModuleSession = (role) => {
 
 export const clearAllAuthSessions = () => {
   clearPrivilegedValidationCache();
+  globalThis.__bluetapResetPrivilegedLoginValidations?.();
   setSessions(null, {});
+};
+
+export const invalidateAuthStateForUid = (uid) => {
+  const normalizedUid = String(uid || '');
+  if (!normalizedUid) {
+    clearAllAuthSessions();
+    return true;
+  }
+
+  const storedSessions = [getActiveSession(), ...Object.values(getModuleSessions())]
+    .filter(Boolean);
+  const hasStaleStoredSession = storedSessions.some(
+    (session) => !session.uid || String(session.uid) !== normalizedUid
+  );
+  const hasStalePrivilegedCache =
+    privilegedValidationCache && privilegedValidationCache.uid !== normalizedUid;
+
+  if (hasStaleStoredSession || hasStalePrivilegedCache) {
+    clearAllAuthSessions();
+    return true;
+  }
+
+  return false;
 };
 
 export const subscribeAuthSessionChanges = (listener) => {
@@ -279,7 +315,7 @@ export const validateRoleAccess = async (expectedRole) => {
   const currentUser = auth.currentUser;
 
   if (!currentUser) {
-    clearPrivilegedValidationCache();
+    clearAllAuthSessions();
     return {
       status: 'unauthenticated',
       message: 'Unauthorized Access',
@@ -287,6 +323,8 @@ export const validateRoleAccess = async (expectedRole) => {
       clearRole: expected,
     };
   }
+
+  invalidateAuthStateForUid(currentUser.uid);
 
   const cachedPrivilegedProfile = ['admin', 'manager'].includes(expected)
     ? getCachedPrivilegedAccess(currentUser, expected)

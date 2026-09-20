@@ -50,6 +50,7 @@ test('public form establishes the client session before profile lookup and role 
   const submit = page.slice(page.indexOf('  const finishSuccessfulLogin'), page.indexOf('  const confirmRestartIncompleteRegistration'));
   const cases = [
     { name: 'requester username', role: 'requester', path: '/requester/r_dashboard' },
+    { name: 'requester after stale Admin session', role: 'requester', staleAdmin: true, path: '/requester/r_dashboard' },
     { name: 'requester email', role: 'requester', email: 'requester@example.test', path: '/requester/r_dashboard' },
     { name: 'approved distributor', role: 'distributor', profile: { approvalStatus: 'approved' }, path: '/distributor/d_dashboard' },
     { name: 'approvalStatus overrides stale legacy status', role: 'distributor', profile: { approvalStatus: 'approved', status: 'Pending' }, path: '/distributor/d_dashboard' },
@@ -62,7 +63,7 @@ test('public form establishes the client session before profile lookup and role 
   ];
   for (const scenario of cases) await t.test(scenario.name, async () => {
     const events = [];
-    const auth = { currentUser: null };
+    const auth = { currentUser: scenario.staleAdmin ? { uid: 'old-admin' } : null };
     const profile = { role: scenario.role, registrationCompleted: true, faceVerification: { required: false, status: 'not_required' }, ...scenario.profile };
     const destination = loadService('services/authSession.js', {}, 'getPostAuthenticationDestination');
     const usernameLogin = loadService('services/usernameAuth.js', {
@@ -70,7 +71,7 @@ test('public form establishes the client session before profile lookup and role 
       fetch: async (_url, options) => {
         events.push('backend');
         const body = JSON.parse(options.body);
-        assert.equal(body.portal, 'unified');
+        assert.equal(body.portal, 'public');
         assert.equal(body.username, scenario.email || 'test_user');
         return { ok: !scenario.error, json: async () => scenario.error ? { error: { code: scenario.error } } : { customToken: 'test-custom-token', profile: { uid: 'public-user', email: 'public@example.test', role: scenario.role, registrationCompleted: true, faceVerification: { required: false, status: 'not_required' }, ...scenario.profile } } };
       },
@@ -84,9 +85,13 @@ test('public form establishes the client session before profile lookup and role 
         auth.currentUser = { uid: 'public-user', email: 'public@example.test', emailVerified: true };
         return { user: auth.currentUser };
       },
+      fetchFirestoreUserProfile: async (user) => ({ ...profile, uid: user.uid, email: 'public@example.test' }),
       ensureUserUniqueId: async (_user, data) => data,
       saveLocalUser: () => {}, saveRoleSession: () => events.push('shared-session'),
-      clearAllAuthSessions: () => events.push('clear'), signOut: async () => { auth.currentUser = null; },
+      clearAllAuthSessions: () => events.push('clear'), signOut: async () => {
+        if (scenario.staleAdmin && auth.currentUser?.uid === 'old-admin') events.push('firebase-signout');
+        auth.currentUser = null;
+      },
       getPostAuthenticationDestination: destination,
       setLoading: () => {}, router: { replace: (path) => events.push(path) },
       showNotification: (_title, message) => events.push(message),
@@ -94,10 +99,17 @@ test('public form establishes the client session before profile lookup and role 
     const run = vm.runInNewContext(`${helpers}\n${submit}\nhandleLogin`, context);
     await run();
     if (scenario.error) {
-      assert.deepEqual(events, ['backend', scenario.message]);
+      assert.deepEqual(events, ['clear', 'backend', scenario.message]);
       assert.equal(auth.currentUser, null);
     } else {
-      assert.deepEqual(events, ['backend', 'client-session', 'shared-session', scenario.path]);
+      assert.deepEqual(events, [
+        'clear',
+        ...(scenario.staleAdmin ? ['firebase-signout'] : []),
+        'backend',
+        'client-session',
+        'shared-session',
+        scenario.path,
+      ]);
       assert.equal(auth.currentUser.uid, 'public-user');
     }
   });

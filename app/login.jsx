@@ -29,6 +29,7 @@ import {
 import { findLocalUserByEmail, saveLocalUser } from '../localUsers';
 import {
   clearAllAuthSessions,
+  fetchFirestoreUserProfile,
   getPostAuthenticationDestination,
   saveRoleSession,
 } from '../services/authSession';
@@ -288,6 +289,16 @@ export default function LoginPage() {
       role,
     });
     const destination = getPostAuthenticationDestination(profile);
+    console.info('[public-login]', {
+      stage: 'LOGIN_ROUTE_ROLE',
+      uid: profile?.uid || auth.currentUser?.uid || '',
+      role,
+    });
+    console.info('[public-login]', {
+      stage: 'LOGIN_ROUTE_DESTINATION',
+      uid: profile?.uid || auth.currentUser?.uid || '',
+      destination,
+    });
 
     setLoading(false);
     router.replace(destination);
@@ -312,22 +323,56 @@ export default function LoginPage() {
       const startedAt = Date.now();
       console.info('[public-login]', { stage: 'LOGIN_REQUEST_STARTED' });
 
+      // Public sign-in always begins without any authorization state from a
+      // previous account. This also invalidates the UID-bound privileged cache.
+      clearAllAuthSessions();
+      if (auth.currentUser) {
+        await signOut(auth);
+      }
+
       // Both identifiers use password verification and public-role checks on
       // the backend before establishing the matching Firebase client session.
-      const loginResult = await loginWithUsernameResult(loginIdentifier, enteredPassword, { portal: 'unified' });
+      const loginResult = await loginWithUsernameResult(loginIdentifier, enteredPassword, { portal: 'public' });
       const userCredential = await signInWithCustomToken(auth, loginResult.customToken);
 
       const user = userCredential.user;
       authenticatedUser = user;
+      console.info('[public-login]', { stage: 'LOGIN_AUTH_UID', uid: user.uid });
       console.info('[public-login]', { stage: 'LOGIN_AUTH_COMPLETED', durationMs: Date.now() - startedAt });
 
-      const userData = loginResult.profile;
-      if (!userData || userData.uid !== user.uid) {
+      const responseProfile = loginResult.profile;
+      console.info('[public-login]', {
+        stage: 'LOGIN_PROFILE_UID',
+        uid: responseProfile?.uid || '',
+      });
+      console.info('[public-login]', {
+        stage: 'LOGIN_PROFILE_ROLE',
+        uid: responseProfile?.uid || '',
+        role: normalizeRole(responseProfile?.role),
+      });
+      if (!responseProfile || responseProfile.uid !== user.uid) {
+        console.warn('[public-login]', {
+          stage: 'USERNAME_UID_MISMATCH',
+          authenticatedUid: user.uid,
+          profileUid: responseProfile?.uid || '',
+        });
+        throw Object.assign(new Error('Account mapping invalid'), { code: 'ACCOUNT_MAPPING_INVALID' });
+      }
+
+      const userData = await fetchFirestoreUserProfile(user);
+      if (
+        !userData ||
+        userData.uid !== user.uid ||
+        normalizeRole(userData.role) !== normalizeRole(responseProfile.role)
+      ) {
         throw Object.assign(new Error('Account setup incomplete'), { code: 'ACCOUNT_SETUP_INCOMPLETE' });
       }
       console.info('[public-login]', { stage: 'LOGIN_PROFILE_LOADED', durationMs: Date.now() - startedAt });
       const { role } = userData;
       const profileRole = normalizeRole(role);
+      if (profileRole === 'admin' || profileRole === 'manager') {
+        throw Object.assign(new Error('Privileged portal required'), { code: 'PRIVILEGED_LOGIN_REQUIRED' });
+      }
       const profileApplicationStatus = getApplicationStatus(
         userData,
         profileRole === 'distributor' ? 'pending' : 'approved'
@@ -342,7 +387,7 @@ export default function LoginPage() {
         rejectionReason: userData.rejectionReason || null,
       };
 
-      if (!['requester', 'distributor', 'admin', 'manager'].includes(profileRole)) {
+      if (!['requester', 'distributor'].includes(profileRole)) {
         throw Object.assign(new Error('Account setup incomplete'), { code: 'ACCOUNT_SETUP_INCOMPLETE' });
       }
 
@@ -351,7 +396,7 @@ export default function LoginPage() {
       console.info('[public-login]', { stage: 'LOGIN_ROUTED', durationMs: Date.now() - startedAt });
 
     } catch (error) {
-      if (authenticatedUser && auth.currentUser?.uid === authenticatedUser.uid) {
+      if (auth.currentUser && (!authenticatedUser || auth.currentUser.uid === authenticatedUser.uid)) {
         clearAllAuthSessions();
         await signOut(auth).catch(() => {});
       }
