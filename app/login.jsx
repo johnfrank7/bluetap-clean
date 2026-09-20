@@ -475,6 +475,16 @@ export default function LoginPage() {
           >
             <View style={styles.authCardFrame}>
               <View style={styles.authCard}>
+                <TouchableOpacity
+                  style={styles.backButton}
+                  onPress={() => router.replace('/')}
+                  accessibilityRole="button"
+                  accessibilityLabel="Back to landing page"
+                >
+                  <Text style={styles.backButtonIcon}>‹</Text>
+                  <Text style={styles.backButtonText}>Back to home</Text>
+                </TouchableOpacity>
+
                 <View style={styles.logoSection}>
                   <Pressable
                     onPress={() => adminEntryTracker.tap()}
@@ -736,6 +746,29 @@ const styles = StyleSheet.create({
     shadowRadius: 14,
     shadowOffset: { width: 0, height: 8 },
     elevation: 5,
+  },
+  backButton: {
+    alignSelf: 'flex-start',
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    marginLeft: -8,
+    marginBottom: 2,
+    borderRadius: 10,
+  },
+  backButtonIcon: {
+    color: '#FFFFFF',
+    fontSize: 31,
+    fontWeight: '400',
+    lineHeight: 30,
+    marginRight: 4,
+    marginTop: -2,
+  },
+  backButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
   },
   formContainer: {
     width: '100%',
