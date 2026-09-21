@@ -1,11 +1,13 @@
 import { getRegistrationSecurity } from './adminRegistrationSecurity';
 import { ADMIN_CACHE_KEYS, prefetchAdminData } from './adminDataCache';
 import { getAccountsWorkspace, getBranches, getDistributors } from './branchManagement';
+import { getAdminProducts } from './adminProducts';
 
 const destinations = {
   '/admin/branches': [ADMIN_CACHE_KEYS.branches, getBranches],
   '/admin/managers': [ADMIN_CACHE_KEYS.accounts, getAccountsWorkspace],
   '/admin/distributors': [ADMIN_CACHE_KEYS.distributors, getDistributors],
+  '/admin/products': [ADMIN_CACHE_KEYS.products, getAdminProducts],
   '/admin/registration-security': [ADMIN_CACHE_KEYS.security, getRegistrationSecurity],
 };
 

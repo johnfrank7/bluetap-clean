@@ -75,15 +75,11 @@ service cloud.firestore {
         ]);
     }
 
-    // The water catalog is visible to signed-in BlueTap users. Only a trusted,
-    // Firebase-authenticated Manager identity can mutate it.
+    // Catalog mutations are server-only. The backend validates Administrator
+    // identity and writes audit records before using the Admin SDK.
     match /products/{productId} {
-      allow read: if signedIn() && (currentUser().role != 'manager'
-        || isManagerBranch(resource.data.branchId));
-      allow create: if isManagerBranch(request.resource.data.branchId);
-      allow update: if isManagerBranch(resource.data.branchId)
-        && request.resource.data.branchId == resource.data.branchId;
-      allow delete: if isManagerBranch(resource.data.branchId);
+      allow read: if signedIn();
+      allow create, update, delete: if false;
     }
 
     match /requests/{requestId} {
@@ -92,18 +88,7 @@ service cloud.firestore {
       allow read: if isManagerBranch(resource.data.branchId);
       allow update: if isManagerBranch(resource.data.branchId)
         && request.resource.data.branchId == resource.data.branchId;
-      allow create: if isRequester()
-        && request.resource.data.requester_id == request.auth.uid
-        && request.resource.data.branchId is string
-        && get(/databases/$(database)/documents/branches/$(request.resource.data.branchId)).data.status == 'active'
-        && request.resource.data.status == 'Pending';
-      allow update: if isRequester()
-        && resource.data.requester_id == request.auth.uid
-        && resource.data.status == 'Pending'
-        && request.resource.data.status == 'Cancelled'
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'status', 'updated_at', 'canceled_at'
-        ]);
+      allow create: if false;
       allow delete: if false;
     }
   }

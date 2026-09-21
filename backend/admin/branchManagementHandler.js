@@ -7,11 +7,18 @@ const BRANCH_STATUS = new Set(['active', 'inactive']);
 const MANAGER_STATUS = new Set(['active', 'inactive']);
 
 const clean = (value, max = 160) => String(value || '').trim().slice(0, max);
+const finiteCoordinate = (value, minimum, maximum) => {
+  if (value === null || value === undefined || value === '') return null;
+  const number = Number(value);
+  return Number.isFinite(number) && number >= minimum && number <= maximum ? number : null;
+};
 const branchIdForCode = (code) => clean(code, 24).toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '');
 const safeBranch = (id, data = {}) => ({
   id,
   name: clean(data.name), code: clean(data.code, 24), barangay: clean(data.barangay),
   city: clean(data.city), address: clean(data.address, 240), status: data.status === 'inactive' ? 'inactive' : 'active',
+  latitude: finiteCoordinate(data.latitude, -90, 90), longitude: finiteCoordinate(data.longitude, -180, 180),
+  serviceRadiusKm: data.serviceRadiusKm !== null && data.serviceRadiusKm !== undefined && data.serviceRadiusKm !== '' && Number.isFinite(Number(data.serviceRadiusKm)) ? Number(data.serviceRadiusKm) : null,
   createdAt: data.createdAt || null, createdBy: data.createdBy || '', updatedAt: data.updatedAt || null, updatedBy: data.updatedBy || '',
 });
 const safeManager = (id, data = {}) => ({
@@ -38,6 +45,24 @@ function branchInput(body, { partial = false } = {}) {
   }
   if (!partial && (!result.name || !result.barangay || !result.city || !result.address)) {
     throw new OtpError(400, 'INVALID_BRANCH', 'Branch name and location details are required.');
+  }
+  const hasLatitude = Object.prototype.hasOwnProperty.call(body, 'latitude');
+  const hasLongitude = Object.prototype.hasOwnProperty.call(body, 'longitude');
+  if (!partial || hasLatitude || hasLongitude) {
+    const latitude = finiteCoordinate(body.latitude, -90, 90);
+    const longitude = finiteCoordinate(body.longitude, -180, 180);
+    if (latitude === null || longitude === null) {
+      throw new OtpError(400, 'INVALID_BRANCH_COORDINATES', 'Choose a valid branch location on the map.');
+    }
+    result.latitude = latitude;
+    result.longitude = longitude;
+  }
+  if (!partial || Object.prototype.hasOwnProperty.call(body, 'serviceRadiusKm')) {
+    const radius = body.serviceRadiusKm === '' || body.serviceRadiusKm == null ? null : Number(body.serviceRadiusKm);
+    if (radius !== null && (!Number.isFinite(radius) || radius <= 0 || radius > 500)) {
+      throw new OtpError(400, 'INVALID_SERVICE_RADIUS', 'Service radius must be between 0 and 500 km.');
+    }
+    result.serviceRadiusKm = radius;
   }
   return result;
 }

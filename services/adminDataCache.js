@@ -6,6 +6,7 @@ export const ADMIN_CACHE_KEYS = Object.freeze({
   branches: 'admin-branches',
   accounts: 'admin-accounts-workspace',
   distributors: 'admin-distributors',
+  products: 'admin-products',
   security: 'admin-security-settings',
 });
 

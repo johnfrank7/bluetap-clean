@@ -101,7 +101,7 @@ const ProfileField = memo(function ProfileField({
           multiline={multiline}
         />
       ) : (
-        <Text style={styles.value}>{value || 'Not set'}</Text>
+        <Text style={styles.value}>{value || 'Not provided'}</Text>
       )}
     </View>
   );

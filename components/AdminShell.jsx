@@ -10,7 +10,7 @@ import { signOutAndClearSessions } from '../services/authSession';
 import { warmAdminBackend } from '../services/apiWarmup';
 import { prefetchAdminDestination } from '../services/adminPrefetch';
 
-const links = [['dashboard', 'Dashboard', '/admin/dashboard'], ['branches', 'Branches', '/admin/branches'], ['accounts', 'Accounts & Audit', '/admin/managers'], ['distributors', 'Distributors', '/admin/distributors'], ['security', 'Security Settings', '/admin/registration-security']];
+const links = [['dashboard', 'Dashboard', '/admin/dashboard'], ['branches', 'Branches', '/admin/branches'], ['accounts', 'Accounts & Audit', '/admin/managers'], ['distributors', 'Distributors', '/admin/distributors'], ['products', 'Products', '/admin/products'], ['security', 'Security Settings', '/admin/registration-security']];
 const DESKTOP_WIDTH = 244;
 const COLLAPSED_WIDTH = 76;
 const DRAWER_WIDTH = 286;

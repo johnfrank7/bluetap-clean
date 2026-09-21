@@ -92,15 +92,15 @@ const getRequestId = (request) => request.request_id || request.id || 'Not set';
 
 const normalizeRequestItem = (item = {}, fallback = {}) => {
   const quantity = Number(item.quantity || 0);
-  const unitPrice = Number(item.product_price ?? item.price ?? 0);
+  const unitPrice = Number(item.product_price ?? item.price ?? item.unitPriceAtOrder ?? 0);
   const subtotal = Number(
-    item.line_total ?? item.subtotal ?? unitPrice * quantity
+    item.line_total ?? item.subtotal ?? item.totalAtOrder ?? unitPrice * quantity
   );
 
   return {
     id: item.product_id || fallback.id || fallback.product_id || '',
     productName:
-      item.product_name || item.productName || fallback.product_name || 'Product',
+      item.product_name || item.productName || item.productNameSnapshot || fallback.product_name || 'Product',
     quantity: Number.isFinite(quantity) ? quantity : item.quantity,
     unitPrice: Number.isFinite(unitPrice) ? unitPrice : 0,
     subtotal: Number.isFinite(subtotal) ? subtotal : 0,
@@ -165,7 +165,7 @@ const getQuantityText = (request) => {
 };
 
 const getTotalAmount = (request) => {
-  const totalAmount = Number(request?.total_cost || 0);
+  const totalAmount = Number(request?.total_cost || request?.totalAtOrder || 0);
 
   if (Number.isFinite(totalAmount) && totalAmount > 0) {
     return totalAmount;
@@ -256,6 +256,21 @@ const RequestCard = ({
           <Text style={styles.compactLabel}>Total Amount</Text>
           <Text style={styles.compactValue} numberOfLines={1}>
             {formatPrice(getTotalAmount(request))}
+          </Text>
+        </View>
+      </View>
+
+      <View style={[styles.compactInfoGrid, styles.infoGridDivider]}>
+        <View style={styles.compactInfoColumn}>
+          <Text style={styles.compactLabel}>Provider</Text>
+          <Text style={styles.compactValue} numberOfLines={2}>
+            {request.branchNameSnapshot || request.water_station || 'Not provided'}
+          </Text>
+        </View>
+        <View style={styles.compactInfoColumn}>
+          <Text style={styles.compactLabel}>Quantity · Expected</Text>
+          <Text style={styles.compactValue} numberOfLines={2}>
+            {getQuantityText(request)} · {formatDateValue(request.delivery_date || request.expectedDeliveryDate, 'Not scheduled')}
           </Text>
         </View>
       </View>

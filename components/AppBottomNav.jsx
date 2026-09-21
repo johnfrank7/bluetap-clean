@@ -193,7 +193,7 @@ function NavIcon({
   );
 }
 
-function BottomNav({ items }) {
+function BottomNav({ items, floating = true }) {
   const pathname = usePathname();
   const router = useRouter();
   const segments = useSegments();
@@ -206,7 +206,7 @@ function BottomNav({ items }) {
   );
 
   return (
-    <View style={styles.bottomNav}>
+    <View style={[styles.bottomNav, floating ? styles.floatingNav : styles.flowNav]}>
       {items.map((item, index) => {
         const isActive = index === activeIndex;
 
@@ -236,7 +236,7 @@ function BottomNav({ items }) {
 }
 
 export function RequesterBottomNav() {
-  return <BottomNav items={requesterItems} />;
+  return <BottomNav items={requesterItems} floating={false} />;
 }
 
 export function DistributorBottomNav() {
@@ -245,10 +245,6 @@ export function DistributorBottomNav() {
 
 const styles = StyleSheet.create({
   bottomNav: {
-    position: 'absolute',
-    bottom: 24,
-    left: 20,
-    right: 20,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
@@ -264,6 +260,19 @@ const styles = StyleSheet.create({
       radius: 6,
       offset: { width: 0, height: 3 },
     }),
+  },
+  floatingNav: {
+    position: 'absolute',
+    bottom: 24,
+    left: 20,
+    right: 20,
+  },
+  flowNav: {
+    width: '100%',
+    maxWidth: 760,
+    alignSelf: 'center',
+    borderRadius: 0,
+    paddingBottom: 18,
   },
   navButton: {
     width: 36,

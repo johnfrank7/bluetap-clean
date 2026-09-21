@@ -1,0 +1,125 @@
+const { getFirebaseAdmin } = require('../firebase/firebaseAdmin');
+const { requireAdmin } = require('../auth/authorization');
+const { applyCors } = require('../utils/cors');
+const { OtpError } = require('../utils/otpError');
+
+const clean = (value, max = 240) => String(value || '').trim().slice(0, max);
+const priceFor = (value) => {
+  const price = Number(value);
+  if (!Number.isFinite(price) || price < 0 || price > 1_000_000) {
+    throw new OtpError(400, 'INVALID_PRODUCT_PRICE', 'Enter a valid product price.');
+  }
+  return Math.round(price * 100) / 100;
+};
+const branchIdsFor = (value) => Array.isArray(value)
+  ? [...new Set(value.map((item) => clean(item, 80)).filter(Boolean))].slice(0, 100)
+  : [];
+const safePrice = (value) => {
+  const price = Number(value);
+  return Number.isFinite(price) && price >= 0 ? Math.round(price * 100) / 100 : null;
+};
+const safeProduct = (id, data = {}) => ({
+  id,
+  product_name: clean(data.product_name || data.name, 120),
+  description: clean(data.description, 500),
+  price: safePrice(data.price),
+  image: clean(data.image || data.imageUrl, 1000),
+  imagePath: clean(data.imagePath, 500),
+  containerType: clean(data.containerType || data.capacity, 80),
+  size: clean(data.size, 80),
+  active: data.active !== false,
+  branchIds: branchIdsFor(data.branchIds || (data.branchId ? [data.branchId] : [])),
+  createdAt: data.createdAt || data.created_at || null,
+  updatedAt: data.updatedAt || data.updated_at || null,
+});
+
+function bodyOf(req) {
+  if (req.body && typeof req.body === 'object') return req.body;
+  try { return JSON.parse(String(req.body || '{}')); }
+  catch { throw new OtpError(400, 'INVALID_REQUEST', 'The request body is invalid.'); }
+}
+
+async function validateBranches(db, branchIds) {
+  await Promise.all(branchIds.map(async (branchId) => {
+    const snapshot = await db.collection('branches').doc(branchId).get();
+    if (!snapshot.exists) throw new OtpError(400, 'INVALID_PRODUCT_BRANCH', 'A selected product branch does not exist.');
+  }));
+}
+
+function productInput(body, { partial = false } = {}) {
+  const result = {};
+  const copy = (field, value, max) => {
+    if (!partial || Object.prototype.hasOwnProperty.call(body, field)) result[field] = clean(value, max);
+  };
+  copy('product_name', body.product_name || body.name, 120);
+  copy('description', body.description, 500);
+  copy('image', body.image || body.imageUrl, 1000);
+  copy('imagePath', body.imagePath, 500);
+  copy('containerType', body.containerType || body.capacity, 80);
+  copy('size', body.size, 80);
+  if (!partial || Object.prototype.hasOwnProperty.call(body, 'price')) result.price = priceFor(body.price);
+  if (!partial || Object.prototype.hasOwnProperty.call(body, 'active')) result.active = body.active !== false;
+  if (!partial || Object.prototype.hasOwnProperty.call(body, 'branchIds')) result.branchIds = branchIdsFor(body.branchIds);
+  if (!partial && !result.product_name) throw new OtpError(400, 'INVALID_PRODUCT', 'Product name is required.');
+  return result;
+}
+
+function responseError(res, error) {
+  const known = error instanceof OtpError;
+  return res.status(known ? error.status : 500).json({ error: {
+    reason: known ? error.reason : 'service-unavailable',
+    message: known ? error.message : 'Product management is temporarily unavailable.',
+  } });
+}
+
+function createAdminProductsHandler(getAdmin = getFirebaseAdmin) {
+  return async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    if (!applyCors(req, res)) return;
+    if (req.method === 'OPTIONS') return res.status(204).end();
+    if (!['GET', 'POST', 'PATCH'].includes(req.method)) {
+      return res.status(405).json({ error: { reason: 'method-not-allowed', message: 'Use GET, POST, or PATCH.' } });
+    }
+    try {
+      const { auth, db } = getAdmin();
+      const admin = await requireAdmin(req, auth, db);
+      if (req.method === 'GET') {
+        const snapshot = await db.collection('products').get();
+        const products = snapshot.docs.map((item) => safeProduct(item.id, item.data()))
+          .sort((left, right) => left.product_name.localeCompare(right.product_name));
+        return res.status(200).json({ products });
+      }
+      const body = bodyOf(req);
+      if (req.method === 'POST') {
+        const input = productInput(body);
+        await validateBranches(db, input.branchIds);
+        const now = new Date();
+        const ref = db.collection('products').doc();
+        const saved = { ...input, createdAt: now, createdBy: admin.uid, updatedAt: now, updatedBy: admin.uid };
+        await db.runTransaction(async (tx) => {
+          tx.create(ref, saved);
+          tx.set(db.collection('adminAuditLogs').doc(), { action: 'PRODUCT_CREATED', adminUid: admin.uid, productId: ref.id, before: null, after: safeProduct(ref.id, saved), createdAt: now });
+        });
+        return res.status(201).json({ product: safeProduct(ref.id, saved) });
+      }
+      const productId = clean(body.productId, 128);
+      if (!productId) throw new OtpError(400, 'PRODUCT_ID_REQUIRED', 'Product ID is required.');
+      const ref = db.collection('products').doc(productId);
+      const snapshot = await ref.get();
+      if (!snapshot.exists) throw new OtpError(404, 'PRODUCT_NOT_FOUND', 'Product not found.');
+      const changes = productInput(body, { partial: true });
+      if (!Object.keys(changes).length) throw new OtpError(400, 'NO_PRODUCT_CHANGES', 'No product changes were provided.');
+      if (changes.branchIds) await validateBranches(db, changes.branchIds);
+      const now = new Date();
+      const saved = { ...snapshot.data(), ...changes, updatedAt: now, updatedBy: admin.uid };
+      const action = snapshot.data()?.active !== false && saved.active === false ? 'PRODUCT_DEACTIVATED' : 'PRODUCT_UPDATED';
+      await db.runTransaction(async (tx) => {
+        tx.update(ref, { ...changes, updatedAt: now, updatedBy: admin.uid });
+        tx.set(db.collection('adminAuditLogs').doc(), { action, adminUid: admin.uid, productId, before: safeProduct(productId, snapshot.data()), after: safeProduct(productId, saved), createdAt: now });
+      });
+      return res.status(200).json({ product: safeProduct(productId, saved) });
+    } catch (error) { return responseError(res, error); }
+  };
+}
+
+module.exports = { createAdminProductsHandler, safeProduct };

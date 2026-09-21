@@ -233,17 +233,17 @@ export default function ManagerProductsPage() {
     <ManagerShell
       active="products"
       title="Products"
-      subtitle="Manage refill sizes and pricing"
+      subtitle="View the active catalog assigned by an Administrator"
       searchValue={search}
       onSearchChange={setSearch}
       searchPlaceholder="Search products..."
     >
       <View style={styles.card}>
         <View style={styles.cardHeader}>
-          <Text style={styles.cardTitle}>Product catalog</Text>
-          <TouchableOpacity activeOpacity={0.85} style={styles.addButton} onPress={openAddModal}>
-            <Text style={styles.addButtonText}>+ Add product</Text>
-          </TouchableOpacity>
+          <View>
+            <Text style={styles.cardTitle}>Branch product catalog</Text>
+            <Text style={styles.readOnlyNote}>Pricing, images, and availability are managed in Admin Products.</Text>
+          </View>
         </View>
 
         <ScrollView horizontal showsHorizontalScrollIndicator contentContainerStyle={styles.tableScroll}>
@@ -251,7 +251,7 @@ export default function ManagerProductsPage() {
         <View style={[styles.tableRow, styles.tableHeadRow]}>
           <Text style={[styles.th, styles.productCol]}>PRODUCT</Text>
           <Text style={[styles.th, styles.priceCol]}>PRICE</Text>
-          <Text style={[styles.th, styles.actionsCol]}>ACTIONS</Text>
+          <Text style={[styles.th, styles.actionsCol]}>STATUS</Text>
         </View>
 
         {loading ? (
@@ -297,24 +297,7 @@ export default function ManagerProductsPage() {
                 </Text>
 
                 <View style={[styles.actionsCell, styles.actionsCol]}>
-                  <TouchableOpacity
-                    activeOpacity={0.82}
-                    style={[styles.editButton, isDeleting && styles.actionDisabled]}
-                    onPress={() => openEditModal(product)}
-                    disabled={isDeleting}
-                  >
-                    <Text style={styles.editButtonText}>Edit</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    activeOpacity={0.82}
-                    style={[styles.deleteButton, isDeleting && styles.actionDisabled]}
-                    onPress={() => confirmDeleteProduct(product)}
-                    disabled={isDeleting}
-                  >
-                    <Text style={styles.deleteButtonText}>
-                      {isDeleting ? 'Deleting...' : 'Delete'}
-                    </Text>
-                  </TouchableOpacity>
+                  <View style={styles.activePill}><Text style={styles.activePillText}>Active</Text></View>
                 </View>
               </View>
             );
@@ -417,6 +400,9 @@ const createStyles = (colors) => StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
   },
+  readOnlyNote: { color: colors.textSecondary, fontSize: 12, marginTop: 5 },
+  activePill: { backgroundColor: '#E8F7EF', borderRadius: 999, paddingHorizontal: 12, paddingVertical: 6 },
+  activePillText: { color: colors.success, fontSize: 12, fontWeight: 'bold' },
   addButton: {
     borderRadius: 20,
     backgroundColor: colors.primary,

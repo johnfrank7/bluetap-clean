@@ -17,7 +17,8 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.johnfrank7.bluetap",
       "infoPlist": {
-        "NSCameraUsageDescription": "Allow BlueTap to use your camera for face verification."
+        "NSCameraUsageDescription": "Allow BlueTap to use your camera for face verification.",
+        "NSLocationWhenInUseUsageDescription": "Allow BlueTap to use your location when choosing a delivery address and nearby provider."
       }
     },
     "android": {
@@ -29,7 +30,9 @@
       "softwareKeyboardLayoutMode": "resize",
       "package": "com.johnfrank7.bluetap",
       "permissions": [
-        "android.permission.CAMERA"
+        "android.permission.CAMERA",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION"
       ],
       "blockedPermissions": [
         "android.permission.RECORD_AUDIO"
@@ -47,6 +50,12 @@
           "cameraPermission": "Allow BlueTap to use your camera for face verification.",
           "recordAudioAndroid": false,
           "microphonePermission": false
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Allow BlueTap to use your location when choosing a delivery address and nearby provider."
         }
       ]
     ],

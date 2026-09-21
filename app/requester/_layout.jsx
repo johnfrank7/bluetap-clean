@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, StyleSheet } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack } from 'expo-router';
 import { RequesterBottomNav } from '../../components/AppBottomNav';
 import RequesterHeader from '../../components/RequesterHeader';
@@ -20,11 +21,9 @@ export default function RequesterLayout() {
           />
         </View>
 
-        <View style={styles.navOverlay}>
-          <View style={styles.navFrame}>
-            <RequesterBottomNav />
-          </View>
-        </View>
+        <SafeAreaView edges={['bottom']} style={styles.navArea}>
+          <RequesterBottomNav />
+        </SafeAreaView>
       </View>
     </RoleGate>
   );
@@ -37,20 +36,8 @@ const styles = StyleSheet.create({
   screenContent: {
     flex: 1,
   },
-  navOverlay: {
-    position: 'absolute',
-    top: 0,
-    right: 0,
-    bottom: 0,
-    left: 0,
-    alignItems: 'center',
-    zIndex: 20,
-    pointerEvents: 'box-none',
-  },
-  navFrame: {
+  navArea: {
     width: '100%',
-    maxWidth: 480,
-    flex: 1,
-    pointerEvents: 'box-none',
+    backgroundColor: '#FFFFFF',
   },
 });

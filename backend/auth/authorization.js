@@ -27,6 +27,22 @@ async function requireAdmin(req, auth, db) {
   return decoded;
 }
 
+async function requireRequester(req, auth, db) {
+  const decoded = await verifiedIdentity(req, auth);
+  const profileSnapshot = await db.collection('users').doc(decoded.uid).get();
+  const profile = profileSnapshot.data() || {};
+  if (!profileSnapshot.exists || profile.role !== 'requester') {
+    throw new OtpError(403, 'REQUESTER_REQUIRED', 'Requester access is required.');
+  }
+  if (profile.mustChangePassword === true) {
+    throw new OtpError(403, 'PASSWORD_CHANGE_REQUIRED', 'You must change your temporary password before placing an order.');
+  }
+  if (['inactive', 'disabled'].includes(String(profile.accountStatus || profile.status || '').toLowerCase())) {
+    throw new OtpError(403, 'ACCOUNT_INACTIVE', 'This Requester account is inactive.');
+  }
+  return { decoded, profile: { ...profile, uid: decoded.uid } };
+}
+
 async function requireActiveManager(req, auth, db) {
   const decoded = await verifiedIdentity(req, auth);
   const profileSnapshot = await db.collection('users').doc(decoded.uid).get();
@@ -55,4 +71,4 @@ function requireManagerBranch(managerContext, requestedBranchId) {
   return assigned;
 }
 
-module.exports = { bearerToken, requireActiveManager, requireAdmin, requireManagerBranch, verifiedIdentity };
+module.exports = { bearerToken, requireActiveManager, requireAdmin, requireManagerBranch, requireRequester, verifiedIdentity };

@@ -22,6 +22,7 @@ import { findLocalUserForAuthRole } from '../../localUsers';
 import RequestDetailsModal from '../../components/RequestDetailsModal';
 import SoftStatusBadge from '../../components/SoftStatusBadge';
 import { createShadow } from '../../components/shadowStyles';
+import ProductCard from '../../components/ProductCard';
 import { subscribeProducts } from '../../services/products';
 import {
   cancelRequest,
@@ -31,13 +32,12 @@ import {
 const REQUESTER_APP_MAX_WIDTH = 480;
 const DASHBOARD_HORIZONTAL_PADDING = 20;
 const PRODUCT_CARD_WIDTH_RATIO = 0.88;
-const PRODUCT_CAROUSEL_HEIGHT = 226;
+const PRODUCT_CAROUSEL_HEIGHT = 290;
 const BLUE = '#187BCD';
 const BLUE_LIGHT = '#E3F2FD';
 const CARD_BORDER = '#D7ECFF';
 const TEXT_MUTED = '#6F8EA8';
 const TEXT_DARK = '#20384D';
-const REQUESTER_NAME = 'Requester';
 const formatPrice = (price) => `\u20B1${Number(price || 0).toFixed(2)}`;
 const formatDashboardDate = (date) =>
   new Intl.DateTimeFormat('en-US', {
@@ -269,6 +269,7 @@ export default function RequesterDashboard() {
   const [requestToCancel, setRequestToCancel] = useState(null);
   const [detailsRequest, setDetailsRequest] = useState(null);
   const [notification, setNotification] = useState(null);
+  const [requesterName, setRequesterName] = useState('Requester');
   const productCarouselWidth = Math.max(
     1,
     Math.min(windowWidth, REQUESTER_APP_MAX_WIDTH) -
@@ -337,6 +338,9 @@ export default function RequesterDashboard() {
     };
 
     const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
+      const localRequester = user ? findLocalUserForAuthRole(user, 'requester') : null;
+      const displayName = localRequester?.fullName || localRequester?.firstName || user?.displayName || 'Requester';
+      setRequesterName(String(displayName).trim().split(/\s+/)[0] || 'Requester');
       subscribeForRequester(getRequesterId(user));
     });
 
@@ -407,68 +411,11 @@ export default function RequesterDashboard() {
   );
 
   const renderProductCard = useCallback(
-    ({ item: product }) => {
-      const stockText = getProductStockText(product);
-      const productGallons = getProductGallons(product);
-
-      return (
-        <View style={styles.productCarouselItem}>
-          <View style={styles.productCard}>
-            <View style={styles.priceBadge}>
-              <Text style={styles.priceBadgeText}>
-                {formatPrice(product.price)}
-              </Text>
-            </View>
-
-            <View style={styles.productImageWrap}>
-              {product.image ? (
-                <Image
-                  source={{ uri: product.image }}
-                  style={styles.productImage}
-                  resizeMode="contain"
-                />
-              ) : (
-                <Image
-                  source={require('../../assets/icons/bluetaplogo.png')}
-                  style={styles.productImage}
-                  resizeMode="contain"
-                />
-              )}
-            </View>
-
-            <View style={styles.productDetails}>
-              <Text style={styles.productName} numberOfLines={2}>
-                {product.product_name}
-              </Text>
-              {!!productGallons && (
-                <Text style={styles.productGallons} numberOfLines={1}>
-                  {productGallons}
-                </Text>
-              )}
-              {!!stockText && (
-                <Text
-                  style={[
-                    styles.productStock,
-                    isUnavailableStock(stockText) && styles.productStockUnavailable,
-                  ]}
-                  numberOfLines={1}
-                >
-                  {stockText}
-                </Text>
-              )}
-            </View>
-
-            <TouchableOpacity
-              style={styles.orderButton}
-              activeOpacity={0.85}
-              onPress={() => openProductRequest(product.id)}
-            >
-              <Text style={styles.orderButtonText}>Order</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      );
-    },
+    ({ item: product }) => (
+      <View style={styles.productCarouselItem}>
+        <ProductCard product={product} compact onOrder={() => openProductRequest(product.id)} />
+      </View>
+    ),
     [openProductRequest]
   );
 
@@ -536,7 +483,7 @@ export default function RequesterDashboard() {
             <View style={styles.welcomeSection}>
               <Text style={styles.welcomeText}>WELCOME!</Text>
               <Text style={styles.greetingText}>
-                Good Morning, {REQUESTER_NAME}
+                Good Morning, {requesterName}
               </Text>
               <Text style={styles.dateText}>{todayText}</Text>
             </View>

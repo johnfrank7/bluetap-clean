@@ -69,7 +69,7 @@ async function call(handler, method, token, body) {
   return res;
 }
 
-const branch = (code) => ({ name: `Branch ${code}`, code, barangay: 'Central', city: 'Toledo', address: `${code} Main Street` });
+const branch = (code) => ({ name: `Branch ${code}`, code, barangay: 'Central', city: 'Toledo', address: `${code} Main Street`, latitude: 10.267, longitude: 123.584 });
 
 test('legacy Manager promotion endpoint is retired', async () => {
   const f = fixture();
