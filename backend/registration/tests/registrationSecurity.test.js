@@ -44,6 +44,22 @@ test('role-scoped session endpoint exposes only the requested non-Admin policy',
   assert.equal(adminResponse.statusCode, 400);
 });
 
+test('authenticated session policy applies only that user’s idle override over the role default', async () => {
+  const records = new Map([
+    ['systemConfig/registrationSecurity', { ...SECURE_DEFAULTS }],
+    ['users/requester-1', { role: 'requester', sessionIdleTimeoutOverrideMinutes: 10 }],
+  ]);
+  const db = { collection: (name) => ({ doc: (id) => ({ get: async () => ({ exists: records.has(`${name}/${id}`), data: () => records.get(`${name}/${id}`) }) }) }) };
+  const auth = { verifyIdToken: async () => ({ uid: 'requester-1' }) };
+  const handler = createSessionPolicyHandler(() => ({ auth, db }));
+  const res = response();
+  await handler({ method: 'POST', headers: { authorization: 'Bearer valid' }, body: { role: 'requester' } }, res);
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.policy.idleTimeoutMinutes, 10);
+  assert.equal(res.body.rolePolicy.idleTimeoutMinutes, 30);
+  assert.equal(res.body.overrideIdleTimeoutMinutes, 10);
+});
+
 function response() {
   return { statusCode: 0, body: null, setHeader() {}, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; }, end() {} };
 }

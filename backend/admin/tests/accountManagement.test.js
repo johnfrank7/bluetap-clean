@@ -15,7 +15,7 @@ test('account workspace DTO exposes only safe normalized fields', () => {
     username: 'dinawater', approvalStatus: 'pending', branchId: 'branch-a', mustChangePassword: true,
     password: 'must-never-leak', faceEmbedding: [1, 2, 3], accountSource: 'public_registration',
   }, new Map([['branch-a', 'North Branch']]), { metadata: { lastSignInTime: '2026-09-20T00:00:00Z' } });
-  assert.deepEqual(Object.keys(account).sort(), ['accountSource','branchId','branchName','createdAt','email','fullName','lastSignInAt','mustChangePassword','role','status','uid','updatedAt','username'].sort());
+  assert.deepEqual(Object.keys(account).sort(), ['accountSource','branchId','branchName','createdAt','email','fullName','lastSignInAt','mustChangePassword','onboarding','role','sessionIdleTimeoutOverrideMinutes','sessionPolicy','status','uid','updatedAt','username'].sort());
   assert.equal(account.status, 'pending');
   assert.equal(account.email, 'dina@example.test');
   assert.equal(account.branchName, 'North Branch');
@@ -98,5 +98,27 @@ test('Admin can revoke every session for one account without changing its profil
   assert.equal(result.statusCode, 200);
   assert.deepEqual(fixture.revoked, ['requester-1']);
   assert.equal(fixture.records.get('users/requester-1').accountStatus, 'active');
-  assert.ok([...fixture.records.values()].some((value) => value.action === 'ACCOUNT_SESSIONS_REVOKED'));
+  assert.ok([...fixture.records.values()].some((value) => value.action === 'USER_SESSIONS_REVOKED'));
+});
+
+test('Admin account edits keep the session override and Manager branch server-authoritative and audited', async () => {
+  const fixture = managementFixture();
+  fixture.records.set('branches/south', { name: 'South', code: 'S', status: 'active' });
+  const handler = createAdminAccountsHandler(fixture.getAdmin);
+  const requester = await call(handler, 'PATCH', 'admin-token', {
+    uid: 'requester-1', action: 'updateAccount', fullName: 'Rita Updated', email: 'rita@example.test', role: 'requester',
+    sessionIdleTimeoutOverrideMinutes: 10, requirePasswordChange: true, active: true,
+  });
+  assert.equal(requester.statusCode, 200);
+  assert.equal(fixture.records.get('users/requester-1').sessionIdleTimeoutOverrideMinutes, 10);
+  assert.equal(fixture.records.get('users/requester-1').mustChangePassword, true);
+  assert.ok([...fixture.records.values()].some((value) => value.action === 'ACCOUNT_SESSION_POLICY_CHANGED'));
+  assert.ok([...fixture.records.values()].some((value) => value.action === 'PASSWORD_CHANGE_REQUIRED'));
+
+  const manager = await call(handler, 'PATCH', 'admin-token', {
+    uid: 'manager-1', action: 'updateAccount', fullName: 'Manny Manager', email: 'manny@example.test', role: 'manager', branchId: 'south', active: true,
+  });
+  assert.equal(manager.statusCode, 200);
+  assert.equal(fixture.records.get('users/manager-1').branchId, 'south');
+  assert.ok([...fixture.records.values()].some((value) => value.action === 'MANAGER_BRANCH_REASSIGNED'));
 });
