@@ -18,6 +18,10 @@ test('Admin shell owns responsive navigation, theme preference, and confirmed lo
   assert.match(shell, /duration: 240/);
   assert.match(shell, /drawerOpen/);
   assert.match(shell, /Close navigation/);
+  assert.match(shell, /accessibilityRole="switch"/);
+  assert.match(shell, /Light mode/);
+  assert.match(shell, /Dark mode/);
+  assert.doesNotMatch(shell, /accessibilityRole="radio"/);
   assert.match(shell, /event\.key !== 'Escape'/);
   assert.match(shell, /Log out of BlueTap\?/);
   assert.match(shell, /signOutAndClearSessions\(\)/);
