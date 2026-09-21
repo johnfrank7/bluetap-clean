@@ -29,8 +29,19 @@ const activeAccount = (profile = {}) => {
   return !['inactive', 'disabled'].includes(String(profile.accountStatus || profile.status || 'active').toLowerCase());
 };
 const genericRequest = (email) => ({ recoverySessionId: randomUUID(), maskedEmail: maskEmail(email), expiresAt: Date.now() + EXPIRY_MS, retryAfterSeconds: Math.ceil(COOLDOWN_MS / 1000), generic: true });
+const recoveryMailCode = (reason) => {
+  if (reason === 'EMAIL_TRANSPORT_NOT_CONFIGURED') return 'MAIL_PROVIDER_CONFIG_MISSING';
+  if (reason === 'EMAIL_TRANSPORT_AUTH_FAILED') return 'MAIL_RELAY_UNAUTHORIZED';
+  if (reason === 'EMAIL_SEND_FAILED') return 'MAIL_RELAY_UNAVAILABLE';
+  return reason;
+};
+const safeMailMessage = 'Unable to send verification email. Please try again.';
 
-function createPasswordRecoveryHandler(getAdmin = getFirebaseAdmin, { now = Date.now, send = sendEmail } = {}) {
+function createPasswordRecoveryHandler(getAdmin = getFirebaseAdmin, { now = Date.now, send = sendEmail, logger = console } = {}) {
+  const logStage = (stage, details = {}, level = 'info') => {
+    const write = typeof logger?.[level] === 'function' ? logger[level].bind(logger) : logger.info.bind(logger);
+    write('[password-recovery]', JSON.stringify({ stage, ...details }));
+  };
   return async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     if (!applyCors(req, res)) return;
@@ -38,18 +49,42 @@ function createPasswordRecoveryHandler(getAdmin = getFirebaseAdmin, { now = Date
     if (req.method !== 'POST') return res.status(405).json({ error: { reason: 'method-not-allowed', message: 'Use POST.' } });
     try {
       const body = bodyOf(req); const action = String(body.action || 'request');
+      if (action === 'request') logStage('PASSWORD_RECOVERY_REQUEST_RECEIVED');
       const { auth, db } = getAdmin(); const secret = String(process.env.EMAIL_OTP_HASH_SECRET || '');
       if (!secret) throw new OtpError(503, 'RECOVERY_UNAVAILABLE', 'Password recovery is temporarily unavailable.');
       if (action === 'request') {
         const email = emailFor(body.email); const response = genericRequest(email); let user; let profile;
         try { user = await auth.getUserByEmail(email); profile = (await db.collection('users').doc(user.uid).get()).data(); } catch (error) { if (error?.code !== 'auth/user-not-found') throw error; }
-        if (!user || user.disabled || !profile || !['requester', 'distributor', 'manager'].includes(profile.role) || !activeAccount(profile)) return res.status(200).json(response);
+        const accountEligible = Boolean(user && !user.disabled && profile && ['requester', 'distributor', 'manager'].includes(profile.role) && activeAccount(profile));
+        logStage('PASSWORD_RECOVERY_ACCOUNT_RESOLVED', { accountEligible });
+        if (!accountEligible) return res.status(200).json(response);
         const sessionId = randomUUID(); const limitRef = db.collection('passwordResetRateLimits').doc(digest(secret, 'email', email)); const ipRef = db.collection('passwordResetRateLimits').doc(digest(secret, 'ip', getClientIp(req))); const sessionRef = db.collection('passwordResetSessions').doc(sessionId);
-        await db.runTransaction(async (tx) => { const [emailLimit, ipLimit] = await Promise.all([tx.get(limitRef), tx.get(ipRef)]); const previous = [emailLimit.data() || {}, ipLimit.data() || {}]; const last = Math.max(...previous.map((item) => millis(item.lastSentAt))); if (last && now() - last < COOLDOWN_MS) throw new OtpError(429, 'RESEND_TOO_SOON', 'Please wait before requesting another code.', { retryAfterSeconds: Math.ceil((last + COOLDOWN_MS - now()) / 1000) }); tx.set(limitRef, { lastSentAt: new Date(now()), sessionId, emailHash: digest(secret, 'email', email) }); tx.set(ipRef, { lastSentAt: new Date(now()), sessionId }); });
+        await db.runTransaction(async (tx) => { const [emailLimit, ipLimit] = await Promise.all([tx.get(limitRef), tx.get(ipRef)]); const previous = [emailLimit.data() || {}, ipLimit.data() || {}]; const last = Math.max(...previous.map((item) => millis(item.lastSentAt))); if (last && now() - last < COOLDOWN_MS) throw new OtpError(429, 'PASSWORD_RECOVERY_RATE_LIMITED', 'Please wait before requesting another code.', { retryAfterSeconds: Math.ceil((last + COOLDOWN_MS - now()) / 1000) }); tx.set(limitRef, { lastSentAt: new Date(now()), sessionId, emailHash: digest(secret, 'email', email) }); tx.set(ipRef, { lastSentAt: new Date(now()), sessionId }); });
         const code = String(randomInt(100000, 1000000)); const expiresAt = now() + EXPIRY_MS;
         await sessionRef.set({ purpose: 'PASSWORD_RESET', uid: user.uid, email, otpHash: digest(secret, 'otp', sessionId, user.uid, email, code), attempts: 0, status: 'active', createdAt: new Date(now()), expiresAt: new Date(expiresAt), lastSentAt: new Date(now()) });
-        try { await send({ to: email, requestId: sessionId, subject: 'BlueTap Password Reset Code', text: `BlueTap\n\nYour password reset code is: ${code}\n\nThis code expires in 10 minutes. Do not share it. If you did not request this reset, you can safely ignore this email.`, html: `<!doctype html><html><body><h1>BlueTap</h1><h2>Password reset</h2><p>Your verification code is:</p><p style="font-size:28px;font-weight:700;letter-spacing:6px">${code}</p><p>This code expires in 10 minutes. Do not share it with anyone.</p><p>If you did not request a reset, you can safely ignore this email.</p></body></html>` }); } catch (error) { await db.runTransaction(async (tx) => { const [emailLimit, ipLimit] = await Promise.all([tx.get(limitRef), tx.get(ipRef)]); if (emailLimit.data()?.sessionId === sessionId) tx.delete(limitRef); if (ipLimit.data()?.sessionId === sessionId) tx.delete(ipRef); tx.update(sessionRef, { status: 'send-failed', otpHash: null, failedAt: new Date(now()) }); }); await db.collection('securityAuditLogs').add({ action: 'PASSWORD_RESET_FAILED', uid: user.uid, source: 'public-recovery', result: 'email-send-failed', createdAt: new Date(now()) }); throw error; }
+        logStage('PASSWORD_RECOVERY_OTP_CREATED', { purpose: 'PASSWORD_RESET' });
+        try {
+          logStage('PASSWORD_RECOVERY_MAIL_SEND_STARTED', { provider: String(process.env.EMAIL_PROVIDER || 'missing').toLowerCase() });
+          const delivery = await send({ to: email, requestId: sessionId, subject: 'BlueTap Password Reset Code', text: `BlueTap\n\nYour password reset code is: ${code}\n\nThis code expires in 10 minutes. Do not share it. If you did not request this reset, you can safely ignore this email.`, html: `<!doctype html><html><body><h1>BlueTap</h1><h2>Password reset</h2><p>Your verification code is:</p><p style="font-size:28px;font-weight:700;letter-spacing:6px">${code}</p><p>This code expires in 10 minutes. Do not share it with anyone.</p><p>If you did not request a reset, you can safely ignore this email.</p></body></html>` });
+          logStage('PASSWORD_RECOVERY_MAIL_RELAY_RESPONSE', {
+            provider: delivery?.provider || String(process.env.EMAIL_PROVIDER || 'unknown').toLowerCase(),
+            relayStatus: Number(delivery?.providerStatus) || 0,
+          });
+        } catch (error) {
+          if (Number.isInteger(error?.details?.providerStatus)) {
+            logStage('PASSWORD_RECOVERY_MAIL_RELAY_RESPONSE', {
+              provider: error.details.provider || String(process.env.EMAIL_PROVIDER || 'unknown').toLowerCase(),
+              relayStatus: error.details.providerStatus,
+            });
+          }
+          logStage('PASSWORD_RECOVERY_MAIL_SEND_FAILED', { reason: recoveryMailCode(error?.reason || 'EMAIL_SEND_FAILED') }, 'error');
+          await db.runTransaction(async (tx) => { const [emailLimit, ipLimit] = await Promise.all([tx.get(limitRef), tx.get(ipRef)]); if (emailLimit.data()?.sessionId === sessionId) tx.delete(limitRef); if (ipLimit.data()?.sessionId === sessionId) tx.delete(ipRef); tx.update(sessionRef, { status: 'send-failed', otpHash: null, failedAt: new Date(now()) }); });
+          await db.collection('securityAuditLogs').add({ action: 'PASSWORD_RESET_FAILED', uid: user.uid, source: 'public-recovery', result: 'email-send-failed', createdAt: new Date(now()) });
+          if (error instanceof OtpError) throw new OtpError(error.status, recoveryMailCode(error.reason), safeMailMessage, error.details);
+          throw error;
+        }
         await db.collection('securityAuditLogs').add({ action: 'PASSWORD_RESET_REQUESTED', uid: user.uid, source: 'public-recovery', result: 'sent', createdAt: new Date(now()) });
+        logStage('PASSWORD_RECOVERY_SENT');
         return res.status(200).json({ recoverySessionId: sessionId, maskedEmail: maskEmail(email), expiresAt, retryAfterSeconds: Math.ceil(COOLDOWN_MS / 1000), generic: true });
       }
       if (action === 'verify') {
@@ -67,7 +102,18 @@ function createPasswordRecoveryHandler(getAdmin = getFirebaseAdmin, { now = Date
         return res.status(200).json({ changed: true });
       }
       throw new OtpError(400, 'INVALID_REQUEST', 'Invalid recovery action.');
-    } catch (error) { const known = error instanceof OtpError; return res.status(known ? error.status : 503).json({ error: { code: known ? error.reason : 'RECOVERY_UNAVAILABLE', message: known ? error.message : 'Password recovery is temporarily unavailable. Please try again.' } }); }
+    } catch (error) {
+      const known = error instanceof OtpError;
+      const retryAfterSeconds = known ? Number(error.details?.retryAfterSeconds) : 0;
+      if (retryAfterSeconds > 0) res.setHeader('Retry-After', String(retryAfterSeconds));
+      return res.status(known ? error.status : 503).json({
+        error: {
+          code: known ? error.reason : 'RECOVERY_UNAVAILABLE',
+          message: known ? error.message : 'Password recovery is temporarily unavailable. Please try again.',
+          ...(retryAfterSeconds > 0 ? { retryAfterSeconds } : {}),
+        },
+      });
+    }
   };
 }
 module.exports = { createPasswordRecoveryHandler, maskEmail, passwordFor };

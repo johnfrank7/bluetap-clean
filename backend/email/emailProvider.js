@@ -159,6 +159,7 @@ function createEmailProvider({ env = process.env, fetchImpl = globalThis.fetch, 
       const error = providerError(
         'EMAIL_SEND_FAILED',
         'Unable to send verification email. Please try again.',
+        { provider, providerStatus: 0 },
       );
       logger.error('[email-otp]', JSON.stringify({ stage: 'EMAIL_SEND_FAILED', reason: error.reason }));
       throw error;
@@ -179,10 +180,22 @@ function createEmailProvider({ env = process.env, fetchImpl = globalThis.fetch, 
         const authenticationFailure = [401, 403].includes(response.status) ||
           ['EMAIL_TRANSPORT_AUTH_FAILED', 'INVALID_RELAY_SECRET', 'UNAUTHENTICATED'].includes(relayReason);
         error = authenticationFailure
-          ? providerError('EMAIL_TRANSPORT_AUTH_FAILED', 'Email delivery authentication failed. Please contact support.')
+          ? providerError(
+            'EMAIL_TRANSPORT_AUTH_FAILED',
+            'Email delivery authentication failed. Please contact support.',
+            { provider, providerStatus: Number(response.status) || 0 },
+          )
           : relayReason === 'EMAIL_TRANSPORT_NOT_CONFIGURED'
-            ? notConfigured()
-            : providerError('EMAIL_SEND_FAILED', 'Unable to send verification email. Please try again.');
+            ? providerError(
+              'EMAIL_TRANSPORT_NOT_CONFIGURED',
+              'Email delivery is not configured. Please contact support.',
+              { provider, providerStatus: Number(response.status) || 0 },
+            )
+            : providerError(
+              'EMAIL_SEND_FAILED',
+              'Unable to send verification email. Please try again.',
+              { provider, providerStatus: Number(response.status) || 0 },
+            );
         if (authenticationFailure) {
           logger.error('[email-otp]', JSON.stringify({ stage: 'EMAIL_RELAY_AUTH_FAILED', relayStatus: Number(response.status) || 0 }));
         }
@@ -198,12 +211,17 @@ function createEmailProvider({ env = process.env, fetchImpl = globalThis.fetch, 
       let result;
       try { result = await response.json(); } catch { result = null; }
       if (result?.success !== true) {
-        const error = providerError('EMAIL_SEND_FAILED', 'Unable to send verification email. Please try again.');
+        const error = providerError(
+          'EMAIL_SEND_FAILED',
+          'Unable to send verification email. Please try again.',
+          { provider, providerStatus: Number(response.status) || 0 },
+        );
         logger.error('[email-otp]', JSON.stringify({ stage: 'EMAIL_SEND_FAILED', reason: error.reason, providerStatus: response.status }));
         throw error;
       }
     }
     logger.info('[email-otp]', JSON.stringify({ stage: 'EMAIL_SEND_SUCCEEDED', provider }));
+    return { provider, providerStatus: Number(response.status) || 0 };
   }
 
   async function sendEmailOtp({ recipient, code, requestId }) {

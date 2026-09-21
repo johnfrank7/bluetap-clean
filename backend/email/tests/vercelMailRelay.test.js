@@ -10,6 +10,13 @@ const validBody = {
   requestId: '123e4567-e89b-42d3-a456-426614174000',
 };
 
+const validPasswordResetBody = {
+  ...validBody,
+  subject: 'BlueTap Password Reset Code',
+  text: 'BlueTap password reset code: 123456. It expires in 10 minutes. Do not share it.',
+  html: '<p>BlueTap password reset code: <strong>123456</strong>. It expires in 10 minutes. Do not share it.</p>',
+};
+
 function response() {
   return {
     headers: {},
@@ -77,6 +84,26 @@ test('Vercel relay uses Gmail SMTP only after auth and returns sanitized success
   const serialized = JSON.stringify(logs);
   assert.ok(serialized.includes('RELAY_CONFIGURATION'));
   for (const sensitive of ['relay-secret', 'app password', 'apppassword', validBody.to, '123456']) assert.equal(serialized.includes(sensitive), false);
+});
+
+test('Vercel relay accepts the password recovery OTP template', async () => {
+  let mail;
+  const handler = createInternalMailRelayHandler({
+    env: { INTERNAL_MAIL_RELAY_SECRET: 'relay-secret', GMAIL_USER: 'sender@example.test', GMAIL_APP_PASSWORD: 'app-password' },
+    createTransport: () => ({
+      sendMail: async (message) => {
+        mail = message;
+        return { accepted: [message.to], rejected: [] };
+      },
+    }),
+    logger: { info() {}, error() {} },
+  });
+
+  const res = await invoke(handler, { body: validPasswordResetBody });
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body, { success: true });
+  assert.equal(mail.subject, 'BlueTap Password Reset Code');
 });
 
 test('Vercel relay maps missing Gmail config and SMTP failures without leaking details', async () => {

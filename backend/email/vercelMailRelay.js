@@ -2,6 +2,8 @@ const { createHash, timingSafeEqual } = require('node:crypto');
 const nodemailer = require('nodemailer');
 
 const EXPECTED_SUBJECT = 'BlueTap Email Verification Code';
+const PASSWORD_RESET_SUBJECT = 'BlueTap Password Reset Code';
+const ALLOWED_SUBJECTS = new Set([EXPECTED_SUBJECT, PASSWORD_RESET_SUBJECT]);
 const EMAIL_PATTERN = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/;
 
 const responseError = (res, status, reason, message) =>
@@ -28,7 +30,7 @@ const validateMessage = (body) => {
   const text = typeof body.text === 'string' ? body.text : '';
   const html = typeof body.html === 'string' ? body.html : '';
   const requestId = typeof body.requestId === 'string' ? body.requestId : '';
-  if (!EMAIL_PATTERN.test(to) || to.length > 254 || subject !== EXPECTED_SUBJECT ||
+  if (!EMAIL_PATTERN.test(to) || to.length > 254 || !ALLOWED_SUBJECTS.has(subject) ||
       !text || text.length > 3000 || !html || html.length > 6000 ||
       !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId)) return null;
   return { to, subject, text, html };
@@ -115,4 +117,10 @@ function createInternalMailRelayHandler({
   };
 }
 
-module.exports = { EXPECTED_SUBJECT, createInternalMailRelayHandler, secretsMatch, validateMessage };
+module.exports = {
+  EXPECTED_SUBJECT,
+  PASSWORD_RESET_SUBJECT,
+  createInternalMailRelayHandler,
+  secretsMatch,
+  validateMessage,
+};
