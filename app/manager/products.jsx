@@ -18,6 +18,7 @@ import {
   subscribeProducts,
   updateProduct,
 } from '../../services/products';
+import { useAdminTheme } from '../../components/AdminTheme';
 import ManagerShell, {
   MANAGER_COLORS,
   ManagerWaterDrop,
@@ -34,6 +35,7 @@ const emptyForm = {
 const formatPrice = (price) => `\u20B1${Number(price || 0).toFixed(2)}`;
 
 export default function ManagerProductsPage() {
+  const { colors } = useAdminTheme(); const styles = createStyles(colors);
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
@@ -254,7 +256,7 @@ export default function ManagerProductsPage() {
 
         {loading ? (
           <View style={styles.emptyState}>
-            <ActivityIndicator color={MANAGER_COLORS.blue} size="small" />
+            <ActivityIndicator color={colors.primary} size="small" />
           </View>
         ) : filteredProducts.length === 0 ? (
           <View style={styles.emptyState}>
@@ -266,10 +268,10 @@ export default function ManagerProductsPage() {
             const isDeleting = deletingId === product.id;
             const dropColor =
               index % 3 === 0
-                ? MANAGER_COLORS.blue
+                ? colors.primary
                 : index % 3 === 1
-                  ? MANAGER_COLORS.cyan
-                  : MANAGER_COLORS.green;
+                  ? colors.primaryLight
+                  : colors.success;
 
             return (
               <View key={product.id} style={styles.tableRow}>
@@ -392,11 +394,11 @@ export default function ManagerProductsPage() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors) => StyleSheet.create({
   card: {
-    backgroundColor: MANAGER_COLORS.card,
+    backgroundColor: colors.surface,
     borderWidth: 1,
-    borderColor: MANAGER_COLORS.border,
+    borderColor: colors.border,
     borderRadius: 16,
     paddingHorizontal: 20,
     paddingTop: 18,
@@ -411,13 +413,13 @@ const styles = StyleSheet.create({
     marginBottom: 18,
   },
   cardTitle: {
-    color: MANAGER_COLORS.text,
+    color: colors.textPrimary,
     fontSize: 16,
     fontWeight: 'bold',
   },
   addButton: {
     borderRadius: 20,
-    backgroundColor: MANAGER_COLORS.blue,
+    backgroundColor: colors.primary,
     paddingHorizontal: 16,
     paddingVertical: 9,
   },
@@ -431,13 +433,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     borderBottomWidth: 1,
-    borderBottomColor: MANAGER_COLORS.border,
+    borderBottomColor: colors.border,
   },
   tableHeadRow: {
     minHeight: 38,
   },
   th: {
-    color: MANAGER_COLORS.muted,
+    color: colors.textSecondary,
     fontSize: 11,
     fontWeight: 'bold',
   },
@@ -460,7 +462,7 @@ const styles = StyleSheet.create({
     width: 28,
     height: 28,
     borderRadius: 6,
-    backgroundColor: '#EEF5FB',
+    backgroundColor: colors.surfaceAlt,
     marginRight: 14,
   },
   dropWrap: {
@@ -470,12 +472,12 @@ const styles = StyleSheet.create({
   },
   productName: {
     flex: 1,
-    color: MANAGER_COLORS.text,
+    color: colors.textPrimary,
     fontSize: 14,
     fontWeight: 'bold',
   },
   priceText: {
-    color: MANAGER_COLORS.text,
+    color: colors.textPrimary,
     fontSize: 14,
     fontWeight: 'bold',
   },
@@ -491,7 +493,7 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   editButtonText: {
-    color: MANAGER_COLORS.blue,
+    color: colors.primary,
     fontSize: 12,
     fontWeight: 'bold',
   },
@@ -502,7 +504,7 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   deleteButtonText: {
-    color: MANAGER_COLORS.red,
+    color: colors.danger,
     fontSize: 12,
     fontWeight: 'bold',
   },
@@ -515,12 +517,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   emptyText: {
-    color: MANAGER_COLORS.muted,
+    color: colors.textSecondary,
     fontSize: 13,
     fontWeight: '600',
   },
   errorText: {
-    color: MANAGER_COLORS.red,
+    color: colors.danger,
     fontSize: 12,
     marginTop: 8,
   },
@@ -535,19 +537,19 @@ const styles = StyleSheet.create({
     width: '90%',
     maxWidth: 430,
     borderRadius: 8,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.surface,
     borderWidth: 1,
-    borderColor: MANAGER_COLORS.border,
+    borderColor: colors.border,
     padding: 22,
   },
   modalTitle: {
-    color: MANAGER_COLORS.text,
+    color: colors.textPrimary,
     fontSize: 18,
     fontWeight: 'bold',
     marginBottom: 18,
   },
   inputLabel: {
-    color: MANAGER_COLORS.muted,
+    color: colors.textSecondary,
     fontSize: 12,
     fontWeight: 'bold',
     marginBottom: 6,
@@ -555,9 +557,9 @@ const styles = StyleSheet.create({
   modalInput: {
     minHeight: 42,
     borderWidth: 1,
-    borderColor: MANAGER_COLORS.border,
+    borderColor: colors.border,
     borderRadius: 8,
-    color: MANAGER_COLORS.text,
+    color: colors.textPrimary,
     fontSize: 14,
     paddingHorizontal: 12,
     marginBottom: 14,
@@ -567,13 +569,13 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: MANAGER_COLORS.blue,
+    borderColor: colors.primary,
     paddingHorizontal: 14,
     paddingVertical: 8,
     marginBottom: 12,
   },
   uploadButtonText: {
-    color: MANAGER_COLORS.blue,
+    color: colors.primary,
     fontSize: 12,
     fontWeight: 'bold',
   },
@@ -581,7 +583,7 @@ const styles = StyleSheet.create({
     width: 120,
     height: 86,
     borderRadius: 8,
-    backgroundColor: '#EEF5FB',
+    backgroundColor: colors.surfaceAlt,
     marginBottom: 16,
   },
   modalActions: {
@@ -596,11 +598,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: MANAGER_COLORS.blue,
-    backgroundColor: '#FFFFFF',
+    borderColor: colors.primary,
+    backgroundColor: colors.surface,
   },
   cancelButtonText: {
-    color: MANAGER_COLORS.blue,
+    color: colors.primary,
     fontSize: 13,
     fontWeight: 'bold',
   },
@@ -610,7 +612,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 20,
-    backgroundColor: MANAGER_COLORS.blue,
+    backgroundColor: colors.primary,
   },
   saveButtonText: {
     color: '#FFFFFF',

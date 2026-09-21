@@ -24,6 +24,7 @@ import { db } from '../../firebase';
 import { getLocalUsers, subscribeLocalUsers, updateLocalUserStatus } from '../../localUsers';
 import { getProfileUniqueId, saveUserProfileWithUniqueId } from '../../services/uniqueIds';
 import { getModuleSession } from '../../services/authSession';
+import { useAdminTheme } from '../../components/AdminTheme';
 import ManagerShell, {
   MANAGER_COLORS,
   ManagerPill,
@@ -107,6 +108,7 @@ const buildDistributorUpdate = (distributor, approvalStatus, rejectionReason = '
 };
 
 export default function ManagerRequestPage() {
+  const { colors } = useAdminTheme(); const styles = createStyles(colors);
   const branchId = getModuleSession('manager')?.branchId || '';
   const [pendingDistributors, setPendingDistributors] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -305,7 +307,7 @@ export default function ManagerRequestPage() {
 
         {loading ? (
           <View style={styles.emptyState}>
-            <ActivityIndicator color={MANAGER_COLORS.blue} size="small" />
+            <ActivityIndicator color={colors.primary} size="small" />
           </View>
         ) : filteredDistributors.length === 0 ? (
           <View style={styles.emptyState}>
@@ -424,11 +426,11 @@ export default function ManagerRequestPage() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors) => StyleSheet.create({
   card: {
-    backgroundColor: MANAGER_COLORS.card,
+    backgroundColor: colors.surface,
     borderWidth: 1,
-    borderColor: MANAGER_COLORS.border,
+    borderColor: colors.border,
     borderRadius: 16,
     paddingHorizontal: 20,
     paddingTop: 20,
@@ -440,7 +442,7 @@ const styles = StyleSheet.create({
     marginBottom: 18,
   },
   cardTitle: {
-    color: MANAGER_COLORS.text,
+    color: colors.textPrimary,
     fontSize: 16,
     fontWeight: 'bold',
   },
@@ -449,28 +451,28 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     borderBottomWidth: 1,
-    borderBottomColor: MANAGER_COLORS.border,
+    borderBottomColor: colors.border,
   },
   tableHeadRow: {
     minHeight: 38,
   },
   th: {
-    color: MANAGER_COLORS.muted,
+    color: colors.textSecondary,
     fontSize: 11,
     fontWeight: 'bold',
   },
   td: {
-    color: MANAGER_COLORS.muted,
+    color: colors.textSecondary,
     fontSize: 13,
     fontWeight: '600',
   },
   tdName: {
-    color: MANAGER_COLORS.text,
+    color: colors.textPrimary,
     fontSize: 13,
     fontWeight: 'bold',
   },
   tdLink: {
-    color: MANAGER_COLORS.blue,
+    color: colors.primary,
     fontSize: 13,
     fontWeight: '600',
   },
@@ -511,7 +513,7 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   acceptButtonText: {
-    color: MANAGER_COLORS.green,
+    color: colors.success,
     fontSize: 12,
     fontWeight: 'bold',
   },
@@ -522,7 +524,7 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   rejectButtonText: {
-    color: MANAGER_COLORS.red,
+    color: colors.danger,
     fontSize: 12,
     fontWeight: 'bold',
   },
@@ -535,12 +537,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   emptyText: {
-    color: MANAGER_COLORS.muted,
+    color: colors.textSecondary,
     fontSize: 13,
     fontWeight: '600',
   },
   errorText: {
-    color: MANAGER_COLORS.red,
+    color: colors.danger,
     fontSize: 12,
     marginTop: 8,
   },
@@ -555,18 +557,18 @@ const styles = StyleSheet.create({
     width: '90%',
     maxWidth: 430,
     borderRadius: 8,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.surface,
     borderWidth: 1,
-    borderColor: MANAGER_COLORS.border,
+    borderColor: colors.border,
     padding: 22,
   },
   modalTitle: {
-    color: MANAGER_COLORS.text,
+    color: colors.textPrimary,
     fontSize: 18,
     fontWeight: 'bold',
   },
   modalMessage: {
-    color: MANAGER_COLORS.muted,
+    color: colors.textSecondary,
     fontSize: 13,
     lineHeight: 19,
     marginTop: 8,
@@ -575,9 +577,9 @@ const styles = StyleSheet.create({
   reasonInput: {
     minHeight: 104,
     borderWidth: 1,
-    borderColor: MANAGER_COLORS.border,
+    borderColor: colors.border,
     borderRadius: 8,
-    color: MANAGER_COLORS.text,
+    color: colors.textPrimary,
     fontSize: 14,
     lineHeight: 19,
     paddingHorizontal: 12,
@@ -585,11 +587,11 @@ const styles = StyleSheet.create({
     outlineStyle: 'none',
   },
   reasonInputError: {
-    borderColor: MANAGER_COLORS.red,
+    borderColor: colors.danger,
     backgroundColor: '#FFF7F7',
   },
   reasonErrorText: {
-    color: MANAGER_COLORS.red,
+    color: colors.danger,
     fontSize: 12,
     marginTop: 7,
   },
@@ -606,11 +608,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: MANAGER_COLORS.blue,
-    backgroundColor: '#FFFFFF',
+    borderColor: colors.primary,
+    backgroundColor: colors.surface,
   },
   modalCancelText: {
-    color: MANAGER_COLORS.blue,
+    color: colors.primary,
     fontSize: 13,
     fontWeight: 'bold',
   },
@@ -623,7 +625,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFE9E9',
   },
   modalRejectText: {
-    color: MANAGER_COLORS.red,
+    color: colors.danger,
     fontSize: 13,
     fontWeight: 'bold',
   },

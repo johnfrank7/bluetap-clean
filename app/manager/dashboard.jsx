@@ -17,6 +17,7 @@ import { getLocalUsers, subscribeLocalUsers, updateLocalUserStatus } from '../..
 import { getLocalRequests } from '../../services/requests';
 import { getProfileUniqueId } from '../../services/uniqueIds';
 import { getModuleSession } from '../../services/authSession';
+import { useAdminTheme } from '../../components/AdminTheme';
 import ManagerShell, {
   MANAGER_COLORS,
   ManagerPill,
@@ -28,6 +29,8 @@ import {
   useAnimatedValueSnapshot,
   useReducedMotionPreference,
 } from '../../components/managerAnimationHooks';
+
+let styles;
 
 const normalizeApplicationStatus = (status) =>
   (status || 'pending').toString().trim().toLowerCase();
@@ -783,6 +786,7 @@ const StationsPanel = ({ progress, stations }) => {
 };
 
 export default function ManagerDashboard() {
+  const { colors } = useAdminTheme(); styles = createStyles(colors);
   const branchId = getModuleSession('manager')?.branchId || '';
   const [registeredDistributors, setRegisteredDistributors] = useState([]);
   const [allUsers, setAllUsers] = useState([]);
@@ -1291,7 +1295,7 @@ export default function ManagerDashboard() {
 
         {loading ? (
           <View style={styles.emptyState}>
-            <ActivityIndicator color={MANAGER_COLORS.blue} size="small" />
+            <ActivityIndicator color={colors.primary} size="small" />
           </View>
         ) : activeAccounts.length === 0 ? (
           <View style={styles.emptyState}>
@@ -1352,7 +1356,7 @@ export default function ManagerDashboard() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors) => StyleSheet.create({
   metricGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -1363,9 +1367,9 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     flexBasis: 180,
     minHeight: 124,
-    backgroundColor: MANAGER_COLORS.card,
+    backgroundColor: colors.surface,
     borderWidth: 1,
-    borderColor: MANAGER_COLORS.border,
+    borderColor: colors.border,
     borderRadius: 16,
     paddingHorizontal: 20,
     paddingVertical: 18,
@@ -1380,13 +1384,13 @@ const styles = StyleSheet.create({
   },
   metricLabel: {
     flex: 1,
-    color: MANAGER_COLORS.muted,
+    color: colors.textSecondary,
     fontSize: 12,
     fontWeight: 'bold',
     letterSpacing: 0,
   },
   metricValue: {
-    color: MANAGER_COLORS.text,
+    color: colors.textPrimary,
     fontSize: 28,
     fontWeight: 'bold',
     letterSpacing: 0,
@@ -1402,9 +1406,9 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   panel: {
-    backgroundColor: MANAGER_COLORS.card,
+    backgroundColor: colors.surface,
     borderWidth: 1,
-    borderColor: MANAGER_COLORS.border,
+    borderColor: colors.border,
     borderRadius: 16,
     padding: 20,
   },
@@ -1429,7 +1433,7 @@ const styles = StyleSheet.create({
     minHeight: 320,
   },
   panelTitle: {
-    color: MANAGER_COLORS.text,
+    color: colors.textPrimary,
     fontSize: 16,
     fontWeight: 'bold',
     marginBottom: 18,
@@ -1445,7 +1449,7 @@ const styles = StyleSheet.create({
     paddingBottom: 28,
   },
   axisText: {
-    color: MANAGER_COLORS.muted,
+    color: colors.textSecondary,
     fontSize: 12,
     fontWeight: '600',
   },
@@ -1453,7 +1457,7 @@ const styles = StyleSheet.create({
     flex: 1,
     minHeight: 232,
     borderBottomWidth: 1,
-    borderBottomColor: MANAGER_COLORS.border,
+    borderBottomColor: colors.border,
     position: 'relative',
     marginLeft: 2,
     marginRight: 10,
@@ -1489,7 +1493,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     height: 1,
-    backgroundColor: MANAGER_COLORS.border,
+    backgroundColor: colors.border,
   },
   lineSegment: {
     position: 'absolute',
@@ -1506,7 +1510,7 @@ const styles = StyleSheet.create({
     marginTop: -5,
     backgroundColor: BLUE_DARK,
     borderWidth: 2,
-    borderColor: '#FFFFFF',
+    borderColor: colors.border,
     zIndex: 2,
   },
   chartTooltip: {
@@ -1514,7 +1518,7 @@ const styles = StyleSheet.create({
     minWidth: 56,
     alignItems: 'center',
     borderRadius: 6,
-    backgroundColor: MANAGER_COLORS.text,
+    backgroundColor: colors.textPrimary,
     paddingHorizontal: 8,
     paddingVertical: 5,
     zIndex: 4,
@@ -1567,10 +1571,10 @@ const styles = StyleSheet.create({
     borderRadius: 52,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.surface,
   },
   donutPercent: {
-    color: MANAGER_COLORS.text,
+    color: colors.textPrimary,
     fontSize: 18,
     fontWeight: 'bold',
   },
@@ -1598,7 +1602,7 @@ const styles = StyleSheet.create({
     backgroundColor: BLUE_MID,
   },
   legendText: {
-    color: MANAGER_COLORS.muted,
+    color: colors.textSecondary,
     fontSize: 13,
     fontWeight: '700',
   },
@@ -1621,7 +1625,7 @@ const styles = StyleSheet.create({
     top: 0,
     bottom: 0,
     width: 1,
-    backgroundColor: MANAGER_COLORS.border,
+    backgroundColor: colors.border,
   },
   barangayRow: {
     minHeight: 20,
@@ -1630,7 +1634,7 @@ const styles = StyleSheet.create({
   },
   barangayLabel: {
     width: 80,
-    color: MANAGER_COLORS.text,
+    color: colors.textPrimary,
     fontSize: 12,
     fontWeight: '700',
     textAlign: 'right',
@@ -1677,20 +1681,20 @@ const styles = StyleSheet.create({
     marginRight: 16,
   },
   stationName: {
-    color: MANAGER_COLORS.text,
+    color: colors.textPrimary,
     fontSize: 14,
     fontWeight: 'bold',
   },
   stationSales: {
-    color: MANAGER_COLORS.muted,
+    color: colors.textSecondary,
     fontSize: 12,
     fontWeight: '600',
     marginTop: 4,
   },
   tableCard: {
-    backgroundColor: MANAGER_COLORS.card,
+    backgroundColor: colors.surface,
     borderWidth: 1,
-    borderColor: MANAGER_COLORS.border,
+    borderColor: colors.border,
     borderRadius: 8,
     padding: 20,
   },
@@ -1701,7 +1705,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   tableTitle: {
-    color: MANAGER_COLORS.text,
+    color: colors.textPrimary,
     fontSize: 16,
     fontWeight: 'bold',
   },
@@ -1711,7 +1715,7 @@ const styles = StyleSheet.create({
   },
   tableTabActive: {
     borderRadius: 20,
-    backgroundColor: MANAGER_COLORS.blue,
+    backgroundColor: colors.primary,
     paddingHorizontal: 16,
     paddingVertical: 10,
   },
@@ -1723,13 +1727,13 @@ const styles = StyleSheet.create({
   tableTab: {
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: MANAGER_COLORS.border,
-    backgroundColor: '#FFFFFF',
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
     paddingHorizontal: 16,
     paddingVertical: 10,
   },
   tableTabText: {
-    color: MANAGER_COLORS.muted,
+    color: colors.textSecondary,
     fontSize: 12,
     fontWeight: 'bold',
   },
@@ -1738,28 +1742,28 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     borderBottomWidth: 1,
-    borderBottomColor: MANAGER_COLORS.border,
+    borderBottomColor: colors.border,
   },
   tableHeadRow: {
     minHeight: 38,
   },
   th: {
-    color: MANAGER_COLORS.muted,
+    color: colors.textSecondary,
     fontSize: 11,
     fontWeight: 'bold',
   },
   td: {
-    color: MANAGER_COLORS.muted,
+    color: colors.textSecondary,
     fontSize: 13,
     fontWeight: '600',
   },
   tdName: {
-    color: MANAGER_COLORS.text,
+    color: colors.textPrimary,
     fontSize: 13,
     fontWeight: 'bold',
   },
   tdLink: {
-    color: MANAGER_COLORS.blue,
+    color: colors.primary,
     fontSize: 13,
     fontWeight: '600',
   },
@@ -1790,17 +1794,17 @@ const styles = StyleSheet.create({
   },
   removeButton: {
     borderRadius: 999,
-    backgroundColor: '#FFE9E9',
+    backgroundColor: colors.dangerSoft,
     paddingHorizontal: 12,
     paddingVertical: 6,
   },
   removeButtonText: {
-    color: MANAGER_COLORS.red,
+    color: colors.danger,
     fontSize: 12,
     fontWeight: 'bold',
   },
   noActionText: {
-    color: MANAGER_COLORS.muted,
+    color: colors.textSecondary,
     fontSize: 12,
     fontWeight: '700',
   },
@@ -1813,12 +1817,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   emptyText: {
-    color: MANAGER_COLORS.muted,
+    color: colors.textSecondary,
     fontSize: 13,
     fontWeight: '600',
   },
   errorText: {
-    color: MANAGER_COLORS.red,
+    color: colors.danger,
     fontSize: 12,
     marginTop: 8,
   },

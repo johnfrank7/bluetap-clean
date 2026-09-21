@@ -41,14 +41,14 @@ const LIGHT_THEME = {
 };
 
 const DARK_THEME = {
-  surface: '#0D1927',
-  softSurface: '#102842',
-  card: '#142A40',
-  border: '#294862',
-  text: '#F3F8FC',
-  muted: '#AEC4D5',
-  accent: BLUETAP_COLORS.primaryLight,
-  footerText: '#C2D5E3',
+  surface: '#07131F',
+  softSurface: '#0A1928',
+  card: '#0E2235',
+  border: '#1C3C55',
+  text: '#F5FAFF',
+  muted: '#9FB4C8',
+  accent: '#70BDF2',
+  footerText: '#9FB4C8',
 };
 
 const steps = [
@@ -103,15 +103,15 @@ function ActionButton({
   const buttonColors =
     variant === 'outline'
       ? isDark
-        ? { backgroundColor: '#142A40', borderColor: '#4D91BC', textColor: '#D7F1FF' }
+        ? { backgroundColor: '#0E2235', borderColor: '#1C3C55', textColor: '#F5FAFF' }
         : { backgroundColor: '#FFFFFF', borderColor: '#B7DDF7', textColor: BLUE_DARK }
       : variant === 'light'
         ? { backgroundColor: '#FFFFFF', borderColor: '#FFFFFF', textColor: BLUE_DARK }
         : variant === 'inverseOutline'
           ? { backgroundColor: 'transparent', borderColor: 'rgba(255,255,255,0.72)', textColor: '#FFFFFF' }
           : {
-              backgroundColor: isDark ? BLUETAP_COLORS.primaryLight : BLUE,
-              borderColor: isDark ? BLUETAP_COLORS.primaryLight : BLUE,
+              backgroundColor: isDark ? '#2186D9' : BLUE,
+              borderColor: isDark ? '#2186D9' : BLUE,
               textColor: '#FFFFFF',
             };
 
@@ -162,13 +162,13 @@ function SectionHeading({ eyebrow, title, text, theme, align = 'left' }) {
   );
 }
 
-function PhoneMockup() {
+function PhoneMockup({ isDark = false }) {
   return (
     <View style={styles.mockupArea}>
-      <View pointerEvents="none" style={styles.heroOrbLarge} />
-      <View pointerEvents="none" style={styles.heroOrbSmall} />
+      <View pointerEvents="none" style={[styles.heroOrbLarge, isDark && styles.heroOrbLargeDark]} />
+      <View pointerEvents="none" style={[styles.heroOrbSmall, isDark && styles.heroOrbSmallDark]} />
 
-      <View style={styles.phoneMockup}>
+      <View style={[styles.phoneMockup, isDark && styles.phoneMockupDark]}>
         <View style={styles.phoneTopbar}>
           <View style={styles.phoneBrandMark} />
           <View style={styles.phoneTopLines}>
@@ -178,16 +178,16 @@ function PhoneMockup() {
           <View style={styles.phoneAvatar} />
         </View>
 
-        <Text style={styles.phoneGreeting}>Good morning</Text>
-        <Text style={styles.phoneSubheading}>Your water, within reach.</Text>
+        <Text style={[styles.phoneGreeting, isDark && styles.phoneGreetingDark]}>Good morning</Text>
+        <Text style={[styles.phoneSubheading, isDark && styles.phoneSubheadingDark]}>Your water, within reach.</Text>
 
-        <View style={styles.phoneProductCard}>
+        <View style={[styles.phoneProductCard, isDark && styles.phoneProductCardDark]}>
           <View style={styles.waterBottle}>
             <View style={styles.bottleCap} />
             <View style={styles.bottleBody} />
           </View>
           <View style={styles.phoneProductCopy}>
-            <Text style={styles.phoneProductTitle}>Purified Water</Text>
+            <Text style={[styles.phoneProductTitle, isDark && styles.phoneProductTitleDark]}>Purified Water</Text>
             <Text style={styles.phoneProductMeta}>5 gallons · ₱30.00</Text>
             <View style={styles.phoneOrderButton}>
               <Text style={styles.phoneOrderButtonText}>Order now</Text>
@@ -195,9 +195,9 @@ function PhoneMockup() {
           </View>
         </View>
 
-        <View style={styles.phoneOrderCard}>
+        <View style={[styles.phoneOrderCard, isDark && styles.phoneOrderCardDark]}>
           <View style={styles.phoneOrderHeader}>
-            <Text style={styles.phoneOrderTitle}>Current request</Text>
+            <Text style={[styles.phoneOrderTitle, isDark && styles.phoneOrderTitleDark]}>Current request</Text>
             <View style={styles.phoneStatusPill}>
               <View style={styles.statusDot} />
               <Text style={styles.phoneStatusText}>Accepted</Text>
@@ -206,58 +206,58 @@ function PhoneMockup() {
           <View style={styles.deliveryProgress}>
             <View style={styles.deliveryProgressActive} />
           </View>
-          <Text style={styles.deliveryText}>Your order is being prepared.</Text>
+          <Text style={[styles.deliveryText, isDark && styles.deliveryTextDark]}>Your order is being prepared.</Text>
         </View>
       </View>
 
-      <View style={[styles.floatingStatus, styles.floatingStatusTop]}>
+      <View style={[styles.floatingStatus, styles.floatingStatusTop, isDark && styles.floatingStatusDark]}>
         <View style={[styles.floatingIcon, styles.floatingIconBlue]}>
           <Text style={styles.floatingIconText}>✓</Text>
         </View>
         <View>
-          <Text style={styles.floatingStatusTitle}>Request accepted</Text>
-          <Text style={styles.floatingStatusText}>Your water provider was notified</Text>
+          <Text style={[styles.floatingStatusTitle, isDark && styles.floatingStatusTitleDark]}>Request accepted</Text>
+          <Text style={[styles.floatingStatusText, isDark && styles.floatingStatusTextDark]}>Your water provider was notified</Text>
         </View>
       </View>
 
-      <View style={[styles.floatingStatus, styles.floatingStatusBottom]}>
+      <View style={[styles.floatingStatus, styles.floatingStatusBottom, isDark && styles.floatingStatusDark]}>
         <View style={[styles.floatingIcon, styles.floatingIconGreen]}>
           <Text style={styles.floatingIconText}>→</Text>
         </View>
         <View>
-          <Text style={styles.floatingStatusTitle}>On the way</Text>
-          <Text style={styles.floatingStatusText}>Delivery update received</Text>
+          <Text style={[styles.floatingStatusTitle, isDark && styles.floatingStatusTitleDark]}>On the way</Text>
+          <Text style={[styles.floatingStatusText, isDark && styles.floatingStatusTextDark]}>Delivery update received</Text>
         </View>
       </View>
     </View>
   );
 }
 
-function DistributorMockup() {
+function DistributorMockup({ isDark = false }) {
   return (
-    <View style={styles.distributorMockup}>
+    <View style={[styles.distributorMockup, isDark && styles.distributorMockupDark]}>
       <View style={styles.distributorTopbar}>
         <View>
           <Text style={styles.distributorKicker}>BLUE TAP WATER</Text>
-          <Text style={styles.distributorTitle}>Today’s requests</Text>
+          <Text style={[styles.distributorTitle, isDark && styles.distributorTitleDark]}>Today’s requests</Text>
         </View>
         <View style={styles.distributorBadge}>
           <Text style={styles.distributorBadgeText}>8 new</Text>
         </View>
       </View>
 
-      <View style={styles.distributorStatsRow}>
+      <View style={[styles.distributorStatsRow, isDark && styles.distributorStatsRowDark]}>
         <View style={styles.distributorStat}>
           <Text style={styles.distributorStatValue}>12</Text>
-          <Text style={styles.distributorStatLabel}>Requests</Text>
+          <Text style={[styles.distributorStatLabel, isDark && styles.distributorStatLabelDark]}>Requests</Text>
         </View>
         <View style={styles.distributorStat}>
           <Text style={styles.distributorStatValue}>6</Text>
-          <Text style={styles.distributorStatLabel}>Scheduled</Text>
+          <Text style={[styles.distributorStatLabel, isDark && styles.distributorStatLabelDark]}>Scheduled</Text>
         </View>
         <View style={styles.distributorStat}>
           <Text style={styles.distributorStatValue}>4</Text>
-          <Text style={styles.distributorStatLabel}>Delivered</Text>
+          <Text style={[styles.distributorStatLabel, isDark && styles.distributorStatLabelDark]}>Delivered</Text>
         </View>
       </View>
 
@@ -348,7 +348,7 @@ function WebLanding({ router, width }) {
         contentContainerStyle={styles.webScrollContent}
         showsVerticalScrollIndicator={false}
       >
-        <Animated.View style={[styles.navbar, { paddingHorizontal: contentPadding, backgroundColor: transitionColor(LIGHT_THEME.surface, DARK_THEME.surface), borderBottomColor: transitionColor('#E7EFF6', '#26445D') }]}>
+        <Animated.View style={[styles.navbar, { paddingHorizontal: contentPadding, backgroundColor: transitionColor(LIGHT_THEME.surface, DARK_THEME.surface), borderBottomColor: transitionColor('#E7EFF6', DARK_THEME.border) }]}>
           <View style={styles.navbarContent}>
             <TouchableOpacity
               accessibilityLabel="BlueTap home"
@@ -410,9 +410,9 @@ function WebLanding({ router, width }) {
         <Animated.View onLayout={saveSectionOffset('home')} style={[styles.heroSection, { paddingHorizontal: contentPadding, backgroundColor: transitionColor(LIGHT_THEME.surface, DARK_THEME.surface) }]}>
           <View style={[styles.heroContent, !isDesktop && styles.heroContentCompact]}>
             <View style={[styles.heroCopy, !isDesktop && styles.heroCopyCompact]}>
-              <View style={styles.heroBadge}>
+              <View style={[styles.heroBadge, isDark && styles.heroBadgeDark]}>
                 <View style={styles.heroBadgeDot} />
-                <Text style={styles.heroBadgeText}>Fast · Reliable · Local</Text>
+                <Text style={[styles.heroBadgeText, isDark && styles.heroBadgeTextDark]}>Fast · Reliable · Local</Text>
               </View>
 
               <Text style={[styles.heroTitle, { color: theme.text }, !isDesktop && styles.heroTitleCompact]}>
@@ -447,7 +447,7 @@ function WebLanding({ router, width }) {
             </View>
 
             <View style={[styles.heroVisual, !isDesktop && styles.heroVisualCompact]}>
-              <PhoneMockup />
+              <PhoneMockup isDark={isDark} />
             </View>
           </View>
         </Animated.View>
@@ -498,7 +498,7 @@ function WebLanding({ router, width }) {
                   key={feature.title}
                   style={[styles.featureCard, !isDesktop && styles.featureCardCompact]}
                 >
-                  <View style={styles.featureIcon}>
+                  <View style={[styles.featureIcon, isDark && styles.featureIconDark]}>
                     <Text style={styles.featureIconText}>{feature.icon}</Text>
                   </View>
                   <View style={styles.featureCopy}>
@@ -514,7 +514,7 @@ function WebLanding({ router, width }) {
         <Animated.View onLayout={saveSectionOffset('distributors')} style={[styles.section, { backgroundColor: transitionColor(LIGHT_THEME.surface, DARK_THEME.surface) }]}>
           <View style={[webContentStyle, styles.distributorSection, !isDesktop && styles.distributorSectionCompact]}>
             <View style={[styles.distributorVisual, !isDesktop && styles.distributorVisualCompact]}>
-              <DistributorMockup />
+              <DistributorMockup isDark={isDark} />
             </View>
             <View style={[styles.distributorCopy, !isDesktop && styles.distributorCopyCompact]}>
               <SectionHeading
@@ -765,8 +765,10 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     marginBottom: 20,
   },
+  heroBadgeDark: { backgroundColor: '#112A40', borderWidth: 1, borderColor: '#1C3C55' },
   heroBadgeDot: { width: 7, height: 7, borderRadius: 999, backgroundColor: '#2BA6E8', marginRight: 7 },
   heroBadgeText: { color: BLUE_DARK, fontSize: 13, fontWeight: '800' },
+  heroBadgeTextDark: { color: '#70BDF2' },
   heroTitle: { color: TEXT_DARK, fontSize: 60, lineHeight: 67, fontWeight: '800', letterSpacing: -1.8 },
   heroTitleCompact: { fontSize: 38, lineHeight: 44, letterSpacing: -1 },
   heroTitleAccent: { color: BLUE },
@@ -781,7 +783,10 @@ const styles = StyleSheet.create({
   mockupArea: { width: '100%', maxWidth: 510, height: 456, position: 'relative', alignItems: 'center', justifyContent: 'center' },
   heroOrbLarge: { position: 'absolute', width: 388, height: 388, borderRadius: 194, backgroundColor: '#DDF3FF', right: 24, top: 28 },
   heroOrbSmall: { position: 'absolute', width: 90, height: 90, borderRadius: 45, backgroundColor: '#9DDBFA', left: 12, bottom: 36 },
+  heroOrbLargeDark: { backgroundColor: '#0E2235', borderWidth: 1, borderColor: '#1C3C55' },
+  heroOrbSmallDark: { backgroundColor: '#163B59' },
   phoneMockup: { width: 264, borderRadius: 27, backgroundColor: '#FFFFFF', padding: 16, zIndex: 2, shadowColor: '#075D9D', shadowOffset: { width: 0, height: 18 }, shadowOpacity: 0.19, shadowRadius: 24, elevation: 10 },
+  phoneMockupDark: { backgroundColor: '#0E2235', borderWidth: 1, borderColor: '#1C3C55', shadowColor: '#000000', shadowOpacity: 0.32 },
   phoneTopbar: { flexDirection: 'row', alignItems: 'center', marginBottom: 17 },
   phoneBrandMark: { width: 28, height: 28, borderRadius: 14, backgroundColor: BLUE },
   phoneTopLines: { flex: 1, marginLeft: 9 },
@@ -791,24 +796,32 @@ const styles = StyleSheet.create({
   phoneGreeting: { color: '#6C8499', fontSize: 10, fontWeight: '700' },
   phoneSubheading: { color: TEXT_DARK, fontSize: 15, fontWeight: '800', marginTop: 3 },
   phoneProductCard: { flexDirection: 'row', backgroundColor: '#F0F9FF', borderRadius: 16, padding: 12, marginTop: 14 },
+  phoneGreetingDark: { color: '#9FB4C8' },
+  phoneSubheadingDark: { color: '#F5FAFF' },
+  phoneProductCardDark: { backgroundColor: '#112A40' },
   waterBottle: { width: 52, height: 68, alignItems: 'center', justifyContent: 'center' },
   bottleCap: { width: 16, height: 9, borderTopLeftRadius: 4, borderTopRightRadius: 4, backgroundColor: '#6CC3EF', marginBottom: -1 },
   bottleBody: { width: 37, height: 49, borderRadius: 12, borderWidth: 4, borderColor: '#47A9DE', backgroundColor: '#CBEFFF' },
   phoneProductCopy: { flex: 1, marginLeft: 8 },
   phoneProductTitle: { color: TEXT_DARK, fontSize: 12, fontWeight: '800' },
+  phoneProductTitleDark: { color: '#F5FAFF' },
   phoneProductMeta: { color: TEXT_MUTED, fontSize: 9, fontWeight: '700', marginTop: 4 },
   phoneOrderButton: { backgroundColor: BLUE, borderRadius: 8, marginTop: 8, paddingVertical: 6, alignItems: 'center' },
   phoneOrderButtonText: { color: '#FFFFFF', fontSize: 9, fontWeight: '800' },
   phoneOrderCard: { borderWidth: 1, borderColor: '#E0EEF7', borderRadius: 15, padding: 12, marginTop: 13 },
+  phoneOrderCardDark: { borderColor: '#1C3C55', backgroundColor: '#0A1928' },
   phoneOrderHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   phoneOrderTitle: { color: TEXT_DARK, fontSize: 11, fontWeight: '800' },
+  phoneOrderTitleDark: { color: '#F5FAFF' },
   phoneStatusPill: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#E7F9EF', borderRadius: 999, paddingHorizontal: 7, paddingVertical: 4 },
   statusDot: { width: 5, height: 5, borderRadius: 999, backgroundColor: '#22A45D', marginRight: 4 },
   phoneStatusText: { color: '#168448', fontSize: 8, fontWeight: '800' },
   deliveryProgress: { height: 5, borderRadius: 999, backgroundColor: '#E7F1F7', marginTop: 12, overflow: 'hidden' },
   deliveryProgressActive: { width: '62%', height: '100%', borderRadius: 999, backgroundColor: '#55B9E9' },
   deliveryText: { color: '#778EA1', fontSize: 8, lineHeight: 12, fontWeight: '600', marginTop: 8 },
+  deliveryTextDark: { color: '#9FB4C8' },
   floatingStatus: { position: 'absolute', zIndex: 3, flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', borderRadius: 13, padding: 10, shadowColor: '#286A95', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.14, shadowRadius: 14, elevation: 5 },
+  floatingStatusDark: { backgroundColor: '#0E2235', borderWidth: 1, borderColor: '#1C3C55', shadowColor: '#000000', shadowOpacity: 0.28 },
   floatingStatusTop: { top: 64, right: 0 },
   floatingStatusBottom: { bottom: 51, left: 0 },
   floatingIcon: { width: 30, height: 30, borderRadius: 10, alignItems: 'center', justifyContent: 'center', marginRight: 8 },
@@ -817,6 +830,8 @@ const styles = StyleSheet.create({
   floatingIconText: { color: BLUE_DARK, fontSize: 15, fontWeight: '900' },
   floatingStatusTitle: { color: TEXT_DARK, fontSize: 10, fontWeight: '800' },
   floatingStatusText: { color: TEXT_MUTED, fontSize: 8, fontWeight: '600', marginTop: 3 },
+  floatingStatusTitleDark: { color: '#F5FAFF' },
+  floatingStatusTextDark: { color: '#9FB4C8' },
   section: { width: '100%', paddingTop: 88, paddingBottom: 88 },
   howSection: { backgroundColor: '#FFFFFF' },
   featureSection: { backgroundColor: BLUE_LIGHT },
@@ -840,6 +855,7 @@ const styles = StyleSheet.create({
   featureCard: { width: '50%', flexDirection: 'row', paddingHorizontal: 10, paddingVertical: 18 },
   featureCardCompact: { width: '100%', paddingHorizontal: 0, paddingVertical: 14 },
   featureIcon: { width: 46, height: 46, borderRadius: 15, alignItems: 'center', justifyContent: 'center', backgroundColor: '#DDF2FF', marginRight: 15 },
+  featureIconDark: { backgroundColor: '#163B59' },
   featureIconText: { color: BLUE_DARK, fontSize: 22, fontWeight: '900' },
   featureCopy: { flex: 1, paddingRight: 16 },
   featureTitle: { color: TEXT_DARK, fontSize: 17, fontWeight: '800' },
@@ -851,15 +867,19 @@ const styles = StyleSheet.create({
   distributorCopy: { flex: 1, maxWidth: 510 },
   distributorCopyCompact: { width: '100%', maxWidth: 620 },
   distributorMockup: { width: '100%', maxWidth: 480, alignSelf: 'center', backgroundColor: '#FFFFFF', borderRadius: 22, borderWidth: 1, borderColor: '#DCECF7', padding: 22, shadowColor: '#286A95', shadowOffset: { width: 0, height: 12 }, shadowOpacity: 0.12, shadowRadius: 22, elevation: 6 },
+  distributorMockupDark: { backgroundColor: '#0E2235', borderColor: '#1C3C55', shadowColor: '#000000', shadowOpacity: 0.28 },
   distributorTopbar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   distributorKicker: { color: BLUE, fontSize: 9, fontWeight: '900', letterSpacing: 0.9 },
   distributorTitle: { color: TEXT_DARK, fontSize: 20, fontWeight: '800', marginTop: 5 },
+  distributorTitleDark: { color: '#F5FAFF' },
   distributorBadge: { backgroundColor: '#E8F8EE', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6 },
   distributorBadgeText: { color: '#17894B', fontSize: 11, fontWeight: '800' },
   distributorStatsRow: { flexDirection: 'row', justifyContent: 'space-between', backgroundColor: '#F2FAFF', borderRadius: 14, paddingVertical: 15, paddingHorizontal: 10, marginTop: 22 },
+  distributorStatsRowDark: { backgroundColor: '#112A40' },
   distributorStat: { flex: 1, alignItems: 'center' },
   distributorStatValue: { color: BLUE_DARK, fontSize: 21, fontWeight: '900' },
   distributorStatLabel: { color: TEXT_MUTED, fontSize: 10, fontWeight: '700', marginTop: 4 },
+  distributorStatLabelDark: { color: '#9FB4C8' },
   distributorRequest: { flexDirection: 'row', alignItems: 'center', paddingVertical: 15, borderBottomWidth: 1, borderBottomColor: '#E9F0F5' },
   distributorRequestIcon: { width: 36, height: 36, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: BLUE, marginRight: 11 },
   distributorRequestIconPale: { backgroundColor: '#DDF2FF' },

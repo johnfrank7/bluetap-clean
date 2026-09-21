@@ -14,6 +14,7 @@ import { db } from '../../firebase';
 import { getLocalUsers, subscribeLocalUsers, updateLocalUserStatus } from '../../localUsers';
 import { getProfileUniqueId } from '../../services/uniqueIds';
 import { getModuleSession } from '../../services/authSession';
+import { useAdminTheme } from '../../components/AdminTheme';
 import ManagerShell, { MANAGER_COLORS, ManagerPill } from '../../components/ManagerShell';
 
 const normalizeApplicationStatus = (status) =>
@@ -83,6 +84,7 @@ const getJoinedLabel = (user = {}) => {
 };
 
 export default function ManagerDistributorsPage() {
+  const { colors } = useAdminTheme(); const styles = createStyles(colors);
   const branchId = getModuleSession('manager')?.branchId || '';
   const [registeredDistributors, setRegisteredDistributors] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -256,7 +258,7 @@ export default function ManagerDistributorsPage() {
 
         {loading ? (
           <View style={styles.emptyState}>
-            <ActivityIndicator color={MANAGER_COLORS.blue} size="small" />
+            <ActivityIndicator color={colors.primary} size="small" />
           </View>
         ) : filteredDistributors.length === 0 ? (
           <View style={styles.emptyState}>
@@ -315,11 +317,11 @@ export default function ManagerDistributorsPage() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors) => StyleSheet.create({
   card: {
-    backgroundColor: MANAGER_COLORS.card,
+    backgroundColor: colors.surface,
     borderWidth: 1,
-    borderColor: MANAGER_COLORS.border,
+    borderColor: colors.border,
     borderRadius: 16,
     paddingHorizontal: 20,
     paddingTop: 20,
@@ -331,7 +333,7 @@ const styles = StyleSheet.create({
     marginBottom: 18,
   },
   cardTitle: {
-    color: MANAGER_COLORS.text,
+    color: colors.textPrimary,
     fontSize: 16,
     fontWeight: 'bold',
   },
@@ -340,28 +342,28 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     borderBottomWidth: 1,
-    borderBottomColor: MANAGER_COLORS.border,
+    borderBottomColor: colors.border,
   },
   tableHeadRow: {
     minHeight: 38,
   },
   th: {
-    color: MANAGER_COLORS.muted,
+    color: colors.textSecondary,
     fontSize: 11,
     fontWeight: 'bold',
   },
   td: {
-    color: MANAGER_COLORS.muted,
+    color: colors.textSecondary,
     fontSize: 13,
     fontWeight: '600',
   },
   tdName: {
-    color: MANAGER_COLORS.text,
+    color: colors.textPrimary,
     fontSize: 13,
     fontWeight: 'bold',
   },
   tdLink: {
-    color: MANAGER_COLORS.blue,
+    color: colors.primary,
     fontSize: 13,
     fontWeight: '600',
   },
@@ -403,7 +405,7 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   removeButtonText: {
-    color: MANAGER_COLORS.red,
+    color: colors.danger,
     fontSize: 12,
     fontWeight: 'bold',
   },
@@ -416,12 +418,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   emptyText: {
-    color: MANAGER_COLORS.muted,
+    color: colors.textSecondary,
     fontSize: 13,
     fontWeight: '600',
   },
   errorText: {
-    color: MANAGER_COLORS.red,
+    color: colors.danger,
     fontSize: 12,
     marginTop: 8,
   },

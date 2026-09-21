@@ -13,6 +13,7 @@ import { db } from '../../firebase';
 import { getLocalUsers, subscribeLocalUsers } from '../../localUsers';
 import { getLocalRequests } from '../../services/requests';
 import { getModuleSession } from '../../services/authSession';
+import { useAdminTheme } from '../../components/AdminTheme';
 import ManagerShell, {
   MANAGER_COLORS,
   ManagerPill,
@@ -24,6 +25,8 @@ import {
   useAnimatedValueSnapshot,
   useReducedMotionPreference,
 } from '../../components/managerAnimationHooks';
+
+let styles;
 
 const BLUE_DARK = '#0D47A1';
 const BLUE = '#187BCD';
@@ -763,6 +766,7 @@ const StationsPanel = ({ progress, rows }) => (
 );
 
 export default function ManagerAnalyticsPage() {
+  const { colors } = useAdminTheme(); styles = createStyles(colors);
   const branchId = getModuleSession('manager')?.branchId || '';
   const [search, setSearch] = useState('');
   const [users, setUsers] = useState([]);
@@ -982,7 +986,7 @@ export default function ManagerAnalyticsPage() {
           value={productSales}
         />
         <MetricCard
-          accent={offlineStations > 0 ? MANAGER_COLORS.red : BLUE_MID}
+          accent={offlineStations > 0 ? colors.danger : BLUE_MID}
           delay={480}
           enabled={dataReady}
           helper={
@@ -1022,7 +1026,7 @@ export default function ManagerAnalyticsPage() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors) => StyleSheet.create({
   metricGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -1033,9 +1037,9 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     flexBasis: 180,
     minHeight: 124,
-    backgroundColor: MANAGER_COLORS.card,
+    backgroundColor: colors.surface,
     borderWidth: 1,
-    borderColor: MANAGER_COLORS.border,
+    borderColor: colors.border,
     borderRadius: 16,
     paddingHorizontal: 20,
     paddingVertical: 18,
@@ -1050,13 +1054,13 @@ const styles = StyleSheet.create({
   },
   metricLabel: {
     flex: 1,
-    color: MANAGER_COLORS.muted,
+    color: colors.textSecondary,
     fontSize: 12,
     fontWeight: 'bold',
     letterSpacing: 0,
   },
   metricValue: {
-    color: MANAGER_COLORS.text,
+    color: colors.textPrimary,
     fontSize: 28,
     fontWeight: 'bold',
     letterSpacing: 0,
@@ -1072,9 +1076,9 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   panel: {
-    backgroundColor: MANAGER_COLORS.card,
+    backgroundColor: colors.surface,
     borderWidth: 1,
-    borderColor: MANAGER_COLORS.border,
+    borderColor: colors.border,
     borderRadius: 16,
     padding: 20,
   },
@@ -1099,7 +1103,7 @@ const styles = StyleSheet.create({
     minHeight: 320,
   },
   panelTitle: {
-    color: MANAGER_COLORS.text,
+    color: colors.textPrimary,
     fontSize: 16,
     fontWeight: 'bold',
     marginBottom: 18,
@@ -1115,7 +1119,7 @@ const styles = StyleSheet.create({
     paddingBottom: 28,
   },
   axisText: {
-    color: MANAGER_COLORS.muted,
+    color: colors.textSecondary,
     fontSize: 12,
     fontWeight: '600',
   },
@@ -1123,7 +1127,7 @@ const styles = StyleSheet.create({
     flex: 1,
     minHeight: 232,
     borderBottomWidth: 1,
-    borderBottomColor: MANAGER_COLORS.border,
+    borderBottomColor: colors.border,
     position: 'relative',
     marginLeft: 2,
     marginRight: 10,
@@ -1159,7 +1163,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     height: 1,
-    backgroundColor: MANAGER_COLORS.border,
+    backgroundColor: colors.border,
   },
   lineSegment: {
     position: 'absolute',
@@ -1176,7 +1180,7 @@ const styles = StyleSheet.create({
     marginTop: -5,
     backgroundColor: BLUE_DARK,
     borderWidth: 2,
-    borderColor: '#FFFFFF',
+    borderColor: colors.border,
     zIndex: 2,
   },
   chartTooltip: {
@@ -1184,7 +1188,7 @@ const styles = StyleSheet.create({
     minWidth: 56,
     alignItems: 'center',
     borderRadius: 6,
-    backgroundColor: MANAGER_COLORS.text,
+    backgroundColor: colors.textPrimary,
     paddingHorizontal: 8,
     paddingVertical: 5,
     zIndex: 4,
@@ -1237,10 +1241,10 @@ const styles = StyleSheet.create({
     borderRadius: 52,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.surface,
   },
   donutPercent: {
-    color: MANAGER_COLORS.text,
+    color: colors.textPrimary,
     fontSize: 18,
     fontWeight: 'bold',
   },
@@ -1268,7 +1272,7 @@ const styles = StyleSheet.create({
     backgroundColor: BLUE_MID,
   },
   legendText: {
-    color: MANAGER_COLORS.muted,
+    color: colors.textSecondary,
     fontSize: 13,
     fontWeight: '700',
   },
@@ -1291,7 +1295,7 @@ const styles = StyleSheet.create({
     top: 0,
     bottom: 0,
     width: 1,
-    backgroundColor: MANAGER_COLORS.border,
+    backgroundColor: colors.border,
   },
   barangayRow: {
     minHeight: 20,
@@ -1300,7 +1304,7 @@ const styles = StyleSheet.create({
   },
   barangayLabel: {
     width: 80,
-    color: MANAGER_COLORS.text,
+    color: colors.textPrimary,
     fontSize: 12,
     fontWeight: '700',
     textAlign: 'right',
@@ -1347,12 +1351,12 @@ const styles = StyleSheet.create({
     marginRight: 16,
   },
   stationName: {
-    color: MANAGER_COLORS.text,
+    color: colors.textPrimary,
     fontSize: 14,
     fontWeight: 'bold',
   },
   stationSales: {
-    color: MANAGER_COLORS.muted,
+    color: colors.textSecondary,
     fontSize: 12,
     fontWeight: '600',
     marginTop: 4,

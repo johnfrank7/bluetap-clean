@@ -1,9 +1,11 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
+import { useAdminTheme } from '../../components/AdminTheme';
 import ManagerShell, { MANAGER_COLORS, ManagerPill, ManagerWaterDrop } from '../../components/ManagerShell';
 
 export default function ManagerProfilePage() {
+  const { colors } = useAdminTheme(); const styles = createStyles(colors);
   return (
     <ManagerShell
       active="profile"
@@ -14,7 +16,7 @@ export default function ManagerProfilePage() {
       <View style={styles.card}>
         <View style={styles.avatarRow}>
           <View style={styles.avatar}>
-            <ManagerWaterDrop color={MANAGER_COLORS.cyan} size={30} />
+            <ManagerWaterDrop color={colors.primaryLight} size={30} />
           </View>
           <View style={styles.profileText}>
             <Text style={styles.profileName}>BlueTap Manager</Text>
@@ -42,11 +44,11 @@ export default function ManagerProfilePage() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors) => StyleSheet.create({
   card: {
-    backgroundColor: MANAGER_COLORS.card,
+    backgroundColor: colors.surface,
     borderWidth: 1,
-    borderColor: MANAGER_COLORS.border,
+    borderColor: colors.border,
     borderRadius: 16,
     padding: 22,
   },
@@ -56,7 +58,7 @@ const styles = StyleSheet.create({
     gap: 12,
     alignItems: 'center',
     borderBottomWidth: 1,
-    borderBottomColor: MANAGER_COLORS.border,
+    borderBottomColor: colors.border,
     paddingBottom: 18,
   },
   avatar: {
@@ -72,12 +74,12 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   profileName: {
-    color: MANAGER_COLORS.text,
+    color: colors.textPrimary,
     fontSize: 18,
     fontWeight: 'bold',
   },
   profileMeta: {
-    color: MANAGER_COLORS.muted,
+    color: colors.textSecondary,
     fontSize: 13,
     marginTop: 4,
   },
@@ -91,18 +93,18 @@ const styles = StyleSheet.create({
     flex: 1,
     flexBasis: 180,
     borderWidth: 1,
-    borderColor: MANAGER_COLORS.border,
+    borderColor: colors.border,
     borderRadius: 12,
     padding: 16,
-    backgroundColor: '#FAFDFF',
+    backgroundColor: colors.surfaceAlt,
   },
   detailLabel: {
-    color: MANAGER_COLORS.muted,
+    color: colors.textSecondary,
     fontSize: 11,
     fontWeight: 'bold',
   },
   detailValue: {
-    color: MANAGER_COLORS.text,
+    color: colors.textPrimary,
     fontSize: 15,
     fontWeight: 'bold',
     marginTop: 8,

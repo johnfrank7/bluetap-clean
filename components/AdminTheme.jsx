@@ -15,11 +15,13 @@ const light = Object.freeze({
 
 const dark = Object.freeze({
   ...BLUETAP_COLORS,
-  background: '#0D1B2A', surface: '#14283A', surfaceAlt: '#193247', border: '#29485F',
-  text: '#F1F7FC', textPrimary: '#F1F7FC', textSecondary: '#AFC2D2', muted: '#AFC2D2',
-  primarySoft: '#173C58', sidebar: '#0A1725', sidebarHover: '#122C42', sidebarActive: '#164A70', sidebarBorder: '#26465E',
-  header: '#102235', input: '#10283B', inputBorder: '#3A5C73', overlay: 'rgba(2,10,18,.68)',
-  tooltip: '#EAF5FC', tooltipText: '#102235', neutral: '#20384B', successSoft: '#123D30', warningSoft: '#4B3916', dangerSoft: '#49282B', disabled: '#668094',
+  background: '#07131F', surface: '#0E2235', surfaceAlt: '#112A40', border: '#1C3C55',
+  text: '#F5FAFF', textPrimary: '#F5FAFF', textSecondary: '#9FB4C8', muted: '#6F879C',
+  primary: '#2186D9', primaryHover: '#3B9CE8', primaryLight: '#70BDF2', primarySoft: '#163B59',
+  success: '#22C55E', warning: '#F59E0B', danger: '#EF4444',
+  sidebar: '#0A1928', sidebarHover: '#112A40', sidebarActive: '#163B59', sidebarBorder: '#1C3C55',
+  header: '#0A1928', input: '#0A1928', inputBorder: '#1C3C55', overlay: 'rgba(2,10,18,.72)',
+  tooltip: '#F5FAFF', tooltipText: '#07131F', neutral: '#112A40', successSoft: '#103B2A', warningSoft: '#493814', dangerSoft: '#48262A', disabled: '#6F879C',
 });
 
 const AdminThemeContext = React.createContext(null);
@@ -55,4 +57,3 @@ export function useAdminTheme() {
   if (!theme) return { colors: light, layout: BLUETAP_LAYOUT, preference: 'light', resolvedTheme: 'light', setPreference: () => {}, ready: true };
   return theme;
 }
-

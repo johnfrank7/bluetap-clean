@@ -14,6 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 
 import { BLUETAP_COLORS } from '../constants/bluetapTheme';
+import { useAdminTheme } from './AdminTheme';
 import { getModuleSession, signOutAndClearSessions } from '../services/authSession';
 
 export const MANAGER_COLORS = {
@@ -39,7 +40,10 @@ const NAV_ITEMS = [
   { key: 'profile', label: 'Profile', path: '/manager/profile' },
 ];
 
-export function ManagerWaterDrop({ color = MANAGER_COLORS.cyan, size = 18, outline = false }) {
+export function ManagerWaterDrop({ color, size = 18, outline = false }) {
+  const { colors } = useAdminTheme();
+  const styles = createStyles(colors);
+  const dropColor = color || colors.primaryLight;
   return (
     <View
       style={[
@@ -48,8 +52,8 @@ export function ManagerWaterDrop({ color = MANAGER_COLORS.cyan, size = 18, outli
           width: size,
           height: size,
           borderRadius: size / 2,
-          backgroundColor: outline ? 'transparent' : color,
-          borderColor: color,
+          backgroundColor: outline ? 'transparent' : dropColor,
+          borderColor: dropColor,
           borderWidth: outline ? 1.5 : 0,
         },
       ]}
@@ -58,6 +62,8 @@ export function ManagerWaterDrop({ color = MANAGER_COLORS.cyan, size = 18, outli
 }
 
 export function ManagerPill({ children, tone = 'blue' }) {
+  const { colors } = useAdminTheme();
+  const styles = createStyles(colors);
   const toneStyles = {
     blue: styles.pillBlue,
     green: styles.pillGreen,
@@ -89,6 +95,8 @@ export default function ManagerShell({
   subtitle,
   title,
 }) {
+  const { colors, resolvedTheme } = useAdminTheme();
+  const styles = createStyles(colors);
   const router = useRouter();
   const { width } = useWindowDimensions();
   const [internalSearch, setInternalSearch] = useState('');
@@ -125,7 +133,7 @@ export default function ManagerShell({
 
   return (
     <SafeAreaView style={styles.root}>
-      <StatusBar style="dark" />
+      <StatusBar style={resolvedTheme === 'dark' ? 'light' : 'dark'} />
       <View style={[styles.layout, isCompactLayout && styles.layoutCompact]}>
         <View style={[styles.sidebar, isCompactLayout && styles.sidebarCompact]}>
           <View style={[styles.brand, isCompactLayout && styles.brandCompact]}>
@@ -204,22 +212,22 @@ export default function ManagerShell({
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors) => StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: MANAGER_COLORS.bg,
+    backgroundColor: colors.background,
   },
   layout: {
     flex: 1,
     flexDirection: 'row',
-    backgroundColor: MANAGER_COLORS.bg,
+    backgroundColor: colors.background,
   },
   layoutCompact: {
     flexDirection: 'column',
   },
   sidebar: {
     width: 230,
-    backgroundColor: MANAGER_COLORS.navy,
+    backgroundColor: colors.sidebar,
     borderRightWidth: 1,
     borderRightColor: 'rgba(255,255,255,0.08)',
   },
@@ -284,8 +292,8 @@ const styles = StyleSheet.create({
     marginBottom: 0,
   },
   navItemActive: {
-    backgroundColor: 'rgba(255,255,255,0.18)',
-    borderColor: '#FFFFFF',
+    backgroundColor: colors.sidebarActive,
+    borderColor: colors.primaryLight,
   },
   navText: {
     color: '#E3F2FD',
@@ -334,13 +342,13 @@ const styles = StyleSheet.create({
     paddingRight: 0,
   },
   pageTitle: {
-    color: MANAGER_COLORS.text,
+    color: colors.textPrimary,
     fontSize: 23,
     fontWeight: 'bold',
     letterSpacing: 0,
   },
   pageSubtitle: {
-    color: MANAGER_COLORS.muted,
+    color: colors.textSecondary,
     fontSize: 13,
     fontWeight: '500',
     marginTop: 4,
@@ -359,8 +367,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: MANAGER_COLORS.border,
-    backgroundColor: '#FFFFFF',
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
     paddingHorizontal: 15,
   },
   searchBoxCompact: {
@@ -368,7 +376,7 @@ const styles = StyleSheet.create({
     width: undefined,
   },
   searchInput: {
-    color: MANAGER_COLORS.text,
+    color: colors.textPrimary,
     fontSize: 13,
     outlineStyle: 'none',
   },
@@ -379,8 +387,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: MANAGER_COLORS.blue,
-    backgroundColor: '#FFFFFF',
+    borderColor: colors.primary,
+    backgroundColor: colors.surface,
     marginLeft: 10,
     paddingHorizontal: 18,
   },
@@ -389,7 +397,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
   },
   logoutText: {
-    color: MANAGER_COLORS.blue,
+    color: colors.primary,
     fontSize: 13,
     fontWeight: 'bold',
   },
@@ -416,27 +424,27 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   pillBlue: {
-    backgroundColor: '#EAF2FF',
+    backgroundColor: colors.primarySoft,
   },
   pillGreen: {
-    backgroundColor: '#E3F8EF',
+    backgroundColor: colors.successSoft,
   },
   pillRed: {
-    backgroundColor: '#FFE9E9',
+    backgroundColor: colors.dangerSoft,
   },
   pillCyan: {
-    backgroundColor: '#E1F8F6',
+    backgroundColor: colors.neutral,
   },
   pillTextBlue: {
-    color: MANAGER_COLORS.blue,
+    color: colors.primary,
   },
   pillTextGreen: {
-    color: MANAGER_COLORS.green,
+    color: colors.success,
   },
   pillTextRed: {
-    color: MANAGER_COLORS.red,
+    color: colors.danger,
   },
   pillTextCyan: {
-    color: '#008D85',
+    color: colors.primaryLight,
   },
 });
