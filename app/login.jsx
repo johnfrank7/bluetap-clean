@@ -672,7 +672,6 @@ export default function LoginPage() {
         <Modal visible={forgotPasswordVisible} transparent animationType="slide">
           <View style={styles.modalBackground}>
             <View style={styles.modalContainer}>
-              <Text style={styles.recoveryProgress}>Email  →  Verify  →  New password  →  Done</Text>
               <Text style={styles.modalTitle}>{recoveryStep === 'email' ? 'Reset your password' : recoveryStep === 'verify' ? 'Check your email' : recoveryStep === 'password' ? 'Create a new password' : 'Password changed'}</Text>
               <Text style={styles.resetHelperText}>{recoveryStep === 'email' ? 'Enter the email linked to your BlueTap account.' : recoveryStep === 'verify' ? `We sent a verification code to ${recoveryMaskedEmail}.` : recoveryStep === 'password' ? 'Choose a new password with uppercase, lowercase, and a number.' : 'Your password was changed. Sign in with your new password.'}</Text>
               {recoveryStep === 'email' ? <TextInput style={[styles.resetInput, !!resetEmailError && styles.resetInputError]} placeholder="Email address" placeholderTextColor="#90A4AE" keyboardType="email-address" autoCapitalize="none" value={resetEmail} onChangeText={setResetEmail} /> : null}
@@ -905,13 +904,6 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     marginBottom: 20,
     color: '#187BCD',
-  },
-  recoveryProgress: {
-    color: '#64748B',
-    fontSize: 11,
-    fontWeight: '700',
-    marginBottom: 12,
-    textAlign: 'center',
   },
   resetHelperText: {
     color: '#455A64',
