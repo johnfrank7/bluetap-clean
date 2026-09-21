@@ -2,6 +2,7 @@ const { getFirebaseAdmin } = require('../firebase/firebaseAdmin');
 const { verifiedIdentity } = require('./authorization');
 const { applyCors } = require('../utils/cors');
 const { OtpError } = require('../utils/otpError');
+const { loadRegistrationSecurity } = require('../registration/registrationSecurity');
 
 const RECENT_LOGIN_SECONDS = 10 * 60;
 
@@ -45,7 +46,10 @@ function createRequiredPasswordChangeHandler(getAdmin = getFirebaseAdmin, now = 
       const changedAt = new Date(now());
       await auth.updateUser(decoded.uid, { password: newPassword });
       await profileRef.update({ mustChangePassword: false, passwordChangedAt: changedAt, updatedAt: changedAt });
-      await auth.revokeRefreshTokens(decoded.uid);
+      const policy = await loadRegistrationSecurity(db);
+      if (profile.role === 'admin' || policy.sessionSecurity[profile.role]?.forceLogoutAfterPasswordChange !== false) {
+        await auth.revokeRefreshTokens(decoded.uid);
+      }
       await db.collection('adminAuditLogs').doc().set({ action: 'FORCED_PASSWORD_CHANGE_COMPLETED', targetUid: decoded.uid, role: profile.role, timestamp: changedAt });
       return res.status(200).json({ changed: true, profile: { uid: decoded.uid, role: profile.role, email: profile.email || '', approvalStatus: profile.approvalStatus || profile.status || 'approved', mustChangePassword: false, registrationCompleted: profile.registrationCompleted !== false, onboardingStatus: profile.onboardingStatus || 'complete', faceVerification: profile.faceVerification || null } });
     } catch (error) {

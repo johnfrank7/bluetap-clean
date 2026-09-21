@@ -2,10 +2,11 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { readFileSync } = require('node:fs');
 const { resolve } = require('node:path');
-const { SECURE_DEFAULTS, normalizeRegistrationSecurity, policySnapshot, validateRegistrationSecurity } = require('../registrationSecurity');
+const { DEFAULT_SESSION_SECURITY, SECURE_DEFAULTS, normalizeRegistrationSecurity, policySnapshot, validateRegistrationSecurity } = require('../registrationSecurity');
 const { createAdminRegistrationSecurityHandler } = require('../../admin/registrationSecurityHandler');
 const { createRegistrationSessionHandler } = require('../registrationSessionHandler');
 const { getClientIp } = require('../../utils/request');
+const { createSessionPolicyHandler } = require('../../auth/sessionPolicyHandler');
 
 test('registration security accepts three valid verification combinations and rejects both off', () => {
   for (const [faceVerificationEnabled, emailOtpEnabled] of [[true, true], [true, false], [false, true]]) {
@@ -22,6 +23,25 @@ test('missing and malformed policies fail closed to secure defaults', () => {
   for (const value of [0, -1, 1.5, 21, '3', NaN]) {
     assert.throws(() => validateRegistrationSecurity({ faceVerificationEnabled: true, emailOtpEnabled: true, maxAccountsPerDevice: value, maxAccountsPerIp: 3 }));
   }
+});
+
+test('session security accepts only supported role-specific timeout values', () => {
+  const valid = validateRegistrationSecurity({ faceVerificationEnabled: true, emailOtpEnabled: true, maxAccountsPerDevice: 3, maxAccountsPerIp: 3, sessionSecurity: DEFAULT_SESSION_SECURITY });
+  assert.deepEqual(valid.sessionSecurity, DEFAULT_SESSION_SECURITY);
+  assert.throws(() => validateRegistrationSecurity({ faceVerificationEnabled: true, emailOtpEnabled: true, maxAccountsPerDevice: 3, maxAccountsPerIp: 3, sessionSecurity: { ...DEFAULT_SESSION_SECURITY, manager: { ...DEFAULT_SESSION_SECURITY.manager, idleTimeoutMinutes: 14 } } }), (error) => error.reason === 'INVALID_SESSION_SECURITY_CONFIG');
+});
+
+test('role-scoped session endpoint exposes only the requested non-Admin policy', async () => {
+  const records = new Map([['systemConfig/registrationSecurity', { ...SECURE_DEFAULTS, sessionSecurity: { ...DEFAULT_SESSION_SECURITY, manager: { ...DEFAULT_SESSION_SECURITY.manager, idleTimeoutMinutes: 10 } } }]]);
+  const db = { collection: (name) => ({ doc: (id) => ({ get: async () => ({ exists: records.has(`${name}/${id}`), data: () => records.get(`${name}/${id}`) }) }) }) };
+  const handler = createSessionPolicyHandler(() => ({ db }));
+  const managerResponse = response();
+  await handler({ method: 'POST', headers: {}, body: { role: 'manager' } }, managerResponse);
+  assert.equal(managerResponse.statusCode, 200);
+  assert.deepEqual(managerResponse.body.policy, { idleTimeoutMinutes: 10, absoluteSessionHours: 24, forceLogoutAfterPasswordChange: true });
+  const adminResponse = response();
+  await handler({ method: 'POST', headers: {}, body: { role: 'admin' } }, adminResponse);
+  assert.equal(adminResponse.statusCode, 400);
 });
 
 function response() {
@@ -58,6 +78,7 @@ test('only Firebase-authenticated trusted admin can change registration security
   await f.handler({ method: 'PATCH', headers: { authorization: 'Bearer valid' }, body: { faceVerificationEnabled: true, emailOtpEnabled: false, maxAccountsPerDevice: 5, maxAccountsPerIp: 4 } }, res);
   assert.equal(res.statusCode, 200);
   assert.equal(f.records.get('systemConfig/registrationSecurity').maxAccountsPerDevice, 5);
+  assert.deepEqual(f.records.get('systemConfig/registrationSecurity').sessionSecurity, DEFAULT_SESSION_SECURITY);
   const audit = [...f.records.values()].find((value) => value.action === 'REGISTRATION_SECURITY_UPDATED');
   assert.deepEqual({
     actorUid: audit.actorUid,
@@ -139,6 +160,23 @@ test('Admin UI loads authoritative policy, updates from save response, and rever
   assert.match(source, /setDraftSettings\(authoritative\)/);
   assert.match(source, /await updateRegistrationSecurity\(next\)/);
   assert.match(source, /setDraftSettings\(savedSettings\)/);
+  assert.match(source, /title="Security Settings"/);
+  assert.match(source, /SESSION SECURITY/);
+  assert.match(source, /Idle timeout/);
+  assert.match(source, /Absolute session lifetime/);
+});
+
+test('shared session guard owns warning, idle, and absolute timers without affecting Admin', () => {
+  const root = resolve(__dirname, '..', '..', '..');
+  const guard = readFileSync(resolve(root, 'components', 'SessionSecurityGuard.jsx'), 'utf8');
+  const roleGate = readFileSync(resolve(root, 'components', 'RoleGate.jsx'), 'utf8');
+  assert.match(guard, /WARNING_MS/);
+  assert.match(guard, /idleTimeoutMinutes/);
+  assert.match(guard, /absoluteSessionHours/);
+  assert.match(guard, /signOutAndClearSessions\(\)/);
+  assert.match(guard, /role === 'manager' \? '\/manager\/login' : '\/login'/);
+  assert.match(guard, /\['requester', 'distributor', 'manager'\]\.includes\(role\)/);
+  assert.match(roleGate, /SessionSecurityGuard/);
 });
 
 test('installation identity is persisted once and registration secrets remain server-only', () => {

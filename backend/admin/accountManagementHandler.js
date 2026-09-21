@@ -5,7 +5,7 @@ const { OtpError } = require('../utils/otpError');
 const { normalizeUsername } = require('../username/username');
 
 const ROLES = new Set(['requester', 'distributor', 'manager']);
-const ACTIONS = new Set(['deactivate', 'reactivate', 'resetPassword', 'updateProfile', 'reassignManager']);
+const ACTIONS = new Set(['deactivate', 'reactivate', 'resetPassword', 'updateProfile', 'reassignManager', 'signOutAllSessions']);
 const clean = (value, max = 160) => String(value || '').trim().slice(0, max);
 const emailFor = (value) => { const email = clean(value, 254).toLowerCase(); if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new OtpError(400, 'INVALID_EMAIL', 'Enter a valid email address.'); return email; };
 const passwordFor = (value) => { const password = typeof value === 'string' ? value : ''; if (password.length < 12 || password.length > 128 || !/[a-z]/.test(password) || !/[A-Z]/.test(password) || !/[0-9]/.test(password)) throw new OtpError(400, 'WEAK_PASSWORD', 'Use 12-128 characters with uppercase, lowercase, and a number.'); return password; };
@@ -67,9 +67,11 @@ function createAdminAccountsHandler(getAdmin = getFirebaseAdmin) { return async 
     if (action === 'deactivate') { if (statusOf(before) !== 'active') throw new OtpError(409, 'ACCOUNT_NOT_ACTIVE', 'Only active accounts can be deactivated.'); changes = statusChanges(before.role, 'inactive'); authChanges.disabled = true; auditAction = 'ACCOUNT_DEACTIVATED'; }
     if (action === 'reactivate') { if (statusOf(before) !== 'inactive') throw new OtpError(409, 'ACCOUNT_NOT_INACTIVE', 'Only inactive accounts can be reactivated.'); if (before.role === 'manager') await activeBranch(db, before.branchId); changes = statusChanges(before.role, 'active'); authChanges.disabled = false; auditAction = 'ACCOUNT_REACTIVATED'; }
     if (action === 'resetPassword') { authChanges.password = passwordFor(body.temporaryPassword); changes.mustChangePassword = true; auditAction = 'TEMP_PASSWORD_RESET'; }
+    if (action === 'signOutAllSessions') { auditAction = 'ACCOUNT_SESSIONS_REVOKED'; }
     if (action === 'updateProfile') { const fullName = clean(body.fullName, 160); if (!fullName) throw new OtpError(400, 'FULL_NAME_REQUIRED', 'Full name is required.'); const [firstName, ...rest] = fullName.split(/\s+/); changes = { fullName, firstName, lastName: rest.join(' ') }; authChanges.displayName = fullName; auditAction = 'ACCOUNT_UPDATED'; }
     let branch = null; if (action === 'reassignManager') { if (before.role !== 'manager') throw new OtpError(409, 'MANAGER_REQUIRED', 'Only Managers can be assigned to a branch.'); branch = await activeBranch(db, body.branchId); changes = { branchId: branch.id, managerStatus: 'active' }; auditAction = before.branchId === branch.id ? 'MANAGER_BRANCH_ASSIGNED' : 'MANAGER_BRANCH_REASSIGNED'; }
     if (Object.keys(authChanges).length) await auth.updateUser(uid, authChanges); changes = { ...changes, updatedAt: now, updatedBy: admin.uid };
+    if (['deactivate', 'resetPassword', 'signOutAllSessions'].includes(action)) await auth.revokeRefreshTokens(uid);
     await db.runTransaction(async (tx) => { tx.update(ref, changes); tx.set(db.collection('adminAuditLogs').doc(), { action: auditAction, actorUid: admin.uid, targetUid: uid, role: before.role, branchId: branch?.id || before.branchId || null, previousStatus: statusOf(before), newStatus: statusOf({ ...before, ...changes }), createdAt: now }); });
     const branches = new Map(); if (branch) branches.set(branch.id, branch.name); return res.status(200).json({ account: safeAccount(uid, { ...before, ...changes }, branches, await auth.getUser(uid)) });
   } catch (error) { const known = error instanceof OtpError; return res.status(known ? error.status : 500).json({ error: { reason: known ? error.reason : 'ACCOUNT_MANAGEMENT_FAILED', message: known ? error.message : 'Account management is temporarily unavailable.' } }); }

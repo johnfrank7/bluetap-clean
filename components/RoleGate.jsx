@@ -10,6 +10,7 @@ import {
   getCachedPrivilegedAccess,
   validateRoleAccess,
 } from '../services/authSession';
+import SessionSecurityGuard from './SessionSecurityGuard';
 
 export default function RoleGate({ role, allowedRoles, children, bypass = false }) {
   const router = useRouter();
@@ -18,6 +19,8 @@ export default function RoleGate({ role, allowedRoles, children, bypass = false 
   const allowedRolesKey = (Array.isArray(allowedRoles) && allowedRoles.length
     ? allowedRoles
     : [role]).join(',');
+  const sessionRole = role || (Array.isArray(allowedRoles) && allowedRoles.length === 1 ? allowedRoles[0] : '');
+  const authorizedChildren = <SessionSecurityGuard role={sessionRole}>{children}</SessionSecurityGuard>;
   const validationRunRef = useRef(0);
   const redirectTimerRef = useRef(null);
   const [gateState, setGateState] = useState({
@@ -111,7 +114,7 @@ export default function RoleGate({ role, allowedRoles, children, bypass = false 
   // Preserve the mounted navigator during the login-to-dashboard handoff.
   // This is the same UID/role/TTL-checked cache used by validateRoleAccess.
   if (allowedRolesKey.split(',').some((allowedRole) =>
-    getCachedPrivilegedAccess(auth.currentUser, allowedRole))) return children;
+    getCachedPrivilegedAccess(auth.currentUser, allowedRole))) return authorizedChildren;
 
   if (gateState.status !== 'authorized') {
     const isChecking = gateState.status === 'checking';
@@ -127,7 +130,7 @@ export default function RoleGate({ role, allowedRoles, children, bypass = false 
     );
   }
 
-  return children;
+  return authorizedChildren;
 }
 
 const styles = StyleSheet.create({

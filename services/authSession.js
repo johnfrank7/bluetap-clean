@@ -185,6 +185,7 @@ export const saveRoleSession = (profile = {}) => {
     ? existingSession
     : {
         ...nextSession,
+        createdAt: Date.now(),
         updatedAt: Date.now(),
       };
 

@@ -14,6 +14,7 @@ const sanitized = (config) => ({
   emailOtpEnabled: config.emailOtpEnabled,
   maxAccountsPerDevice: config.maxAccountsPerDevice,
   maxAccountsPerIp: config.maxAccountsPerIp,
+  sessionSecurity: config.sessionSecurity,
   version: config.version,
 });
 
@@ -57,6 +58,8 @@ function createAdminRegistrationSecurityHandler(getAdmin = getFirebaseAdmin) {
           newMaxAccountsPerDevice: saved.maxAccountsPerDevice,
           previousMaxAccountsPerIp: before.maxAccountsPerIp,
           newMaxAccountsPerIp: saved.maxAccountsPerIp,
+          previousSessionSecurity: before.sessionSecurity,
+          newSessionSecurity: saved.sessionSecurity,
           createdAt: new Date(),
         });
         return saved;

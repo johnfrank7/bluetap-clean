@@ -5,13 +5,36 @@ const { createRequiredPasswordChangeHandler, validateNewPassword } = require('..
 
 const now = Date.UTC(2026, 8, 14, 12, 0, 0);
 
-function fixture({ role = 'admin', mustChangePassword = true, claims = { admin: true, role: 'admin' } } = {}) {
+function fixture({
+  role = 'admin',
+  mustChangePassword = true,
+  claims = { admin: true, role: 'admin' },
+  forceLogoutAfterPasswordChange = true,
+} = {}) {
   const profile = { role, mustChangePassword };
   const calls = { updates: [], revoked: [] };
   const profileRef = {
     async get() { return { exists: true, data: () => ({ ...profile }) }; },
     async update(changes) { Object.assign(profile, changes); },
     async set() {},
+  };
+  const policyRef = {
+    async get() {
+      return {
+        exists: true,
+        data: () => ({
+          faceVerificationEnabled: true,
+          emailOtpEnabled: true,
+          maxAccountsPerDevice: 3,
+          maxAccountsPerIp: 3,
+          sessionSecurity: {
+            requester: { idleTimeoutMinutes: 30, absoluteSessionHours: 24, forceLogoutAfterPasswordChange: role === 'requester' ? forceLogoutAfterPasswordChange : true },
+            distributor: { idleTimeoutMinutes: 30, absoluteSessionHours: 24, forceLogoutAfterPasswordChange: role === 'distributor' ? forceLogoutAfterPasswordChange : true },
+            manager: { idleTimeoutMinutes: 15, absoluteSessionHours: 24, forceLogoutAfterPasswordChange: role === 'manager' ? forceLogoutAfterPasswordChange : true },
+          },
+        }),
+      };
+    },
   };
   const auth = {
     async verifyIdToken(token) {
@@ -21,7 +44,11 @@ function fixture({ role = 'admin', mustChangePassword = true, claims = { admin: 
     async updateUser(uid, changes) { calls.updates.push({ uid, changes }); },
     async revokeRefreshTokens(uid) { calls.revoked.push(uid); },
   };
-  const db = { collection: () => ({ doc: () => profileRef }) };
+  const db = {
+    collection(name) {
+      return { doc: () => (name === 'systemConfig' ? policyRef : profileRef) };
+    },
+  };
   return { calls, getAdmin: () => ({ auth, db }), profile };
 }
 
@@ -62,4 +89,14 @@ test('password change permits every trusted account role but rejects invalid pro
   f = fixture();
   const staleNow = () => now + (11 * 60 * 1000);
   assert.equal((await call(createRequiredPasswordChangeHandler(f.getAdmin, staleNow), 'valid-token', { newPassword: 'FreshAdmin2026' })).body.error.reason, 'REAUTHENTICATION_REQUIRED');
+});
+
+test('password-change revocation follows the saved role policy while Admin remains strict', async () => {
+  let f = fixture({ role: 'requester', claims: {}, forceLogoutAfterPasswordChange: false });
+  assert.equal((await call(createRequiredPasswordChangeHandler(f.getAdmin, () => now), 'valid-token', { newPassword: 'FreshAdmin2026' })).statusCode, 200);
+  assert.deepEqual(f.calls.revoked, []);
+
+  f = fixture({ forceLogoutAfterPasswordChange: false });
+  assert.equal((await call(createRequiredPasswordChangeHandler(f.getAdmin, () => now), 'valid-token', { newPassword: 'FreshAdmin2026' })).statusCode, 200);
+  assert.deepEqual(f.calls.revoked, ['admin-1']);
 });

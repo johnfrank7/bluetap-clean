@@ -23,6 +23,7 @@ const EXPECTED_ROUTES = [
   '/api/auth/registration-session-status',
   '/api/auth/request-email-otp',
   '/api/auth/request-registration-otp',
+  '/api/auth/session-policy',
   '/api/auth/start-registration-face-verification',
   '/api/auth/verify-email-otp',
   '/api/manager/context',

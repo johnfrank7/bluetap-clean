@@ -33,6 +33,7 @@ test('role-specific account status and audit DTO stay canonical and secret-free'
 });
 
 function managementFixture() {
+  const revoked = [];
   const records = new Map([
     ['users/admin-1', { role: 'admin', email: 'admin@example.test' }],
     ['users/requester-1', { uid: 'requester-1', role: 'requester', fullName: 'Rita Requester', email: 'rita@example.test', username: 'rita_req', accountStatus: 'active', mustChangePassword: false, accountSource: 'admin_created' }],
@@ -58,8 +59,9 @@ function managementFixture() {
     verifyIdToken: async (token) => token === 'admin-token' ? { uid: 'admin-1', admin: true, role: 'admin' } : { uid: 'manager-1', manager: true, role: 'manager' },
     getUser: async (uid) => authUsers.get(uid), listUsers: async () => ({ users: [...authUsers.values()] }),
     updateUser: async (uid, changes) => { const current = authUsers.get(uid); authUsers.set(uid, { ...current, ...changes }); return authUsers.get(uid); },
+    revokeRefreshTokens: async (uid) => { revoked.push(uid); },
   };
-  return { records, authUsers, getAdmin: () => ({ auth, db }) };
+  return { records, authUsers, revoked, getAdmin: () => ({ auth, db }) };
 }
 function response() { return { statusCode: 200, body: null, setHeader() {}, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; }, end() { return this; } }; }
 async function call(handler, method, token, body = {}) { const res = response(); await handler({ method, headers: { authorization: `Bearer ${token}` }, body }, res); return res; }
@@ -87,4 +89,14 @@ test('Admin deactivation and temporary-password reset are authoritative and audi
   assert.equal(fixture.authUsers.get('requester-1').password, 'NewTemporary2026');
   assert.ok([...fixture.records.values()].some((value) => value.action === 'ACCOUNT_DEACTIVATED'));
   assert.ok([...fixture.records.values()].some((value) => value.action === 'TEMP_PASSWORD_RESET'));
+  assert.deepEqual(fixture.revoked, ['requester-1', 'requester-1']);
+});
+
+test('Admin can revoke every session for one account without changing its profile status', async () => {
+  const fixture = managementFixture(); const handler = createAdminAccountsHandler(fixture.getAdmin);
+  const result = await call(handler, 'PATCH', 'admin-token', { uid: 'requester-1', action: 'signOutAllSessions' });
+  assert.equal(result.statusCode, 200);
+  assert.deepEqual(fixture.revoked, ['requester-1']);
+  assert.equal(fixture.records.get('users/requester-1').accountStatus, 'active');
+  assert.ok([...fixture.records.values()].some((value) => value.action === 'ACCOUNT_SESSIONS_REVOKED'));
 });

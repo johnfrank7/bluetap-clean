@@ -13,6 +13,8 @@ test('Admin shell owns responsive navigation, theme preference, and confirmed lo
   const sessions = read('services', 'authSession.js');
 
   assert.match(shell, /accessibilityLabel="Toggle navigation"/);
+  assert.match(shell, /'Security Settings', '\/admin\/registration-security'/);
+  assert.doesNotMatch(shell, /'Session Security', '\/admin\//);
   assert.match(shell, /COLLAPSED_WIDTH = 76/);
   assert.match(shell, /DRAWER_WIDTH = 286/);
   assert.match(shell, /duration: 240/);

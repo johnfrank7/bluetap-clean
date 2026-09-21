@@ -12,6 +12,7 @@ const { createRequiredPasswordChangeHandler } = require('../auth/requiredPasswor
 const { createManagerContextHandler } = require('../manager/managerContextHandler');
 const { createAdminAccountsHandler } = require('../admin/accountManagementHandler');
 const { createAdminDistributorsHandler } = require('../admin/distributorManagementHandler');
+const { createSessionPolicyHandler } = require('../auth/sessionPolicyHandler');
 
 const routes = new Map([
   ['/api/auth/check-username', createUsernameHandler('check')],
@@ -36,6 +37,7 @@ const routes = new Map([
   ['/api/admin/distributors', createAdminDistributorsHandler()],
   ['/api/manager/context', createManagerContextHandler()],
   ['/api/auth/complete-required-password-change', createRequiredPasswordChangeHandler()],
+  ['/api/auth/session-policy', createSessionPolicyHandler()],
 ]);
 
 module.exports = { routes };

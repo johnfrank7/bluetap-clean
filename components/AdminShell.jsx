@@ -8,7 +8,7 @@ import { ADMIN_SIDEBAR_STORAGE_KEY, useAdminTheme } from './AdminTheme';
 import AdminIcon from './AdminIcon';
 import { signOutAndClearSessions } from '../services/authSession';
 
-const links = [['dashboard', 'Dashboard', '/admin/dashboard'], ['branches', 'Branches', '/admin/branches'], ['accounts', 'Accounts & Audit', '/admin/managers'], ['distributors', 'Distributors', '/admin/distributors'], ['security', 'Registration Security', '/admin/registration-security']];
+const links = [['dashboard', 'Dashboard', '/admin/dashboard'], ['branches', 'Branches', '/admin/branches'], ['accounts', 'Accounts & Audit', '/admin/managers'], ['distributors', 'Distributors', '/admin/distributors'], ['security', 'Security Settings', '/admin/registration-security']];
 const DESKTOP_WIDTH = 244;
 const COLLAPSED_WIDTH = 76;
 const DRAWER_WIDTH = 286;
