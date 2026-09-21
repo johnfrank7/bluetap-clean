@@ -28,6 +28,7 @@ function warm(path, stage, requestUrl = () => getApiUrl(path)) {
 }
 
 export const warmLoginBackend = () => warm('/health', 'LOGIN_PAGE_BACKEND_WARMUP', () => `${getApiBaseUrl()}/health`);
+export const warmAdminBackend = () => warm('/health', 'ADMIN_SHELL_BACKEND_WARMUP', () => `${getApiBaseUrl()}/health`);
 export const warmFaceServiceForSignup = () => {
   if (facePrewarmInFlight) return facePrewarmInFlight;
   const startedAt = Date.now();

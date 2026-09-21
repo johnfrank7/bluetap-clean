@@ -12,7 +12,7 @@ import {
 } from '../services/authSession';
 import SessionSecurityGuard from './SessionSecurityGuard';
 
-export default function RoleGate({ role, allowedRoles, children, bypass = false }) {
+export default function RoleGate({ role, allowedRoles, children, bypass = false, loadingFallback = null }) {
   const router = useRouter();
   const routerRef = useRef(router);
   routerRef.current = router;
@@ -93,6 +93,7 @@ export default function RoleGate({ role, allowedRoles, children, bypass = false 
       return undefined;
     }
 
+    console.info('[admin-performance]', { stage: 'ADMIN_ROUTE_ENTERED', roles: allowedRolesKey });
     setGateState({ status: 'checking', message: '' });
     const unsubscribeAuth = onAuthStateChanged(auth, () => {
       setGateState({ status: 'checking', message: '' });
@@ -118,6 +119,8 @@ export default function RoleGate({ role, allowedRoles, children, bypass = false 
 
   if (gateState.status !== 'authorized') {
     const isChecking = gateState.status === 'checking';
+
+    if (isChecking && loadingFallback) return loadingFallback;
 
     return (
       <View style={styles.gate}>

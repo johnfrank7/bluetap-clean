@@ -1,21 +1,13 @@
-import { auth } from '../firebase';
-import { getApiUrl } from './apiClient';
+import { adminApiRequest } from './adminApi';
+import { ADMIN_CACHE_KEYS, invalidateAdminData, setCachedAdminData } from './adminDataCache';
 
 async function request(method, body) {
-  const token = await auth.currentUser?.getIdToken();
-  if (!token) throw new Error('Administrator authentication is required.');
-  const response = await fetch(getApiUrl('/api/admin/registration-security'), {
-    method,
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    ...(body ? { body: JSON.stringify(body) } : {}),
-  });
-  const result = await response.json().catch(() => null);
-  if (!response.ok) {
-    const error = new Error(result?.error?.message || 'Registration security settings are unavailable.');
-    error.code = result?.error?.reason;
-    throw error;
-  }
-  return result;
+  return adminApiRequest('/api/admin/registration-security', { method, body });
 }
 export const getRegistrationSecurity = () => request('GET');
-export const updateRegistrationSecurity = (settings) => request('PATCH', settings);
+export const updateRegistrationSecurity = async (settings) => {
+  const updated = await request('PATCH', settings);
+  setCachedAdminData(ADMIN_CACHE_KEYS.security, updated);
+  invalidateAdminData(ADMIN_CACHE_KEYS.dashboard);
+  return updated;
+};

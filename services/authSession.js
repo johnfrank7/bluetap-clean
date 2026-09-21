@@ -5,6 +5,7 @@ import { auth, db } from '../firebase';
 import { saveLocalUser } from '../localUsers';
 import { isFaceVerified, normalizeFaceVerification } from './faceVerification';
 import { getManagerContext } from './managerAccess';
+import { clearAdminDataCache } from './adminDataCache';
 
 const ACTIVE_SESSION_KEY = 'bluetapActiveAuthSession';
 const MODULE_SESSIONS_KEY = 'bluetapModuleAuthSessions';
@@ -20,9 +21,11 @@ const ROLE_HOME_PATHS = {
 const validRoles = new Set(Object.keys(ROLE_HOME_PATHS));
 const PRIVILEGED_VALIDATION_TTL_MS = 2 * 60 * 1000;
 let privilegedValidationCache = null;
+const privilegedValidationInFlight = new Map();
 
 const clearPrivilegedValidationCache = () => {
   privilegedValidationCache = null;
+  privilegedValidationInFlight.clear();
 };
 
 export const cacheValidatedPrivilegedAccess = (profile = {}) => {
@@ -40,6 +43,7 @@ export const getCachedPrivilegedAccess = (user, role) => {
     clearPrivilegedValidationCache();
     return null;
   }
+  console.info('[admin-performance]', { stage: 'ADMIN_AUTH_CACHE_HIT', role, ageMs: Date.now() - cached.validatedAt });
   return cached.profile;
 };
 
@@ -208,6 +212,7 @@ export const clearModuleSession = (role) => {
 
 export const clearAllAuthSessions = () => {
   clearPrivilegedValidationCache();
+  clearAdminDataCache();
   globalThis.__bluetapResetPrivilegedLoginValidations?.();
   setSessions(null, {});
 };
@@ -301,7 +306,7 @@ export const fetchFirestoreUserProfile = async (user) => {
   return profile;
 };
 
-export const validateRoleAccess = async (expectedRole) => {
+const validateRoleAccessOnce = async (expectedRole) => {
   const expected = normalizeRole(expectedRole);
 
   if (!isValidRole(expected)) {
@@ -390,6 +395,15 @@ export const validateRoleAccess = async (expectedRole) => {
           : 'Unauthorized Access',
       redirectTo: expected === 'admin' ? '/admin/login' : expected === 'manager' ? '/manager/login' : '/login',
       shouldSignOut: true,
+      clearRole: expected,
+    };
+  }
+
+  if (auth.currentUser?.uid !== currentUser.uid) {
+    return {
+      status: 'unauthenticated',
+      message: 'Unauthorized Access',
+      redirectTo: expected === 'admin' ? '/admin/login' : expected === 'manager' ? '/manager/login' : '/login',
       clearRole: expected,
     };
   }
@@ -487,6 +501,23 @@ export const validateRoleAccess = async (expectedRole) => {
     status: 'authorized',
     profile,
   };
+};
+
+export const validateRoleAccess = async (expectedRole) => {
+  const expected = normalizeRole(expectedRole);
+  const key = `${auth.currentUser?.uid || 'signed-out'}:${expected}`;
+  if (privilegedValidationInFlight.has(key)) {
+    console.info('[admin-performance]', { stage: 'ADMIN_AUTH_VALIDATION_DEDUPED', role: expected });
+    return privilegedValidationInFlight.get(key);
+  }
+  const startedAt = Date.now();
+  if (expected === 'admin') console.info('[admin-performance]', { stage: 'ADMIN_AUTH_VALIDATION_STARTED' });
+  const request = validateRoleAccessOnce(expected).then((result) => {
+    if (expected === 'admin') console.info('[admin-performance]', { stage: 'ADMIN_AUTH_VALIDATION_FINISHED', durationMs: Date.now() - startedAt, status: result.status, cached: result.cached === true });
+    return result;
+  }).finally(() => privilegedValidationInFlight.delete(key));
+  privilegedValidationInFlight.set(key, request);
+  return request;
 };
 
 export const signOutAndClearSessions = async () => {

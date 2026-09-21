@@ -155,7 +155,7 @@ test('public registration policy exposes only the step requirements', async () =
 
 test('Admin UI loads authoritative policy, updates from save response, and reverts a failed save', () => {
   const source = readFileSync(resolve(__dirname, '..', '..', '..', 'app', 'admin', 'registration-security.jsx'), 'utf8');
-  assert.match(source, /await getRegistrationSecurity\(\)/);
+  assert.match(source, /useAdminData\(ADMIN_CACHE_KEYS\.security, getRegistrationSecurity\)/);
   assert.match(source, /setSavedSettings\(authoritative\)/);
   assert.match(source, /setDraftSettings\(authoritative\)/);
   assert.match(source, /await updateRegistrationSecurity\(next\)/);

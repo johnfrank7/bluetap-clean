@@ -13,6 +13,7 @@ const { createManagerContextHandler } = require('../manager/managerContextHandle
 const { createAdminAccountsHandler } = require('../admin/accountManagementHandler');
 const { createAdminDistributorsHandler } = require('../admin/distributorManagementHandler');
 const { createSessionPolicyHandler } = require('../auth/sessionPolicyHandler');
+const { createAdminDashboardOverviewHandler } = require('../admin/dashboardOverviewHandler');
 
 const routes = new Map([
   ['/api/auth/check-username', createUsernameHandler('check')],
@@ -35,6 +36,7 @@ const routes = new Map([
   ['/api/admin/managers', createAdminManagersHandler()],
   ['/api/admin/accounts', createAdminAccountsHandler()],
   ['/api/admin/distributors', createAdminDistributorsHandler()],
+  ['/api/admin/dashboard/overview', createAdminDashboardOverviewHandler()],
   ['/api/manager/context', createManagerContextHandler()],
   ['/api/auth/complete-required-password-change', createRequiredPasswordChangeHandler()],
   ['/api/auth/session-policy', createSessionPolicyHandler()],
