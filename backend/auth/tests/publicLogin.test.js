@@ -17,10 +17,10 @@ test('public error mapping never guesses a privileged account from a generic err
   for (const code of ['INVALID_CREDENTIALS', 'username/invalid-credential', 'auth/wrong-password']) {
     assert.equal(getPublicLoginErrorMessage({ code }), 'Invalid username or password.');
   }
-  assert.equal(getPublicLoginErrorMessage({ code: 'PRIVILEGED_LOGIN_REQUIRED' }), 'This account must use its authorized sign-in portal.');
+  assert.equal(getPublicLoginErrorMessage({ code: 'PRIVILEGED_LOGIN_REQUIRED' }), 'This account must use the Administrator sign-in portal.');
   assert.equal(getPublicLoginErrorMessage({ code: 'username/network' }), 'We could not reach the authentication service. Please try again.');
   for (const code of ['SERVER_ERROR', 'auth/invalid-custom-token', 'unknown', undefined]) {
-    assert.equal(getPublicLoginErrorMessage({ code, message: 'This account must use its authorized sign-in portal.' }), 'Login is temporarily unavailable. Please try again.');
+    assert.equal(getPublicLoginErrorMessage({ code, message: 'This account must use the Administrator sign-in portal.' }), 'Login is temporarily unavailable. Please try again.');
   }
 });
 
@@ -28,7 +28,7 @@ test('username client honors response codes, rejects malformed tokens and distin
   const scenarios = [
     { response: { ok: false, json: async () => ({ error: { code: 'INVALID_CREDENTIALS' } }) }, expected: 'Invalid username or password.' },
     { response: { ok: false, json: async () => ({ error: { reason: 'invalid-credential' } }) }, expected: 'Invalid username or password.' },
-    { response: { ok: false, json: async () => ({ error: { code: 'PRIVILEGED_LOGIN_REQUIRED' } }) }, expected: 'This account must use its authorized sign-in portal.' },
+    { response: { ok: false, json: async () => ({ error: { code: 'PRIVILEGED_LOGIN_REQUIRED' } }) }, expected: 'This account must use the Administrator sign-in portal.' },
     { response: { ok: false, json: async () => { throw new Error('HTML proxy error'); } }, expected: 'Login is temporarily unavailable. Please try again.' },
     { response: { ok: true, json: async () => ({ idToken: 'wrong-contract' }) }, expected: 'Login is temporarily unavailable. Please try again.' },
     { network: true, expected: 'We could not reach the authentication service. Please try again.' },
@@ -58,8 +58,9 @@ test('public form establishes the client session before profile lookup and role 
     { name: 'rejected distributor', role: 'distributor', profile: { approvalStatus: 'rejected' }, path: '/registration-status' },
     { name: 'unfinished requester', role: 'requester', profile: { registrationCompleted: false }, path: '/registration-status' },
     { name: 'wrong password', error: 'INVALID_CREDENTIALS', message: 'Invalid username or password.' },
-    { name: 'admin rejected by backend', error: 'PRIVILEGED_LOGIN_REQUIRED', message: 'This account must use its authorized sign-in portal.' },
-    { name: 'manager rejected by backend', error: 'PRIVILEGED_LOGIN_REQUIRED', message: 'This account must use its authorized sign-in portal.' },
+    { name: 'active manager username', role: 'manager', profile: { managerStatus: 'active', branchId: 'branch-a' }, path: '/manager/dashboard' },
+    { name: 'manager temporary password', role: 'manager', profile: { managerStatus: 'active', branchId: 'branch-a', mustChangePassword: true }, path: '/required-password-change' },
+    { name: 'admin rejected by backend', error: 'PRIVILEGED_LOGIN_REQUIRED', message: 'This account must use the Administrator sign-in portal.', actionLabel: 'Go to Admin Login', actionPath: '/admin/login' },
   ];
   for (const scenario of cases) await t.test(scenario.name, async () => {
     const events = [];
@@ -94,12 +95,16 @@ test('public form establishes the client session before profile lookup and role 
       },
       getPostAuthenticationDestination: destination,
       setLoading: () => {}, router: { replace: (path) => events.push(path) },
-      showNotification: (_title, message) => events.push(message),
+      showNotification: (_title, message, onConfirm, actionLabel) => {
+        events.push(message);
+        if (actionLabel) events.push(actionLabel);
+        if (onConfirm) onConfirm();
+      },
     };
     const run = vm.runInNewContext(`${helpers}\n${submit}\nhandleLogin`, context);
     await run();
     if (scenario.error) {
-      assert.deepEqual(events, ['clear', 'backend', scenario.message]);
+      assert.deepEqual(events, ['clear', 'backend', scenario.message, ...(scenario.actionLabel ? [scenario.actionLabel, scenario.actionPath] : [])]);
       assert.equal(auth.currentUser, null);
     } else {
       assert.deepEqual(events, [

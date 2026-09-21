@@ -2,8 +2,8 @@ import { auth } from '../firebase';
 import { getApiUrl } from './apiClient';
 
 export async function getManagerContext() {
-  // PrivilegedLogin already performed the one forced refresh needed for
-  // newly assigned claims. Manager context only needs the current token.
+  // Public login established the Manager Firebase session. Context validation
+  // uses its current token and never forces a second refresh.
   const token = await auth.currentUser?.getIdToken();
   if (!token) {
     const error = new Error('Manager authentication is required.');

@@ -190,7 +190,7 @@ test('shared session guard owns warning, idle, and absolute timers without affec
   assert.match(guard, /idleTimeoutMinutes/);
   assert.match(guard, /absoluteSessionHours/);
   assert.match(guard, /signOutAndClearSessions\(\)/);
-  assert.match(guard, /role === 'manager' \? '\/manager\/login' : '\/login'/);
+  assert.match(guard, /getRoleLoginPath\(role\)/);
   assert.match(guard, /\['requester', 'distributor', 'manager'\]\.includes\(role\)/);
   assert.match(roleGate, /SessionSecurityGuard/);
 });

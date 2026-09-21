@@ -7,15 +7,15 @@ const vm = require('node:vm');
 const root = resolve(__dirname, '../../..');
 const login = readFileSync(resolve(root, 'components/PrivilegedLogin.jsx'), 'utf8');
 // Execute the actual navigation effect with controlled router readiness.
-const effect = login.match(/React\.useEffect\(\(\) => \{([\s\S]*?)\n  \}, \[admin, currentPathname/)[1];
+const effect = login.match(/React\.useEffect\(\(\) => \{([\s\S]*?)\n  \}, \[currentPathname/)[1];
 const harness = () => {
   const calls = [];
   const context = {
     pendingDestination: '/admin/dashboard', rootNavigationState: undefined,
-    navigationCompletedRef: { current: false }, admin: true,
+    navigationCompletedRef: { current: false },
     currentPathname: '/admin/login',
     routerRef: { current: { replace: (path) => calls.push(path) } },
-    logPrivilegedStage: (_admin, stage) => calls.push(stage),
+    logPrivilegedStage: (stage) => calls.push(stage),
     setError: () => {},
   };
   return { calls, context, run: () => vm.runInNewContext(`(() => {${effect}})()`, context) };

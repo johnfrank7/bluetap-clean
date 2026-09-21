@@ -1,6 +1,6 @@
 import React from 'react';
-import PrivilegedLogin from '../../components/PrivilegedLogin';
+import { Redirect } from 'expo-router';
 
 export default function ManagerLoginPage() {
-  return <PrivilegedLogin role="manager" />;
+  return <Redirect href="/login" />;
 }

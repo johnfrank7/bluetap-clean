@@ -2,12 +2,10 @@ import React from 'react';
 import { Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useRouter } from 'expo-router';
 
-import { getModuleSession, signOutAndClearSessions } from '../services/authSession';
+import { getModuleSession, getRoleLoginPath, signOutAndClearSessions } from '../services/authSession';
 import { getSessionPolicy } from '../services/sessionSecurity';
 
 const WARNING_MS = 60 * 1000;
-const loginPath = (role) => role === 'manager' ? '/manager/login' : '/login';
-
 export default function SessionSecurityGuard({ children, role }) {
   const router = useRouter();
   const idleTimer = React.useRef(null);
@@ -28,7 +26,7 @@ export default function SessionSecurityGuard({ children, role }) {
     expiredRef.current = true;
     clearTimers();
     await signOutAndClearSessions();
-    router.replace(loginPath(role));
+    router.replace(getRoleLoginPath(role));
   }, [clearTimers, role, router]);
 
   const scheduleIdle = React.useCallback(() => {

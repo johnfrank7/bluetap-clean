@@ -40,6 +40,8 @@ const publicProfile = (profile, uid, email) => ({
   emailVerificationRequired: profile.emailVerificationRequired === true,
   faceVerification: profile.faceVerification || null,
   unique_id: profile.unique_id || null,
+  managerStatus: profile.managerStatus || null,
+  branchId: profile.branchId || null,
 });
 let verifiedWebKey = null;
 async function getPasswordApiKey() {
@@ -107,7 +109,7 @@ function createUsernameHandler(action, getAdmin = getFirebaseAdmin) {
       if (action === 'check') return res.status(200).json(await checkUsername(db, body.username));
       stage('REQUEST_RECEIVED');
       const portal = body.portal || 'public';
-      if (!['public', 'admin', 'manager', 'unified'].includes(portal) || typeof body.username !== 'string' ||
+      if (!['public', 'admin', 'unified'].includes(portal) || typeof body.username !== 'string' ||
           typeof body.password !== 'string' || !body.password || body.password.length > 128) {
         throw new OtpError(400, 'invalid-request', 'Enter your username or email and password.');
       }
@@ -185,11 +187,10 @@ function createUsernameHandler(action, getAdmin = getFirebaseAdmin) {
       loginDiagnostic('LOGIN_PROFILE_UID', { uid: expectedUid });
       loginDiagnostic('LOGIN_PROFILE_ROLE', { uid: expectedUid, role: profile.role });
       stage('ROLE_IDENTIFIED');
-      const privileged = ['admin', 'manager'].includes(profile.role) || user.customClaims?.admin === true ||
-        user.customClaims?.manager === true || ['admin', 'manager'].includes(user.customClaims?.role);
-      if (['public', 'unified'].includes(portal) && privileged) {
+      const administrator = profile.role === 'admin' || user.customClaims?.admin === true || user.customClaims?.role === 'admin';
+      if (['public', 'unified'].includes(portal) && administrator) {
         stage('PRIVILEGED_ACCOUNT');
-        throw new OtpError(403, 'privileged-login-required', 'This account must use its authorized sign-in portal.');
+        throw new OtpError(403, 'privileged-login-required', 'This account must use the Administrator sign-in portal.');
       }
       if (!['public', 'unified'].includes(portal) && profile.role !== portal) throw new OtpError(403, 'portal-role-mismatch', 'This account cannot use this sign-in portal.');
       // Onboarding/approval is a routing decision after authentication.

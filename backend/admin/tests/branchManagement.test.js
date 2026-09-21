@@ -91,6 +91,10 @@ test('Manager context derives its active Branch and rejects cross-branch or inac
   assert.equal(requireManagerBranch(context, 'a'), 'a');
   assert.throws(() => requireManagerBranch(context, 'b'), (error) => error.reason === 'BRANCH_ACCESS_DENIED');
 
+  f.records.set('users/manager-1', { ...f.records.get('users/manager-1'), managerStatus: 'inactive' });
+  await assert.rejects(requireActiveManager({ headers: { authorization: 'Bearer manager-token' } }, f.auth, f.db), (error) => error.reason === 'MANAGER_INACTIVE');
+
+  f.records.set('users/manager-1', { ...f.records.get('users/manager-1'), managerStatus: 'active' });
   f.records.set('branches/a', { ...f.records.get('branches/a'), status: 'inactive' });
   await assert.rejects(requireActiveManager({ headers: { authorization: 'Bearer manager-token' } }, f.auth, f.db), (error) => error.reason === 'BRANCH_INACTIVE');
 });

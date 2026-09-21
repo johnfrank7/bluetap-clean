@@ -135,7 +135,7 @@ export default function LoginPage() {
 
   React.useEffect(() => {
     if (passwordChanged === 'true') {
-      setNotification({ title: 'Password changed', message: 'Your Admin password was changed. Sign in with your new password.', onConfirm: null });
+      setNotification({ title: 'Password changed', message: 'Your password was changed. Sign in with your new password.', onConfirm: null });
     }
   }, [passwordChanged]);
 
@@ -370,7 +370,7 @@ export default function LoginPage() {
       console.info('[public-login]', { stage: 'LOGIN_PROFILE_LOADED', durationMs: Date.now() - startedAt });
       const { role } = userData;
       const profileRole = normalizeRole(role);
-      if (profileRole === 'admin' || profileRole === 'manager') {
+      if (profileRole === 'admin') {
         throw Object.assign(new Error('Privileged portal required'), { code: 'PRIVILEGED_LOGIN_REQUIRED' });
       }
       const profileApplicationStatus = getApplicationStatus(
@@ -387,7 +387,7 @@ export default function LoginPage() {
         rejectionReason: userData.rejectionReason || null,
       };
 
-      if (!['requester', 'distributor'].includes(profileRole)) {
+      if (!['requester', 'distributor', 'manager'].includes(profileRole)) {
         throw Object.assign(new Error('Account setup incomplete'), { code: 'ACCOUNT_SETUP_INCOMPLETE' });
       }
 
@@ -403,7 +403,7 @@ export default function LoginPage() {
         await signOut(auth).catch(() => {});
       }
       const privileged = error?.code === 'PRIVILEGED_LOGIN_REQUIRED' || error?.code === 'username/privileged-login-required';
-      showNotification('Login failed', getPublicLoginErrorMessage(error), privileged ? () => router.replace('/manager/login') : undefined, privileged ? 'Go to Manager Login' : '');
+      showNotification('Login failed', getPublicLoginErrorMessage(error), privileged ? () => router.replace('/admin/login') : undefined, privileged ? 'Go to Admin Login' : '');
     } finally {
       if (requestId === requestSequence.current) {
         loginInFlight.current = false;

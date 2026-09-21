@@ -4,7 +4,7 @@ import { useRouter } from 'expo-router';
 import { onAuthStateChanged, signInWithEmailAndPassword } from 'firebase/auth';
 
 import { auth } from '../firebase';
-import { clearAllAuthSessions, getPostAuthenticationDestination, saveRoleSession, signOutAndClearSessions } from '../services/authSession';
+import { clearAllAuthSessions, getPostAuthenticationDestination, getRoleLoginPath, saveRoleSession, signOutAndClearSessions } from '../services/authSession';
 import { completeRequiredPasswordChange } from '../services/requiredPasswordChange';
 
 export default function RequiredPasswordChangePage() {
@@ -28,9 +28,11 @@ export default function RequiredPasswordChangePage() {
     if (password !== confirmPassword) return setError('Passwords do not match.');
     passwordChangeFlow.current = true;
     setSaving(true); setError('');
+    let completedRole = '';
     try {
       const accountEmail = auth.currentUser?.email || '';
       const completion = await completeRequiredPasswordChange(password);
+      completedRole = completion.profile?.role || '';
       clearAllAuthSessions();
       await signOutAndClearSessions();
       try {
@@ -46,7 +48,7 @@ export default function RequiredPasswordChangePage() {
       } catch {
         await signOutAndClearSessions();
         passwordChangeFlow.current = false;
-        router.replace('/login?passwordChanged=true');
+        router.replace(`${getRoleLoginPath(completedRole)}?passwordChanged=true`);
       }
     } catch (submitError) {
       passwordChangeFlow.current = false;

@@ -57,7 +57,7 @@ test('username login verifies password through Firebase REST and returns only cu
     await handler({ method: 'POST', headers: {}, socket: { remoteAddress: 'test-ip' }, body: { username: 'JohnBlueTap', password: 'private-password' } }, res);
     assert.equal(res.statusCode, 200);
     assert.equal(res.body.customToken, 'custom-expected-user');
-    assert.deepEqual(res.body.profile, { uid: 'expected-user', email: 'private@example.test', role: 'requester', approvalStatus: null, status: null, rejectionReason: null, mustChangePassword: false, registrationCompleted: true, onboardingStatus: 'complete', emailVerificationRequired: false, faceVerification: null, unique_id: null });
+    assert.deepEqual(res.body.profile, { uid: 'expected-user', email: 'private@example.test', role: 'requester', approvalStatus: null, status: null, rejectionReason: null, mustChangePassword: false, registrationCompleted: true, onboardingStatus: 'complete', emailVerificationRequired: false, faceVerification: null, unique_id: null, managerStatus: null, branchId: null });
     assert.match(request.url, /accounts:signInWithPassword/);
     assert.deepEqual(JSON.parse(request.options.body), { email: 'private@example.test', password: 'private-password', returnSecureToken: true });
     assert.equal(JSON.stringify(res.body).includes('private-password'), false);
@@ -153,12 +153,12 @@ test('public login business outcomes retain production CORS through the HTTP ser
     { name: 'wrong requester password', role: 'requester', provider: 'INVALID_LOGIN_CREDENTIALS', status: 401, code: 'INVALID_CREDENTIALS' },
     { name: 'wrong distributor password', role: 'distributor', provider: 'INVALID_PASSWORD', status: 401, code: 'INVALID_CREDENTIALS' },
     { name: 'wrong admin password never shows privileged message', role: 'admin', provider: 'INVALID_PASSWORD', status: 401, code: 'INVALID_CREDENTIALS' },
-    { name: 'admin public login', role: 'admin', status: 403, code: 'PRIVILEGED_LOGIN_REQUIRED' },
-    { name: 'manager public login', role: 'manager', status: 403, code: 'PRIVILEGED_LOGIN_REQUIRED' },
+    { name: 'admin public login', role: 'admin', status: 403, code: 'PRIVILEGED_LOGIN_REQUIRED', message: 'This account must use the Administrator sign-in portal.' },
+    { name: 'manager public login', role: 'manager', profile: { managerStatus: 'active', branchId: 'branch-a' }, status: 200 },
     { name: 'legacy unified login cannot admit admin', role: 'admin', portal: 'unified', status: 403, code: 'PRIVILEGED_LOGIN_REQUIRED' },
-    { name: 'legacy unified login cannot admit manager', role: 'manager', portal: 'unified', status: 403, code: 'PRIVILEGED_LOGIN_REQUIRED' },
+    { name: 'legacy unified login admits manager through the public flow', role: 'manager', portal: 'unified', status: 200 },
     { name: 'admin authorized portal remains available', role: 'admin', portal: 'admin', status: 200 },
-    { name: 'manager authorized portal remains available', role: 'manager', portal: 'manager', status: 200 },
+    { name: 'legacy manager portal mode is retired', role: 'manager', portal: 'manager', status: 400, code: 'INVALID_REQUEST' },
     { name: 'public user cannot enter privileged portal', role: 'requester', portal: 'admin', status: 403, code: 'PORTAL_ROLE_MISMATCH' },
     { name: 'deleted mapping target', deleted: true, status: 409, code: 'ACCOUNT_MAPPING_INVALID' },
     { name: 'malformed mapping UID', invalidUid: true, status: 409, code: 'ACCOUNT_MAPPING_INVALID' },
@@ -212,10 +212,15 @@ test('public login business outcomes retain production CORS through the HTTP ser
         assert.equal(body.error.code, scenario.code);
         assert.equal(minted, 0);
         if (scenario.code === 'INVALID_CREDENTIALS') assert.equal(body.error.message, 'Invalid username or password.');
+        if (scenario.message) assert.equal(body.error.message, scenario.message);
       } else {
         assert.equal(body.customToken, 'test-custom-token');
         assert.equal(body.profile.uid, 'expected-user');
         assert.equal(minted, 1);
+        if (scenario.role === 'manager' && scenario.profile) {
+          assert.equal(body.profile.managerStatus, scenario.profile.managerStatus);
+          assert.equal(body.profile.branchId, scenario.profile.branchId);
+        }
       }
     } finally {
       await new Promise((resolve) => server.close(resolve));

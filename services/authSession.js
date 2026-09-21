@@ -126,6 +126,7 @@ const setSessions = (activeSession, moduleSessions) => {
 export const normalizeRole = (role) => role?.toString().trim().toLowerCase() || '';
 
 export const getRoleHomePath = (role) => ROLE_HOME_PATHS[normalizeRole(role)] || '/login';
+export const getRoleLoginPath = (role) => normalizeRole(role) === 'admin' ? '/admin/login' : '/login';
 
 const isFaceRequirementSatisfied = (profile = {}) =>
   profile.faceVerification?.status === 'not_required' && profile.faceVerification?.required === false
@@ -325,7 +326,7 @@ const validateRoleAccessOnce = async (expectedRole) => {
     return {
       status: 'unauthenticated',
       message: 'Unauthorized Access',
-      redirectTo: expected === 'admin' ? '/admin/login' : expected === 'manager' ? '/manager/login' : '/login',
+      redirectTo: getRoleLoginPath(expected),
       clearRole: expected,
     };
   }
@@ -339,10 +340,10 @@ const validateRoleAccessOnce = async (expectedRole) => {
     return { status: 'authorized', profile: cachedPrivilegedProfile, cached: true };
   }
 
-  // The fresh privileged sign-in already performed the one allowed forced
-  // token refresh. Route guards inspect the SDK's current token without
-  // forcing another Secure Token request. On a hard refresh Firebase can
-  // renew an expired token normally, while a valid token stays local.
+  // Admin sign-in performs its one allowed forced refresh. Manager uses the
+  // public login, whose custom-token session already contains current claims.
+  // Route guards inspect the SDK's current token without forcing another
+  // Secure Token request or creating a login/dashboard loop.
   if (expected === 'admin' || expected === 'manager') {
     let token;
     try {
@@ -356,7 +357,7 @@ const validateRoleAccessOnce = async (expectedRole) => {
       return {
         status: 'token-refresh-failed',
         message: 'Your secure sign-in session expired. Please sign in again.',
-        redirectTo: expected === 'admin' ? '/admin/login' : '/manager/login',
+        redirectTo: getRoleLoginPath(expected),
         shouldSignOut: true,
         clearRole: expected,
       };
@@ -368,7 +369,7 @@ const validateRoleAccessOnce = async (expectedRole) => {
       return {
         status: 'unauthorized',
         message: expected === 'admin' ? 'Administrator access is required.' : 'Manager access is required.',
-        redirectTo: expected === 'admin' ? '/admin/login' : '/manager/login',
+        redirectTo: getRoleLoginPath(expected),
         shouldSignOut: true,
         clearRole: expected,
       };
@@ -393,7 +394,7 @@ const validateRoleAccessOnce = async (expectedRole) => {
         : expected === 'manager'
           ? 'Manager profile could not be verified. Please contact support.'
           : 'Unauthorized Access',
-      redirectTo: expected === 'admin' ? '/admin/login' : expected === 'manager' ? '/manager/login' : '/login',
+      redirectTo: getRoleLoginPath(expected),
       shouldSignOut: true,
       clearRole: expected,
     };
@@ -403,7 +404,7 @@ const validateRoleAccessOnce = async (expectedRole) => {
     return {
       status: 'unauthenticated',
       message: 'Unauthorized Access',
-      redirectTo: expected === 'admin' ? '/admin/login' : expected === 'manager' ? '/manager/login' : '/login',
+      redirectTo: getRoleLoginPath(expected),
       clearRole: expected,
     };
   }

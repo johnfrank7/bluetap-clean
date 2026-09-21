@@ -14,16 +14,19 @@ test('privileged login requires matching trusted claim and Firestore role', () =
   assert.equal(hasTrustedRole('manager', { admin: true }, { role: 'admin' }), false);
 });
 
-test('Admin and Manager login routes bypass only their login screen while dashboards retain RoleGate', () => {
+test('Admin keeps its portal while the legacy Manager login redirects to public login', () => {
   const root = resolve(__dirname, '..', '..', '..');
   const adminLayout = readFileSync(resolve(root, 'app/admin/_layout.jsx'), 'utf8');
   const managerLayout = readFileSync(resolve(root, 'app/manager/_layout.jsx'), 'utf8');
+  const managerLogin = readFileSync(resolve(root, 'app/manager/login.jsx'), 'utf8');
   assert.match(adminLayout, /usePathname\(\)/);
   assert.match(adminLayout, /bypass=\{pathname === '\/admin\/login'\}/);
   assert.match(adminLayout, /RoleGate allowedRoles=\{\["admin"\]\}/);
   assert.match(managerLayout, /usePathname\(\)/);
   assert.match(managerLayout, /bypass=\{pathname === '\/manager\/login'\}/);
   assert.match(managerLayout, /RoleGate allowedRoles=\{\["manager"\]\}/);
+  assert.match(managerLogin, /Redirect href="\/login"/);
+  assert.doesNotMatch(managerLogin, /PrivilegedLogin/);
   assert.equal((adminLayout.match(/<Stack /g) || []).length, 1);
   assert.equal((managerLayout.match(/<Stack /g) || []).length, 1);
 });
@@ -33,7 +36,7 @@ test('required password change routes every account through a fresh role-based s
   const passwordChangePage = readFileSync(resolve(root, 'app/required-password-change.jsx'), 'utf8');
   assert.match(passwordChangePage, /signInWithEmailAndPassword\(auth, accountEmail, password\)/);
   assert.match(passwordChangePage, /router\.replace\(getPostAuthenticationDestination\(profile\)\)/);
-  assert.match(passwordChangePage, /router\.replace\('\/login\?passwordChanged=true'\)/);
+  assert.match(passwordChangePage, /getRoleLoginPath\(completedRole\)/);
 });
 
 test('privileged login refreshes its token before reading the Firestore profile', () => {
@@ -88,7 +91,7 @@ test('privileged route guard validates claims without forcing a second token ref
   assert.ok(profileReadIndex > refreshIndex);
   assert.doesNotMatch(authSession, /currentUser\.getIdTokenResult\(true\)/);
   assert.match(authSession, /getCachedPrivilegedAccess\(currentUser, expected\)/);
-  assert.match(login, /cacheValidatedPrivilegedAccess\(trustedProfile\)/);
+  assert.match(login, /cacheValidatedPrivilegedAccess\(profile\)/);
 });
 
 test('Manager context uses the current token after privileged validation', () => {
@@ -128,13 +131,18 @@ test('PrivilegedLogin keeps listener completion outside render-scoped effect var
   assert.match(login, /VALIDATION_CALLED_FROM_LOGIN/);
   assert.match(login, /const routerRef = React\.useRef\(router\)/);
   assert.match(login, /setPendingDestination\('\/admin\/dashboard'\)/);
-  assert.doesNotMatch(login, /\}, \[admin, role, router\]\)/);
+  assert.doesNotMatch(login, /\}, \[role, router\]\)/);
+  assert.doesNotMatch(login, /MANAGER_|Manager Sign In|getManagerContext|\/manager\/dashboard/);
 });
 
-test('privileged auth failures return to their own portal without a cross-role loop', () => {
+test('Admin failures return to Admin login while Manager and public sessions return to public login', () => {
   const root = resolve(__dirname, '..', '..', '..');
   const authSession = readFileSync(resolve(root, 'services/authSession.js'), 'utf8');
-  assert.match(authSession, /expected === 'admin' \? '\/admin\/login' : expected === 'manager' \? '\/manager\/login' : '\/login'/);
+  const sessionGuard = readFileSync(resolve(root, 'components/SessionSecurityGuard.jsx'), 'utf8');
+  assert.match(authSession, /normalizeRole\(role\) === 'admin' \? '\/admin\/login' : '\/login'/);
+  assert.doesNotMatch(authSession, /\/manager\/login/);
+  assert.match(sessionGuard, /getRoleLoginPath\(role\)/);
+  assert.doesNotMatch(sessionGuard, /\/manager\/login/);
   assert.match(authSession, /status: 'token-refresh-failed'/);
 });
 

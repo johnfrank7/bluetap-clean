@@ -1,6 +1,6 @@
 const messages = {
   INVALID_CREDENTIALS: 'Invalid username or password.',
-  PRIVILEGED_LOGIN_REQUIRED: 'This account must use its authorized sign-in portal.',
+  PRIVILEGED_LOGIN_REQUIRED: 'This account must use the Administrator sign-in portal.',
   NETWORK_ERROR: 'We could not reach the authentication service. Please try again.',
   SERVER_ERROR: 'Login is temporarily unavailable. Please try again.',
   ACCOUNT_SETUP_INCOMPLETE: 'Your account setup is incomplete. Please contact support.',

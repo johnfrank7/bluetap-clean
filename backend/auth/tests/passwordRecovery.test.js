@@ -3,14 +3,15 @@ const assert = require('node:assert/strict');
 const { createPasswordRecoveryHandler } = require('../passwordRecoveryHandler');
 const { OtpError } = require('../../utils/otpError');
 
-function fixture({ missingUser = false, failSend = false } = {}) {
+function fixture({ missingUser = false, failSend = false, role = 'requester' } = {}) {
   let time = 1800000000000;
   let autoId = 0;
   const records = new Map([
     ['users/recovery-user', {
       uid: 'recovery-user',
-      role: 'requester',
+      role,
       accountStatus: 'active',
+      ...(role === 'manager' ? { managerStatus: 'active', branchId: 'branch-a' } : {}),
       mustChangePassword: true,
     }],
   ]);
@@ -173,6 +174,41 @@ test('unknown recovery email stays generic and creates no OTP', async () => {
     assert.equal(result.body.generic, true);
     assert.equal(f.sent.length, 0);
     assert.equal([...f.records.keys()].some((key) => key.startsWith('passwordResetSessions/')), false);
+  });
+});
+
+test('active Manager recovery uses the same PASSWORD_RESET flow', async () => {
+  await withHashSecret(async () => {
+    const f = fixture({ role: 'manager' });
+    const requested = await f.invoke({ action: 'request', email: 'recovery@example.test' });
+    assert.equal(requested.statusCode, 200);
+    assert.equal(f.sent.length, 1);
+    const code = f.sent[0].text.match(/\b\d{6}\b/)[0];
+    const sessionKey = `passwordResetSessions/${requested.body.recoverySessionId}`;
+    const session = f.records.get(sessionKey);
+    assert.equal(session.purpose, 'PASSWORD_RESET');
+    assert.equal(session.uid, 'recovery-user');
+
+    const verified = await f.invoke({
+      action: 'verify',
+      recoverySessionId: requested.body.recoverySessionId,
+      code,
+    });
+    assert.equal(verified.statusCode, 200);
+
+    const completed = await f.invoke({
+      action: 'complete',
+      recoverySessionId: requested.body.recoverySessionId,
+      resetAuthorization: verified.body.resetAuthorization,
+      newPassword: 'ManagerPassword123',
+    });
+    assert.equal(completed.statusCode, 200);
+    assert.equal(f.records.get(sessionKey).status, 'consumed');
+    assert.equal(f.records.get('users/recovery-user').mustChangePassword, false);
+    assert.deepEqual(f.authEvents, [
+      ['update', 'recovery-user', { password: 'ManagerPassword123' }],
+      ['revoke', 'recovery-user'],
+    ]);
   });
 });
 
