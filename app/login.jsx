@@ -20,21 +20,16 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 
 import { BLUETAP_LOGIN_GRADIENT } from '../constants/bluetapTheme';
 import { auth, db } from '../firebase';
-import {
-  fetchSignInMethodsForEmail,
-  sendPasswordResetEmail,
-  signInWithCustomToken,
-  signOut,
-} from 'firebase/auth';
-import { findLocalUserByEmail, saveLocalUser } from '../localUsers';
+import { signInWithCustomToken, signOut } from 'firebase/auth';
+import { saveLocalUser } from '../localUsers';
 import {
   clearAllAuthSessions,
-  fetchFirestoreUserProfile,
   getPostAuthenticationDestination,
   saveRoleSession,
 } from '../services/authSession';
 import { loginWithUsernameResult } from '../services/usernameAuth';
 import { restartIncompleteRegistration } from '../services/profileRecovery';
+import { completePasswordRecovery, requestPasswordRecovery, verifyPasswordRecovery } from '../services/passwordRecovery';
 import { clearPendingRegistration } from '../services/emailVerification';
 import { warmFaceServiceForSignup, warmLoginBackend } from '../services/apiWarmup';
 
@@ -49,19 +44,6 @@ const getApplicationRejectedMessage = (rejectionReason) =>
   `Unfortunately, your distributor application has been rejected.\n\nReason:\n${rejectionReason || 'No rejection reason was provided.'}\n\nPlease submit a new application with valid and complete documents.`;
 const distributorRegistrationMessage =
   'Your application has been submitted successfully.\n\nYour account is currently Pending Approval.\n\nPlease wait for the administrator to review and approve your application before you can log in.';
-
-const passwordResetErrorMessages = {
-  'auth/invalid-email': 'Please enter a valid email address.',
-  'auth/user-not-found': 'No account is associated with this email.',
-  'auth/expired-action-code': 'This password reset link has expired.',
-  'auth/invalid-action-code': 'This password reset link has expired.',
-  'auth/network-request-failed': 'Network error. Please check your connection and try again.',
-};
-
-const getPasswordResetErrorMessage = (error) =>
-  passwordResetErrorMessages[error?.code] ||
-  error?.message ||
-  'Something went wrong. Please try again.';
 
 const isValidEmail = (value) => emailPattern.test(value.trim().toLowerCase());
 const normalizeApprovalStatus = (status) =>
@@ -118,6 +100,8 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
   const loginInFlight = React.useRef(false);
+  const loginRequestId = React.useRef(0);
+  const loginSucceeded = React.useRef(false);
   const [pendingUser, setPendingUser] = React.useState(null);
   const [restartPhase, setRestartPhase] = React.useState('idle');
   const [restartError, setRestartError] = React.useState('');
@@ -125,6 +109,13 @@ export default function LoginPage() {
   const [resetEmail, setResetEmail] = React.useState('');
   const [resetEmailError, setResetEmailError] = React.useState('');
   const [resetLoading, setResetLoading] = React.useState(false);
+  const [recoveryStep, setRecoveryStep] = React.useState('email');
+  const [recoverySessionId, setRecoverySessionId] = React.useState('');
+  const [recoveryMaskedEmail, setRecoveryMaskedEmail] = React.useState('');
+  const [recoveryAuthorization, setRecoveryAuthorization] = React.useState('');
+  const [recoveryCode, setRecoveryCode] = React.useState('');
+  const [recoveryPassword, setRecoveryPassword] = React.useState('');
+  const [recoveryPasswordConfirm, setRecoveryPasswordConfirm] = React.useState('');
   const [notification, setNotification] = React.useState(null);
   const [keyboardBottomInset, setKeyboardBottomInset] = React.useState(0);
   const isLoginSuccessVisible = notification?.title === 'Successfully logged in';
@@ -316,10 +307,16 @@ export default function LoginPage() {
       return;
     }
 
+    const requestSequence = typeof loginRequestId === 'undefined' ? { current: 0 } : loginRequestId;
+    const successState = typeof loginSucceeded === 'undefined' ? { current: false } : loginSucceeded;
+    const requestId = requestSequence.current + 1;
+    requestSequence.current = requestId;
+    successState.current = false;
     let authenticatedUser = null;
     loginInFlight.current = true;
     try {
       setLoading(true);
+      if (typeof setNotification === 'function') setNotification(null);
       const startedAt = Date.now();
       console.info('[public-login]', { stage: 'LOGIN_REQUEST_STARTED' });
 
@@ -359,7 +356,10 @@ export default function LoginPage() {
         throw Object.assign(new Error('Account mapping invalid'), { code: 'ACCOUNT_MAPPING_INVALID' });
       }
 
-      const userData = await fetchFirestoreUserProfile(user);
+      // The backend just authenticated this UID and loaded this profile before
+      // minting the custom token. A second client Firestore read could fail or
+      // race after successful authentication and used to overwrite success.
+      const userData = responseProfile;
       if (
         !userData ||
         userData.uid !== user.uid ||
@@ -392,10 +392,12 @@ export default function LoginPage() {
       }
 
       saveLocalUser(profileData);
+      successState.current = true;
       finishSuccessfulLogin(profileData);
       console.info('[public-login]', { stage: 'LOGIN_ROUTED', durationMs: Date.now() - startedAt });
 
     } catch (error) {
+      if (requestId !== requestSequence.current || successState.current) return;
       if (auth.currentUser && (!authenticatedUser || auth.currentUser.uid === authenticatedUser.uid)) {
         clearAllAuthSessions();
         await signOut(auth).catch(() => {});
@@ -403,8 +405,10 @@ export default function LoginPage() {
       const privileged = error?.code === 'PRIVILEGED_LOGIN_REQUIRED' || error?.code === 'username/privileged-login-required';
       showNotification('Login failed', getPublicLoginErrorMessage(error), privileged ? () => router.replace('/manager/login') : undefined, privileged ? 'Go to Manager Login' : '');
     } finally {
-      loginInFlight.current = false;
-      setLoading(false);
+      if (requestId === requestSequence.current) {
+        loginInFlight.current = false;
+        setLoading(false);
+      }
     }
   };
 
@@ -448,6 +452,7 @@ export default function LoginPage() {
     clearFocusScrollTimeout();
     setResetEmail(email.trim().toLowerCase());
     setResetEmailError('');
+    setRecoveryStep('email'); setRecoverySessionId(''); setRecoveryMaskedEmail(''); setRecoveryAuthorization(''); setRecoveryCode(''); setRecoveryPassword(''); setRecoveryPasswordConfirm('');
     setForgotPasswordVisible(true);
   };
 
@@ -470,26 +475,30 @@ export default function LoginPage() {
       setResetLoading(true);
       setResetEmailError('');
 
-      const signInMethods = await fetchSignInMethodsForEmail(auth, normalizedEmail);
-
-      if (signInMethods.length === 0 && !findLocalUserByEmail(normalizedEmail)) {
-        const noAccountError = new Error('No account is associated with this email.');
-        noAccountError.code = 'auth/user-not-found';
-        throw noAccountError;
-      }
-
-      await sendPasswordResetEmail(auth, normalizedEmail);
-      setForgotPasswordVisible(false);
-      setResetEmail('');
-      showNotification('Password reset', 'Password reset link has been sent to your email.');
+      const result = await requestPasswordRecovery(normalizedEmail);
+      setRecoverySessionId(result.recoverySessionId);
+      setRecoveryMaskedEmail(result.maskedEmail || normalizedEmail);
+      setRecoveryStep('verify');
     } catch (error) {
-      console.log('Password reset error:', error.message);
-      const message = getPasswordResetErrorMessage(error);
+      const message = error?.message || 'Password recovery is temporarily unavailable. Please try again.';
       setResetEmailError(message);
-      showNotification('Password reset failed', message);
     } finally {
       setResetLoading(false);
     }
+  };
+
+  const verifyRecoveryCode = async () => {
+    if (!/^\d{6}$/.test(recoveryCode)) { setResetEmailError('Enter the six-digit code from your email.'); return; }
+    try { setResetLoading(true); setResetEmailError(''); const result = await verifyPasswordRecovery(recoverySessionId, recoveryCode); setRecoveryAuthorization(result.resetAuthorization); setRecoveryStep('password'); }
+    catch (error) { setResetEmailError(error?.message || 'That code is invalid or expired.'); }
+    finally { setResetLoading(false); }
+  };
+
+  const completeRecovery = async () => {
+    if (recoveryPassword !== recoveryPasswordConfirm) { setResetEmailError('Passwords do not match.'); return; }
+    try { setResetLoading(true); setResetEmailError(''); await completePasswordRecovery(recoverySessionId, recoveryAuthorization, recoveryPassword); setRecoveryStep('done'); }
+    catch (error) { setResetEmailError(error?.message || 'Password recovery is temporarily unavailable. Please try again.'); }
+    finally { setResetLoading(false); }
   };
 
   return (
@@ -663,48 +672,16 @@ export default function LoginPage() {
         <Modal visible={forgotPasswordVisible} transparent animationType="slide">
           <View style={styles.modalBackground}>
             <View style={styles.modalContainer}>
-              <Text style={styles.modalTitle}>Forgot Password?</Text>
-              <Text style={styles.resetHelperText}>
-                Enter the email address associated with your BlueTap account.
-              </Text>
-
-              <TextInput
-                style={[styles.resetInput, !!resetEmailError && styles.resetInputError]}
-                placeholder="Enter email"
-                placeholderTextColor="#90A4AE"
-                keyboardType="email-address"
-                autoCapitalize="none"
-                value={resetEmail}
-                onChangeText={(value) => {
-                  setResetEmail(value);
-                  if (resetEmailError) {
-                    setResetEmailError(
-                      isValidEmail(value) ? '' : 'Please enter a valid email address.'
-                    );
-                  }
-                }}
-              />
-              {!!resetEmailError && (
-                <Text style={styles.resetErrorText}>{resetEmailError}</Text>
-              )}
-
-              <TouchableOpacity
-                style={[styles.modalButton, resetLoading && styles.buttonDisabled]}
-                onPress={handlePasswordReset}
-                disabled={resetLoading}
-              >
-                <Text style={styles.modalButtonText}>
-                  {resetLoading ? 'Sending...' : 'Send reset link'}
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.modalCancel}
-                onPress={closeForgotPassword}
-                disabled={resetLoading}
-              >
-                <Text style={styles.modalCancelText}>Cancel</Text>
-              </TouchableOpacity>
+              <Text style={styles.recoveryProgress}>Email  →  Verify  →  New password  →  Done</Text>
+              <Text style={styles.modalTitle}>{recoveryStep === 'email' ? 'Reset your password' : recoveryStep === 'verify' ? 'Check your email' : recoveryStep === 'password' ? 'Create a new password' : 'Password changed'}</Text>
+              <Text style={styles.resetHelperText}>{recoveryStep === 'email' ? 'Enter the email linked to your BlueTap account.' : recoveryStep === 'verify' ? `We sent a verification code to ${recoveryMaskedEmail}.` : recoveryStep === 'password' ? 'Choose a new password with uppercase, lowercase, and a number.' : 'Your password was changed. Sign in with your new password.'}</Text>
+              {recoveryStep === 'email' ? <TextInput style={[styles.resetInput, !!resetEmailError && styles.resetInputError]} placeholder="Email address" placeholderTextColor="#90A4AE" keyboardType="email-address" autoCapitalize="none" value={resetEmail} onChangeText={setResetEmail} /> : null}
+              {recoveryStep === 'verify' ? <TextInput style={[styles.resetInput, !!resetEmailError && styles.resetInputError]} placeholder="6-digit code" placeholderTextColor="#90A4AE" keyboardType="number-pad" maxLength={6} value={recoveryCode} onChangeText={(value) => setRecoveryCode(value.replace(/\D/g, ''))} /> : null}
+              {recoveryStep === 'password' ? <><TextInput style={[styles.resetInput, !!resetEmailError && styles.resetInputError]} placeholder="New password" placeholderTextColor="#90A4AE" secureTextEntry value={recoveryPassword} onChangeText={setRecoveryPassword} /><TextInput style={styles.resetInput} placeholder="Confirm new password" placeholderTextColor="#90A4AE" secureTextEntry value={recoveryPasswordConfirm} onChangeText={setRecoveryPasswordConfirm} /></> : null}
+              {!!resetEmailError && <Text style={styles.resetErrorText}>{resetEmailError}</Text>}
+              {recoveryStep !== 'done' ? <TouchableOpacity style={[styles.modalButton, resetLoading && styles.buttonDisabled]} onPress={recoveryStep === 'email' ? handlePasswordReset : recoveryStep === 'verify' ? verifyRecoveryCode : completeRecovery} disabled={resetLoading}><Text style={styles.modalButtonText}>{resetLoading ? 'Please wait…' : recoveryStep === 'email' ? 'Send verification code' : recoveryStep === 'verify' ? 'Verify code' : 'Save new password'}</Text></TouchableOpacity> : <TouchableOpacity style={styles.modalButton} onPress={closeForgotPassword}><Text style={styles.modalButtonText}>Back to sign in</Text></TouchableOpacity>}
+              {recoveryStep === 'verify' ? <TouchableOpacity style={styles.modalCancel} onPress={handlePasswordReset} disabled={resetLoading}><Text style={styles.modalCancelText}>Resend code</Text></TouchableOpacity> : null}
+              {recoveryStep !== 'done' ? <TouchableOpacity style={styles.modalCancel} onPress={closeForgotPassword} disabled={resetLoading}><Text style={styles.modalCancelText}>Cancel</Text></TouchableOpacity> : null}
             </View>
           </View>
         </Modal>
@@ -928,6 +905,13 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     marginBottom: 20,
     color: '#187BCD',
+  },
+  recoveryProgress: {
+    color: '#64748B',
+    fontSize: 11,
+    fontWeight: '700',
+    marginBottom: 12,
+    textAlign: 'center',
   },
   resetHelperText: {
     color: '#455A64',

@@ -34,6 +34,7 @@ const publicProfile = (profile, uid, email) => ({
   approvalStatus: profile.approvalStatus || profile.status || null,
   status: profile.status || profile.approvalStatus || null,
   rejectionReason: profile.rejectionReason || null,
+  mustChangePassword: profile.mustChangePassword === true,
   registrationCompleted: profile.registrationCompleted,
   onboardingStatus: profile.onboardingStatus || null,
   emailVerificationRequired: profile.emailVerificationRequired === true,

@@ -9,6 +9,7 @@ const { createFaceServiceWarmupHandler } = require('../verification/faceServiceW
 const { createAdminRegistrationSecurityHandler } = require('../admin/registrationSecurityHandler');
 const { createAdminBranchesHandler, createAdminManagersHandler } = require('../admin/branchManagementHandler');
 const { createRequiredPasswordChangeHandler } = require('../auth/requiredPasswordChangeHandler');
+const { createPasswordRecoveryHandler } = require('../auth/passwordRecoveryHandler');
 const { createManagerContextHandler } = require('../manager/managerContextHandler');
 const { createAdminAccountsHandler } = require('../admin/accountManagementHandler');
 const { createAdminDistributorsHandler } = require('../admin/distributorManagementHandler');
@@ -39,6 +40,7 @@ const routes = new Map([
   ['/api/admin/dashboard/overview', createAdminDashboardOverviewHandler()],
   ['/api/manager/context', createManagerContextHandler()],
   ['/api/auth/complete-required-password-change', createRequiredPasswordChangeHandler()],
+  ['/api/auth/password-recovery', createPasswordRecoveryHandler()],
   ['/api/auth/session-policy', createSessionPolicyHandler()],
 ]);
 
