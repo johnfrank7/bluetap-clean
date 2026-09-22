@@ -6,7 +6,7 @@ import { StatusBadge } from '../../components/DashboardUi';
 import { useAdminTheme } from '../../components/AdminTheme';
 import { BLUETAP_LAYOUT } from '../../constants/bluetapTheme';
 import { ADMIN_CACHE_KEYS, useAdminData } from '../../services/adminDataCache';
-import { createAdminProduct, getAdminProducts, updateAdminProduct } from '../../services/adminProducts';
+import { adminProductErrorMessage, createAdminProduct, getAdminProducts, updateAdminProduct } from '../../services/adminProducts';
 import { getBranches } from '../../services/branchManagement';
 
 const empty = { product_name:'',description:'',price:'',containerType:'',size:'',active:true,branchIds:[],image:'',imagePath:'',imageFile:null,imagePreview:'' };
@@ -34,9 +34,9 @@ export default function AdminProductsPage() {
       const payload = { product_name:form.product_name.trim(),description:form.description.trim(),price,containerType:form.containerType.trim(),size:form.size.trim(),active:form.active,branchIds:form.branchIds };
       if (editing) await updateAdminProduct(editing.id,payload,form.imageFile); else await createAdminProduct(payload,form.imageFile);
       setModal(false); setEditing(null); setForm(empty); await productsState.refresh({force:true}); setMessage('Product saved. Requesters will see the updated catalog on refresh.');
-    } catch (error) { setMessage(error.message); } finally { setSaving(false); }
+    } catch (error) { setMessage(adminProductErrorMessage(error)); } finally { setSaving(false); }
   };
-  const toggleActive = async (product) => { setSaving(true); setMessage(''); try { await updateAdminProduct(product.id,{active:!product.active},null); await productsState.refresh({force:true}); } catch(error){setMessage(error.message);} finally{setSaving(false);} };
+  const toggleActive = async (product) => { setSaving(true); setMessage(''); try { await updateAdminProduct(product.id,{active:!product.active},null); await productsState.refresh({force:true}); } catch(error){setMessage(adminProductErrorMessage(error));} finally{setSaving(false);} };
   return <AdminShell title="Products" subtitle="Manage the authoritative product catalog, pricing, images, and availability.">
     <View style={styles.toolbar}><View><Text style={styles.eyebrow}>PRODUCT CATALOG</Text><Text style={styles.heading}>Products and pricing</Text></View><View style={styles.toolbarActions}><TextInput value={search} onChangeText={setSearch} placeholder="Search products" placeholderTextColor={colors.textSecondary} style={styles.search}/><TouchableOpacity onPress={() => open()} style={styles.primary}><Text style={styles.primaryText}>Add product</Text></TouchableOpacity></View></View>
     {!!message && <View accessibilityRole="alert" style={styles.notice}><Text style={styles.noticeText}>{message}</Text></View>}

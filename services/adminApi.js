@@ -29,6 +29,8 @@ async function runRequest(path, { method, body }) {
   if (!response.ok) {
     const error = new Error(result?.error?.message || 'Administrator data is temporarily unavailable.');
     error.code = result?.error?.reason || 'service-unavailable';
+    error.status = response.status;
+    error.fieldErrors = result?.error?.fieldErrors || null;
     throw error;
   }
   return result;

@@ -8,7 +8,7 @@ const clean = (value, max = 240) => String(value || '').trim().slice(0, max);
 const priceFor = (value) => {
   const price = Number(value);
   if (!Number.isFinite(price) || price < 0 || price > 1_000_000) {
-    throw new OtpError(400, 'INVALID_PRODUCT_PRICE', 'Enter a valid product price.');
+    throw new OtpError(400, 'INVALID_PRODUCT_PRICE', 'Enter a valid product price.', { field: 'price' });
   }
   return Math.round(price * 100) / 100;
 };
@@ -63,7 +63,7 @@ function requireJsonProductRequest(req) {
 async function validateBranches(db, branchIds) {
   await Promise.all(branchIds.map(async (branchId) => {
     const snapshot = await db.collection('branches').doc(branchId).get();
-    if (!snapshot.exists) throw new OtpError(400, 'INVALID_PRODUCT_BRANCH', 'A selected product branch does not exist.');
+    if (!snapshot.exists) throw new OtpError(400, 'INVALID_PRODUCT_BRANCH', 'A selected product branch does not exist.', { field: 'branchIds' });
   }));
 }
 
@@ -79,15 +79,32 @@ function productInput(body, { partial = false } = {}) {
   if (!partial || Object.prototype.hasOwnProperty.call(body, 'price')) result.price = priceFor(body.price);
   if (!partial || Object.prototype.hasOwnProperty.call(body, 'active')) result.active = body.active !== false;
   if (!partial || Object.prototype.hasOwnProperty.call(body, 'branchIds')) result.branchIds = branchIdsFor(body.branchIds);
-  if (!partial && !result.product_name) throw new OtpError(400, 'INVALID_PRODUCT', 'Product name is required.');
+  if (!partial && !result.product_name) throw new OtpError(400, 'INVALID_PRODUCT', 'Product name is required.', { field: 'product_name' });
   return result;
+}
+
+function safeRequestMetadata(body = {}) {
+  const image = body.imageUpload && typeof body.imageUpload === 'object' ? body.imageUpload : null;
+  return {
+    propertyNames: Object.keys(body).sort(),
+    valueTypes: Object.fromEntries(Object.entries(body).filter(([key]) => key !== 'imageUpload').map(([key, value]) => [key, Array.isArray(value) ? 'array' : typeof value])),
+    branchIds: branchIdsFor(body.branchIds),
+    priceType: typeof body.price,
+    image: image ? {
+      propertyNames: Object.keys(image).sort(),
+      contentType: clean(image.contentType, 80),
+      hasDataUrlPrefix: /^data:/i.test(String(image.dataBase64 || '')),
+    } : null,
+  };
 }
 
 function responseError(res, error) {
   const known = error instanceof OtpError;
+  const field = known ? clean(error.details?.field, 80) : '';
   return res.status(known ? error.status : 500).json({ error: {
     reason: known ? error.reason : 'service-unavailable',
     message: known ? error.message : 'Product management is temporarily unavailable.',
+    ...(field ? { fieldErrors: { [field]: error.message } } : {}),
   } });
 }
 
@@ -119,6 +136,7 @@ function createAdminProductsHandler(getAdmin = getFirebaseAdmin, { imageStorage 
       logger.info?.('[product-create]', { stage: 'PRODUCT_CREATE_REQUEST_RECEIVED', method: req.method });
       logger.info?.('[product-create]', { stage: 'PRODUCT_CREATE_CONTENT_TYPE', contentType });
       const body = bodyOf(req);
+      logger.info?.('[product-create]', { stage: 'PRODUCT_CREATE_PAYLOAD_RECEIVED', ...safeRequestMetadata(body) });
       if (req.method === 'POST') {
         const input = productInput(body);
         await validateBranches(db, input.branchIds);
@@ -182,4 +200,4 @@ function createAdminProductsHandler(getAdmin = getFirebaseAdmin, { imageStorage 
   };
 }
 
-module.exports = { createAdminProductsHandler, safeProduct, requestContentType };
+module.exports = { createAdminProductsHandler, safeProduct, requestContentType, safeRequestMetadata };

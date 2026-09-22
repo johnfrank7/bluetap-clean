@@ -3,7 +3,7 @@ const { readFileSync } = require('node:fs');
 const { resolve } = require('node:path');
 const test = require('node:test');
 
-const { createAdminProductsHandler, safeProduct } = require('../productManagementHandler');
+const { createAdminProductsHandler, safeProduct, safeRequestMetadata } = require('../productManagementHandler');
 const { createSupabaseProductImageStorage, decodeProductImage } = require('../../services/supabaseStorage');
 const { createRequesterCatalogHandler } = require('../../requester/orderingHandler');
 
@@ -18,6 +18,8 @@ function fixture() {
     ['users/manager-1', { role: 'manager' }],
     ['users/requester-1', { role: 'requester' }],
     ['branches/central', { name: 'Central', status: 'active' }],
+    ['branches/bluetap-a', { name: 'bluetap A', status: 'active' }],
+    ['branches/bluetap-b', { name: 'bluetap B', status: 'active' }],
     ['products/refill', { product_name: 'Refill', price: 35, active: true, branchIds: ['central'], imageUrl: 'https://example.supabase.co/storage/v1/object/public/products-images/products/refill/old.webp', imagePath: 'products/refill/old.webp', imageStorageProvider: 'supabase' }],
   ]);
   let auto = 0;
@@ -136,8 +138,27 @@ test('Admin product client sends one JSON payload and preserves image MIME insid
   const adminProducts = readFileSync(resolve(__dirname, '..', '..', '..', 'services', 'adminProducts.js'), 'utf8');
   assert.match(adminApi, /'Content-Type': 'application\/json'/);
   assert.match(adminApi, /body: JSON\.stringify\(body\)/);
-  assert.match(adminProducts, /contentType: file\.type, dataBase64/);
+  assert.match(adminProducts, /signatureType\(await fileSignature\(file\)\)/);
+  assert.match(adminProducts, /return \{ contentType, dataBase64:/);
   assert.doesNotMatch(adminApi + adminProducts, /FormData|multipart\/form-data/);
+});
+
+test('safe product diagnostics report schema and types without image bytes', () => {
+  const body = {
+    product_name: 'BlueTap 1-Gallon Purified Water',
+    price: 25,
+    branchIds: ['bluetap-a', 'bluetap-b'],
+    imageUpload: imagePayload('image/png', png),
+  };
+  const metadata = safeRequestMetadata(body);
+  assert.deepEqual(metadata.propertyNames, ['branchIds', 'imageUpload', 'price', 'product_name']);
+  assert.equal(metadata.valueTypes.price, 'number');
+  assert.equal(metadata.valueTypes.branchIds, 'array');
+  assert.deepEqual(metadata.branchIds, ['bluetap-a', 'bluetap-b']);
+  assert.deepEqual(metadata.image.propertyNames, ['contentType', 'dataBase64']);
+  assert.equal(metadata.image.contentType, 'image/png');
+  assert.equal(metadata.image.hasDataUrlPrefix, false);
+  assert.doesNotMatch(JSON.stringify(metadata), new RegExp(body.imageUpload.dataBase64));
 });
 
 test('Admin creates a product with a Supabase image metadata record', async () => {
@@ -169,6 +190,55 @@ test('valid JSON with an invalid image MIME returns product validation, not an H
   const f = fixture(); const result = await call(createAdminProductsHandler(f.getAdmin, { imageStorage: storage(), logger: { info() {} } }), 'POST', 'admin-token', { product_name: 'Bad image', price: 12, imageUpload: imagePayload('image/gif', jpeg) });
   assert.equal(result.statusCode, 422);
   assert.equal(result.body.error.reason, 'PRODUCT_IMAGE_TYPE_INVALID');
+});
+
+test('a declared image MIME that differs from its bytes returns the exact actionable 422 before storage', async () => {
+  const f = fixture(); const imageStorage = storage(); const logs = [];
+  const handler = createAdminProductsHandler(f.getAdmin, { imageStorage, logger: { info(...entry) { logs.push(entry); } } });
+  const result = await call(handler, 'POST', 'admin-token', {
+    product_name: 'Mismatched image',
+    price: 25,
+    imageUpload: imagePayload('image/png', jpeg),
+  });
+  assert.equal(result.statusCode, 422);
+  assert.deepEqual(result.body, { error: {
+    reason: 'PRODUCT_IMAGE_TYPE_INVALID',
+    message: 'The uploaded file does not match its image type.',
+    fieldErrors: { imageUpload: 'The uploaded file does not match its image type.' },
+  } });
+  assert.equal(imageStorage.calls.length, 0);
+  assert.match(JSON.stringify(logs), /PRODUCT_CREATE_PAYLOAD_RECEIVED/);
+  assert.doesNotMatch(JSON.stringify(logs), /PRODUCT_IMAGE_DECODED|PRODUCT_IMAGE_UPLOAD_STARTED/);
+});
+
+test('the reported two-branch product payload succeeds with a valid image', async () => {
+  const f = fixture(); const imageStorage = storage();
+  const handler = createAdminProductsHandler(f.getAdmin, { imageStorage, logger: { info() {} } });
+  const payload = {
+    product_name: 'BlueTap 1-Gallon Purified Water',
+    price: 25,
+    containerType: 'Gallon Container',
+    size: '1 Gallon / 3.8 Liters',
+    description: 'SAFAFA',
+    active: true,
+    branchIds: ['bluetap-a', 'bluetap-b'],
+    imageUpload: imagePayload('image/png', png),
+  };
+  const result = await call(handler, 'POST', 'admin-token', payload);
+  assert.equal(result.statusCode, 201);
+  assert.equal(result.body.product.product_name, payload.product_name);
+  assert.equal(result.body.product.price, 25);
+  assert.equal(result.body.product.containerType, payload.containerType);
+  assert.equal(result.body.product.size, payload.size);
+  assert.equal(result.body.product.description, payload.description);
+  assert.deepEqual(result.body.product.branchIds, payload.branchIds);
+  assert.deepEqual(imageStorage.calls.map(({ type, contentType }) => ({ type, contentType })), [{ type: 'upload', contentType: 'image/png' }]);
+  const saved = f.records.get(`products/${result.body.product.id}`);
+  assert.deepEqual(saved.branchIds, payload.branchIds);
+  assert.equal(saved.price, 25);
+  const catalog = await call(createRequesterCatalogHandler(f.getAdmin), 'GET', 'requester-token');
+  assert.equal(catalog.statusCode, 200);
+  assert.equal(catalog.body.products.some((product) => product.id === result.body.product.id), true);
 });
 
 test('a valid JSON image just under the decoded 5 MB limit uploads through the Admin API', async () => {
