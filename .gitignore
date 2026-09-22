@@ -33,8 +33,15 @@ yarn-error.*
 .DS_Store
 *.pem
 
-# local env files
-.env*.local
+# local environment files and private service credentials
+.env
+.env.*
+!.env.example
+!**/.env.example
+*service-account*.json
+*service_account*.json
+serviceAccountKey.json
+firebase-adminsdk*.json
 
 # typescript
 *.tsbuildinfo
