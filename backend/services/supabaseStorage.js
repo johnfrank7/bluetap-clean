@@ -21,14 +21,14 @@ function decodeProductImage(value) {
   if (!value || typeof value !== 'object') return null;
   const contentType = String(value.contentType || '').toLowerCase().trim();
   const encoded = String(value.dataBase64 || '');
-  if (!IMAGE_TYPES.has(contentType)) throw new OtpError(415, 'PRODUCT_IMAGE_TYPE_INVALID', 'Use a JPG, PNG, or WebP product image.');
+  if (!IMAGE_TYPES.has(contentType)) throw new OtpError(422, 'PRODUCT_IMAGE_TYPE_INVALID', 'Use a JPG, PNG, or WebP product image.');
   if (!encoded || !/^[A-Za-z0-9+/]+={0,2}$/.test(encoded) || encoded.length % 4 !== 0) {
     throw new OtpError(400, 'PRODUCT_IMAGE_TYPE_INVALID', 'Use a valid JPG, PNG, or WebP product image.');
   }
   const bytes = Buffer.from(encoded, 'base64');
   if (!bytes.length || bytes.toString('base64') !== encoded) throw new OtpError(400, 'PRODUCT_IMAGE_TYPE_INVALID', 'Use a valid JPG, PNG, or WebP product image.');
   if (bytes.length > MAX_PRODUCT_IMAGE_BYTES) throw new OtpError(413, 'PRODUCT_IMAGE_TOO_LARGE', 'Product images must be 5 MB or smaller.');
-  if (imageTypeFor(bytes) !== contentType) throw new OtpError(415, 'PRODUCT_IMAGE_TYPE_INVALID', 'The uploaded file does not match its image type.');
+  if (imageTypeFor(bytes) !== contentType) throw new OtpError(422, 'PRODUCT_IMAGE_TYPE_INVALID', 'The uploaded file does not match its image type.');
   return { bytes, contentType };
 }
 

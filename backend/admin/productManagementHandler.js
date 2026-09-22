@@ -45,6 +45,21 @@ function bodyOf(req) {
   catch { throw new OtpError(400, 'INVALID_REQUEST', 'The request body is invalid.'); }
 }
 
+function requestContentType(req) {
+  return String(req.headers?.['content-type'] || req.headers?.['Content-Type'] || '')
+    .split(';', 1)[0]
+    .trim()
+    .toLowerCase();
+}
+
+function requireJsonProductRequest(req) {
+  const contentType = requestContentType(req);
+  if (contentType !== 'application/json') {
+    throw new OtpError(415, 'UNSUPPORTED_PRODUCT_MEDIA_TYPE', 'Use application/json for product changes.');
+  }
+  return contentType;
+}
+
 async function validateBranches(db, branchIds) {
   await Promise.all(branchIds.map(async (branchId) => {
     const snapshot = await db.collection('branches').doc(branchId).get();
@@ -82,7 +97,7 @@ async function cleanupUploadedImage(storage, uploaded, productId) {
   catch { /* Storage service emits a safe cleanup failure log. */ }
 }
 
-function createAdminProductsHandler(getAdmin = getFirebaseAdmin, { imageStorage = null } = {}) {
+function createAdminProductsHandler(getAdmin = getFirebaseAdmin, { imageStorage = null, logger = console } = {}) {
   return async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     if (!applyCors(req, res)) return;
@@ -99,6 +114,10 @@ function createAdminProductsHandler(getAdmin = getFirebaseAdmin, { imageStorage 
           .sort((left, right) => left.product_name.localeCompare(right.product_name));
         return res.status(200).json({ products });
       }
+      const startedAt = Date.now();
+      const contentType = requireJsonProductRequest(req);
+      logger.info?.('[product-create]', { stage: 'PRODUCT_CREATE_REQUEST_RECEIVED', method: req.method });
+      logger.info?.('[product-create]', { stage: 'PRODUCT_CREATE_CONTENT_TYPE', contentType });
       const body = bodyOf(req);
       if (req.method === 'POST') {
         const input = productInput(body);
@@ -106,6 +125,7 @@ function createAdminProductsHandler(getAdmin = getFirebaseAdmin, { imageStorage 
         const now = new Date();
         const ref = db.collection('products').doc();
         const image = decodeProductImage(body.imageUpload);
+        if (image) logger.info?.('[product-create]', { stage: 'PRODUCT_IMAGE_DECODED', imageMime: image.contentType, decodedByteCount: image.bytes.length });
         const storage = image ? (imageStorage || createSupabaseProductImageStorage()) : null;
         let uploaded;
         try {
@@ -115,6 +135,7 @@ function createAdminProductsHandler(getAdmin = getFirebaseAdmin, { imageStorage 
             tx.create(ref, saved);
             tx.set(db.collection('adminAuditLogs').doc(), { action: 'PRODUCT_CREATED', adminUid: admin.uid, productId: ref.id, before: null, after: safeProduct(ref.id, saved), createdAt: now });
           });
+          logger.info?.('[product-create]', { stage: 'PRODUCT_CREATE_COMPLETED', productId: ref.id, status: 201, durationMs: Date.now() - startedAt });
           return res.status(201).json({ product: safeProduct(ref.id, saved) });
         } catch (error) {
           await cleanupUploadedImage(storage, uploaded, ref.id);
@@ -132,6 +153,7 @@ function createAdminProductsHandler(getAdmin = getFirebaseAdmin, { imageStorage 
       if (changes.branchIds) await validateBranches(db, changes.branchIds);
       const now = new Date();
       const image = decodeProductImage(body.imageUpload);
+      if (image) logger.info?.('[product-create]', { stage: 'PRODUCT_IMAGE_DECODED', imageMime: image.contentType, decodedByteCount: image.bytes.length });
       const storage = image ? (imageStorage || createSupabaseProductImageStorage()) : null;
       let uploaded;
       try { uploaded = image ? await storage.uploadProductImage(productId, image) : null; }
@@ -154,9 +176,10 @@ function createAdminProductsHandler(getAdmin = getFirebaseAdmin, { imageStorage 
         }
         catch { /* The new product record is valid; preserve it if cleanup has a transient failure. */ }
       }
+      logger.info?.('[product-create]', { stage: 'PRODUCT_CREATE_COMPLETED', productId, status: 200, durationMs: Date.now() - startedAt });
       return res.status(200).json({ product: safeProduct(productId, saved) });
     } catch (error) { return responseError(res, error); }
   };
 }
 
-module.exports = { createAdminProductsHandler, safeProduct };
+module.exports = { createAdminProductsHandler, safeProduct, requestContentType };

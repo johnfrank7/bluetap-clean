@@ -54,7 +54,7 @@ function response() {
 }
 async function call(handler, method, token, body) {
   const res = response();
-  await handler({ method, headers: token ? { authorization: `Bearer ${token}` } : {}, body }, res);
+  await handler({ method, headers: token ? { authorization: `Bearer ${token}`, 'content-type': 'application/json' } : { 'content-type': 'application/json' }, body }, res);
   return res;
 }
 const validOrder = (extra = {}) => ({ branchId: 'central', deliveryLocation: { latitude: 10.27, longitude: 123.58 }, items: [{ productId: 'refill', quantity: 2 }], container: 'Exchange', ...extra });

@@ -36,18 +36,21 @@ test('denied location explains why access is needed and manual pin remains avail
 test('branches are ranked using Haversine distance and labeled approximate', () => {
   assert.match(location, /haversineDistanceKm/); assert.match(location, /sort\(\(left, right\) => left\.distanceKm - right\.distanceKm\)/); assert.match(form, /Approx\./);
 });
-test('map renders requester and provider markers with fit view', () => {
-  assert.match(map, /requesterMarker/); assert.match(map, /branchMarker/); assert.match(map, /Fit view/);
+test('map renders a clear initial location prompt plus requester and provider markers with fit view', () => {
+  assert.match(map, /Select your delivery location/); assert.match(map, /Your delivery location/); assert.match(map, /requesterMarker/); assert.match(map, /branchMarker/); assert.match(map, /Fit view/);
 });
 test('map uses OpenStreetMap without a paid routing dependency', () => assert.match(map, /tile\.openstreetmap\.org/));
 test('product card uses a prominent contain image and a placeholder', () => {
   assert.match(productCard, /resizeMode="contain"/); assert.match(productCard, /placeholder/i); assert.match(productCard, /height:158/);
 });
-test('Requester bottom navigation participates in layout flow instead of overlaying content', () => {
-  assert.match(layout, /SafeAreaView/); assert.match(layout, /navArea/); assert.doesNotMatch(layout, /navOverlay/); assert.match(nav, /floating=\{false\}/);
+test('Requester floating navigation reserves shared content space instead of covering controls', () => {
+  assert.match(layout, /SafeAreaView/); assert.match(layout, /navOverlay/); assert.match(layout, /REQUESTER_FLOATING_NAV_RESERVE/); assert.match(nav, /primaryNavButton/); assert.doesNotMatch(nav, /floating=\{false\}/);
 });
 test('Requester form uses keyboard avoidance and safe bottom content space', () => {
-  assert.match(form, /KeyboardAvoidingView/); assert.match(form, /paddingBottom:36/);
+  assert.match(form, /KeyboardAvoidingView/); assert.match(form, /minWidth:0/); assert.match(form, /maxWidth:'100%'/);
+});
+test('location selection unlocks providers and supports GPS retry or a manual map pin', () => {
+  assert.match(form, /rankBranchesByDistance/); assert.match(form, /Choose a delivery location to see nearby BlueTap providers/); assert.match(form, /Delivery location selected/); assert.match(form, /Retry/); assert.match(map, /onLocationChange/);
 });
 test('Admin Products supports add, edit, archive, image preview, and branch availability', () => {
   for (const label of ['Add product', 'Edit product', 'Deactivate', 'Choose image', 'Branch availability']) assert.match(adminProducts, new RegExp(label));

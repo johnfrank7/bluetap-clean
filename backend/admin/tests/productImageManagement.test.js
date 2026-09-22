@@ -67,9 +67,9 @@ function storage() {
 function response() {
   return { statusCode: 200, body: null, setHeader() {}, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; }, end() { return this; } };
 }
-async function call(handler, method, token, body) {
+async function call(handler, method, token, body, contentType = 'application/json') {
   const res = response();
-  await handler({ method, headers: token ? { authorization: `Bearer ${token}` } : {}, body }, res);
+  await handler({ method, headers: token ? { authorization: `Bearer ${token}`, 'content-type': contentType } : { 'content-type': contentType }, body }, res);
   return res;
 }
 
@@ -78,6 +78,7 @@ test('server validates JPEG, PNG, WebP, size, and actual image signatures', () =
   assert.equal(decodeProductImage(imagePayload('image/png', png)).contentType, 'image/png');
   assert.equal(decodeProductImage(imagePayload('image/webp', webp)).contentType, 'image/webp');
   assert.throws(() => decodeProductImage(imagePayload('image/gif', jpeg)), (error) => error.reason === 'PRODUCT_IMAGE_TYPE_INVALID');
+  assert.throws(() => decodeProductImage(imagePayload('image/gif', jpeg)), (error) => error.status === 422 && error.reason === 'PRODUCT_IMAGE_TYPE_INVALID');
   assert.throws(() => decodeProductImage(imagePayload('image/png', jpeg)), (error) => error.reason === 'PRODUCT_IMAGE_TYPE_INVALID');
   assert.throws(() => decodeProductImage(imagePayload('image/jpeg', Buffer.concat([jpeg, Buffer.alloc(5 * 1024 * 1024)]))), (error) => error.reason === 'PRODUCT_IMAGE_TOO_LARGE');
 });
@@ -124,10 +125,19 @@ test('Supabase failures map to safe product-image error codes', async () => {
 test('product image logging records only safe lifecycle stages', () => {
   const storageSource = readFileSync(resolve(__dirname, '..', '..', 'services', 'supabaseStorage.js'), 'utf8');
   const handlerSource = readFileSync(resolve(__dirname, '..', 'productManagementHandler.js'), 'utf8');
-  for (const stage of ['PRODUCT_IMAGE_UPLOAD_STARTED', 'PRODUCT_IMAGE_UPLOAD_COMPLETED', 'PRODUCT_IMAGE_UPLOAD_FAILED', 'PRODUCT_IMAGE_DELETE_COMPLETED', 'PRODUCT_IMAGE_DELETE_FAILED', 'PRODUCT_IMAGE_REPLACED']) {
+  for (const stage of ['PRODUCT_CREATE_REQUEST_RECEIVED', 'PRODUCT_CREATE_CONTENT_TYPE', 'PRODUCT_IMAGE_DECODED', 'PRODUCT_CREATE_COMPLETED', 'PRODUCT_IMAGE_UPLOAD_STARTED', 'PRODUCT_IMAGE_UPLOAD_COMPLETED', 'PRODUCT_IMAGE_UPLOAD_FAILED', 'PRODUCT_IMAGE_DELETE_COMPLETED', 'PRODUCT_IMAGE_DELETE_FAILED', 'PRODUCT_IMAGE_REPLACED']) {
     assert.match(storageSource + handlerSource, new RegExp(stage));
   }
   assert.doesNotMatch(storageSource, /logger\[level\].*serviceRoleKey/);
+});
+
+test('Admin product client sends one JSON payload and preserves image MIME inside that payload', () => {
+  const adminApi = readFileSync(resolve(__dirname, '..', '..', '..', 'services', 'adminApi.js'), 'utf8');
+  const adminProducts = readFileSync(resolve(__dirname, '..', '..', '..', 'services', 'adminProducts.js'), 'utf8');
+  assert.match(adminApi, /'Content-Type': 'application\/json'/);
+  assert.match(adminApi, /body: JSON\.stringify\(body\)/);
+  assert.match(adminProducts, /contentType: file\.type, dataBase64/);
+  assert.doesNotMatch(adminApi + adminProducts, /FormData|multipart\/form-data/);
 });
 
 test('Admin creates a product with a Supabase image metadata record', async () => {
@@ -141,6 +151,32 @@ test('Admin creates a product with a Supabase image metadata record', async () =
   assert.equal(saved.imageStorageProvider, 'supabase');
   assert.equal(saved.image, undefined);
   assert.equal(saved.imageUrl, result.body.product.imageUrl);
+});
+
+test('product creation has one JSON contract: JSON without an image succeeds and unsupported HTTP media is rejected', async () => {
+  const f = fixture(); const imageStorage = storage(); const handler = createAdminProductsHandler(f.getAdmin, { imageStorage, logger: { info() {} } });
+  const withoutImage = await call(handler, 'POST', 'admin-token', { product_name: 'No image', price: 12 });
+  assert.equal(withoutImage.statusCode, 201);
+  assert.equal(imageStorage.calls.length, 0);
+  const withCharset = await call(handler, 'POST', 'admin-token', { product_name: 'Charset', price: 12 }, 'application/json; charset=utf-8');
+  assert.equal(withCharset.statusCode, 201);
+  const unsupported = await call(handler, 'POST', 'admin-token', { product_name: 'Plain text', price: 12 }, 'text/plain');
+  assert.equal(unsupported.statusCode, 415);
+  assert.equal(unsupported.body.error.reason, 'UNSUPPORTED_PRODUCT_MEDIA_TYPE');
+});
+
+test('valid JSON with an invalid image MIME returns product validation, not an HTTP media-type error', async () => {
+  const f = fixture(); const result = await call(createAdminProductsHandler(f.getAdmin, { imageStorage: storage(), logger: { info() {} } }), 'POST', 'admin-token', { product_name: 'Bad image', price: 12, imageUpload: imagePayload('image/gif', jpeg) });
+  assert.equal(result.statusCode, 422);
+  assert.equal(result.body.error.reason, 'PRODUCT_IMAGE_TYPE_INVALID');
+});
+
+test('a valid JSON image just under the decoded 5 MB limit uploads through the Admin API', async () => {
+  const f = fixture(); const imageStorage = storage();
+  const bytes = Buffer.concat([jpeg, Buffer.alloc(5 * 1024 * 1024 - jpeg.length - 1)]);
+  const result = await call(createAdminProductsHandler(f.getAdmin, { imageStorage, logger: { info() {} } }), 'POST', 'admin-token', { product_name: 'Large image', price: 12, imageUpload: imagePayload('image/jpeg', bytes) });
+  assert.equal(result.statusCode, 201);
+  assert.equal(imageStorage.calls.filter((item) => item.type === 'upload').length, 1);
 });
 
 test('Admin uploads PNG and WebP product images through the same Render authorization path', async () => {

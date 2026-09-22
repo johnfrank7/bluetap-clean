@@ -16,6 +16,7 @@ const BLUE = BLUETAP_COLORS.primary;
 const ICON_SIZE = 26;
 const ACTIVE_SCALE = 1.1;
 const NAV_HORIZONTAL_PADDING = 28;
+export const REQUESTER_FLOATING_NAV_RESERVE = 116;
 const ANIMATION_DURATION = 250;
 
 const requesterItems = [
@@ -139,6 +140,7 @@ function NavIcon({
   isActive,
   keepIconFixed,
   reduceMotion,
+  tintColor = BLUE,
 }) {
   const progress = useRef(new Animated.Value(isActive ? 1 : 0)).current;
 
@@ -172,7 +174,7 @@ function NavIcon({
       <Image
         source={icon}
         style={styles.navIcon}
-        tintColor={BLUE}
+        tintColor={tintColor}
       />
     );
   }
@@ -182,12 +184,12 @@ function NavIcon({
       <Animated.Image
         source={icon}
         style={[styles.navIcon, styles.iconLayer, { opacity: inactiveOpacity }]}
-        tintColor={BLUE}
+        tintColor={tintColor}
       />
       <Animated.Image
         source={activeIcon}
         style={[styles.navIcon, styles.iconLayer, { opacity: activeOpacity }]}
-        tintColor={BLUE}
+        tintColor={tintColor}
       />
     </Animated.View>
   );
@@ -209,6 +211,7 @@ function BottomNav({ items, floating = true }) {
     <View style={[styles.bottomNav, floating ? styles.floatingNav : styles.flowNav]}>
       {items.map((item, index) => {
         const isActive = index === activeIndex;
+        const isPrimaryAction = item.key === 'add';
 
         return (
           <TouchableOpacity
@@ -218,7 +221,7 @@ function BottomNav({ items, floating = true }) {
             accessibilityLabel={item.label}
             activeOpacity={0.78}
             onPress={() => router.replace(item.route)}
-            style={styles.navButton}
+            style={[styles.navButton, isPrimaryAction && styles.primaryNavButton, isPrimaryAction && isActive && styles.primaryNavButtonActive]}
           >
             <NavIcon
               activeIcon={item.activeIcon}
@@ -227,6 +230,7 @@ function BottomNav({ items, floating = true }) {
               isActive={isActive}
               keepIconFixed={item.keepIconFixed}
               reduceMotion={reduceMotion}
+              tintColor={isPrimaryAction ? BLUETAP_COLORS.white : BLUE}
             />
           </TouchableOpacity>
         );
@@ -236,7 +240,7 @@ function BottomNav({ items, floating = true }) {
 }
 
 export function RequesterBottomNav() {
-  return <BottomNav items={requesterItems} floating={false} />;
+  return <BottomNav items={requesterItems} />;
 }
 
 export function DistributorBottomNav() {
@@ -263,22 +267,29 @@ const styles = StyleSheet.create({
   },
   floatingNav: {
     position: 'absolute',
-    bottom: 24,
+    bottom: 14,
     left: 20,
     right: 20,
-  },
-  flowNav: {
-    width: '100%',
-    maxWidth: 760,
-    alignSelf: 'center',
-    borderRadius: 0,
-    paddingBottom: 18,
+    minHeight: 64,
   },
   navButton: {
     width: 36,
     height: 32,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  primaryNavButton: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    marginTop: -24,
+    backgroundColor: BLUE,
+    borderWidth: 4,
+    borderColor: BLUETAP_COLORS.white,
+    ...createShadow({ color: BLUE, elevation: 6, opacity: 0.28, radius: 8, offset: { width: 0, height: 4 } }),
+  },
+  primaryNavButtonActive: {
+    backgroundColor: BLUETAP_COLORS.primaryDark,
   },
   iconFrame: {
     width: ICON_SIZE,

@@ -35,7 +35,7 @@ const fitZoom = (points) => {
 };
 
 export default function LocationMap({ location, branches = [], selectedBranchId, onLocationChange, onSelectBranch }) {
-  const [width, setWidth] = React.useState(320);
+  const [width, setWidth] = React.useState(0);
   const [fitVersion, setFitVersion] = React.useState(0);
   const requester = normalizeLocation(location);
   const branchPoints = branches.map((branch) => ({ ...normalizeLocation(branch), branch })).filter((item) => Number.isFinite(item.latitude));
@@ -47,11 +47,12 @@ export default function LocationMap({ location, branches = [], selectedBranchId,
   const zoom = fitZoom(points);
   const centerPixel = project(center, zoom);
   const tiles = [];
-  const left = centerPixel.x - width / 2;
+  const viewportWidth = Math.max(width, 1);
+  const left = centerPixel.x - viewportWidth / 2;
   const top = centerPixel.y - MAP_HEIGHT / 2;
   const minTileX = Math.floor(left / TILE_SIZE);
   const minTileY = Math.floor(top / TILE_SIZE);
-  for (let x = minTileX; x <= Math.floor((left + width) / TILE_SIZE); x += 1) {
+  for (let x = minTileX; x <= Math.floor((left + viewportWidth) / TILE_SIZE); x += 1) {
     for (let y = minTileY; y <= Math.floor((top + MAP_HEIGHT) / TILE_SIZE); y += 1) {
       const max = 2 ** zoom;
       if (y >= 0 && y < max) tiles.push({ x: ((x % max) + max) % max, rawX: x, y });
@@ -63,14 +64,15 @@ export default function LocationMap({ location, branches = [], selectedBranchId,
   };
   const chooseLocation = (event) => {
     if (!onLocationChange) return;
-    const x = clamp(event.nativeEvent.locationX, 0, width);
+    const x = clamp(event.nativeEvent.locationX, 0, viewportWidth);
     const y = clamp(event.nativeEvent.locationY, 0, MAP_HEIGHT);
     onLocationChange(unproject({ x: left + x, y: top + y }, zoom));
   };
-  return <View key={fitVersion} style={styles.shell} onLayout={(event) => setWidth(Math.max(280, event.nativeEvent.layout.width))}>
+  return <View key={fitVersion} style={styles.shell} onLayout={(event) => setWidth(Math.max(0, event.nativeEvent.layout.width))}>
     <Pressable accessibilityRole="image" accessibilityLabel="Delivery and provider map" onPress={chooseLocation} style={styles.map}>
       {tiles.map((tile) => <Image key={`${zoom}-${tile.rawX}-${tile.y}`} source={{ uri: `https://tile.openstreetmap.org/${zoom}/${tile.x}/${tile.y}.png` }} style={[styles.tile, { left: tile.rawX * TILE_SIZE - left, top: tile.y * TILE_SIZE - top }]} />)}
-      {requester && <View pointerEvents="none" style={[styles.requesterMarker, position(requester)]}><View style={styles.requesterDot} /><Text style={styles.markerLabel}>Delivery</Text></View>}
+      {!requester && <View pointerEvents="none" style={styles.selectionPrompt}><Text style={styles.selectionPromptText}>Select your delivery location</Text></View>}
+      {requester && <View pointerEvents="none" style={[styles.requesterMarker, position(requester)]}><View style={styles.requesterDot} /><Text style={styles.markerLabel}>Your delivery location</Text></View>}
       {branchPoints.map(({ branch, ...point }) => {
         const selected = branch.id === selectedBranchId;
         return <TouchableOpacity key={branch.id} accessibilityRole="button" accessibilityLabel={`Select ${branch.name}`} onPress={(event) => { event.stopPropagation?.(); onSelectBranch?.(branch); }} style={[styles.branchMarker, position(point), selected && styles.branchMarkerSelected]}>
@@ -84,12 +86,12 @@ export default function LocationMap({ location, branches = [], selectedBranchId,
 }
 
 const styles = StyleSheet.create({
-  shell:{borderWidth:1,borderColor:BLUETAP_COLORS.border,borderRadius:BLUETAP_LAYOUT.radius.lg,overflow:'hidden',backgroundColor:BLUETAP_COLORS.surface},
-  map:{height:MAP_HEIGHT,overflow:'hidden',backgroundColor:'#DCECF5',position:'relative'},
+  shell:{width:'100%',maxWidth:'100%',minWidth:0,alignSelf:'stretch',borderWidth:1,borderColor:BLUETAP_COLORS.border,borderRadius:BLUETAP_LAYOUT.radius.lg,overflow:'hidden',backgroundColor:BLUETAP_COLORS.surface},
+  map:{width:'100%',maxWidth:'100%',minWidth:0,height:MAP_HEIGHT,overflow:'hidden',backgroundColor:'#DCECF5',position:'relative'},
   tile:{position:'absolute',width:TILE_SIZE,height:TILE_SIZE},
   requesterMarker:{position:'absolute',transform:[{translateX:-28},{translateY:-34}],alignItems:'center'},requesterDot:{width:18,height:18,borderRadius:9,backgroundColor:BLUETAP_COLORS.primary,borderWidth:4,borderColor:'#FFF'},markerLabel:{fontSize:10,fontWeight:'900',color:BLUETAP_COLORS.text,backgroundColor:'#FFF',paddingHorizontal:5,paddingVertical:2,borderRadius:5,marginTop:2},
   branchMarker:{position:'absolute',transform:[{translateX:-15},{translateY:-15}],width:30,height:30,borderRadius:15,backgroundColor:BLUETAP_COLORS.success,borderWidth:3,borderColor:'#FFF',alignItems:'center',justifyContent:'center'},branchMarkerSelected:{backgroundColor:BLUETAP_COLORS.warning,width:36,height:36,borderRadius:18,transform:[{translateX:-18},{translateY:-18}]},branchMarkerText:{color:'#FFF',fontWeight:'900',fontSize:11},
   attribution:{position:'absolute',right:4,bottom:4,backgroundColor:'rgba(255,255,255,.82)',paddingHorizontal:4,paddingVertical:2},attributionText:{fontSize:8,color:BLUETAP_COLORS.muted},
+  selectionPrompt:{position:'absolute',top:12,left:12,backgroundColor:'rgba(255,255,255,.94)',borderRadius:BLUETAP_LAYOUT.radius.pill,paddingHorizontal:10,paddingVertical:7,borderWidth:1,borderColor:BLUETAP_COLORS.border},selectionPromptText:{color:BLUETAP_COLORS.textPrimary,fontWeight:'800',fontSize:12},
   mapFooter:{minHeight:46,paddingHorizontal:12,flexDirection:'row',alignItems:'center',gap:10},help:{flex:1,color:BLUETAP_COLORS.muted,fontSize:11},fitButton:{paddingHorizontal:10,paddingVertical:7,borderRadius:8,backgroundColor:BLUETAP_COLORS.primarySoft},fitText:{color:BLUETAP_COLORS.primary,fontSize:11,fontWeight:'900'},
 });
-
