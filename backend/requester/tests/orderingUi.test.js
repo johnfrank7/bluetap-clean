@@ -14,6 +14,9 @@ const portalShell = read('components/UserPortalShell.jsx');
 const portalLayout = read('constants/userPortalLayout.js');
 const nav = read('components/AppBottomNav.jsx');
 const notifications = read('app/requester/r_notification.jsx');
+const requesterRequests = read('app/requester/r_request.jsx');
+const requesterRequestService = read('services/requests.js');
+const requesterOrderStatus = read('constants/requesterOrderStatus.js');
 const profile = read('app/requester/r_profile.jsx');
 const dashboard = read('app/requester/r_dashboard.jsx');
 const adminProducts = read('app/admin/products.jsx');
@@ -80,6 +83,26 @@ test('Requester catalog is short-cached, deduplicated, and exposes shared querie
 });
 test('notifications are order-derived and contain no demo request numbers', () => {
   assert.match(notifications, /subscribeRequesterRequests/); assert.doesNotMatch(notifications, /BT-01245|BT-01212|Toledo Pure Water Station/);
+});
+test('Requester order surfaces share API-backed UID ownership, canonical lifecycle classification, and a post-submit cache prime', () => {
+  assert.match(requesterOrderStatus, /isActiveRequesterOrderStatus/);
+  assert.match(requesterOrderStatus, /isHistoryRequesterOrderStatus/);
+  assert.match(requesterOrderStatus, /outside radius pending approval/);
+  assert.match(requesterOrderStatus, /awaiting distributor assignment/);
+  assert.match(requesterOrderStatus, /branch transfer pending/);
+  assert.match(requesterOrderStatus, /out for delivery/);
+  assert.match(requesterOrderStatus, /declined outside service area/);
+  assert.match(requesterRequestService, /getRequesterOrders\(\)/);
+  assert.match(requesterRequestService, /requesterUid/);
+  assert.match(requesterRequestService, /primeRequesterRequest/);
+  assert.doesNotMatch(requesterRequestService, /onSnapshot/);
+  assert.match(requesterRequests, /user\.uid/);
+  assert.match(requesterRequests, /ordersLoading/);
+  assert.match(requesterRequests, /ordersError/);
+  assert.match(form, /createRequest/);
+  assert.match(dashboard, /subscribeRequesterCurrentRequests/);
+  assert.match(dashboard, /normalizeRequesterOrderStatus/);
+  assert.match(notifications, /requesterOrderStatusLabel/);
 });
 test('profile renders missing values as Not provided', () => assert.match(profile, /Not provided/));
 test('dashboard supports both a current order card and a no-current-request state', () => {

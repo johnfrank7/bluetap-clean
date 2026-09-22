@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   ScrollView,
   StyleSheet,
@@ -7,6 +8,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { onAuthStateChanged } from 'firebase/auth';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -22,8 +24,14 @@ import { USER_PORTAL_BOTTOM_CONTENT_INSET, USER_PORTAL_LAYOUT } from '../../cons
 import { BLUETAP_COLORS } from '../../constants/bluetapTheme';
 import {
   cancelRequest,
+  refreshRequesterRequests,
+  sortRequesterOrders,
   subscribeRequesterRequests,
 } from '../../services/requests';
+import {
+  isActiveRequesterOrderStatus,
+  isHistoryRequesterOrderStatus,
+} from '../../constants/requesterOrderStatus';
 
 const BLUE = BLUETAP_COLORS.primary;
 const BLUE_LIGHT = BLUETAP_COLORS.primarySoft;
@@ -33,17 +41,6 @@ const TEXT_DARK = BLUETAP_COLORS.textPrimary;
 
 const ACTIVE_TAB = 'active';
 const HISTORY_TAB = 'history';
-const ACTIVE_STATUSES = new Set([
-  'pending',
-  'outside radius pending approval',
-  'awaiting distributor assignment',
-  'distributor assigned',
-  'branch transfer pending',
-  'accepted',
-  'scheduled',
-  'out for delivery',
-]);
-const HISTORY_STATUSES = new Set(['delivered', 'cancelled', 'canceled', 'declined outside service area']);
 
 const formatPrice = (price) => `\u20B1${Number(price || 0).toFixed(2)}`;
 
@@ -323,29 +320,62 @@ export default function RequesterRequests() {
   const [selectedRequest, setSelectedRequest] = useState(null);
   const [activeTab, setActiveTab] = useState(ACTIVE_TAB);
   const [cancellingRequestId, setCancellingRequestId] = useState('');
+  const [ordersLoading, setOrdersLoading] = useState(true);
+  const [ordersError, setOrdersError] = useState('');
   const isActiveOrdersTab = activeTab === ACTIVE_TAB;
 
   useEffect(() => {
-    const requesterId =
-      findLocalUserForAuthRole(auth.currentUser, 'requester')?.uid || '';
+    let unsubscribeRequests = () => {};
 
-    if (!requesterId) return undefined;
+    const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
+      unsubscribeRequests();
+      setRequests([]);
+      setOrdersError('');
 
-    return subscribeRequesterRequests(requesterId, setRequests);
+      if (!user?.uid) {
+        setOrdersLoading(false);
+        setOrdersError('Requester authentication is required.');
+        return;
+      }
+
+      setOrdersLoading(true);
+      unsubscribeRequests = subscribeRequesterRequests(
+        user.uid,
+        (nextRequests) => {
+          setRequests(nextRequests);
+          setOrdersLoading(false);
+        },
+        (error) => {
+          setOrdersError(error?.message || 'Unable to load orders right now.');
+          setOrdersLoading(false);
+        }
+      );
+    });
+
+    return () => {
+      unsubscribeAuth();
+      unsubscribeRequests();
+    };
   }, []);
 
   const displayedRequests = useMemo(
     () =>
-      requests.filter((request) => {
-        const normalizedStatus = normalizeStatus(request.status || 'Pending');
-
-        return isActiveOrdersTab
-          ? ACTIVE_STATUSES.has(normalizedStatus)
-          : HISTORY_STATUSES.has(normalizedStatus);
-      }),
+      sortRequesterOrders(requests.filter((request) => (
+        isActiveOrdersTab
+          ? isActiveRequesterOrderStatus(request.status)
+          : isHistoryRequesterOrderStatus(request.status)
+      ))),
     [isActiveOrdersTab, requests]
   );
   const selectedDetailsRequest = getDetailsRequestData(selectedRequest);
+
+  const retryOrders = () => {
+    const requesterId = auth.currentUser?.uid;
+    if (!requesterId) return;
+    setOrdersError('');
+    setOrdersLoading(true);
+    refreshRequesterRequests(requesterId);
+  };
 
   const cancelPendingRequest = async (request) => {
     if (cancellingRequestId) return;
@@ -459,7 +489,20 @@ export default function RequesterRequests() {
             </TouchableOpacity>
           )}
 
-          {displayedRequests.length === 0 ? (
+          {ordersLoading ? (
+            <View style={styles.emptyRequestCard}>
+              <ActivityIndicator color={BLUE} />
+              <Text style={styles.emptyRequestText}>Loading orders...</Text>
+            </View>
+          ) : ordersError ? (
+            <View style={styles.emptyRequestCard}>
+              <Text style={styles.emptyRequestTitle}>Orders unavailable</Text>
+              <Text style={styles.emptyRequestText}>{ordersError}</Text>
+              <TouchableOpacity style={styles.retryOrdersButton} onPress={retryOrders}>
+                <Text style={styles.retryOrdersText}>Retry</Text>
+              </TouchableOpacity>
+            </View>
+          ) : displayedRequests.length === 0 ? (
             <View style={styles.emptyRequestCard}>
               <Text style={styles.emptyRequestTitle}>
                 {isActiveOrdersTab
@@ -734,6 +777,20 @@ const styles = createPortalStyleSheet({
     fontSize: 13,
     lineHeight: 18,
     marginTop: 4,
+  },
+  retryOrdersButton: {
+    alignSelf: 'flex-start',
+    marginTop: 12,
+    minHeight: 36,
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    backgroundColor: BLUE_LIGHT,
+  },
+  retryOrdersText: {
+    color: BLUE,
+    fontSize: 13,
+    fontWeight: 'bold',
   },
   addRequestButton: {
     minHeight: 48,

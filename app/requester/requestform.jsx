@@ -9,7 +9,8 @@ import { createPortalStyleSheet, useBlueTapTheme } from '../../components/BlueTa
 import { BLUETAP_COLORS, BLUETAP_LAYOUT } from '../../constants/bluetapTheme';
 import { USER_PORTAL_BOTTOM_CONTENT_INSET, USER_PORTAL_LAYOUT } from '../../constants/userPortalLayout';
 import { haversineDistanceKm, rankBranchesByDistance, requestCurrentLocation } from '../../services/location';
-import { createRequesterOrder, getRequesterCatalog } from '../../services/requesterOrdering';
+import { getRequesterCatalog } from '../../services/requesterOrdering';
+import { createRequest } from '../../services/requests';
 
 const containers = ['New Container', 'Exchange'];
 const formatPrice = (value) => `₱${Number(value || 0).toFixed(2)}`;
@@ -50,7 +51,7 @@ export default function RequestFormPage() {
   const addProduct = (product) => setItems((current)=>{ const found=current.find((item)=>item.productId===product.id); return found?current.map((item)=>item.productId===product.id?{...item,quantity:Math.min(100,item.quantity+1)}:item):[...current,{productId:product.id,quantity:1}]; });
   const changeQuantity = (productId,delta) => setItems((current)=>current.map((item)=>item.productId===productId?{...item,quantity:item.quantity+delta}:item).filter((item)=>item.quantity>0));
   const canReview = profileComplete&&deliveryLocation&&selectedBranch&&items.length>0;
-  const submit = async () => { if(!canReview||submitting) return; setSubmitting(true); setSubmitError(''); try { await createRequesterOrder({branchId:selectedBranch.id,deliveryLocation,container,items:items.map(({productId,quantity})=>({productId,quantity}))}); router.replace('/requester/r_request'); } catch(error){setSubmitError(error.message);} finally{setSubmitting(false);} };
+  const submit = async () => { if(!canReview||submitting) return; setSubmitting(true); setSubmitError(''); try { await createRequest({branchId:selectedBranch.id,deliveryLocation,container,items:items.map(({productId,quantity})=>({product_id:productId,quantity}))}); router.replace('/requester/r_request'); } catch(error){setSubmitError(error.message);} finally{setSubmitting(false);} };
 
   return <LinearGradient colors={isDark?[colors.background,colors.header]:[colors.primary,colors.primaryLight]} style={styles.gradient} start={{x:0,y:0}} end={{x:0,y:1}}><SafeAreaView edges={['left','right','bottom']} style={styles.safe}><KeyboardAvoidingView behavior={Platform.OS==='ios'?'padding':undefined} style={styles.flex}><ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
     <View style={styles.pageHeading}><Text style={styles.eyebrow}>NEW REQUEST</Text><Text style={styles.title}>Place a water order</Text><Text style={styles.subtitle}>Choose a delivery point, nearby provider, and products. Final pricing is verified by BlueTap.</Text></View>

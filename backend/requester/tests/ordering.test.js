@@ -78,6 +78,24 @@ test('valid order uses authenticated UID and ignores a supplied target UID', asy
   const f = fixture(); const result = await call(createRequesterOrdersHandler(f.getAdmin), 'POST', 'requester-token', validOrder({ requesterUid: 'attacker-target' }));
   assert.equal(result.statusCode, 201); assert.equal(result.body.order.requesterUid, 'requester-1'); assert.equal(result.body.order.requester_id, 'requester-1');
 });
+test('Requester order reads return only the authenticated UID records with creation timestamps', async () => {
+  const f = fixture(); const handler = createRequesterOrdersHandler(f.getAdmin);
+  const created = await call(handler, 'POST', 'requester-token', validOrder());
+  assert.equal(created.statusCode, 201);
+  assert.ok(created.body.order.createdAt instanceof Date);
+  assert.equal(created.body.order.branchId, 'central');
+  assert.equal(created.body.order.currentBranchId, 'central');
+  assert.equal(created.body.order.status, 'Pending');
+
+  const ownerRead = await call(handler, 'GET', 'requester-token');
+  assert.equal(ownerRead.statusCode, 200);
+  assert.deepEqual(ownerRead.body.orders.map((order) => order.id), [created.body.order.id]);
+  assert.equal(ownerRead.body.orders[0].requesterUid, 'requester-1');
+
+  const unrelatedRead = await call(handler, 'GET', 'requester-2-token');
+  assert.equal(unrelatedRead.statusCode, 200);
+  assert.deepEqual(unrelatedRead.body.orders, []);
+});
 test('server reloads price and calculates quantity and total', async () => {
   const result = await call(createRequesterOrdersHandler(fixture().getAdmin), 'POST', 'requester-token', validOrder({ clientPrice: 1, clientTotal: 1 }));
   assert.equal(result.body.order.items[0].unitPriceAtOrder, 35); assert.equal(result.body.order.items[0].totalAtOrder, 70); assert.equal(result.body.order.totalAtOrder, 70);

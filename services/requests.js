@@ -1,11 +1,8 @@
+import { cancelRequesterOrder, createRequesterOrder, getRequesterOrders } from './requesterOrdering';
 import {
-  collection,
-  onSnapshot,
-  query,
-  where,
-} from 'firebase/firestore';
-import { db } from '../firebase';
-import { cancelRequesterOrder, createRequesterOrder } from './requesterOrdering';
+  isActiveRequesterOrderStatus,
+  normalizeRequesterOrderStatus,
+} from '../constants/requesterOrderStatus';
 
 export const REQUESTS_COLLECTION = 'requests';
 
@@ -52,6 +49,7 @@ const normalizeItems = (data = {}) => {
 
 const timestampToMillis = (timestamp) => {
   if (!timestamp) return 0;
+  if (timestamp instanceof Date) return timestamp.getTime();
   if (typeof timestamp === 'string') return new Date(timestamp).getTime() || 0;
   if (typeof timestamp.toMillis === 'function') return timestamp.toMillis();
   if (timestamp.seconds) return timestamp.seconds * 1000;
@@ -70,7 +68,8 @@ const normalizeRequest = (id, data = {}) => {
   return {
     id,
     request_id: data.request_id || data.requestId || '',
-    requester_id: (data.requester_id || '').toString().trim(),
+    requesterUid: (data.requesterUid || data.requester_id || '').toString().trim(),
+    requester_id: (data.requester_id || data.requesterUid || '').toString().trim(),
     requester_unique_id:
       (data.requester_unique_id || data.requesterUniqueId || '').toString().trim(),
     requester_name: data.requester_name || '',
@@ -93,45 +92,41 @@ const normalizeRequest = (id, data = {}) => {
     container: data.container || '',
     water_station: data.water_station || data.branchNameSnapshot || '',
     branchId: (data.branchId || '').toString().trim(),
+    currentBranchId: (data.currentBranchId || data.branchId || '').toString().trim(),
+    branchNameSnapshot:
+      data.currentBranchNameSnapshot || data.branchNameSnapshot || data.water_station || '',
     currentBranchName: data.currentBranchNameSnapshot || data.branchNameSnapshot || data.water_station || '',
     transferState: data.transferState || '',
     transferToBranchName: data.transferToBranchNameSnapshot || '',
     delivery_date: data.delivery_date || '',
     total_cost: totalCost,
     status: data.status || 'Pending',
-    created_at: data.created_at || null,
-    updated_at: data.updated_at || null,
-    canceled_at: data.canceled_at || null,
+    created_at: data.created_at || data.createdAt || null,
+    updated_at: data.updated_at || data.updatedAt || null,
+    canceled_at: data.canceled_at || data.cancelledAt || data.cancelled_at || null,
     isLocal: !!data.isLocal,
   };
 };
 
-const sortRequests = (requests) =>
-  [...requests].sort(
-    (left, right) =>
-      timestampToMillis(right.created_at) - timestampToMillis(left.created_at)
-  );
+export const sortRequesterOrders = (requests) =>
+  [...requests].sort((left, right) => {
+    const timestampFor = (request) => {
+      if (!isActiveRequesterOrderStatus(request?.status)) {
+        return timestampToMillis(request.updated_at || request.canceled_at || request.created_at);
+      }
 
-const inactiveCurrentRequestStatuses = new Set([
-  'cancelled',
-  'canceled',
-  'delivered',
-  'rejected',
-  'declined_outside_service_area',
-  'declined outside service area',
-]);
+      return timestampToMillis(request.created_at || request.updated_at);
+    };
+
+    return timestampFor(right) - timestampFor(left);
+  });
 
 export const isCurrentRequesterRequest = (request) => {
-  const normalizedStatus = (request.status || 'Pending')
-    .toString()
-    .trim()
-    .toLowerCase();
-
-  return !inactiveCurrentRequestStatuses.has(normalizedStatus);
+  return isActiveRequesterOrderStatus(request?.status);
 };
 
 const getCurrentRequesterRequests = (requests) =>
-  sortRequests(requests.filter(isCurrentRequesterRequest));
+  sortRequesterOrders(requests.filter(isCurrentRequesterRequest));
 
 const getMemoryRequests = () => {
   if (!globalThis.__bluetapLocalRequests) {
@@ -222,41 +217,6 @@ const subscribeLocalRequests = (listener) => {
   };
 };
 
-const mergeRequests = (firestoreRequests, localRequests) => {
-  const requestsById = new Map();
-
-  firestoreRequests.forEach((request) => {
-    requestsById.set(request.id, request);
-  });
-
-  localRequests.forEach((localRequest) => {
-    const firestoreRequest = requestsById.get(localRequest.id);
-
-    if (!firestoreRequest) {
-      requestsById.set(localRequest.id, localRequest);
-      return;
-    }
-
-    const localUpdatedAt = timestampToMillis(localRequest.updated_at);
-    const firestoreUpdatedAt = timestampToMillis(firestoreRequest.updated_at);
-    const hasLocalStatusChange =
-      localRequest.status &&
-      localRequest.status.toLowerCase() !== firestoreRequest.status.toLowerCase();
-    const shouldUseLocalRequest =
-      localUpdatedAt >= firestoreUpdatedAt ||
-      (firestoreUpdatedAt === 0 && hasLocalStatusChange);
-
-    requestsById.set(
-      localRequest.id,
-      shouldUseLocalRequest
-        ? { ...firestoreRequest, ...localRequest, isLocal: true }
-        : firestoreRequest
-    );
-  });
-
-  return sortRequests(Array.from(requestsById.values()));
-};
-
 const REQUEST_SUBSCRIPTION_IDLE_MS = 15000;
 const requesterRequestSubscriptions = new Map();
 
@@ -271,12 +231,11 @@ const getRequestSignature = (requests) =>
 const getRequesterRequestEntry = (requesterId) => {
   if (!requesterRequestSubscriptions.has(requesterId)) {
     requesterRequestSubscriptions.set(requesterId, {
-      firestoreRequests: [],
+      serverRequests: [],
       cachedRequests: null,
       cachedSignature: '',
       subscribers: new Set(),
-      unsubscribeFirestore: null,
-      unsubscribeLocal: null,
+      refreshPromise: null,
       stopTimer: null,
     });
   }
@@ -291,10 +250,11 @@ const notifyRequesterRequestSubscribers = (entry) => {
 };
 
 const emitRequesterRequests = (requesterId, entry, force = false) => {
-  const localRequests = getLocalRequests().filter(
-    (request) => request.requester_id === requesterId
+  const nextRequests = sortRequesterOrders(
+    entry.serverRequests.filter(
+      (request) => (request.requesterUid || request.requester_id) === requesterId
+    )
   );
-  const nextRequests = mergeRequests(entry.firestoreRequests, localRequests);
   const nextSignature = getRequestSignature(nextRequests);
 
   if (!force && entry.cachedRequests && nextSignature === entry.cachedSignature) {
@@ -307,10 +267,6 @@ const emitRequesterRequests = (requesterId, entry, force = false) => {
 };
 
 const stopRequesterRequestSubscription = (requesterId, entry) => {
-  entry.unsubscribeFirestore?.();
-  entry.unsubscribeLocal?.();
-  entry.unsubscribeFirestore = null;
-  entry.unsubscribeLocal = null;
   entry.stopTimer = null;
 };
 
@@ -330,33 +286,21 @@ const startRequesterRequestSubscription = (requesterId, entry) => {
     entry.stopTimer = null;
   }
 
-  if (entry.unsubscribeFirestore && entry.unsubscribeLocal) {
-    return;
-  }
+  if (entry.refreshPromise) return;
 
-  entry.unsubscribeLocal = subscribeLocalRequests(() =>
-    emitRequesterRequests(requesterId, entry)
-  );
-
-  const requestsQuery = query(
-    collection(db, REQUESTS_COLLECTION),
-    where('requester_id', '==', requesterId)
-  );
-
-  entry.unsubscribeFirestore = onSnapshot(
-    requestsQuery,
-    (snapshot) => {
-      entry.firestoreRequests = snapshot.docs.map((item) =>
-        normalizeRequest(item.id, item.data())
-      );
-      emitRequesterRequests(requesterId, entry);
-    },
-    (error) => {
-      console.log('Requests Firestore subscription error:', error.message);
-      entry.subscribers.forEach(({ onError }) => onError?.(error));
+  entry.refreshPromise = getRequesterOrders()
+    .then((orders) => {
+      entry.serverRequests = (Array.isArray(orders) ? orders : [])
+        .map((order) => normalizeRequest(order.id || order.requestId || order.request_id, order))
+        .filter((order) => (order.requesterUid || order.requester_id) === requesterId);
       emitRequesterRequests(requesterId, entry, true);
-    }
-  );
+    })
+    .catch((error) => {
+      entry.subscribers.forEach(({ onError }) => onError?.(error));
+    })
+    .finally(() => {
+      entry.refreshPromise = null;
+    });
 };
 
 export const subscribeRequesterRequests = (requesterId, listener, onError) => {
@@ -371,10 +315,8 @@ export const subscribeRequesterRequests = (requesterId, listener, onError) => {
   const subscriber = { listener, onError };
   entry.subscribers.add(subscriber);
 
-  if (entry.cachedRequests) {
+  if (entry.cachedRequests !== null) {
     listener(entry.cachedRequests);
-  } else {
-    emitRequesterRequests(normalizedRequesterId, entry, true);
   }
 
   startRequesterRequestSubscription(normalizedRequesterId, entry);
@@ -392,6 +334,32 @@ export const subscribeRequesterCurrentRequests = (requesterId, listener, onError
     onError
   );
 
+export const refreshRequesterRequests = async (requesterId) => {
+  const normalizedRequesterId = (requesterId || '').toString().trim();
+
+  if (!normalizedRequesterId) return [];
+
+  const entry = getRequesterRequestEntry(normalizedRequesterId);
+  startRequesterRequestSubscription(normalizedRequesterId, entry);
+  await entry.refreshPromise;
+  return entry.cachedRequests || [];
+};
+
+const primeRequesterRequest = (order) => {
+  const normalizedOrder = normalizeRequest(order?.id || order?.requestId || order?.request_id, order);
+  const requesterId = normalizedOrder.requesterUid || normalizedOrder.requester_id;
+
+  if (!requesterId || !normalizedOrder.id) return normalizedOrder;
+
+  const entry = getRequesterRequestEntry(requesterId);
+  entry.serverRequests = [
+    normalizedOrder,
+    ...entry.serverRequests.filter((request) => request.id !== normalizedOrder.id),
+  ];
+  emitRequesterRequests(requesterId, entry, true);
+  return normalizedOrder;
+};
+
 export const createRequest = async (requestData) => {
   const order = await createRequesterOrder({
     branchId: requestData.branchId,
@@ -400,7 +368,7 @@ export const createRequest = async (requestData) => {
     expectedDeliveryDate: requestData.expectedDeliveryDate || requestData.delivery_date,
     items: normalizeItems(requestData).map((item) => ({ productId: item.product_id, quantity: item.quantity })),
   });
-  return normalizeRequest(order.id, order);
+  return primeRequesterRequest(order);
 };
 
 export const cancelRequest = async (request) => {
@@ -412,10 +380,10 @@ export const cancelRequest = async (request) => {
 
   const normalizedRequest = normalizeRequest(requestId, typeof request === 'string' ? {} : request);
 
-  if (normalizedRequest.status.toLowerCase() !== 'pending') {
+  if (!['pending', 'outside radius pending approval'].includes(normalizeRequesterOrderStatus(normalizedRequest.status))) {
     throw new Error('Only pending requests can be canceled.');
   }
 
   const cancelled = await cancelRequesterOrder(requestId);
-  return normalizeRequest(requestId, cancelled);
+  return primeRequesterRequest({ ...cancelled, id: requestId });
 };

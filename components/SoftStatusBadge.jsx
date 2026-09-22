@@ -1,5 +1,9 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
+import {
+  normalizeRequesterOrderStatus,
+  requesterOrderStatusLabel,
+} from '../constants/requesterOrderStatus';
 
 const BLUE = '#2563EB';
 
@@ -20,6 +24,11 @@ const STATUS_META = {
     label: 'Waiting for distributor assignment',
   },
   'distributor assigned': {
+    backgroundColor: '#ECFDF5',
+    color: '#059669',
+    label: 'Distributor assigned',
+  },
+  assigned: {
     backgroundColor: '#ECFDF5',
     color: '#059669',
     label: 'Distributor assigned',
@@ -79,16 +88,14 @@ const STATUS_META = {
     color: '#6B7280',
     label: 'Rejected',
   },
+  declined: {
+    backgroundColor: '#FEF2F2',
+    color: '#DC2626',
+    label: 'Declined',
+  },
 };
 
-export const normalizeStatus = (status) =>
-  (status || '')
-    .toString()
-    .trim()
-    .replace(/([a-z])([A-Z])/g, '$1 $2')
-    .toLowerCase()
-    .replace(/[_-]+/g, ' ')
-    .replace(/\s+/g, ' ');
+export const normalizeStatus = normalizeRequesterOrderStatus;
 
 export const getSoftStatusMeta = (status) => {
   const statusText = status || 'Pending';
@@ -98,7 +105,7 @@ export const getSoftStatusMeta = (status) => {
     STATUS_META[normalizedStatus] || {
       backgroundColor: '#EFF6FF',
       color: BLUE,
-      label: statusText,
+      label: requesterOrderStatusLabel(statusText),
     }
   );
 };

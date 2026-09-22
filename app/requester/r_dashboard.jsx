@@ -26,9 +26,11 @@ import ProductCard from '../../components/ProductCard';
 import { createPortalStyleSheet, useBlueTapTheme } from '../../components/BlueTapTheme';
 import { USER_PORTAL_BOTTOM_CONTENT_INSET, USER_PORTAL_LAYOUT } from '../../constants/userPortalLayout';
 import { BLUETAP_COLORS } from '../../constants/bluetapTheme';
+import { normalizeRequesterOrderStatus } from '../../constants/requesterOrderStatus';
 import { getActiveProducts } from '../../services/requesterOrdering';
 import {
   cancelRequest,
+  refreshRequesterRequests,
   subscribeRequesterCurrentRequests,
 } from '../../services/requests';
 
@@ -194,16 +196,10 @@ const getRequestTotalAmount = (request) => {
     0
   );
 };
-const getNormalizedStatus = (status) =>
-  (status || '')
-    .toString()
-    .trim()
-    .replace(/([a-z])([A-Z])/g, '$1 $2')
-    .toLowerCase()
-    .replace(/[_-]+/g, ' ')
-    .replace(/\s+/g, ' ');
 const isPendingRequest = (request) =>
-  getNormalizedStatus(request.status) === 'pending';
+  ['pending', 'outside radius pending approval'].includes(
+    normalizeRequesterOrderStatus(request?.status)
+  );
 const getProductGallons = (product) => {
   const sizeText =
     product.capacity ||
@@ -270,6 +266,8 @@ export default function RequesterDashboard() {
   const [productsError, setProductsError] = useState('');
   const [activeProductIndex, setActiveProductIndex] = useState(0);
   const [currentRequests, setCurrentRequests] = useState([]);
+  const [currentRequestsLoading, setCurrentRequestsLoading] = useState(true);
+  const [currentRequestsError, setCurrentRequestsError] = useState('');
   const [cancellingRequestId, setCancellingRequestId] = useState('');
   const [requestToCancel, setRequestToCancel] = useState(null);
   const [detailsRequest, setDetailsRequest] = useState(null);
@@ -349,10 +347,7 @@ export default function RequesterDashboard() {
     let unsubscribeRequests = () => {};
 
     const getRequesterId = (user) => {
-      if (!user) return '';
-
-      const localRequester = findLocalUserForAuthRole(user, 'requester');
-      return localRequester?.uid || '';
+      return user?.uid || '';
     };
 
     const subscribeForRequester = (requesterId) => {
@@ -365,12 +360,23 @@ export default function RequesterDashboard() {
 
       if (!normalizedRequesterId) {
         setCurrentRequests([]);
+        setCurrentRequestsLoading(false);
+        setCurrentRequestsError('Requester authentication is required.');
         return;
       }
 
+      setCurrentRequestsLoading(true);
+      setCurrentRequestsError('');
       unsubscribeRequests = subscribeRequesterCurrentRequests(
         normalizedRequesterId,
-        setCurrentRequests
+        (nextRequests) => {
+          setCurrentRequests(nextRequests);
+          setCurrentRequestsLoading(false);
+        },
+        (error) => {
+          setCurrentRequestsError(error?.message || 'Unable to load current orders right now.');
+          setCurrentRequestsLoading(false);
+        }
       );
     };
 
@@ -386,6 +392,14 @@ export default function RequesterDashboard() {
       unsubscribeRequests();
     };
   }, []);
+
+  const retryCurrentRequests = () => {
+    const requesterId = auth.currentUser?.uid;
+    if (!requesterId) return;
+    setCurrentRequestsError('');
+    setCurrentRequestsLoading(true);
+    refreshRequesterRequests(requesterId);
+  };
 
   const cancelPendingRequest = async (request) => {
     if (cancellingRequestId) return;
@@ -588,7 +602,20 @@ export default function RequesterDashboard() {
             <View style={styles.currentRequestSection}>
               <Text style={styles.currentRequestLabel}>Current Request</Text>
 
-              {currentRequests.length === 0 ? (
+              {currentRequestsLoading ? (
+                <View style={styles.emptyRequestCard}>
+                  <ActivityIndicator size="small" color={BLUE} />
+                  <Text style={styles.emptyRequestText}>Loading current order...</Text>
+                </View>
+              ) : currentRequestsError ? (
+                <View style={styles.emptyRequestCard}>
+                  <Text style={styles.emptyRequestTitle}>Current order unavailable</Text>
+                  <Text style={styles.emptyRequestText}>{currentRequestsError}</Text>
+                  <TouchableOpacity accessibilityRole="button" onPress={retryCurrentRequests} style={styles.catalogRetry}>
+                    <Text style={styles.catalogRetryText}>Retry</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : currentRequests.length === 0 ? (
                 <View style={styles.emptyRequestCard}>
                   <Text style={styles.emptyRequestTitle}>No current request.</Text>
                   <Text style={styles.emptyRequestText}>
@@ -596,7 +623,7 @@ export default function RequesterDashboard() {
                   </Text>
                 </View>
               ) : (
-                currentRequests.map((request, index) => {
+                currentRequests.slice(0, 1).map((request, index) => {
                   const isRequestPending = isPendingRequest(request);
 
                   return (
