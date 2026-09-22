@@ -1,0 +1,213 @@
+const assert = require('node:assert/strict');
+const { readFileSync } = require('node:fs');
+const { resolve } = require('node:path');
+const test = require('node:test');
+
+const { createAdminProductsHandler, safeProduct } = require('../productManagementHandler');
+const { createSupabaseProductImageStorage, decodeProductImage } = require('../../services/supabaseStorage');
+const { createRequesterCatalogHandler } = require('../../requester/orderingHandler');
+
+const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46]);
+const png = Buffer.from('89504e470d0a1a0a00000000', 'hex');
+const webp = Buffer.from('524946460400000057454250', 'hex');
+const imagePayload = (contentType = 'image/jpeg', bytes = jpeg) => ({ contentType, dataBase64: bytes.toString('base64') });
+
+function fixture() {
+  const records = new Map([
+    ['users/admin-1', { role: 'admin' }],
+    ['users/manager-1', { role: 'manager' }],
+    ['users/requester-1', { role: 'requester' }],
+    ['branches/central', { name: 'Central', status: 'active' }],
+    ['products/refill', { product_name: 'Refill', price: 35, active: true, branchIds: ['central'], imageUrl: 'https://example.supabase.co/storage/v1/object/public/products-images/products/refill/old.webp', imagePath: 'products/refill/old.webp', imageStorageProvider: 'supabase' }],
+  ]);
+  let auto = 0;
+  let failTransaction = false;
+  const snapshot = (path) => ({ id: path.split('/').pop(), exists: records.has(path), data: () => records.get(path) });
+  const collection = (name) => ({
+    doc(id = `product-${++auto}`) { const path = `${name}/${id}`; return { id, path, get: async () => snapshot(path) }; },
+    async get() { return { docs: [...records.keys()].filter((path) => path.startsWith(`${name}/`)).map(snapshot) }; },
+  });
+  const db = {
+    collection,
+    async runTransaction(run) {
+      if (failTransaction) throw new Error('Firestore unavailable');
+      return run({
+        create(ref, data) { records.set(ref.path, data); },
+        update(ref, data) { records.set(ref.path, { ...records.get(ref.path), ...data }); },
+        set(ref, data) { records.set(ref.path, data); },
+      });
+    },
+  };
+  const auth = {
+    async verifyIdToken(token) {
+      if (token === 'admin-token') return { uid: 'admin-1', admin: true, role: 'admin' };
+      if (token === 'manager-token') return { uid: 'manager-1', manager: true, role: 'manager' };
+      if (token === 'requester-token') return { uid: 'requester-1', role: 'requester' };
+      throw new Error('bad token');
+    },
+  };
+  return { records, getAdmin: () => ({ auth, db }), failTransactions(value) { failTransaction = value; } };
+}
+
+function storage() {
+  const calls = [];
+  let next = 0;
+  return {
+    calls,
+    async uploadProductImage(productId, image) {
+      calls.push({ type: 'upload', productId, contentType: image.contentType });
+      next += 1;
+      const imagePath = `products/${productId}/new-${next}.${image.contentType === 'image/jpeg' ? 'jpg' : image.contentType.split('/')[1]}`;
+      return { imageUrl: `https://example.supabase.co/storage/v1/object/public/products-images/${imagePath}`, imagePath, imageStorageProvider: 'supabase' };
+    },
+    async deleteProductImage(imagePath, productId) { calls.push({ type: 'delete', imagePath, productId }); },
+  };
+}
+
+function response() {
+  return { statusCode: 200, body: null, setHeader() {}, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; }, end() { return this; } };
+}
+async function call(handler, method, token, body) {
+  const res = response();
+  await handler({ method, headers: token ? { authorization: `Bearer ${token}` } : {}, body }, res);
+  return res;
+}
+
+test('server validates JPEG, PNG, WebP, size, and actual image signatures', () => {
+  assert.equal(decodeProductImage(imagePayload('image/jpeg')).bytes.length, jpeg.length);
+  assert.equal(decodeProductImage(imagePayload('image/png', png)).contentType, 'image/png');
+  assert.equal(decodeProductImage(imagePayload('image/webp', webp)).contentType, 'image/webp');
+  assert.throws(() => decodeProductImage(imagePayload('image/gif', jpeg)), (error) => error.reason === 'PRODUCT_IMAGE_TYPE_INVALID');
+  assert.throws(() => decodeProductImage(imagePayload('image/png', jpeg)), (error) => error.reason === 'PRODUCT_IMAGE_TYPE_INVALID');
+  assert.throws(() => decodeProductImage(imagePayload('image/jpeg', Buffer.concat([jpeg, Buffer.alloc(5 * 1024 * 1024)]))), (error) => error.reason === 'PRODUCT_IMAGE_TOO_LARGE');
+});
+
+test('Supabase product storage uses a server-generated safe path and public URL', async () => {
+  const uploads = []; const removed = []; const logs = []; let clientArgs;
+  const imageStorage = createSupabaseProductImageStorage({
+    env: { SUPABASE_URL: 'https://example.supabase.co', SUPABASE_SERVICE_ROLE_KEY: 'server-only', SUPABASE_STORAGE_BUCKET: 'products-images' },
+    createClientImpl(...args) {
+      clientArgs = args;
+      return { storage: { from(bucket) { return {
+        async upload(path, bytes, options) { uploads.push({ bucket, path, bytes, options }); return { error: null }; },
+        getPublicUrl(path) { return { data: { publicUrl: `https://example.supabase.co/storage/v1/object/public/${bucket}/${path}` } }; },
+        async remove(paths) { removed.push({ bucket, paths }); return { error: null }; },
+      }; } } };
+    },
+    logger: { info(...entry) { logs.push(entry); }, error(...entry) { logs.push(entry); } },
+  });
+  const uploaded = await imageStorage.uploadProductImage('product_42', decodeProductImage(imagePayload('image/webp', webp)));
+  assert.equal(clientArgs[0], 'https://example.supabase.co');
+  assert.equal(clientArgs[1], 'server-only');
+  assert.match(uploaded.imagePath, /^products\/product_42\/[a-f0-9-]+\.webp$/);
+  assert.equal(uploads[0].bucket, 'products-images');
+  assert.equal(uploads[0].options.contentType, 'image/webp');
+  await imageStorage.deleteProductImage(uploaded.imagePath, 'product_42');
+  assert.deepEqual(removed[0].paths, [uploaded.imagePath]);
+  assert.match(JSON.stringify(logs), /PRODUCT_IMAGE_UPLOAD_STARTED/);
+  assert.match(JSON.stringify(logs), /PRODUCT_IMAGE_UPLOAD_COMPLETED/);
+  assert.match(JSON.stringify(logs), /PRODUCT_IMAGE_DELETE_COMPLETED/);
+  assert.doesNotMatch(JSON.stringify(logs), /server-only/);
+});
+
+test('Supabase failures map to safe product-image error codes', async () => {
+  const unavailable = createSupabaseProductImageStorage({ env: {}, logger: { info() {}, error() {} } });
+  await assert.rejects(unavailable.uploadProductImage('product_42', decodeProductImage(imagePayload())), (error) => error.reason === 'PRODUCT_IMAGE_STORAGE_UNAVAILABLE');
+  const failed = createSupabaseProductImageStorage({
+    env: { SUPABASE_URL: 'https://example.supabase.co', SUPABASE_SERVICE_ROLE_KEY: 'server-only', SUPABASE_STORAGE_BUCKET: 'products-images' },
+    createClientImpl: () => ({ storage: { from: () => ({ upload: async () => ({ error: new Error('provider failure') }) }) } }),
+    logger: { info() {}, error() {} },
+  });
+  await assert.rejects(failed.uploadProductImage('product_42', decodeProductImage(imagePayload())), (error) => error.reason === 'PRODUCT_IMAGE_UPLOAD_FAILED');
+});
+
+test('product image logging records only safe lifecycle stages', () => {
+  const storageSource = readFileSync(resolve(__dirname, '..', '..', 'services', 'supabaseStorage.js'), 'utf8');
+  const handlerSource = readFileSync(resolve(__dirname, '..', 'productManagementHandler.js'), 'utf8');
+  for (const stage of ['PRODUCT_IMAGE_UPLOAD_STARTED', 'PRODUCT_IMAGE_UPLOAD_COMPLETED', 'PRODUCT_IMAGE_UPLOAD_FAILED', 'PRODUCT_IMAGE_DELETE_COMPLETED', 'PRODUCT_IMAGE_DELETE_FAILED', 'PRODUCT_IMAGE_REPLACED']) {
+    assert.match(storageSource + handlerSource, new RegExp(stage));
+  }
+  assert.doesNotMatch(storageSource, /logger\[level\].*serviceRoleKey/);
+});
+
+test('Admin creates a product with a Supabase image metadata record', async () => {
+  const f = fixture(); const imageStorage = storage();
+  const result = await call(createAdminProductsHandler(f.getAdmin, { imageStorage }), 'POST', 'admin-token', { product_name: 'Premium', price: 42, branchIds: ['central'], imageUpload: imagePayload() });
+  assert.equal(result.statusCode, 201);
+  assert.equal(result.body.product.imageStorageProvider, 'supabase');
+  assert.match(result.body.product.imageUrl, /supabase\.co\/storage/);
+  assert.equal(imageStorage.calls.filter((item) => item.type === 'upload').length, 1);
+  const saved = f.records.get(`products/${result.body.product.id}`);
+  assert.equal(saved.imageStorageProvider, 'supabase');
+  assert.equal(saved.image, undefined);
+  assert.equal(saved.imageUrl, result.body.product.imageUrl);
+});
+
+test('Admin uploads PNG and WebP product images through the same Render authorization path', async () => {
+  const f = fixture(); const imageStorage = storage(); const handler = createAdminProductsHandler(f.getAdmin, { imageStorage });
+  for (const [name, contentType, bytes] of [['PNG product', 'image/png', png], ['WebP product', 'image/webp', webp]]) {
+    const result = await call(handler, 'POST', 'admin-token', { product_name: name, price: 42, imageUpload: imagePayload(contentType, bytes) });
+    assert.equal(result.statusCode, 201);
+    assert.equal(result.body.product.imageStorageProvider, 'supabase');
+  }
+  assert.deepEqual(imageStorage.calls.filter((item) => item.type === 'upload').map((item) => item.contentType), ['image/png', 'image/webp']);
+});
+
+test('Requester and Manager cannot upload a product image through the Admin API', async () => {
+  const f = fixture(); const imageStorage = storage(); const handler = createAdminProductsHandler(f.getAdmin, { imageStorage });
+  for (const token of ['requester-token', 'manager-token']) {
+    const result = await call(handler, 'POST', token, { product_name: 'Blocked', price: 1, imageUpload: imagePayload() });
+    assert.equal(result.statusCode, 403);
+  }
+  assert.equal(imageStorage.calls.length, 0);
+});
+
+test('failed product creation cleans up only the newly uploaded Supabase image', async () => {
+  const f = fixture(); const imageStorage = storage(); f.failTransactions(true);
+  const result = await call(createAdminProductsHandler(f.getAdmin, { imageStorage }), 'POST', 'admin-token', { product_name: 'Premium', price: 42, imageUpload: imagePayload() });
+  assert.equal(result.statusCode, 500);
+  assert.deepEqual(imageStorage.calls.map((item) => item.type), ['upload', 'delete']);
+});
+
+test('editing a product without a replacement preserves its existing image', async () => {
+  const f = fixture(); const imageStorage = storage();
+  const result = await call(createAdminProductsHandler(f.getAdmin, { imageStorage }), 'PATCH', 'admin-token', { productId: 'refill', price: 40 });
+  assert.equal(result.statusCode, 200);
+  assert.equal(result.body.product.imagePath, 'products/refill/old.webp');
+  assert.equal(imageStorage.calls.length, 0);
+});
+
+test('replacement uploads first, saves Firestore, then deletes the previous Supabase image', async () => {
+  const f = fixture(); const imageStorage = storage();
+  const result = await call(createAdminProductsHandler(f.getAdmin, { imageStorage }), 'PATCH', 'admin-token', { productId: 'refill', imageUpload: imagePayload('image/webp', webp) });
+  assert.equal(result.statusCode, 200);
+  assert.match(result.body.product.imagePath, /^products\/refill\/new-1\.webp$/);
+  assert.deepEqual(imageStorage.calls.map((item) => item.type), ['upload', 'delete']);
+  assert.equal(imageStorage.calls[1].imagePath, 'products/refill/old.webp');
+});
+
+test('failed replacement preserves the old image and cleans up only the newly uploaded object', async () => {
+  const f = fixture(); const imageStorage = storage(); f.failTransactions(true);
+  const result = await call(createAdminProductsHandler(f.getAdmin, { imageStorage }), 'PATCH', 'admin-token', { productId: 'refill', imageUpload: imagePayload() });
+  assert.equal(result.statusCode, 500);
+  assert.equal(f.records.get('products/refill').imagePath, 'products/refill/old.webp');
+  assert.deepEqual(imageStorage.calls.map((item) => item.type), ['upload', 'delete']);
+  assert.notEqual(imageStorage.calls[1].imagePath, 'products/refill/old.webp');
+});
+
+test('legacy Firebase URLs remain displayable while new URLs use Supabase metadata', () => {
+  const legacy = safeProduct('legacy', { product_name: 'Legacy', price: 30, image: 'https://firebasestorage.googleapis.com/v0/b/legacy/o/product.png' });
+  assert.match(legacy.imageUrl, /firebasestorage\.googleapis\.com/);
+  const productCard = readFileSync(resolve(__dirname, '..', '..', '..', 'components', 'ProductCard.jsx'), 'utf8');
+  assert.match(productCard, /product\?\.imageUrl \|\| product\?\.image/);
+  const adminProducts = readFileSync(resolve(__dirname, '..', '..', '..', 'services', 'adminProducts.js'), 'utf8');
+  assert.match(adminProducts, /imageUpload/);
+  assert.doesNotMatch(adminProducts, /firebase\/storage|uploadBytes|deleteObject|getDownloadURL/);
+});
+
+test('Requester catalog returns the server-supplied Supabase image URL', async () => {
+  const f = fixture();
+  const result = await call(createRequesterCatalogHandler(f.getAdmin), 'GET', 'requester-token');
+  assert.equal(result.statusCode, 200);
+  assert.match(result.body.products.find((product) => product.id === 'refill').imageUrl, /example\.supabase\.co/);
+});

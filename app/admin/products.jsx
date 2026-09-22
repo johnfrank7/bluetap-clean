@@ -19,7 +19,7 @@ export default function AdminProductsPage() {
   const products = productsState.data || []; const branches = branchesState.data || [];
   const [search,setSearch] = React.useState(''); const [modal,setModal] = React.useState(false); const [editing,setEditing] = React.useState(null); const [form,setForm] = React.useState(empty); const [saving,setSaving] = React.useState(false); const [message,setMessage] = React.useState('');
   const filtered = products.filter((product) => product.product_name.toLowerCase().includes(search.trim().toLowerCase()));
-  const open = (product = null) => { setEditing(product); setForm(product ? { ...empty,...product,price:String(product.price),imagePreview:product.image || '' } : empty); setMessage(''); setModal(true); };
+  const open = (product = null) => { setEditing(product); setForm(product ? { ...empty,...product,price:String(product.price),imagePreview:product.imageUrl || product.image || '' } : empty); setMessage(''); setModal(true); };
   const close = () => { if (!saving) { setModal(false); setEditing(null); setForm(empty); } };
   const chooseImage = () => {
     if (!globalThis.document) return setMessage('Image upload is currently available in the web Admin portal.');
@@ -32,11 +32,11 @@ export default function AdminProductsPage() {
     setSaving(true); setMessage('');
     try {
       const payload = { product_name:form.product_name.trim(),description:form.description.trim(),price,containerType:form.containerType.trim(),size:form.size.trim(),active:form.active,branchIds:form.branchIds };
-      if (editing) await updateAdminProduct(editing.id,payload,form.imageFile,editing); else await createAdminProduct(payload,form.imageFile);
+      if (editing) await updateAdminProduct(editing.id,payload,form.imageFile); else await createAdminProduct(payload,form.imageFile);
       setModal(false); setEditing(null); setForm(empty); await productsState.refresh({force:true}); setMessage('Product saved. Requesters will see the updated catalog on refresh.');
     } catch (error) { setMessage(error.message); } finally { setSaving(false); }
   };
-  const toggleActive = async (product) => { setSaving(true); setMessage(''); try { await updateAdminProduct(product.id,{active:!product.active},null,product); await productsState.refresh({force:true}); } catch(error){setMessage(error.message);} finally{setSaving(false);} };
+  const toggleActive = async (product) => { setSaving(true); setMessage(''); try { await updateAdminProduct(product.id,{active:!product.active},null); await productsState.refresh({force:true}); } catch(error){setMessage(error.message);} finally{setSaving(false);} };
   return <AdminShell title="Products" subtitle="Manage the authoritative product catalog, pricing, images, and availability.">
     <View style={styles.toolbar}><View><Text style={styles.eyebrow}>PRODUCT CATALOG</Text><Text style={styles.heading}>Products and pricing</Text></View><View style={styles.toolbarActions}><TextInput value={search} onChangeText={setSearch} placeholder="Search products" placeholderTextColor={colors.textSecondary} style={styles.search}/><TouchableOpacity onPress={() => open()} style={styles.primary}><Text style={styles.primaryText}>Add product</Text></TouchableOpacity></View></View>
     {!!message && <View accessibilityRole="alert" style={styles.notice}><Text style={styles.noticeText}>{message}</Text></View>}

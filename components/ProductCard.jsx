@@ -5,7 +5,7 @@ import { BLUETAP_COLORS, BLUETAP_LAYOUT } from '../constants/bluetapTheme';
 const formatPrice = (price) => `₱${Number(price || 0).toFixed(2)}`;
 
 export default function ProductCard({ product, onOrder, compact = false, selected = false }) {
-  const imageUrl = product?.image || product?.imageUrl || '';
+  const imageUrl = product?.imageUrl || product?.image || '';
   const detail = [product?.containerType || product?.capacity, product?.size].filter(Boolean).join(' · ');
   return <View style={[styles.card, compact && styles.compactCard, selected && styles.selectedCard]}>
     <View style={[styles.imageSurface, compact && styles.compactImageSurface]}>

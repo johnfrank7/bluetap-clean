@@ -3,7 +3,7 @@ import { db } from '../firebase';
 import { getModuleSession } from './authSession';
 
 export const PRODUCTS_COLLECTION = 'products';
-export const PRODUCT_SCHEMA_FIELDS = ['id', 'product_name', 'description', 'price', 'image', 'imagePath', 'containerType', 'size', 'active', 'branchIds', 'createdAt', 'updatedAt'];
+export const PRODUCT_SCHEMA_FIELDS = ['id', 'product_name', 'description', 'price', 'image', 'imageUrl', 'imagePath', 'imageStorageProvider', 'containerType', 'size', 'active', 'branchIds', 'createdAt', 'updatedAt'];
 
 const subscribers = new Set();
 let sourceProducts = [];
@@ -18,8 +18,10 @@ const normalizeProduct = (id, data = {}) => ({
   product_name: data.product_name || data.productName || data.name || '',
   description: data.description || '',
   price: amount(data.price),
-  image: data.image || data.imageUrl || '',
+  image: data.imageUrl || data.image || '',
+  imageUrl: data.imageUrl || data.image || '',
   imagePath: data.imagePath || '',
+  imageStorageProvider: data.imageStorageProvider || '',
   containerType: data.containerType || data.capacity || '',
   capacity: data.capacity || data.containerType || '',
   size: data.size || '',

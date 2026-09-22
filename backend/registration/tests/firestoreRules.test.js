@@ -4,7 +4,6 @@ const { resolve } = require('node:path');
 const test = require('node:test');
 
 const rules = readFileSync(resolve(__dirname, '..', '..', '..', 'firestore.rules'), 'utf8');
-const storageRules = readFileSync(resolve(__dirname, '..', '..', '..', 'storage.rules'), 'utf8');
 
 test('Firestore rules allow own-profile access while scoping Manager reads to their Branch', () => {
   assert.match(rules, /request\.auth\.uid == uid \|\| isAdmin\(\)/);
@@ -47,14 +46,4 @@ test('branch definitions and Admin audit logs are backend-write-only', () => {
   assert.match(rules, /match \/branches\/\{branchId\}[\s\S]*allow list, create, update, delete:\s*if false;/);
   assert.match(rules, /request\.auth\.token\.manager == true/);
   assert.match(rules, /request\.auth\.token\.admin == true/);
-});
-
-test('product images are readable only when authenticated and writable only by Admins', () => {
-  assert.match(storageRules, /match \/products\/admin\/\{allPaths=\*\*\}/);
-  assert.match(storageRules, /allow read:\s*if request\.auth != null;/);
-  assert.match(storageRules, /allow create, update:[\s\S]*request\.auth\.token\.admin == true/);
-  assert.match(storageRules, /allow create, update:[\s\S]*request\.resource\.size < 5 \* 1024 \* 1024/);
-  assert.match(storageRules, /allow create, update:[\s\S]*image\/\(jpeg\|png\|webp\)/);
-  assert.match(storageRules, /allow delete:[\s\S]*request\.auth\.token\.admin == true/);
-  assert.match(storageRules, /match \/\{allPaths=\*\*\} \{ allow read, write: if false; \}/);
 });

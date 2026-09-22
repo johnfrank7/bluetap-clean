@@ -6,6 +6,7 @@ const { emailProviderConfigStatus } = require('./email/emailProvider');
 const { applyCors } = require('./utils/cors');
 
 const MAX_REQUEST_BYTES = 5 * 1024 * 1024;
+const MAX_PRODUCT_IMAGE_REQUEST_BYTES = Math.ceil(MAX_REQUEST_BYTES * 4 / 3) + 64 * 1024;
 
 function addResponseHelpers(res) {
   res.status = (statusCode) => {
@@ -19,7 +20,7 @@ function addResponseHelpers(res) {
   return res;
 }
 
-function readBody(req) {
+function readBody(req, maxBytes = MAX_REQUEST_BYTES) {
   return new Promise((resolve, reject) => {
     let size = 0;
     let tooLarge = false;
@@ -27,7 +28,7 @@ function readBody(req) {
     req.on('data', (chunk) => {
       if (tooLarge) return;
       size += chunk.length;
-      if (size > MAX_REQUEST_BYTES) {
+      if (size > maxBytes) {
         tooLarge = true;
         const error = new Error('Request body is too large.');
         error.code = 'REQUEST_TOO_LARGE';
@@ -64,7 +65,8 @@ function createRequestListener(routeMap = routes) {
     if (!handler) return res.status(404).json({ error: { reason: 'not-found', message: 'Endpoint not found.' } });
 
     try {
-      req.body = ['POST', 'PUT', 'PATCH'].includes(req.method) ? await readBody(req) : '';
+      const maxBytes = pathname === '/api/admin/products' ? MAX_PRODUCT_IMAGE_REQUEST_BYTES : MAX_REQUEST_BYTES;
+      req.body = ['POST', 'PUT', 'PATCH'].includes(req.method) ? await readBody(req, maxBytes) : '';
       await handler(req, res);
     } catch (error) {
       if (res.writableEnded) return;
@@ -102,4 +104,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { MAX_REQUEST_BYTES, addResponseHelpers, createAppServer, createRequestListener, readBody };
+module.exports = { MAX_REQUEST_BYTES, MAX_PRODUCT_IMAGE_REQUEST_BYTES, addResponseHelpers, createAppServer, createRequestListener, readBody };
