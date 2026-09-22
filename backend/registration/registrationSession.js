@@ -34,6 +34,9 @@ function validatePersonalInfo(input) {
     throw new OtpError(400, 'invalid-registration', 'Complete your personal information before identity verification.');
   }
   if (!/^\+639\d{9}$/.test(input.phone || '')) throw new OtpError(400, 'invalid-registration', 'Enter a valid Philippine mobile number.');
+  if (input.role === 'distributor' && (typeof input.requestedBranchId !== 'string' || !input.requestedBranchId.trim())) {
+    throw new OtpError(400, 'branch-required', 'Choose the BlueTap branch you are applying to.');
+  }
 }
 
 function createRegistrationSessionService({ db, hashSecret, deviceHashSecret, ipHashSecret, now = Date.now }) {
@@ -56,11 +59,24 @@ function createRegistrationSessionService({ db, hashSecret, deviceHashSecret, ip
       tx.set(ref, { count: count + 1, resetAt: new Date(active ? millis(data.resetAt) : time + 60 * 60 * 1000) });
     });
   }
+  async function activeBranches() {
+    const snapshot = await db.collection('branches').get();
+    return (snapshot.docs || []).filter((doc) => doc.data()?.status === 'active').map((doc) => ({ id: doc.id, name: String(doc.data()?.name || '').trim() })).filter((branch) => branch.name);
+  }
+  async function requestedBranch(input) {
+    if (input.role !== 'distributor') return null;
+    const id = String(input.requestedBranchId || '').trim().slice(0, 80);
+    const snapshot = id ? await db.collection('branches').doc(id).get() : null;
+    if (!snapshot?.exists) throw new OtpError(404, 'BRANCH_NOT_FOUND', 'The selected BlueTap branch does not exist.');
+    if (snapshot.data()?.status !== 'active') throw new OtpError(409, 'BRANCH_INACTIVE', 'The selected BlueTap branch is inactive.');
+    return { id, name: String(snapshot.data()?.name || '').trim().slice(0, 160) };
+  }
   async function create(input, ip) {
     validatePersonalInfo(input);
     if (!INSTALLATION_ID.test(input?.installationId || '')) {
       throw new OtpError(400, 'invalid-installation-id', 'Restart BlueTap before registering.');
     }
+    const branch = await requestedBranch(input);
     await limit(ip);
     const config = await loadRegistrationSecurity(db);
     const securityPolicySnapshot = policySnapshot(config);
@@ -72,7 +88,8 @@ function createRegistrationSessionService({ db, hashSecret, deviceHashSecret, ip
     await db.collection('registrationSessions').doc(id).set({
       role: input.role,
       personalInfoCompleted: true,
-      personalInfoDigest: digest(JSON.stringify([input.role, input.firstName.trim(), input.lastName.trim(), input.phone, input.barangay.trim(), input.address.trim()])),
+      personalInfoDigest: digest(JSON.stringify([input.role, input.firstName.trim(), input.lastName.trim(), input.phone, input.barangay.trim(), input.address.trim(), ...(branch ? [branch.id] : [])])),
+      ...(branch ? { requestedBranchId: branch.id, requestedBranchNameSnapshot: branch.name } : {}),
       securityPolicySnapshot,
       registrationLimitKeys: { deviceHash, ipHash },
       faceVerification: securityPolicySnapshot.faceVerificationRequired
@@ -113,7 +130,7 @@ function createRegistrationSessionService({ db, hashSecret, deviceHashSecret, ip
     });
     return { accepted: true, termsVersion: TERMS_VERSION, privacyVersion: PRIVACY_VERSION };
   }
-  return { create, status, start, acceptTerms };
+  return { create, status, start, acceptTerms, activeBranches };
 }
 
 // Trusted provider/backend integration only. Never expose this directly as a

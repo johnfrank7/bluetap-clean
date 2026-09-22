@@ -47,7 +47,7 @@ async function requireActiveDistributor(req, auth, db) {
   const decoded = await verifiedIdentity(req, auth);
   const profileSnapshot = await db.collection('users').doc(decoded.uid).get();
   const profile = profileSnapshot.data() || {};
-  const distributorStatus = String(profile.approvalStatus || profile.status || '').trim().toLowerCase();
+  const distributorStatus = String(profile.distributorStatus || profile.approvalStatus || profile.status || '').trim().toLowerCase();
   if (!profileSnapshot.exists || profile.role !== 'distributor') {
     throw new OtpError(403, 'DISTRIBUTOR_REQUIRED', 'Distributor access is required.');
   }

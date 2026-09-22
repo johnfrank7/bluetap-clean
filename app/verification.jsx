@@ -58,7 +58,7 @@ export default function VerificationPage() {
     }
 
     if (role === 'distributor') {
-      if (getDistributorApplicationStatus(profile) === 'approved') {
+      if (['approved', 'active'].includes(getDistributorApplicationStatus(profile)) && String(profile.branchId || '').trim()) {
         router.replace('/distributor/d_dashboard');
       } else {
         setDistributorApprovalRequired(true);

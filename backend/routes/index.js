@@ -25,6 +25,7 @@ const routes = new Map([
   ['/api/auth/check-username', createUsernameHandler('check')],
   ['/api/auth/login-with-username', createUsernameHandler('login')],
   ['/api/auth/create-registration-session', createRegistrationSessionHandler('create')],
+  ['/api/auth/registration-branches', createRegistrationSessionHandler('branches')],
   ['/api/auth/registration-policy', createRegistrationSessionHandler('policy')],
   ['/api/auth/registration-session-status', createRegistrationSessionHandler('status')],
   ['/api/auth/start-registration-face-verification', createRegistrationSessionHandler('start')],

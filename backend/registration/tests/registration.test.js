@@ -71,9 +71,10 @@ function fixture() {
     sendEmailOtp: async (message) => { if (failEmail) throw new Error('Test provider outage'); sent.push(message); },
   });
   const setSessionProfile = (profile = form, options = {}) => {
-    const personalInfoDigest = createHmac('sha256', 'test-signing-key').update(JSON.stringify([profile.role, profile.firstName, profile.lastName, profile.phone, profile.barangay, profile.address])).digest('hex');
+    const personalInfoDigest = createHmac('sha256', 'test-signing-key').update(JSON.stringify([profile.role, profile.firstName, profile.lastName, profile.phone, profile.barangay, profile.address, ...(profile.role === 'distributor' ? [profile.requestedBranchId || 'branch-a'] : [])])).digest('hex');
     records.set('registrationSessions/' + sessionId, {
       role: profile.role, personalInfoCompleted: true, personalInfoDigest,
+      ...(profile.role === 'distributor' ? { requestedBranchId: profile.requestedBranchId || 'branch-a', requestedBranchNameSnapshot: 'Branch A' } : {}),
       securityPolicySnapshot: { faceVerificationRequired: options.faceRequired !== false, emailOtpRequired: options.otpRequired !== false, maxAccountsPerDevice: 3, maxAccountsPerIp: 3, policyVersion: 1 },
       registrationLimitKeys: { deviceHash: 'device-hash', ipHash: 'ip-hash' },
       faceVerification: options.faceStatus === 'temporary'
@@ -146,13 +147,16 @@ test('correct OTP creates verified Auth account and server-owned profile exactly
   assert.equal(f.creates, 1);
 });
 
-test('distributor registration cannot set its own approval or face verification', async () => {
+test('distributor registration cannot set its own approval or branch and remains pending', async () => {
   const f = fixture();
-  f.setSessionProfile({ ...form, role: 'distributor' });
+  f.setSessionProfile({ ...form, role: 'distributor', requestedBranchId: 'branch-a' });
   const result = await f.service.request('new@example.test', 'test-ip');
-  await f.service.complete(result.challenge, f.sent[0].code, { ...form, role: 'distributor', approvalStatus: 'approved', faceVerification: { status: 'verified' } });
+  await f.service.complete(result.challenge, f.sent[0].code, { ...form, role: 'distributor', requestedBranchId: 'branch-a', branchId: 'forged', approvalStatus: 'approved', faceVerification: { status: 'verified' } });
   const profile = f.records.get('users/new-user');
+  assert.equal(profile.distributorStatus, 'pending');
   assert.equal(profile.approvalStatus, 'pending');
+  assert.equal(profile.requestedBranchId, 'branch-a');
+  assert.equal(profile.branchId, null);
   assert.equal(profile.faceVerification.status, 'verified');
   assert.notEqual(profile.faceVerification.verificationReference, 'forged');
   assert.equal(profile.unique_id, 'DIS-000001');

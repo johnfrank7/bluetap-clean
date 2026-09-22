@@ -12,7 +12,7 @@ import { BLUETAP_COLORS, BLUETAP_LOGIN_GRADIENT } from '../constants/bluetapThem
 import { clearAllAuthSessions } from '../services/authSession';
 import { clearPendingRegistration, completeRegistrationWithoutOtp, getPendingRegistration, requestRegistrationOtp, setPendingRegistration } from '../services/emailVerification';
 import { checkUsername, normalizeUsername, validateUsername } from '../services/usernameAuth';
-import { acceptRegistrationTerms, createRegistrationSession, getRegistrationSecurityPolicy } from '../services/registrationSession';
+import { acceptRegistrationTerms, createRegistrationSession, getRegistrationBranches, getRegistrationSecurityPolicy } from '../services/registrationSession';
 import { useFaceServiceWarmup } from '../services/useFaceServiceWarmup';
 
 import RegistrationFaceCapture from '../components/RegistrationFaceCapture';
@@ -57,12 +57,16 @@ export default function SignupPage() {
     role: usernameRetryDraft?.profile?.role || initialRole,
     firstName: usernameRetryDraft?.profile?.firstName || '', lastName: usernameRetryDraft?.profile?.lastName || '',
     phone: String(usernameRetryDraft?.profile?.phone || '').replace(/^\+63/, ''),
-    barangay: usernameRetryDraft?.profile?.barangay || '', address: usernameRetryDraft?.profile?.address || '',
+    barangay: usernameRetryDraft?.profile?.barangay || '', address: usernameRetryDraft?.profile?.address || '', requestedBranchId: usernameRetryDraft?.profile?.requestedBranchId || '',
     username: usernameRetryDraft?.profile?.username || '', email: usernameRetryDraft?.profile?.email || '',
     password: usernameRetryDraft?.profile?.password || '', confirmPassword: usernameRetryDraft?.profile?.password || '',
   }));
   const [errors, setErrors] = React.useState(() => usernameRetryDraft ? { username: 'This username was just taken. Please choose another.' } : {});
   const [showBarangays, setShowBarangays] = React.useState(false);
+  const [showBranches, setShowBranches] = React.useState(false);
+  const [registrationBranches, setRegistrationBranches] = React.useState([]);
+  const [branchesLoading, setBranchesLoading] = React.useState(false);
+  const [branchLoadError, setBranchLoadError] = React.useState('');
   const [showPassword, setShowPassword] = React.useState(false);
   const [usernameState, setUsernameState] = React.useState(() => usernameRetryDraft
     ? { status: 'taken', checked: normalizeUsername(usernameRetryDraft.profile.username) }
@@ -110,6 +114,17 @@ export default function SignupPage() {
   }, [registrationSessionId]);
 
   React.useEffect(() => {
+    let active = true;
+    if (form.role !== 'distributor') { setRegistrationBranches([]); setBranchLoadError(''); return () => { active = false; }; }
+    setBranchesLoading(true); setBranchLoadError('');
+    getRegistrationBranches()
+      .then((branches) => { if (active) setRegistrationBranches(branches); })
+      .catch((error) => { if (active) setBranchLoadError(error.message || 'BlueTap branches are unavailable.'); })
+      .finally(() => { if (active) setBranchesLoading(false); });
+    return () => { active = false; };
+  }, [form.role]);
+
+  React.useEffect(() => {
     Animated.timing(stepTransition, {
       toValue: 1,
       duration: 260,
@@ -131,7 +146,7 @@ export default function SignupPage() {
       usernameCheckVersion.current += 1;
       setUsernameState({ status: 'idle', checked: '' });
     }
-    if (['role', 'firstName', 'lastName', 'phone', 'barangay', 'address'].includes(key) && registrationSessionId) {
+    if (['role', 'firstName', 'lastName', 'phone', 'barangay', 'address', 'requestedBranchId'].includes(key) && registrationSessionId) {
       setRegistrationSessionId('');
       setFaceVerification({ status: 'unverified', duplicateCheck: 'unknown' });
     }
@@ -144,7 +159,7 @@ export default function SignupPage() {
   }, [retryAt]);
   const retrySeconds = Math.max(0, Math.ceil((retryAt - now) / 1000));
   const accountComplete = !!form.role;
-  const personalComplete = !!form.firstName.trim() && !!form.lastName.trim() && PHONE.test(form.phone) && !!form.barangay && !!form.address.trim();
+  const personalComplete = !!form.firstName.trim() && !!form.lastName.trim() && PHONE.test(form.phone) && !!form.barangay && !!form.address.trim() && (form.role !== 'distributor' || !!form.requestedBranchId);
   const identityComplete = !!registrationSessionId && (!securityPolicy.faceVerificationRequired || isTrustedRegistrationFaceVerification(faceVerification));
   const credentialsComplete = !validateUsername(form.username) && EMAIL.test(form.email.trim()) && form.password.length >= 8 && form.password === form.confirmPassword && usernameState.status === 'available' && termsAccepted;
   const visibleRegistrationSteps = [1, 2, ...(securityPolicy.faceVerificationRequired ? [3] : []), 4, ...(securityPolicy.emailOtpRequired ? [5] : [])];
@@ -226,6 +241,7 @@ export default function SignupPage() {
       if (!PHONE.test(form.phone)) next.phone = 'Enter a valid Philippine number (9XXXXXXXXX).';
       if (!form.barangay) next.barangay = 'Select your barangay.';
       if (!form.address.trim()) next.address = 'Address is required.';
+      if (form.role === 'distributor' && !form.requestedBranchId) next.requestedBranchId = 'Choose the BlueTap branch you are applying to.';
     }
     if (target === 4) {
       const usernameError = validateUsername(form.username);
@@ -249,6 +265,7 @@ export default function SignupPage() {
         const result = await createRegistrationSession({
           role: form.role, firstName: form.firstName.trim(), lastName: form.lastName.trim(),
           phone: `+63${form.phone}`, barangay: form.barangay, address: form.address.trim(),
+          ...(form.role === 'distributor' ? { requestedBranchId: form.requestedBranchId } : {}),
         });
         setRegistrationSessionId(result.registrationSessionId);
         setSecurityPolicy(result.securityPolicy || { faceVerificationRequired: true, emailOtpRequired: true });
@@ -298,6 +315,7 @@ export default function SignupPage() {
         username: form.username.trim(), usernameNormalized: normalizeUsername(form.username),
         email: form.email.trim().toLowerCase(), password: form.password,
         registrationSessionId,
+        ...(form.role === 'distributor' ? { requestedBranchId: form.requestedBranchId } : {}),
         securityPolicy,
       };
       clearPendingRegistration();
@@ -309,7 +327,7 @@ export default function SignupPage() {
         await signInWithCustomToken(auth, completed.customToken);
         saveRoleSession({ uid: auth.currentUser.uid, email: profile.email, role: completed.role });
         clearPendingRegistration();
-        router.replace(getRoleHomePath(completed.role));
+        router.replace(completed.role === 'distributor' ? '/registration-status' : getRoleHomePath(completed.role));
         return;
       }
       router.replace({ pathname: '/email-verification', params: {
@@ -405,6 +423,8 @@ export default function SignupPage() {
                 <Field label="Barangay" error={errors.barangay}><TouchableOpacity style={[styles.input, styles.select, errors.barangay && styles.inputError]} onPress={() => setShowBarangays((v) => !v)}><Text style={form.barangay ? styles.inputText : styles.placeholder}>{form.barangay || 'Select barangay'}</Text><Text>⌄</Text></TouchableOpacity></Field>
                 {showBarangays && <ScrollView style={styles.dropdown} nestedScrollEnabled>{BARANGAYS.map((item) => <TouchableOpacity key={item} style={styles.option} onPress={() => { update('barangay', item); setShowBarangays(false); }}><Text style={styles.inputText}>{item}</Text></TouchableOpacity>)}</ScrollView>}
                 <Field label="Address" error={errors.address}><TextInput style={[styles.input, errors.address && styles.inputError]} value={form.address} onChangeText={(v) => update('address', v)} placeholder="Street, sitio, or house number" placeholderTextColor="#94A3B8" /></Field>
+                {form.role === 'distributor' && <Field label="Apply to branch" error={errors.requestedBranchId} hint={branchLoadError || (branchesLoading ? 'Loading active BlueTap branches…' : 'Choose the active BlueTap branch you are applying to. Administrator approval is required before delivery access.')}><TouchableOpacity disabled={branchesLoading || !!branchLoadError} style={[styles.input, styles.select, errors.requestedBranchId && styles.inputError, (branchesLoading || !!branchLoadError) && styles.inputDisabled]} onPress={() => setShowBranches((value) => !value)} accessibilityRole="combobox" accessibilityLabel="Apply to branch"><Text style={form.requestedBranchId ? styles.inputText : styles.placeholder}>{registrationBranches.find((branch) => branch.id === form.requestedBranchId)?.name || 'Select BlueTap branch'}</Text><Text>⌄</Text></TouchableOpacity></Field>}
+                {form.role === 'distributor' && showBranches && <ScrollView style={styles.dropdown} nestedScrollEnabled>{registrationBranches.map((branch) => <TouchableOpacity key={branch.id} style={styles.option} onPress={() => { update('requestedBranchId', branch.id); setShowBranches(false); }}><Text style={styles.inputText}>{branch.name}</Text></TouchableOpacity>)}{!registrationBranches.length && !branchesLoading && <Text style={styles.emptyDropdown}>No active BlueTap branches are currently available.</Text>}</ScrollView>}
               </View>}
 
               {step === 3 && accountComplete && personalComplete && !!registrationSessionId && <RegistrationFaceCapture
@@ -468,7 +488,7 @@ const styles = StyleSheet.create({
   stepText: { color: BLUETAP_COLORS.primary, fontSize: 12, fontWeight: '700', textAlign: 'center', marginTop: -12, marginBottom: 12 },
   roleList: { gap: 12 }, roleCard: { flexDirection: 'row', alignItems: 'center', minHeight: 94, padding: 16, borderRadius: 14, borderWidth: 1.5, borderColor: '#D8E5EF', backgroundColor: '#FAFCFE' }, roleCardSelected: { borderColor: BLUETAP_COLORS.primary, backgroundColor: '#EDF7FF' }, roleIcon: { fontSize: 28, marginRight: 14 }, roleCopy: { flex: 1 }, roleTitle: { color: '#17324D', fontSize: 16, fontWeight: '800' }, roleDescription: { color: '#607A90', fontSize: 13, lineHeight: 18, marginTop: 3 }, radio: { width: 18, height: 18, borderRadius: 9, borderWidth: 2, borderColor: '#A8BCCB' }, radioSelected: { borderWidth: 5, borderColor: BLUETAP_COLORS.primary },
   row: { flexDirection: 'row', gap: 12 }, half: { flex: 1 }, field: { marginBottom: 15 }, label: { color: '#29465F', fontSize: 13, fontWeight: '700', marginBottom: 6 }, input: { minHeight: 50, borderWidth: 1, borderColor: '#C8D9E6', borderRadius: 11, backgroundColor: '#FAFCFE', paddingHorizontal: 14, color: '#17324D', fontSize: 15 }, inputError: { borderColor: '#DC5757', backgroundColor: '#FFF8F8' }, inputSuccess: { borderColor: '#36A269' }, error: { color: '#B93A3A', fontSize: 12, marginTop: 5 }, hint: { color: '#68839A', fontSize: 12, marginTop: 5 },
-  phone: { flexDirection: 'row', alignItems: 'center', minHeight: 50, borderWidth: 1, borderColor: '#C8D9E6', borderRadius: 11, backgroundColor: '#FAFCFE' }, prefix: { paddingHorizontal: 14, color: '#17324D', fontWeight: '700', borderRightWidth: 1, borderRightColor: '#D8E5EF' }, phoneInput: { flex: 1, minHeight: 48, paddingHorizontal: 12, color: '#17324D', fontSize: 15 }, select: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }, inputText: { color: '#17324D', fontSize: 15 }, placeholder: { color: '#94A3B8', fontSize: 15 }, dropdown: { maxHeight: 170, borderWidth: 1, borderColor: '#C8D9E6', borderRadius: 11, marginTop: -10, marginBottom: 15 }, option: { padding: 13, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#D8E5EF' },
+  phone: { flexDirection: 'row', alignItems: 'center', minHeight: 50, borderWidth: 1, borderColor: '#C8D9E6', borderRadius: 11, backgroundColor: '#FAFCFE' }, prefix: { paddingHorizontal: 14, color: '#17324D', fontWeight: '700', borderRightWidth: 1, borderRightColor: '#D8E5EF' }, phoneInput: { flex: 1, minHeight: 48, paddingHorizontal: 12, color: '#17324D', fontSize: 15 }, select: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }, inputText: { color: '#17324D', fontSize: 15 }, placeholder: { color: '#94A3B8', fontSize: 15 }, inputDisabled: { opacity: .58 }, dropdown: { maxHeight: 170, borderWidth: 1, borderColor: '#C8D9E6', borderRadius: 11, marginTop: -10, marginBottom: 15 }, option: { padding: 13, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#D8E5EF' }, emptyDropdown: { color: '#607A90', padding: 13, fontSize: 13 },
   identityBox: { alignItems: 'center' }, faceIcon: { width: 82, height: 82, borderRadius: 41, backgroundColor: '#E8F5FF', alignItems: 'center', justifyContent: 'center', marginBottom: 15 }, faceIconText: { color: BLUETAP_COLORS.primary, fontSize: 48 }, identityTitle: { color: '#17324D', fontSize: 17, fontWeight: '800', textAlign: 'center' }, identityText: { color: '#607A90', fontSize: 14, lineHeight: 21, textAlign: 'center', marginTop: 9 }, privacy: { backgroundColor: '#F1F7FB', padding: 13, borderRadius: 10, marginTop: 16 }, privacyText: { color: '#47667E', fontSize: 12, lineHeight: 18 }, status: { flexDirection: 'row', alignItems: 'center', marginTop: 14 }, successMark: { color: '#238A57', fontSize: 18, fontWeight: '900', marginRight: 7 }, reviewDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#C47A13', marginRight: 7 }, faceMessage: { color: '#A34B23', fontSize: 13, lineHeight: 18, textAlign: 'center', marginTop: 14 }, faceSuccess: { color: '#238A57', fontSize: 13, fontWeight: '700' }, faceReview: { color: '#A5650B', fontSize: 13, fontWeight: '700' },
   faceButton: { width: '100%', minHeight: 48, marginTop: 16, borderRadius: 11, borderWidth: 1, borderColor: '#9AC7E8', alignItems: 'center', justifyContent: 'center' }, faceButtonText: { color: BLUETAP_COLORS.primary, fontSize: 14, fontWeight: '700' },
   password: { flexDirection: 'row', alignItems: 'center', minHeight: 50, borderWidth: 1, borderColor: '#C8D9E6', borderRadius: 11, backgroundColor: '#FAFCFE' }, passwordInput: { flex: 1, minHeight: 48, paddingHorizontal: 14, color: '#17324D', fontSize: 15 }, show: { color: BLUETAP_COLORS.primary, fontWeight: '700', padding: 13 },

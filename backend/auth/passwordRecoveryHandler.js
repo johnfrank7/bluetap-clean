@@ -25,7 +25,7 @@ const digest = (secret, ...values) => createHmac('sha256', secret).update(JSON.s
 const millis = (value) => value?.toMillis?.() || (value instanceof Date ? value.getTime() : Number(value) || 0);
 const activeAccount = (profile = {}) => {
   if (profile.role === 'manager') return profile.managerStatus === 'active';
-  if (profile.role === 'distributor') return ['approved', 'active'].includes(String(profile.approvalStatus || profile.status || '').toLowerCase());
+  if (profile.role === 'distributor') return ['approved', 'active'].includes(String(profile.distributorStatus || profile.approvalStatus || profile.status || '').toLowerCase());
   return !['inactive', 'disabled'].includes(String(profile.accountStatus || profile.status || 'active').toLowerCase());
 };
 const genericRequest = (email) => ({ recoverySessionId: randomUUID(), maskedEmail: maskEmail(email), expiresAt: Date.now() + EXPIRY_MS, retryAfterSeconds: Math.ceil(COOLDOWN_MS / 1000), generic: true });

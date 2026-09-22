@@ -1,8 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
-  Modal,
   ScrollView,
   StyleSheet,
   Text,
@@ -12,17 +10,14 @@ import {
 } from 'react-native';
 import {
   collection,
-  doc,
   onSnapshot,
   query,
-  serverTimestamp,
-  setDoc,
   where,
 } from 'firebase/firestore';
 
 import { db } from '../../firebase';
-import { getLocalUsers, subscribeLocalUsers, updateLocalUserStatus } from '../../localUsers';
-import { getProfileUniqueId, saveUserProfileWithUniqueId } from '../../services/uniqueIds';
+import { getLocalUsers, subscribeLocalUsers } from '../../localUsers';
+import { getProfileUniqueId } from '../../services/uniqueIds';
 import { getModuleSession } from '../../services/authSession';
 import { decideOutsideRadiusOrder, dispatchManagerOrder, getManagerDispatch, getOutsideRadiusOrders } from '../../services/managerOrderApprovals';
 import { haversineDistanceKm } from '../../services/location';
@@ -37,18 +32,10 @@ const normalizeApplicationStatus = (status) =>
 
 const normalizeRole = (role) => (role || '').toString().trim().toLowerCase();
 
-const toApplicationStatus = (status) => {
-  const normalizedStatus = normalizeApplicationStatus(status);
-
-  if (normalizedStatus === 'approved') return 'Approved';
-  if (normalizedStatus === 'rejected') return 'Rejected';
-
-  return 'Pending';
-};
-
 const getDistributorApplicationStatus = (distributor) =>
   normalizeApplicationStatus(
-    distributor.status ||
+    distributor.distributorStatus ||
+      distributor.status ||
       distributor.approvalStatus ||
       distributor.accountStatus ||
       'pending'
@@ -81,33 +68,6 @@ const getFullName = (user = {}) =>
 
 const getBarangay = (user = {}) =>
   (user.barangay || user.address || 'Not set').toString().trim() || 'Not set';
-
-const buildDistributorUpdate = (distributor, approvalStatus, rejectionReason = '') => {
-  const uid = distributor.uid || distributor.id;
-  const isRejected = approvalStatus === 'rejected';
-  const uniqueId = getProfileUniqueId(distributor);
-
-  const update = {
-    uid,
-    firstName: distributor.firstName || '',
-    lastName: distributor.lastName || '',
-    email: distributor.email || '',
-    phone: distributor.phone || '',
-    barangay: distributor.barangay || distributor.address || '',
-    address: distributor.address || distributor.barangay || '',
-    role: 'distributor',
-    approvalStatus,
-    status: toApplicationStatus(approvalStatus),
-    rejectionReason: isRejected ? rejectionReason : null,
-    reviewedAt: serverTimestamp(),
-  };
-
-  if (uniqueId) {
-    update.unique_id = uniqueId;
-  }
-
-  return update;
-};
 
 const formatAmount = (amount) => `₱${Number(amount || 0).toFixed(2)}`;
 
@@ -190,12 +150,8 @@ export default function ManagerRequestPage() {
   const branchId = getModuleSession('manager')?.branchId || '';
   const [pendingDistributors, setPendingDistributors] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [updatingId, setUpdatingId] = useState(null);
   const [loadError, setLoadError] = useState('');
   const [search, setSearch] = useState('');
-  const [rejectingDistributor, setRejectingDistributor] = useState(null);
-  const [rejectionReason, setRejectionReason] = useState('');
-  const [rejectionReasonError, setRejectionReasonError] = useState('');
 
   useEffect(() => {
     let firestorePending = [];
@@ -264,103 +220,11 @@ export default function ManagerRequestPage() {
     );
   }, [pendingDistributors, search]);
 
-  const updateDistributorStatus = async (distributor, approvalStatus, reason = '') => {
-    const id = distributor.uid || distributor.id;
-    const rejectionReason = reason.trim();
-
-    if (approvalStatus === 'rejected' && !rejectionReason) {
-      setRejectionReasonError('Rejection reason is required.');
-      return;
-    }
-
-    try {
-      setUpdatingId(id);
-      let distributorWithUniqueId = distributor;
-
-      try {
-        distributorWithUniqueId = await saveUserProfileWithUniqueId(
-          id,
-          'distributor',
-          {
-            uid: id,
-            role: 'distributor',
-          }
-        );
-      } catch (error) {
-        console.log('Distributor Unique ID review error:', error.message);
-      }
-
-      updateLocalUserStatus(id, approvalStatus, { rejectionReason });
-      setPendingDistributors((current) =>
-        current.filter((distributor) => distributor.uid !== id && distributor.id !== id)
-      );
-
-      try {
-        await setDoc(
-          doc(db, 'users', id),
-          buildDistributorUpdate(
-            {
-              ...distributor,
-              ...distributorWithUniqueId,
-            },
-            approvalStatus,
-            rejectionReason
-          ),
-          { merge: true }
-        );
-      } catch (error) {
-        console.log('Distributor Firestore review error:', error.message);
-        Alert.alert(
-          'Saved locally',
-          'The distributor status was updated on this device, but Firestore did not accept the change.'
-        );
-      }
-    } catch (error) {
-      console.log('Distributor review error:', error.message);
-      Alert.alert('Update failed', error.message);
-    } finally {
-      setUpdatingId(null);
-    }
-  };
-
-  const openRejectModal = (distributor) => {
-    setRejectingDistributor(distributor);
-    setRejectionReason('');
-    setRejectionReasonError('');
-  };
-
-  const closeRejectModal = () => {
-    const id = rejectingDistributor?.uid || rejectingDistributor?.id;
-
-    if (id && updatingId === id) return;
-
-    setRejectingDistributor(null);
-    setRejectionReason('');
-    setRejectionReasonError('');
-  };
-
-  const submitRejection = async () => {
-    if (!rejectingDistributor) return;
-
-    const trimmedReason = rejectionReason.trim();
-
-    if (!trimmedReason) {
-      setRejectionReasonError('Rejection reason is required.');
-      return;
-    }
-
-    await updateDistributorStatus(rejectingDistributor, 'rejected', trimmedReason);
-    closeRejectModal();
-  };
-
-  const rejectingDistributorId = rejectingDistributor?.uid || rejectingDistributor?.id;
-  const isSavingRejection = !!rejectingDistributorId && updatingId === rejectingDistributorId;
-
   return (
     <ManagerShell
       active="requests"
       title="Requests"
-      subtitle="Branch delivery exceptions and distributor approvals"
+      subtitle="Branch delivery exceptions and dispatch coordination"
       searchValue={search}
       onSearchChange={setSearch}
     >
@@ -369,7 +233,7 @@ export default function ManagerRequestPage() {
       <View style={styles.card}>
         <View style={styles.cardHeader}>
           <Text style={styles.cardTitle}>
-            Pending approvals ({pendingDistributors.length})
+            Pending Distributor applications ({pendingDistributors.length})
           </Text>
         </View>
 
@@ -397,7 +261,6 @@ export default function ManagerRequestPage() {
         ) : (
           filteredDistributors.map((distributor) => {
             const distributorId = distributor.uid || distributor.id;
-            const isUpdating = updatingId === distributorId;
 
             return (
               <View key={distributorId || distributor.email} style={styles.tableRow}>
@@ -419,26 +282,7 @@ export default function ManagerRequestPage() {
                 <View style={[styles.roleCell, styles.roleCol]}>
                   <ManagerPill tone="cyan">Distributor</ManagerPill>
                 </View>
-                <View style={[styles.actionButtons, styles.actionsCol]}>
-                  <TouchableOpacity
-                    activeOpacity={0.82}
-                    style={[styles.acceptButton, isUpdating && styles.actionDisabled]}
-                    onPress={() => updateDistributorStatus(distributor, 'approved')}
-                    disabled={isUpdating}
-                  >
-                    <Text style={styles.acceptButtonText}>
-                      {isUpdating ? 'Saving...' : 'Accept'}
-                    </Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    activeOpacity={0.82}
-                    style={[styles.rejectButton, isUpdating && styles.actionDisabled]}
-                    onPress={() => openRejectModal(distributor)}
-                    disabled={isUpdating}
-                  >
-                    <Text style={styles.rejectButtonText}>Reject</Text>
-                  </TouchableOpacity>
-                </View>
+                <View style={[styles.actionButtons, styles.actionsCol]}><Text style={styles.noActionText}>Managed by Admin</Text></View>
               </View>
             );
           })
@@ -447,61 +291,6 @@ export default function ManagerRequestPage() {
         </ScrollView>
       </View>
 
-      <Modal visible={!!rejectingDistributor} transparent animationType="fade">
-        <View style={styles.modalBackground}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Reject application</Text>
-            <Text style={styles.modalMessage}>
-              Enter the reason this distributor application is being rejected.
-            </Text>
-
-            <TextInput
-              style={[
-                styles.reasonInput,
-                !!rejectionReasonError && styles.reasonInputError,
-              ]}
-              placeholder="Reason"
-              placeholderTextColor="#95A6B8"
-              value={rejectionReason}
-              onChangeText={(value) => {
-                setRejectionReason(value);
-                if (rejectionReasonError && value.trim()) {
-                  setRejectionReasonError('');
-                }
-              }}
-              multiline
-              textAlignVertical="top"
-            />
-            {!!rejectionReasonError && (
-              <Text style={styles.reasonErrorText}>{rejectionReasonError}</Text>
-            )}
-
-            <View style={styles.modalActions}>
-              <TouchableOpacity
-                activeOpacity={0.82}
-                style={styles.modalCancelButton}
-                onPress={closeRejectModal}
-                disabled={isSavingRejection}
-              >
-                <Text style={styles.modalCancelText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                activeOpacity={0.82}
-                style={[
-                  styles.modalRejectButton,
-                  isSavingRejection && styles.actionDisabled,
-                ]}
-                onPress={submitRejection}
-                disabled={isSavingRejection}
-              >
-                <Text style={styles.modalRejectText}>
-                  {isSavingRejection ? 'Saving...' : 'Save rejection'}
-                </Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
     </ManagerShell>
   );
 }
@@ -960,5 +749,10 @@ const createStyles = (colors) => StyleSheet.create({
     color: colors.danger,
     fontSize: 13,
     fontWeight: 'bold',
+  },
+  noActionText: {
+    color: colors.textSecondary,
+    fontSize: 12,
+    fontWeight: '700',
   },
 });

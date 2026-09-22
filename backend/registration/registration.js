@@ -79,11 +79,14 @@ function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, render 
     }
     const username = text('username', 20);
     const usernameNormalized = normalizeUsername(username);
+    const requestedBranchId = role === 'distributor'
+      ? text('requestedBranchId', 80)
+      : '';
     return { firstName: text('firstName', 100), lastName: text('lastName', 100),
       barangay: text('barangay', 150), address: text('address', 250), phone, role,
-      username, usernameNormalized };
+      username, usernameNormalized, requestedBranchId };
   }
-  const personalDigest = (profile) => digest(JSON.stringify([profile.role, profile.firstName, profile.lastName, profile.phone, profile.barangay, profile.address]));
+  const personalDigest = (profile) => digest(JSON.stringify([profile.role, profile.firstName, profile.lastName, profile.phone, profile.barangay, profile.address, ...(profile.role === 'distributor' ? [profile.requestedBranchId || ''] : [])]));
   const captureHash = (image) => createHash('sha256').update(String(image)).digest('hex');
   const hasEligibleFaceStep = isRegistrationFaceVerified;
   const requiresFace = (session) => session?.securityPolicySnapshot?.faceVerificationRequired !== false;
@@ -97,7 +100,7 @@ function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, render 
       throw new OtpError(403, data.faceVerification?.duplicateCheck === 'flagged' ? 'face-review-required' : 'face-verification-required', data.faceVerification?.duplicateCheck === 'flagged' ? 'Verification needs review.' : 'Complete identity verification before continuing.');
     }
     if (data.termsAcceptance?.accepted !== true) throw new OtpError(403, 'terms-required', 'Please accept the Terms of Service and Privacy Policy to continue.');
-    if (profile && (data.role !== profile.role || data.personalInfoDigest !== personalDigest(profile))) {
+    if (profile && (data.role !== profile.role || data.personalInfoDigest !== personalDigest(profile) || (profile.role === 'distributor' && data.requestedBranchId !== profile.requestedBranchId))) {
       throw new OtpError(400, 'registration-session-mismatch', 'Your registration details changed. Please restart identity verification.');
     }
     return data;
@@ -125,7 +128,8 @@ function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, render 
       if (!session || session.completed || Number(session.expiresAt?.toMillis?.() || session.expiresAt || 0) <= now() ||
         (requiresFace(session) && !hasEligibleFaceStep(session.faceVerification)) ||
         (requiresOtp(session) && emailOtpVerified !== true) || session.termsAcceptance?.accepted !== true ||
-        session.role !== profile.role || session.personalInfoDigest !== personalDigest(profile)) {
+        session.role !== profile.role || session.personalInfoDigest !== personalDigest(profile) ||
+        (profile.role === 'distributor' && session.requestedBranchId !== profile.requestedBranchId)) {
         throw new OtpError(403, 'registration-session-invalid', 'Registration verification is incomplete or expired. Please restart signup.');
       }
       const face = session.faceVerification || {};
@@ -149,11 +153,18 @@ function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, render 
         termsVersion: session.termsAcceptance.termsVersion, privacyVersion: session.termsAcceptance.privacyVersion,
       };
       const onboardingStatus = requiresFace(session) ? 'face_enrollment_pending' : 'finalization_pending';
+      const distributorApplication = profile.role === 'distributor' ? {
+        distributorStatus: existing?.distributorStatus || 'pending',
+        approvalStatus: existing?.approvalStatus || 'pending', status: existing?.status || 'Pending',
+        requestedBranchId: session.requestedBranchId, requestedBranchNameSnapshot: session.requestedBranchNameSnapshot || null,
+        branchId: existing?.branchId || null, branchNameSnapshot: existing?.branchNameSnapshot || null,
+      } : {};
       const recoveryProfile = {
         ...profile, uid: user.uid, email: user.email,
         unique_id: existing?.unique_id || `${profile.role === 'requester' ? 'REQ' : 'DIS'}-${String(Number(counts[profile.role] || 0) + 1).padStart(6, '0')}`,
         approvalStatus: existing?.approvalStatus || (profile.role === 'distributor' ? 'pending' : 'approved'),
         status: existing?.status || (profile.role === 'distributor' ? 'Pending' : 'Approved'),
+        ...distributorApplication,
         rejectionReason: existing?.rejectionReason || null,
         emailVerificationRequired: requiresOtp(session), emailVerified: emailOtpVerified === true,
         emailOtpVerification: { required: requiresOtp(session), status: emailOtpVerified === true ? 'verified' : 'not_required' },
@@ -188,6 +199,7 @@ function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, render 
         ...profile, uid: user.uid, email: user.email,
         unique_id: `${prefix}-${String(number).padStart(6, '0')}`,
         approvalStatus: pending ? 'pending' : 'approved', status: pending ? 'Pending' : 'Approved',
+        ...(pending ? { distributorStatus: 'pending', requestedBranchId: session.requestedBranchId, requestedBranchNameSnapshot: session.requestedBranchNameSnapshot || null, branchId: null, branchNameSnapshot: null } : {}),
         rejectionReason: null, emailVerificationRequired: requiresOtp(session), emailVerified: emailOtpVerified === true,
         emailOtpVerification: recoveryProfile.emailOtpVerification, registrationCompleted: false, onboardingStatus,
         createdAt: new Date(now()), updatedAt: new Date(now()), emailVerifiedAt: emailOtpVerified === true ? new Date(now()) : null,

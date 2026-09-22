@@ -9,7 +9,7 @@ function fixture() {
   const snapshot = (key) => ({ exists: records.has(key), data: () => records.get(key) });
   const ref = (collection, id) => ({ key: `${collection}/${id}`, get: async () => snapshot(`${collection}/${id}`), set: async (data) => records.set(`${collection}/${id}`, data) });
   const db = {
-    collection: (name) => ({ doc: (id) => ref(name, id) }),
+    collection: (name) => ({ doc: (id) => ref(name, id), get: async () => ({ docs: [...records.keys()].filter((key) => key.startsWith(`${name}/`)).map((key) => ({ id: key.split('/').pop(), data: () => records.get(key) })) }) }),
     runTransaction: async (callback) => {
       const writes = [];
       const result = await callback({
@@ -92,4 +92,23 @@ test('admin limit changes affect only new registration session snapshots', async
     { faceVerificationRequired: false, emailOtpRequired: true, maxAccountsPerDevice: 2, maxAccountsPerIp: 1, policyVersion: 2 });
   assert.deepEqual(f.records.get(`registrationSessions/${third.registrationSessionId}`).securityPolicySnapshot,
     { faceVerificationRequired: true, emailOtpRequired: true, maxAccountsPerDevice: 5, maxAccountsPerIp: 5, policyVersion: 3 });
+});
+
+test('Distributor registration session snapshots one active requested branch without granting operational access', async () => {
+  const f = fixture();
+  f.records.set('branches/north', { name: 'North BlueTap', status: 'active' });
+  const result = await f.service.create({ ...personal, role: 'distributor', requestedBranchId: 'north' }, 'ip');
+  const session = f.records.get(`registrationSessions/${result.registrationSessionId}`);
+  assert.equal(session.requestedBranchId, 'north');
+  assert.equal(session.requestedBranchNameSnapshot, 'North BlueTap');
+  assert.equal(session.branchId, undefined);
+  assert.deepEqual(await f.service.activeBranches(), [{ id: 'north', name: 'North BlueTap' }]);
+});
+
+test('Distributor registration rejects missing, unknown, and inactive requested branches', async () => {
+  const f = fixture();
+  f.records.set('branches/inactive', { name: 'Old BlueTap', status: 'inactive' });
+  await assert.rejects(f.service.create({ ...personal, role: 'distributor' }, 'ip'), (error) => error.reason === 'branch-required');
+  await assert.rejects(f.service.create({ ...personal, role: 'distributor', requestedBranchId: 'missing' }, 'ip'), (error) => error.reason === 'BRANCH_NOT_FOUND');
+  await assert.rejects(f.service.create({ ...personal, role: 'distributor', requestedBranchId: 'inactive' }, 'ip'), (error) => error.reason === 'BRANCH_INACTIVE');
 });

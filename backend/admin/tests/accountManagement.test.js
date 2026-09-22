@@ -15,7 +15,7 @@ test('account workspace DTO exposes only safe normalized fields', () => {
     username: 'dinawater', approvalStatus: 'pending', branchId: 'branch-a', mustChangePassword: true,
     password: 'must-never-leak', faceEmbedding: [1, 2, 3], accountSource: 'public_registration',
   }, new Map([['branch-a', 'North Branch']]), { metadata: { lastSignInTime: '2026-09-20T00:00:00Z' } });
-  assert.deepEqual(Object.keys(account).sort(), ['accountSource','branchId','branchName','createdAt','email','fullName','lastSignInAt','mustChangePassword','onboarding','role','sessionIdleTimeoutOverrideMinutes','sessionPolicy','status','uid','updatedAt','username'].sort());
+  assert.deepEqual(Object.keys(account).sort(), ['accountSource','branchId','branchName','createdAt','email','fullName','lastSignInAt','mustChangePassword','onboarding','requestedBranchId','requestedBranchName','role','sessionIdleTimeoutOverrideMinutes','sessionPolicy','status','uid','updatedAt','username'].sort());
   assert.equal(account.status, 'pending');
   assert.equal(account.email, 'dina@example.test');
   assert.equal(account.branchName, 'North Branch');
@@ -38,6 +38,7 @@ function managementFixture() {
     ['users/admin-1', { role: 'admin', email: 'admin@example.test' }],
     ['users/requester-1', { uid: 'requester-1', role: 'requester', fullName: 'Rita Requester', email: 'rita@example.test', username: 'rita_req', accountStatus: 'active', mustChangePassword: false, accountSource: 'admin_created' }],
     ['users/manager-1', { uid: 'manager-1', role: 'manager', fullName: 'Manny Manager', email: 'manny@example.test', managerStatus: 'active', branchId: 'north', accountSource: 'admin_created' }],
+    ['users/distributor-1', { uid: 'distributor-1', role: 'distributor', fullName: 'Dina Driver', email: 'dina@example.test', username: 'dina_driver', distributorStatus: 'active', approvalStatus: 'active', branchId: 'north', accountSource: 'admin_created' }],
     ['branches/north', { name: 'North', code: 'N', status: 'active' }],
   ]);
   let autoId = 0;
@@ -53,11 +54,13 @@ function managementFixture() {
     ['admin-1', { uid: 'admin-1', email: 'admin@example.test', customClaims: { admin: true, role: 'admin' }, metadata: {} }],
     ['requester-1', { uid: 'requester-1', email: 'rita@example.test', customClaims: {}, metadata: { creationTime: '2026-01-01', lastSignInTime: '2026-02-01' } }],
     ['manager-1', { uid: 'manager-1', email: 'manny@example.test', customClaims: { manager: true }, metadata: {} }],
+    ['distributor-1', { uid: 'distributor-1', email: 'dina@example.test', customClaims: {}, metadata: {} }],
   ]);
-  const db = { collection, runTransaction: async (run) => run({ update(ref, data) { records.set(ref.path, { ...records.get(ref.path), ...data }); }, set(ref, data) { records.set(ref.path, data); } }) };
+  const db = { collection, runTransaction: async (run) => run({ get: async (ref) => snapshot(ref.path), create(ref, data) { records.set(ref.path, data); }, update(ref, data) { records.set(ref.path, { ...records.get(ref.path), ...data }); }, set(ref, data) { records.set(ref.path, data); } }) };
   const auth = {
     verifyIdToken: async (token) => token === 'admin-token' ? { uid: 'admin-1', admin: true, role: 'admin' } : { uid: 'manager-1', manager: true, role: 'manager' },
-    getUser: async (uid) => authUsers.get(uid), listUsers: async () => ({ users: [...authUsers.values()] }),
+    getUser: async (uid) => authUsers.get(uid), getUserByEmail: async (email) => { const user = [...authUsers.values()].find((item) => item.email === email); if (!user) throw Object.assign(new Error('not found'), { code: 'auth/user-not-found' }); return user; }, listUsers: async () => ({ users: [...authUsers.values()] }),
+    createUser: async ({ email, password, displayName }) => { const uid = `created-${authUsers.size}`; const user = { uid, email, password, displayName, metadata: {} }; authUsers.set(uid, user); return user; }, deleteUser: async (uid) => authUsers.delete(uid), setCustomUserClaims: async () => {},
     updateUser: async (uid, changes) => { const current = authUsers.get(uid); authUsers.set(uid, { ...current, ...changes }); return authUsers.get(uid); },
     revokeRefreshTokens: async (uid) => { revoked.push(uid); },
   };
@@ -70,7 +73,7 @@ test('Accounts & Audit endpoint lists all operational roles and rejects Manager 
   const fixture = managementFixture(); const handler = createAdminAccountsHandler(fixture.getAdmin);
   const allowed = await call(handler, 'GET', 'admin-token');
   assert.equal(allowed.statusCode, 200);
-  assert.deepEqual(allowed.body.accounts.map((account) => account.role).sort(), ['manager', 'requester']);
+  assert.deepEqual(allowed.body.accounts.map((account) => account.role).sort(), ['distributor', 'manager', 'requester']);
   assert.deepEqual(allowed.body.activity, []);
   const denied = await call(handler, 'GET', 'manager-token');
   assert.equal(denied.statusCode, 403);
@@ -121,4 +124,35 @@ test('Admin account edits keep the session override and Manager branch server-au
   assert.equal(manager.statusCode, 200);
   assert.equal(fixture.records.get('users/manager-1').branchId, 'south');
   assert.ok([...fixture.records.values()].some((value) => value.action === 'MANAGER_BRANCH_REASSIGNED'));
+});
+
+test('Admin Distributor reassignment requires an active branch, records an audit, and blocks active deliveries', async () => {
+  const fixture = managementFixture(); fixture.records.set('branches/south', { name: 'South', status: 'active' });
+  const handler = createAdminAccountsHandler(fixture.getAdmin);
+  const moved = await call(handler, 'PATCH', 'admin-token', { uid: 'distributor-1', action: 'updateAccount', fullName: 'Dina Driver', email: 'dina@example.test', role: 'distributor', branchId: 'south', active: true });
+  assert.equal(moved.statusCode, 200); assert.equal(fixture.records.get('users/distributor-1').branchId, 'south');
+  const audit = [...fixture.records.values()].find((value) => value.action === 'DISTRIBUTOR_BRANCH_CHANGED');
+  assert.equal(audit.previousBranchId, 'north'); assert.equal(audit.newBranchId, 'south'); assert.equal(audit.changedByAdminUid, 'admin-1');
+  fixture.records.set('requests/open-delivery', { assignedDistributorUid: 'distributor-1', status: 'out_for_delivery' });
+  const blocked = await call(handler, 'PATCH', 'admin-token', { uid: 'distributor-1', action: 'updateAccount', fullName: 'Dina Driver', email: 'dina@example.test', role: 'distributor', branchId: 'north', active: true });
+  assert.equal(blocked.statusCode, 409); assert.equal(blocked.body.error.reason, 'DISTRIBUTOR_ACTIVE_DELIVERIES');
+  assert.match(blocked.body.error.message, /active deliveries/i);
+});
+
+test('Admin can manually assign an active branch to a legacy active Distributor with no branch', async () => {
+  const fixture = managementFixture(); const handler = createAdminAccountsHandler(fixture.getAdmin);
+  fixture.records.set('users/legacy-distributor', { uid: 'legacy-distributor', role: 'distributor', fullName: 'Legacy Driver', email: 'legacy@example.test', username: 'legacy_driver', distributorStatus: 'active', approvalStatus: 'active', branchId: null });
+  fixture.authUsers.set('legacy-distributor', { uid: 'legacy-distributor', email: 'legacy@example.test', customClaims: {}, metadata: {} });
+  const assigned = await call(handler, 'PATCH', 'admin-token', { uid: 'legacy-distributor', action: 'updateAccount', fullName: 'Legacy Driver', email: 'legacy@example.test', role: 'distributor', branchId: 'north', active: true });
+  assert.equal(assigned.statusCode, 200); assert.equal(fixture.records.get('users/legacy-distributor').branchId, 'north');
+  assert.ok([...fixture.records.values()].some((value) => value.action === 'DISTRIBUTOR_BRANCH_CHANGED' && value.targetUid === 'legacy-distributor'));
+});
+
+test('Admin-created active Distributor requires and receives an authoritative active branch', async () => {
+  const fixture = managementFixture(); const handler = createAdminAccountsHandler(fixture.getAdmin);
+  const missing = await call(handler, 'POST', 'admin-token', { role: 'distributor', fullName: 'New Driver', email: 'new@example.test', username: 'new_driver', temporaryPassword: 'SafePassword2026' });
+  assert.equal(missing.statusCode, 404); assert.equal(missing.body.error.reason, 'BRANCH_NOT_FOUND');
+  const created = await call(handler, 'POST', 'admin-token', { role: 'distributor', fullName: 'New Driver', email: 'new@example.test', username: 'new_driver', temporaryPassword: 'SafePassword2026', branchId: 'north' });
+  assert.equal(created.statusCode, 201); assert.equal(created.body.account.status, 'active'); assert.equal(created.body.account.branchId, 'north');
+  const profile = fixture.records.get(`users/${created.body.account.uid}`); assert.equal(profile.distributorStatus, 'active'); assert.equal(profile.branchId, 'north');
 });

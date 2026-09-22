@@ -16,7 +16,7 @@ async function timed(stage, operation) {
 
 function accountStatus(data = {}) {
   if (data.role === 'manager') return clean(data.managerStatus || 'inactive', 30).toLowerCase();
-  if (data.role === 'distributor') return clean(data.approvalStatus || data.status || 'pending', 30).toLowerCase();
+  if (data.role === 'distributor') return clean(data.distributorStatus || data.approvalStatus || data.status || 'pending', 30).toLowerCase();
   return clean(data.accountStatus || data.status || 'active', 30).toLowerCase();
 }
 

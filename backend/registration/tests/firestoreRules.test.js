@@ -19,7 +19,7 @@ test('Firestore rules keep OTP and registration state private', () => {
 
 test('client profile updates cannot change trusted verification fields', () => {
   assert.match(rules, /allow create, delete:\s*if false;/);
-  for (const protectedField of ['role', 'approvalStatus', 'emailVerified', 'registrationCompleted', 'faceVerification', 'termsAcceptance', 'branchId', 'managerStatus']) {
+  for (const protectedField of ['role', 'distributorStatus', 'approvalStatus', 'approvedBy', 'requestedBranchId', 'emailVerified', 'registrationCompleted', 'faceVerification', 'termsAcceptance', 'branchId', 'managerStatus']) {
     assert.match(rules, new RegExp(`['\"]${protectedField}['\"]`));
   }
 });

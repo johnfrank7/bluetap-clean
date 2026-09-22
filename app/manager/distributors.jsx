@@ -1,17 +1,16 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
-import { collection, doc, onSnapshot, query, serverTimestamp, setDoc, where } from 'firebase/firestore';
+import { collection, onSnapshot, query, where } from 'firebase/firestore';
 
 import { db } from '../../firebase';
-import { getLocalUsers, subscribeLocalUsers, updateLocalUserStatus } from '../../localUsers';
+import { getLocalUsers, subscribeLocalUsers } from '../../localUsers';
 import { getProfileUniqueId } from '../../services/uniqueIds';
 import { getModuleSession } from '../../services/authSession';
 import { useAdminTheme } from '../../components/AdminTheme';
@@ -24,7 +23,8 @@ const normalizeRole = (role) => (role || '').toString().trim().toLowerCase();
 
 const getDistributorApplicationStatus = (distributor) =>
   normalizeApplicationStatus(
-    distributor.status ||
+    distributor.distributorStatus ||
+      distributor.status ||
       distributor.approvalStatus ||
       distributor.accountStatus ||
       'pending'
@@ -36,7 +36,7 @@ const getRegisteredLocalDistributors = (firestoreDistributors = [], branchId = '
       (user) =>
         user.branchId === branchId &&
         normalizeRole(user.role) === 'distributor' &&
-        getDistributorApplicationStatus(user) === 'approved'
+        ['approved', 'active'].includes(getDistributorApplicationStatus(user))
     )
     .map((user) => ({ ...user, id: user.uid, isLocal: true }))
     .filter(
@@ -90,7 +90,6 @@ export default function ManagerDistributorsPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [search, setSearch] = useState('');
-  const [removingId, setRemovingId] = useState(null);
 
   useEffect(() => {
     let firestoreRegistered = [];
@@ -126,7 +125,7 @@ export default function ManagerDistributorsPage() {
             uid: item.id,
             ...item.data(),
           }))
-          .filter((item) => getDistributorApplicationStatus(item) === 'approved');
+          .filter((item) => ['approved', 'active'].includes(getDistributorApplicationStatus(item)));
 
         refreshRegisteredDistributors(firestoreDistributors);
         setLoadError('');
@@ -163,70 +162,6 @@ export default function ManagerDistributorsPage() {
     );
   }, [registeredDistributors, search]);
 
-  const removeDistributor = async (distributor) => {
-    const id = distributor.uid || distributor.id;
-
-    try {
-      setRemovingId(id);
-      updateLocalUserStatus(id, 'rejected');
-      setRegisteredDistributors((current) =>
-        current.filter((item) => item.uid !== id && item.id !== id)
-      );
-
-      try {
-        const uniqueId = getProfileUniqueId(distributor);
-        const removePayload = {
-          uid: id,
-          firstName: distributor.firstName || '',
-          lastName: distributor.lastName || '',
-          email: distributor.email || '',
-          phone: distributor.phone || '',
-          barangay: distributor.barangay || distributor.address || '',
-          address: distributor.address || distributor.barangay || '',
-          role: 'distributor',
-          approvalStatus: 'rejected',
-          status: 'Rejected',
-          rejectionReason: distributor.rejectionReason || null,
-          removedAt: serverTimestamp(),
-        };
-
-        if (uniqueId) {
-          removePayload.unique_id = uniqueId;
-        }
-
-        await setDoc(doc(db, 'users', id), removePayload, { merge: true });
-      } catch (error) {
-        console.log('Distributor Firestore remove error:', error.message);
-        Alert.alert(
-          'Saved locally',
-          'The distributor was removed on this device, but Firestore did not accept the change.'
-        );
-      }
-    } catch (error) {
-      console.log('Distributor remove error:', error.message);
-      Alert.alert('Remove failed', error.message);
-    } finally {
-      setRemovingId(null);
-    }
-  };
-
-  const confirmRemoveDistributor = (distributor, fullName) => {
-    if (globalThis.confirm) {
-      if (globalThis.confirm(`Remove ${fullName}?`)) {
-        removeDistributor(distributor);
-      }
-      return;
-    }
-
-    Alert.alert('Remove distributor', `Remove ${fullName}?`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Remove',
-        style: 'destructive',
-        onPress: () => removeDistributor(distributor),
-      },
-    ]);
-  };
 
   return (
     <ManagerShell
@@ -269,7 +204,6 @@ export default function ManagerDistributorsPage() {
           filteredDistributors.map((distributor) => {
             const fullName = getFullName(distributor);
             const distributorId = distributor.uid || distributor.id;
-            const isRemoving = removingId === distributorId;
 
             return (
               <View key={distributorId || distributor.email} style={styles.tableRow}>
@@ -294,18 +228,7 @@ export default function ManagerDistributorsPage() {
                 <View style={[styles.statusCell, styles.statusCol]}>
                   <ManagerPill tone="green">Active</ManagerPill>
                 </View>
-                <View style={[styles.actionsCell, styles.actionsCol]}>
-                  <TouchableOpacity
-                    activeOpacity={0.82}
-                    style={[styles.removeButton, isRemoving && styles.actionDisabled]}
-                    onPress={() => confirmRemoveDistributor(distributor, fullName)}
-                    disabled={isRemoving}
-                  >
-                    <Text style={styles.removeButtonText}>
-                      {isRemoving ? 'Removing...' : 'Remove'}
-                    </Text>
-                  </TouchableOpacity>
-                </View>
+                <View style={[styles.actionsCell, styles.actionsCol]}><Text style={styles.noActionText}>Managed by Admin</Text></View>
               </View>
             );
           })
@@ -397,6 +320,11 @@ const createStyles = (colors) => StyleSheet.create({
   },
   actionsCell: {
     alignItems: 'flex-end',
+  },
+  noActionText: {
+    color: colors.textSecondary,
+    fontSize: 12,
+    fontWeight: '700',
   },
   removeButton: {
     borderRadius: 999,

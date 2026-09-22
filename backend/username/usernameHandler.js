@@ -31,8 +31,9 @@ const publicProfile = (profile, uid, email) => ({
   uid,
   email: String(profile.email || email || '').trim().toLowerCase(),
   role: profile.role,
-  approvalStatus: profile.approvalStatus || profile.status || null,
-  status: profile.status || profile.approvalStatus || null,
+  distributorStatus: profile.distributorStatus || profile.approvalStatus || profile.status || null,
+  approvalStatus: profile.distributorStatus || profile.approvalStatus || profile.status || null,
+  status: profile.status || profile.distributorStatus || profile.approvalStatus || null,
   rejectionReason: profile.rejectionReason || null,
   mustChangePassword: profile.mustChangePassword === true,
   registrationCompleted: profile.registrationCompleted,
@@ -42,6 +43,7 @@ const publicProfile = (profile, uid, email) => ({
   unique_id: profile.unique_id || null,
   managerStatus: profile.managerStatus || null,
   branchId: profile.branchId || null,
+  requestedBranchId: profile.requestedBranchId || null,
 });
 let verifiedWebKey = null;
 async function getPasswordApiKey() {

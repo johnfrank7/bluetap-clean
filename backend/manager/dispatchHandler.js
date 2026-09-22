@@ -13,7 +13,7 @@ const clean = (value, max = 240) => String(value || '').trim().slice(0, max);
 const safeNumber = (value) => Number.isFinite(Number(value)) ? Number(value) : null;
 const owningBranchId = (order = {}) => clean(order.currentBranchId || order.branchId, 128);
 const fullName = (data = {}) => clean(data.fullName || `${data.firstName || ''} ${data.lastName || ''}`, 160);
-const distributorStatus = (data = {}) => clean(data.approvalStatus || data.status, 40).toLowerCase();
+const distributorStatus = (data = {}) => clean(data.distributorStatus || data.approvalStatus || data.status, 40).toLowerCase();
 const isEligibleDistributor = (data = {}, branchId = '') => data.role === 'distributor'
   && clean(data.branchId, 128) === branchId
   && ['active', 'approved'].includes(distributorStatus(data))

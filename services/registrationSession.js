@@ -54,5 +54,14 @@ export const getRegistrationSecurityPolicy = async () => {
   }
   return policy;
 };
+export const getRegistrationBranches = async () => {
+  const result = await callRegistrationApi('/api/auth/registration-branches', {});
+  if (!Array.isArray(result?.branches)) {
+    const error = new Error('BlueTap branches are temporarily unavailable. Please try again.');
+    error.code = 'registration/invalid-response';
+    throw error;
+  }
+  return result.branches.filter((branch) => typeof branch?.id === 'string' && typeof branch?.name === 'string');
+};
 export const getRegistrationSessionStatus = (registrationSessionId) => callRegistrationApi('/api/auth/registration-session-status', { registrationSessionId });
 export const acceptRegistrationTerms = (registrationSessionId) => callRegistrationApi('/api/auth/accept-registration-terms', { registrationSessionId });

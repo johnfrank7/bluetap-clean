@@ -57,7 +57,7 @@ test('username login verifies password through Firebase REST and returns only cu
     await handler({ method: 'POST', headers: {}, socket: { remoteAddress: 'test-ip' }, body: { username: 'JohnBlueTap', password: 'private-password' } }, res);
     assert.equal(res.statusCode, 200);
     assert.equal(res.body.customToken, 'custom-expected-user');
-    assert.deepEqual(res.body.profile, { uid: 'expected-user', email: 'private@example.test', role: 'requester', approvalStatus: null, status: null, rejectionReason: null, mustChangePassword: false, registrationCompleted: true, onboardingStatus: 'complete', emailVerificationRequired: false, faceVerification: null, unique_id: null, managerStatus: null, branchId: null });
+    assert.deepEqual(res.body.profile, { uid: 'expected-user', email: 'private@example.test', role: 'requester', approvalStatus: null, distributorStatus: null, status: null, rejectionReason: null, mustChangePassword: false, registrationCompleted: true, onboardingStatus: 'complete', emailVerificationRequired: false, faceVerification: null, unique_id: null, managerStatus: null, branchId: null, requestedBranchId: null });
     assert.match(request.url, /accounts:signInWithPassword/);
     assert.deepEqual(JSON.parse(request.options.body), { email: 'private@example.test', password: 'private-password', returnSecureToken: true });
     assert.equal(JSON.stringify(res.body).includes('private-password'), false);

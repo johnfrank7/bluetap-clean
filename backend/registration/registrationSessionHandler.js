@@ -31,7 +31,8 @@ function createRegistrationSessionHandler(action, getAdmin = getFirebaseAdmin, w
         ipHashSecret: process.env.REGISTRATION_IP_HASH_SECRET,
       });
       const ip = getClientIp(req);
-      const result = action === 'create' ? await service.create(body, ip)
+      const result = action === 'branches' ? { branches: await service.activeBranches() }
+        : action === 'create' ? await service.create(body, ip)
         : action === 'start' ? await service.start(body?.registrationSessionId)
           : action === 'terms' ? await service.acceptTerms(body?.registrationSessionId)
             : await service.status(body?.registrationSessionId);

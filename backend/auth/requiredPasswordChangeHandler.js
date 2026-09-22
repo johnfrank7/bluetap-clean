@@ -51,7 +51,7 @@ function createRequiredPasswordChangeHandler(getAdmin = getFirebaseAdmin, now = 
         await auth.revokeRefreshTokens(decoded.uid);
       }
       await db.collection('adminAuditLogs').doc().set({ action: 'FORCED_PASSWORD_CHANGE_COMPLETED', targetUid: decoded.uid, role: profile.role, timestamp: changedAt });
-      return res.status(200).json({ changed: true, profile: { uid: decoded.uid, role: profile.role, email: profile.email || '', approvalStatus: profile.approvalStatus || profile.status || 'approved', mustChangePassword: false, registrationCompleted: profile.registrationCompleted !== false, onboardingStatus: profile.onboardingStatus || 'complete', faceVerification: profile.faceVerification || null } });
+      return res.status(200).json({ changed: true, profile: { uid: decoded.uid, role: profile.role, email: profile.email || '', distributorStatus: profile.distributorStatus || profile.approvalStatus || profile.status || 'approved', approvalStatus: profile.distributorStatus || profile.approvalStatus || profile.status || 'approved', branchId: profile.branchId || null, mustChangePassword: false, registrationCompleted: profile.registrationCompleted !== false, onboardingStatus: profile.onboardingStatus || 'complete', faceVerification: profile.faceVerification || null } });
     } catch (error) {
       const known = error instanceof OtpError;
       return res.status(known ? error.status : 500).json({ error: {

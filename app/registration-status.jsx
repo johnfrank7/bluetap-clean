@@ -50,11 +50,15 @@ export default function RegistrationStatusPage() {
 
   const enrollmentPending = profile?.onboardingStatus === 'face_enrollment_pending' ||
     profile?.registrationCompleted === false;
-  const applicationRejected = String(profile?.approvalStatus || profile?.status || '').toLowerCase() === 'rejected';
-  const title = enrollmentPending ? 'Finishing secure enrollment' : applicationRejected ? 'Application rejected' : 'Application submitted';
+  const distributorStatus = String(profile?.distributorStatus || profile?.approvalStatus || profile?.status || '').toLowerCase();
+  const applicationRejected = distributorStatus === 'rejected';
+  const branchAssignmentRequired = profile?.role === 'distributor' && ['active', 'approved'].includes(distributorStatus) && !String(profile?.branchId || '').trim();
+  const title = enrollmentPending ? 'Finishing secure enrollment' : branchAssignmentRequired ? 'Branch assignment required' : applicationRejected ? 'Application rejected' : 'Application submitted';
   const message = enrollmentPending
     ? 'Your email and identity verification succeeded. BlueTap is still finalizing the secure face enrollment. Please try again shortly; if this continues, contact support.'
-    : applicationRejected
+    : branchAssignmentRequired
+      ? 'Your Distributor account is active, but it has not yet been assigned to an active BlueTap branch. Please contact an administrator before accessing delivery operations.'
+      : applicationRejected
       ? `Your distributor application was rejected. ${profile?.rejectionReason || 'Please contact support for more information.'}`
       : 'Your identity verification succeeded. Your distributor application is awaiting administrator approval before you can access the distributor dashboard.';
 

@@ -40,8 +40,9 @@ export const manageAdminAccount = async (uid, action, changes = {}) => {
   return updated;
 };
 export const getDistributors = async () => (await request('/api/admin/distributors')).distributors || [];
-export const updateDistributor = async (uid, action, rejectionReason = '') => {
-  const updated = (await request('/api/admin/distributors', 'POST', { uid, action, rejectionReason })).distributor;
+export const updateDistributor = async (uid, action, options = {}) => {
+  const payload = typeof options === 'string' ? { rejectionReason: options } : options;
+  const updated = (await request('/api/admin/distributors', 'POST', { uid, action, ...payload })).distributor;
   invalidateAdminData(ADMIN_CACHE_KEYS.distributors, ADMIN_CACHE_KEYS.accounts, ADMIN_CACHE_KEYS.dashboard);
   return updated;
 };

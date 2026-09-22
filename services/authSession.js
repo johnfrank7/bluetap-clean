@@ -143,7 +143,7 @@ export const getPostAuthenticationDestination = (profile = {}) => {
     return '/registration-status';
   }
   if (!isFaceRequirementSatisfied(profile)) return '/verification';
-  if (role === 'distributor' && !['approved', 'active'].includes(getDistributorApplicationStatus(profile))) {
+  if (role === 'distributor' && (!['approved', 'active'].includes(getDistributorApplicationStatus(profile)) || !String(profile.branchId || '').trim())) {
     return '/registration-status';
   }
   return getRoleHomePath(role);
@@ -270,7 +270,8 @@ const normalizeApprovalStatus = (status) =>
 
 export const getDistributorApplicationStatus = (profile = {}) =>
   normalizeApprovalStatus(
-    profile.approvalStatus ||
+    profile.distributorStatus ||
+      profile.approvalStatus ||
       profile.status ||
       profile.accountStatus ||
       'pending'
@@ -485,11 +486,11 @@ const validateRoleAccessOnce = async (expectedRole) => {
 
   if (
     profile.role === 'distributor' &&
-    !['approved', 'active'].includes(getDistributorApplicationStatus(profile))
+    (!['approved', 'active'].includes(getDistributorApplicationStatus(profile)) || !String(profile.branchId || '').trim())
   ) {
     return {
       status: 'unauthorized',
-      message: 'Your distributor application is awaiting administrator approval.',
+      message: ['approved', 'active'].includes(getDistributorApplicationStatus(profile)) ? 'Your Distributor account needs an active branch assignment before delivery operations are available.' : 'Your distributor application is awaiting administrator approval.',
       redirectTo: '/registration-status',
       clearRole: expected,
     };

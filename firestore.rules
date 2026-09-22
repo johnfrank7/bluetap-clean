@@ -27,7 +27,8 @@ service cloud.firestore {
       return signedIn()
         && currentUser().role == 'distributor'
         && currentUser().mustChangePassword != true
-        && (currentUser().approvalStatus == 'active' || currentUser().approvalStatus == 'approved'
+        && (currentUser().distributorStatus == 'active' || currentUser().distributorStatus == 'approved'
+          || currentUser().approvalStatus == 'active' || currentUser().approvalStatus == 'approved'
           || currentUser().status == 'active' || currentUser().status == 'approved')
         && currentUser().branchId is string
         && get(/databases/$(database)/documents/branches/$(currentUser().branchId)).data.status == 'active';
@@ -72,19 +73,15 @@ service cloud.firestore {
       // server-owned and cannot be elevated by a client update.
       allow update: if request.auth != null && request.auth.uid == uid
         && !request.resource.data.diff(resource.data).affectedKeys().hasAny([
-          'uid', 'email', 'role', 'status', 'approvalStatus', 'accountStatus',
+          'uid', 'email', 'role', 'status', 'distributorStatus', 'approvalStatus', 'accountStatus',
           'rejectionReason', 'username', 'usernameNormalized', 'unique_id',
           'emailVerified', 'emailVerifiedAt', 'emailVerificationRequired',
           'emailOtpVerification', 'registrationCompleted', 'onboardingStatus', 'faceVerification',
           'registrationLimitKeys', 'registrationLimitReservation', 'admin', 'manager',
-          'branchId', 'managerStatus', 'mustChangePassword', 'passwordChangedAt',
+          'branchId', 'branchNameSnapshot', 'requestedBranchId', 'requestedBranchNameSnapshot',
+          'managerStatus', 'approvedAt', 'approvedBy', 'rejectedAt', 'rejectedBy',
+          'mustChangePassword', 'passwordChangedAt',
           'termsAcceptance', 'createdAt', 'restoredAt'
-        ]);
-      allow update: if isManager() && resource.data.role == 'distributor'
-        && resource.data.branchId == currentUser().branchId
-        && request.resource.data.branchId == currentUser().branchId
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'approvalStatus', 'status', 'accountStatus', 'rejectionReason', 'updatedAt'
         ]);
     }
 
