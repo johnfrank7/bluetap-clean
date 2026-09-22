@@ -4,8 +4,9 @@ const { resolve } = require('node:path');
 const test = require('node:test');
 
 const { createAdminProductsHandler, safeProduct, safeRequestMetadata } = require('../productManagementHandler');
-const { createSupabaseProductImageStorage, decodeProductImage } = require('../../services/supabaseStorage');
+const { createSupabaseProductImageStorage, decodeProductImage, storageConfigStatus } = require('../../services/supabaseStorage');
 const { createRequesterCatalogHandler } = require('../../requester/orderingHandler');
+const { OtpError } = require('../../utils/otpError');
 
 const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46]);
 const png = Buffer.from('89504e470d0a1a0a00000000', 'hex');
@@ -91,7 +92,7 @@ test('Supabase product storage uses a server-generated safe path and public URL'
     env: { SUPABASE_URL: 'https://example.supabase.co', SUPABASE_SERVICE_ROLE_KEY: 'server-only', SUPABASE_STORAGE_BUCKET: 'products-images' },
     createClientImpl(...args) {
       clientArgs = args;
-      return { storage: { from(bucket) { return {
+      return { storage: { async getBucket(bucket) { return { data: { id: bucket, public: true }, error: null }; }, from(bucket) { return {
         async upload(path, bytes, options) { uploads.push({ bucket, path, bytes, options }); return { error: null }; },
         getPublicUrl(path) { return { data: { publicUrl: `https://example.supabase.co/storage/v1/object/public/${bucket}/${path}` } }; },
         async remove(paths) { removed.push({ bucket, paths }); return { error: null }; },
@@ -108,7 +109,8 @@ test('Supabase product storage uses a server-generated safe path and public URL'
   await imageStorage.deleteProductImage(uploaded.imagePath, 'product_42');
   assert.deepEqual(removed[0].paths, [uploaded.imagePath]);
   assert.match(JSON.stringify(logs), /PRODUCT_IMAGE_UPLOAD_STARTED/);
-  assert.match(JSON.stringify(logs), /PRODUCT_IMAGE_UPLOAD_COMPLETED/);
+  assert.match(JSON.stringify(logs), /PRODUCT_IMAGE_BUCKET_CHECK_FINISHED/);
+  assert.match(JSON.stringify(logs), /PRODUCT_IMAGE_UPLOAD_FINISHED/);
   assert.match(JSON.stringify(logs), /PRODUCT_IMAGE_DELETE_COMPLETED/);
   assert.doesNotMatch(JSON.stringify(logs), /server-only/);
 });
@@ -118,16 +120,55 @@ test('Supabase failures map to safe product-image error codes', async () => {
   await assert.rejects(unavailable.uploadProductImage('product_42', decodeProductImage(imagePayload())), (error) => error.reason === 'PRODUCT_IMAGE_STORAGE_UNAVAILABLE');
   const failed = createSupabaseProductImageStorage({
     env: { SUPABASE_URL: 'https://example.supabase.co', SUPABASE_SERVICE_ROLE_KEY: 'server-only', SUPABASE_STORAGE_BUCKET: 'products-images' },
-    createClientImpl: () => ({ storage: { from: () => ({ upload: async () => ({ error: new Error('provider failure') }) }) } }),
+    createClientImpl: () => ({ storage: { getBucket: async () => ({ data: { id: 'products-images', public: true }, error: null }), from: () => ({ upload: async () => ({ error: new Error('provider failure') }) }) } }),
     logger: { info() {}, error() {} },
   });
   await assert.rejects(failed.uploadProductImage('product_42', decodeProductImage(imagePayload())), (error) => error.reason === 'PRODUCT_IMAGE_UPLOAD_FAILED');
 });
 
+test('Supabase bucket, authorization, public-read and public-URL failures keep precise safe codes', async () => {
+  const env = { SUPABASE_URL: 'https://example.supabase.co', SUPABASE_SERVICE_ROLE_KEY: 'server-only', SUPABASE_STORAGE_BUCKET: 'products-images' };
+  const clientForBucket = (result) => ({ storage: { getBucket: async () => result } });
+  await assert.rejects(
+    createSupabaseProductImageStorage({ env, createClientImpl: () => clientForBucket({ data: null, error: { status: 404, code: 'NoSuchBucket' } }), logger: { info() {}, error() {} } }).uploadProductImage('p1', decodeProductImage(imagePayload())),
+    (error) => error.reason === 'SUPABASE_BUCKET_NOT_FOUND' && error.details.stage === 'PRODUCT_IMAGE_BUCKET_CHECK',
+  );
+  await assert.rejects(
+    createSupabaseProductImageStorage({ env, createClientImpl: () => clientForBucket({ data: null, error: { status: 403, code: 'AccessDenied' } }), logger: { info() {}, error() {} } }).uploadProductImage('p1', decodeProductImage(imagePayload())),
+    (error) => error.reason === 'SUPABASE_AUTH_FAILED',
+  );
+  await assert.rejects(
+    createSupabaseProductImageStorage({ env, createClientImpl: () => clientForBucket({ data: { id: 'products-images', public: false }, error: null }), logger: { info() {}, error() {} } }).uploadProductImage('p1', decodeProductImage(imagePayload())),
+    (error) => error.reason === 'SUPABASE_BUCKET_NOT_PUBLIC',
+  );
+
+  const removed = [];
+  const invalidUrl = createSupabaseProductImageStorage({
+    env,
+    createClientImpl: () => ({ storage: {
+      getBucket: async () => ({ data: { id: 'products-images', public: true }, error: null }),
+      from: () => ({
+        upload: async () => ({ error: null }),
+        getPublicUrl: () => ({ data: { publicUrl: 'https://example.supabase.co/not-public' } }),
+        remove: async (paths) => { removed.push(paths); return { error: null }; },
+      }),
+    } }),
+    logger: { info() {}, error() {} },
+  });
+  await assert.rejects(invalidUrl.uploadProductImage('p1', decodeProductImage(imagePayload())), (error) => error.reason === 'PRODUCT_IMAGE_PUBLIC_URL_FAILED');
+  assert.equal(removed.length, 1);
+});
+
+test('Supabase configuration diagnostics reveal presence only', () => {
+  assert.deepEqual(storageConfigStatus({}), { url: 'missing', serviceRoleKey: 'missing', bucket: 'missing' });
+  assert.deepEqual(storageConfigStatus({ SUPABASE_URL: 'https://example.supabase.co', SUPABASE_SERVICE_ROLE_KEY: 'secret', SUPABASE_STORAGE_BUCKET: 'products-images' }), { url: 'present', serviceRoleKey: 'present', bucket: 'present' });
+  assert.doesNotMatch(JSON.stringify(storageConfigStatus({ SUPABASE_URL: 'https://example.supabase.co', SUPABASE_SERVICE_ROLE_KEY: 'secret', SUPABASE_STORAGE_BUCKET: 'products-images' })), /secret|example/);
+});
+
 test('product image logging records only safe lifecycle stages', () => {
   const storageSource = readFileSync(resolve(__dirname, '..', '..', 'services', 'supabaseStorage.js'), 'utf8');
   const handlerSource = readFileSync(resolve(__dirname, '..', 'productManagementHandler.js'), 'utf8');
-  for (const stage of ['PRODUCT_CREATE_REQUEST_RECEIVED', 'PRODUCT_CREATE_CONTENT_TYPE', 'PRODUCT_IMAGE_DECODED', 'PRODUCT_CREATE_COMPLETED', 'PRODUCT_IMAGE_UPLOAD_STARTED', 'PRODUCT_IMAGE_UPLOAD_COMPLETED', 'PRODUCT_IMAGE_UPLOAD_FAILED', 'PRODUCT_IMAGE_DELETE_COMPLETED', 'PRODUCT_IMAGE_DELETE_FAILED', 'PRODUCT_IMAGE_REPLACED']) {
+  for (const stage of ['PRODUCT_CREATE_REQUEST_RECEIVED', 'PRODUCT_CREATE_AUTHORIZED', 'PRODUCT_CREATE_VALIDATED', 'PRODUCT_CREATE_CONTENT_TYPE', 'PRODUCT_IMAGE_DECODED', 'PRODUCT_IMAGE_UPLOAD_STARTED', 'PRODUCT_IMAGE_UPLOAD_FINISHED', 'PRODUCT_FIRESTORE_WRITE_STARTED', 'PRODUCT_FIRESTORE_WRITE_FINISHED', 'PRODUCT_CREATE_COMPLETED', 'PRODUCT_IMAGE_UPLOAD_FAILED', 'PRODUCT_IMAGE_DELETE_COMPLETED', 'PRODUCT_IMAGE_DELETE_FAILED', 'PRODUCT_IMAGE_REPLACED']) {
     assert.match(storageSource + handlerSource, new RegExp(stage));
   }
   assert.doesNotMatch(storageSource, /logger\[level\].*serviceRoleKey/);
@@ -139,7 +180,7 @@ test('Admin product client sends one JSON payload and preserves image MIME insid
   assert.match(adminApi, /'Content-Type': 'application\/json'/);
   assert.match(adminApi, /body: JSON\.stringify\(body\)/);
   assert.match(adminProducts, /signatureType\(await fileSignature\(file\)\)/);
-  assert.match(adminProducts, /return \{ contentType, dataBase64:/);
+  assert.match(adminProducts, /return \{ contentType, fileName, dataBase64:/);
   assert.doesNotMatch(adminApi + adminProducts, /FormData|multipart\/form-data/);
 });
 
@@ -157,6 +198,7 @@ test('safe product diagnostics report schema and types without image bytes', () 
   assert.deepEqual(metadata.branchIds, ['bluetap-a', 'bluetap-b']);
   assert.deepEqual(metadata.image.propertyNames, ['contentType', 'dataBase64']);
   assert.equal(metadata.image.contentType, 'image/png');
+  assert.equal(metadata.image.hasFileName, false);
   assert.equal(metadata.image.hasDataUrlPrefix, false);
   assert.doesNotMatch(JSON.stringify(metadata), new RegExp(body.imageUpload.dataBase64));
 });
@@ -190,6 +232,25 @@ test('valid JSON with an invalid image MIME returns product validation, not an H
   const f = fixture(); const result = await call(createAdminProductsHandler(f.getAdmin, { imageStorage: storage(), logger: { info() {} } }), 'POST', 'admin-token', { product_name: 'Bad image', price: 12, imageUpload: imagePayload('image/gif', jpeg) });
   assert.equal(result.statusCode, 422);
   assert.equal(result.body.error.reason, 'PRODUCT_IMAGE_TYPE_INVALID');
+});
+
+test('storage failures retain the exact safe 502 reason and stage and never reach Firestore', async () => {
+  const f = fixture();
+  const imageStorage = {
+    async uploadProductImage() {
+      throw new OtpError(502, 'SUPABASE_AUTH_FAILED', 'Product image storage authorization failed.', { stage: 'PRODUCT_IMAGE_UPLOAD_STARTED' });
+    },
+  };
+  const result = await call(createAdminProductsHandler(f.getAdmin, { imageStorage, logger: { info() {}, error() {} } }), 'POST', 'admin-token', {
+    product_name: 'bluetap', price: 25, branchIds: [], imageUpload: imagePayload('image/png', png),
+  });
+  assert.equal(result.statusCode, 502);
+  assert.deepEqual(result.body, { error: {
+    reason: 'SUPABASE_AUTH_FAILED',
+    message: 'Product image storage authorization failed.',
+    stage: 'PRODUCT_IMAGE_UPLOAD_STARTED',
+  } });
+  assert.equal([...f.records.keys()].some((key) => key.startsWith('products/product-')), false);
 });
 
 test('a declared image MIME that differs from its bytes returns the exact actionable 422 before storage', async () => {
@@ -241,6 +302,29 @@ test('the reported two-branch product payload succeeds with a valid image', asyn
   assert.equal(catalog.body.products.some((product) => product.id === result.body.product.id), true);
 });
 
+test('the current empty-branch product payload completes upload, Firestore, and Requester catalog', async () => {
+  const f = fixture(); const imageStorage = storage(); const logs = [];
+  const handler = createAdminProductsHandler(f.getAdmin, { imageStorage, logger: { info(...entry) { logs.push(entry); }, error(...entry) { logs.push(entry); } } });
+  const result = await call(handler, 'POST', 'admin-token', {
+    product_name: 'bluetap',
+    price: 25,
+    containerType: 'Gallon Container',
+    size: '1 Gallon / 3.8 Liters',
+    description: 'testttt',
+    active: true,
+    branchIds: [],
+    imageUpload: { ...imagePayload('image/png', png), fileName: 'water.png' },
+  });
+  assert.equal(result.statusCode, 201);
+  assert.deepEqual(result.body.product.branchIds, []);
+  assert.match(result.body.product.imageUrl, /\/storage\/v1\/object\/public\/products-images\//);
+  assert.equal(f.records.has(`products/${result.body.product.id}`), true);
+  const catalog = await call(createRequesterCatalogHandler(f.getAdmin), 'GET', 'requester-token');
+  assert.equal(catalog.body.products.some((product) => product.id === result.body.product.id), true);
+  const stages = JSON.stringify(logs);
+  for (const stage of ['PRODUCT_CREATE_REQUEST_RECEIVED', 'PRODUCT_CREATE_AUTHORIZED', 'PRODUCT_CREATE_VALIDATED', 'PRODUCT_IMAGE_DECODED', 'PRODUCT_FIRESTORE_WRITE_STARTED', 'PRODUCT_FIRESTORE_WRITE_FINISHED', 'PRODUCT_CREATE_COMPLETED']) assert.match(stages, new RegExp(stage));
+});
+
 test('a valid JSON image just under the decoded 5 MB limit uploads through the Admin API', async () => {
   const f = fixture(); const imageStorage = storage();
   const bytes = Buffer.concat([jpeg, Buffer.alloc(5 * 1024 * 1024 - jpeg.length - 1)]);
@@ -271,7 +355,9 @@ test('Requester and Manager cannot upload a product image through the Admin API'
 test('failed product creation cleans up only the newly uploaded Supabase image', async () => {
   const f = fixture(); const imageStorage = storage(); f.failTransactions(true);
   const result = await call(createAdminProductsHandler(f.getAdmin, { imageStorage }), 'POST', 'admin-token', { product_name: 'Premium', price: 42, imageUpload: imagePayload() });
-  assert.equal(result.statusCode, 500);
+  assert.equal(result.statusCode, 503);
+  assert.equal(result.body.error.reason, 'PRODUCT_FIRESTORE_WRITE_FAILED');
+  assert.equal(result.body.error.stage, 'PRODUCT_FIRESTORE_WRITE_STARTED');
   assert.deepEqual(imageStorage.calls.map((item) => item.type), ['upload', 'delete']);
 });
 
@@ -295,7 +381,8 @@ test('replacement uploads first, saves Firestore, then deletes the previous Supa
 test('failed replacement preserves the old image and cleans up only the newly uploaded object', async () => {
   const f = fixture(); const imageStorage = storage(); f.failTransactions(true);
   const result = await call(createAdminProductsHandler(f.getAdmin, { imageStorage }), 'PATCH', 'admin-token', { productId: 'refill', imageUpload: imagePayload() });
-  assert.equal(result.statusCode, 500);
+  assert.equal(result.statusCode, 503);
+  assert.equal(result.body.error.reason, 'PRODUCT_FIRESTORE_WRITE_FAILED');
   assert.equal(f.records.get('products/refill').imagePath, 'products/refill/old.webp');
   assert.deepEqual(imageStorage.calls.map((item) => item.type), ['upload', 'delete']);
   assert.notEqual(imageStorage.calls[1].imagePath, 'products/refill/old.webp');

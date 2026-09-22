@@ -4,6 +4,8 @@ const { applyCors } = require('../utils/cors');
 const { OtpError } = require('../utils/otpError');
 const { createSupabaseProductImageStorage, decodeProductImage } = require('../services/supabaseStorage');
 
+const firestoreWriteFailed = () => new OtpError(503, 'PRODUCT_FIRESTORE_WRITE_FAILED', 'The product record could not be saved. Please try again.', { stage: 'PRODUCT_FIRESTORE_WRITE_STARTED' });
+
 const clean = (value, max = 240) => String(value || '').trim().slice(0, max);
 const priceFor = (value) => {
   const price = Number(value);
@@ -93,6 +95,7 @@ function safeRequestMetadata(body = {}) {
     image: image ? {
       propertyNames: Object.keys(image).sort(),
       contentType: clean(image.contentType, 80),
+      hasFileName: Boolean(image.fileName),
       hasDataUrlPrefix: /^data:/i.test(String(image.dataBase64 || '')),
     } : null,
   };
@@ -101,9 +104,11 @@ function safeRequestMetadata(body = {}) {
 function responseError(res, error) {
   const known = error instanceof OtpError;
   const field = known ? clean(error.details?.field, 80) : '';
+  const stage = known ? clean(error.details?.stage, 80) : '';
   return res.status(known ? error.status : 500).json({ error: {
     reason: known ? error.reason : 'service-unavailable',
     message: known ? error.message : 'Product management is temporarily unavailable.',
+    ...(stage ? { stage } : {}),
     ...(field ? { fieldErrors: { [field]: error.message } } : {}),
   } });
 }
@@ -122,6 +127,8 @@ function createAdminProductsHandler(getAdmin = getFirebaseAdmin, { imageStorage 
     if (!['GET', 'POST', 'PATCH'].includes(req.method)) {
       return res.status(405).json({ error: { reason: 'method-not-allowed', message: 'Use GET, POST, or PATCH.' } });
     }
+    const startedAt = Date.now();
+    if (req.method !== 'GET') logger.info?.('[product-create]', { stage: 'PRODUCT_CREATE_REQUEST_RECEIVED', method: req.method });
     try {
       const { auth, db } = getAdmin();
       const admin = await requireAdmin(req, auth, db);
@@ -131,34 +138,35 @@ function createAdminProductsHandler(getAdmin = getFirebaseAdmin, { imageStorage 
           .sort((left, right) => left.product_name.localeCompare(right.product_name));
         return res.status(200).json({ products });
       }
-      const startedAt = Date.now();
+      logger.info?.('[product-create]', { stage: 'PRODUCT_CREATE_AUTHORIZED', method: req.method });
       const contentType = requireJsonProductRequest(req);
-      logger.info?.('[product-create]', { stage: 'PRODUCT_CREATE_REQUEST_RECEIVED', method: req.method });
       logger.info?.('[product-create]', { stage: 'PRODUCT_CREATE_CONTENT_TYPE', contentType });
       const body = bodyOf(req);
       logger.info?.('[product-create]', { stage: 'PRODUCT_CREATE_PAYLOAD_RECEIVED', ...safeRequestMetadata(body) });
       if (req.method === 'POST') {
         const input = productInput(body);
         await validateBranches(db, input.branchIds);
+        logger.info?.('[product-create]', { stage: 'PRODUCT_CREATE_VALIDATED', branchScope: input.branchIds.length ? 'selected' : 'all-active', branchCount: input.branchIds.length });
         const now = new Date();
         const ref = db.collection('products').doc();
         const image = decodeProductImage(body.imageUpload);
         if (image) logger.info?.('[product-create]', { stage: 'PRODUCT_IMAGE_DECODED', imageMime: image.contentType, decodedByteCount: image.bytes.length });
         const storage = image ? (imageStorage || createSupabaseProductImageStorage()) : null;
-        let uploaded;
+        const uploaded = image ? await storage.uploadProductImage(ref.id, image) : null;
+        const saved = { ...input, ...(uploaded || {}), createdAt: now, createdBy: admin.uid, updatedAt: now, updatedBy: admin.uid };
+        logger.info?.('[product-create]', { stage: 'PRODUCT_FIRESTORE_WRITE_STARTED', productId: ref.id });
         try {
-          uploaded = image ? await storage.uploadProductImage(ref.id, image) : null;
-          const saved = { ...input, ...(uploaded || {}), createdAt: now, createdBy: admin.uid, updatedAt: now, updatedBy: admin.uid };
           await db.runTransaction(async (tx) => {
             tx.create(ref, saved);
             tx.set(db.collection('adminAuditLogs').doc(), { action: 'PRODUCT_CREATED', adminUid: admin.uid, productId: ref.id, before: null, after: safeProduct(ref.id, saved), createdAt: now });
           });
-          logger.info?.('[product-create]', { stage: 'PRODUCT_CREATE_COMPLETED', productId: ref.id, status: 201, durationMs: Date.now() - startedAt });
-          return res.status(201).json({ product: safeProduct(ref.id, saved) });
         } catch (error) {
           await cleanupUploadedImage(storage, uploaded, ref.id);
-          throw error;
+          throw firestoreWriteFailed();
         }
+        logger.info?.('[product-create]', { stage: 'PRODUCT_FIRESTORE_WRITE_FINISHED', productId: ref.id });
+        logger.info?.('[product-create]', { stage: 'PRODUCT_CREATE_COMPLETED', productId: ref.id, status: 201, durationMs: Date.now() - startedAt });
+        return res.status(201).json({ product: safeProduct(ref.id, saved) });
       }
       const productId = clean(body.productId, 128);
       if (!productId) throw new OtpError(400, 'PRODUCT_ID_REQUIRED', 'Product ID is required.');
@@ -169,6 +177,7 @@ function createAdminProductsHandler(getAdmin = getFirebaseAdmin, { imageStorage 
       const changes = productInput(body, { partial: true });
       if (!Object.keys(changes).length && !body.imageUpload) throw new OtpError(400, 'NO_PRODUCT_CHANGES', 'No product changes were provided.');
       if (changes.branchIds) await validateBranches(db, changes.branchIds);
+      logger.info?.('[product-create]', { stage: 'PRODUCT_CREATE_VALIDATED', branchScope: changes.branchIds?.length ? 'selected' : 'unchanged-or-all-active', branchCount: changes.branchIds?.length || 0 });
       const now = new Date();
       const image = decodeProductImage(body.imageUpload);
       if (image) logger.info?.('[product-create]', { stage: 'PRODUCT_IMAGE_DECODED', imageMime: image.contentType, decodedByteCount: image.bytes.length });
@@ -178,6 +187,7 @@ function createAdminProductsHandler(getAdmin = getFirebaseAdmin, { imageStorage 
       catch (error) { throw error; }
       const saved = { ...previous, ...changes, ...(uploaded || {}), updatedAt: now, updatedBy: admin.uid };
       const action = previous.active !== false && saved.active === false ? 'PRODUCT_DEACTIVATED' : 'PRODUCT_UPDATED';
+      logger.info?.('[product-create]', { stage: 'PRODUCT_FIRESTORE_WRITE_STARTED', productId });
       try {
         await db.runTransaction(async (tx) => {
           tx.update(ref, { ...changes, ...(uploaded || {}), updatedAt: now, updatedBy: admin.uid });
@@ -185,8 +195,9 @@ function createAdminProductsHandler(getAdmin = getFirebaseAdmin, { imageStorage 
         });
       } catch (error) {
         await cleanupUploadedImage(storage, uploaded, productId);
-        throw error;
+        throw firestoreWriteFailed();
       }
+      logger.info?.('[product-create]', { stage: 'PRODUCT_FIRESTORE_WRITE_FINISHED', productId });
       if (uploaded && previous.imageStorageProvider === 'supabase' && previous.imagePath && previous.imagePath !== uploaded.imagePath) {
         try {
           await storage.deleteProductImage(previous.imagePath, productId);
@@ -196,7 +207,14 @@ function createAdminProductsHandler(getAdmin = getFirebaseAdmin, { imageStorage 
       }
       logger.info?.('[product-create]', { stage: 'PRODUCT_CREATE_COMPLETED', productId, status: 200, durationMs: Date.now() - startedAt });
       return res.status(200).json({ product: safeProduct(productId, saved) });
-    } catch (error) { return responseError(res, error); }
+    } catch (error) {
+      logger.error?.('[product-create]', {
+        stage: 'PRODUCT_CREATE_FAILED',
+        reason: error instanceof OtpError ? error.reason : 'service-unavailable',
+        failureStage: error instanceof OtpError ? error.details?.stage || 'PRODUCT_CREATE_REQUEST_RECEIVED' : 'PRODUCT_CREATE_REQUEST_RECEIVED',
+      });
+      return responseError(res, error);
+    }
   };
 }
 

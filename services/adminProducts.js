@@ -38,7 +38,10 @@ const imagePayload = async (file) => {
   });
   const separator = dataUrl.indexOf(',');
   if (separator < 0 || !/^data:[^;,]+;base64$/i.test(dataUrl.slice(0, separator))) throw new Error('The selected image could not be read.');
-  return { contentType, dataBase64: dataUrl.slice(separator + 1) };
+  const fileName = String(file.name || 'product-image')
+    .replace(/[\\/\u0000-\u001f\u007f]/g, '-')
+    .slice(0, 120);
+  return { contentType, fileName, dataBase64: dataUrl.slice(separator + 1) };
 };
 
 export const safeProductPayloadMetadata = (payload = {}) => {
@@ -51,6 +54,7 @@ export const safeProductPayloadMetadata = (payload = {}) => {
     image: image ? {
       propertyNames: Object.keys(image).sort(),
       contentType: String(image.contentType || ''),
+      hasFileName: Boolean(image.fileName),
       hasDataUrlPrefix: /^data:/i.test(String(image.dataBase64 || '')),
     } : null,
   };
@@ -62,6 +66,10 @@ export const adminProductErrorMessage = (error) => {
   if (error?.code === 'PRODUCT_IMAGE_TYPE_INVALID') return 'Product image: use a valid JPG, PNG, or WebP file whose contents match its image type.';
   if (error?.code === 'INVALID_PRODUCT_BRANCH') return 'Branch availability: refresh the page and select existing branches again.';
   if (error?.code === 'INVALID_PRODUCT_PRICE') return 'Price: enter a finite amount from 0 to 1,000,000.';
+  if (error?.code === 'SUPABASE_BUCKET_NOT_FOUND') return 'Product image storage bucket was not found. Ask an administrator to verify the Render storage configuration.';
+  if (error?.code === 'SUPABASE_BUCKET_NOT_PUBLIC') return 'Product image storage is not enabled for public image display.';
+  if (error?.code === 'SUPABASE_AUTH_FAILED') return 'Product image storage authorization failed. Ask an administrator to verify the Render service credential.';
+  if (error?.code === 'PRODUCT_IMAGE_PUBLIC_URL_FAILED') return 'The product image uploaded, but its public URL could not be created.';
   return error?.message || 'Product could not be saved.';
 };
 

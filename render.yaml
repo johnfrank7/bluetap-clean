@@ -8,6 +8,8 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
+      - key: NODE_VERSION
+        value: 22.22.0
       - key: ALLOWED_ORIGINS
         sync: false
       - key: FIREBASE_PROJECT_ID
