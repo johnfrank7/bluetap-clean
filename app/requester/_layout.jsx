@@ -22,7 +22,9 @@ export default function RequesterLayout() {
         </View>
 
         <SafeAreaView pointerEvents="box-none" edges={['bottom']} style={styles.navOverlay}>
-          <RequesterBottomNav />
+          <View pointerEvents="box-none" style={styles.navFrame}>
+            <RequesterBottomNav />
+          </View>
         </SafeAreaView>
       </View>
     </RoleGate>
@@ -32,6 +34,7 @@ export default function RequesterLayout() {
 const styles = StyleSheet.create({
   root: {
     flex: 1,
+    minWidth: 0,
   },
   screenContent: {
     flex: 1,
@@ -40,10 +43,18 @@ const styles = StyleSheet.create({
   },
   navOverlay: {
     position: 'absolute',
+    top: 0,
     left: 0,
     right: 0,
     bottom: 0,
-    height: REQUESTER_FLOATING_NAV_RESERVE,
+    alignItems: 'center',
     minWidth: 0,
+    zIndex: 20,
+  },
+  navFrame: {
+    width: '100%',
+    maxWidth: 480,
+    minWidth: 0,
+    flex: 1,
   },
 });

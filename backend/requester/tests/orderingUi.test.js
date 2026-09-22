@@ -44,7 +44,7 @@ test('product card uses a prominent contain image and a placeholder', () => {
   assert.match(productCard, /resizeMode="contain"/); assert.match(productCard, /placeholder/i); assert.match(productCard, /height:158/);
 });
 test('Requester floating navigation reserves shared content space instead of covering controls', () => {
-  assert.match(layout, /SafeAreaView/); assert.match(layout, /navOverlay/); assert.match(layout, /REQUESTER_FLOATING_NAV_RESERVE/); assert.match(nav, /primaryNavButton/); assert.doesNotMatch(nav, /floating=\{false\}/);
+  assert.match(layout, /SafeAreaView/); assert.match(layout, /navOverlay/); assert.match(layout, /navFrame/); assert.match(layout, /maxWidth: 480/); assert.match(layout, /REQUESTER_FLOATING_NAV_RESERVE/); assert.match(nav, /primaryNavButton/); assert.match(nav, /label: 'Add Request'/); assert.doesNotMatch(nav, /floating=\{false\}/);
 });
 test('Requester form uses keyboard avoidance and safe bottom content space', () => {
   assert.match(form, /KeyboardAvoidingView/); assert.match(form, /minWidth:0/); assert.match(form, /maxWidth:'100%'/);

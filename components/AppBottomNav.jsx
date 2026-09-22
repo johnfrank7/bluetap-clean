@@ -271,6 +271,7 @@ const styles = StyleSheet.create({
     left: 20,
     right: 20,
     minHeight: 64,
+    minWidth: 0,
   },
   navButton: {
     width: 36,
@@ -286,6 +287,7 @@ const styles = StyleSheet.create({
     backgroundColor: BLUE,
     borderWidth: 4,
     borderColor: BLUETAP_COLORS.white,
+    alignSelf: 'center',
     ...createShadow({ color: BLUE, elevation: 6, opacity: 0.28, radius: 8, offset: { width: 0, height: 4 } }),
   },
   primaryNavButtonActive: {

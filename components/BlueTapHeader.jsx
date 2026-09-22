@@ -71,6 +71,7 @@ const styles = StyleSheet.create({
   frame: {
     width: '100%',
     maxWidth: 480,
+    minWidth: 0,
     alignSelf: 'center',
   },
   header: {
@@ -84,6 +85,8 @@ const styles = StyleSheet.create({
   brandButton: {
     flexDirection: 'row',
     alignItems: 'center',
+    minWidth: 0,
+    flexShrink: 1,
   },
   brandLogo: {
     width: 24,
@@ -100,6 +103,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
+    flexShrink: 0,
   },
   notifIcon: {
     width: 22,
