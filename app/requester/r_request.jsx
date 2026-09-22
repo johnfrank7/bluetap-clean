@@ -35,11 +35,15 @@ const ACTIVE_TAB = 'active';
 const HISTORY_TAB = 'history';
 const ACTIVE_STATUSES = new Set([
   'pending',
+  'outside radius pending approval',
+  'awaiting distributor assignment',
+  'distributor assigned',
+  'branch transfer pending',
   'accepted',
   'scheduled',
   'out for delivery',
 ]);
-const HISTORY_STATUSES = new Set(['delivered', 'cancelled', 'canceled']);
+const HISTORY_STATUSES = new Set(['delivered', 'cancelled', 'canceled', 'declined outside service area']);
 
 const formatPrice = (price) => `\u20B1${Number(price || 0).toFixed(2)}`;
 
@@ -89,7 +93,7 @@ const formatDateValue = (value, fallback = 'Date not set') => {
 };
 
 const isPendingRequest = (request) =>
-  normalizeStatus(request?.status || 'Pending') === 'pending';
+  ['pending', 'outside radius pending approval'].includes(normalizeStatus(request?.status || 'Pending'));
 
 const getRequestId = (request) => request.request_id || request.id || 'Not set';
 
@@ -230,6 +234,11 @@ const RequestCard = ({
 
         <SoftStatusBadge status={request.status} />
       </View>
+      {normalizeStatus(request.status) === 'outside radius pending approval' && <View style={styles.approvalWaiting}><Text style={styles.approvalWaitingTitle}>Waiting for branch approval</Text><Text style={styles.approvalWaitingText}>This delivery point is outside the branch’s normal radius. Delivery is not confirmed until the branch approves it.</Text></View>}
+      {normalizeStatus(request.status) === 'awaiting distributor assignment' && <View style={styles.approvalWaiting}><Text style={styles.approvalWaitingTitle}>Waiting for distributor assignment</Text><Text style={styles.approvalWaitingText}>Your branch approved the order and is assigning a Distributor.</Text></View>}
+      {normalizeStatus(request.status) === 'distributor assigned' && <View style={styles.assignmentReady}><Text style={styles.assignmentReadyTitle}>Distributor assigned</Text><Text style={styles.assignmentReadyText}>A Distributor has been assigned to your order.</Text></View>}
+      {normalizeStatus(request.status) === 'branch transfer pending' && <View style={styles.transferWaiting}><Text style={styles.transferWaitingTitle}>Branch transfer in progress</Text><Text style={styles.transferWaitingText}>Your order is being reviewed by another branch. Delivery is not confirmed until that review finishes.</Text></View>}
+      {request.transferState === 'accepted' && <View style={styles.assignmentReady}><Text style={styles.assignmentReadyTitle}>Transferred to another branch</Text><Text style={styles.assignmentReadyText}>Your order was accepted by {request.currentBranchName || 'another branch'} and is awaiting Distributor assignment.</Text></View>}
 
       <View style={styles.compactInfoGrid}>
         <View style={styles.compactInfoColumn}>
@@ -587,6 +596,45 @@ const styles = createPortalStyleSheet({
     fontSize: 15,
     fontWeight: 'bold',
   },
+  approvalWaiting: {
+    marginTop: 12,
+    padding: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#E8C77F',
+    backgroundColor: '#FFF8E8',
+  },
+  approvalWaitingTitle: {
+    color: TEXT_DARK,
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  approvalWaitingText: {
+    color: TEXT_MUTED,
+    fontSize: 11,
+    lineHeight: 16,
+    marginTop: 3,
+  },
+  assignmentReady: {
+    marginTop: 12,
+    padding: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#8DD7AE',
+    backgroundColor: '#ECFDF5',
+  },
+  assignmentReadyTitle: { color: TEXT_DARK, fontSize: 12, fontWeight: 'bold' },
+  assignmentReadyText: { color: TEXT_MUTED, fontSize: 11, lineHeight: 16, marginTop: 3 },
+  transferWaiting: {
+    marginTop: 12,
+    padding: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#C4B5FD',
+    backgroundColor: '#F3E8FF',
+  },
+  transferWaitingTitle: { color: TEXT_DARK, fontSize: 12, fontWeight: 'bold' },
+  transferWaitingText: { color: TEXT_MUTED, fontSize: 11, lineHeight: 16, marginTop: 3 },
   compactInfoGrid: {
     flexDirection: 'row',
     gap: 12,

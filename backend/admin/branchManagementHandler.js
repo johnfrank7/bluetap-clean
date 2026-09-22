@@ -2,9 +2,11 @@ const { getFirebaseAdmin } = require('../firebase/firebaseAdmin');
 const { requireAdmin } = require('../auth/authorization');
 const { applyCors } = require('../utils/cors');
 const { OtpError } = require('../utils/otpError');
+const { DEFAULT_SERVICE_RADIUS_KM, TOLEDO_BARANGAYS, TOLEDO_CITY } = require('../../constants/toledoBarangays.json');
 
 const BRANCH_STATUS = new Set(['active', 'inactive']);
 const MANAGER_STATUS = new Set(['active', 'inactive']);
+const TOLEDO_BARANGAY_SET = new Set(TOLEDO_BARANGAYS);
 
 const clean = (value, max = 160) => String(value || '').trim().slice(0, max);
 const finiteCoordinate = (value, minimum, maximum) => {
@@ -16,9 +18,10 @@ const branchIdForCode = (code) => clean(code, 24).toLowerCase().replace(/[^a-z0-
 const safeBranch = (id, data = {}) => ({
   id,
   name: clean(data.name), code: clean(data.code, 24), barangay: clean(data.barangay),
-  city: clean(data.city), address: clean(data.address, 240), status: data.status === 'inactive' ? 'inactive' : 'active',
+  city: clean(data.city) || TOLEDO_CITY, address: clean(data.address, 240), status: data.status === 'inactive' ? 'inactive' : 'active',
+  active: data.status === 'inactive' ? false : data.active !== false,
   latitude: finiteCoordinate(data.latitude, -90, 90), longitude: finiteCoordinate(data.longitude, -180, 180),
-  serviceRadiusKm: data.serviceRadiusKm !== null && data.serviceRadiusKm !== undefined && data.serviceRadiusKm !== '' && Number.isFinite(Number(data.serviceRadiusKm)) ? Number(data.serviceRadiusKm) : null,
+  serviceRadiusKm: data.serviceRadiusKm !== null && data.serviceRadiusKm !== undefined && data.serviceRadiusKm !== '' && Number.isFinite(Number(data.serviceRadiusKm)) ? Number(data.serviceRadiusKm) : DEFAULT_SERVICE_RADIUS_KM,
   createdAt: data.createdAt || null, createdBy: data.createdBy || '', updatedAt: data.updatedAt || null, updatedBy: data.updatedBy || '',
 });
 const safeManager = (id, data = {}) => ({
@@ -35,13 +38,24 @@ function bodyOf(req) {
 
 function branchInput(body, { partial = false } = {}) {
   const result = {};
-  for (const [field, max] of [['name', 120], ['barangay', 120], ['city', 120], ['address', 240]]) {
+  for (const [field, max] of [['name', 120], ['barangay', 120], ['address', 240]]) {
     if (!partial || Object.prototype.hasOwnProperty.call(body, field)) result[field] = clean(body[field], max);
+  }
+  if (!partial || Object.prototype.hasOwnProperty.call(body, 'city')) {
+    const requestedCity = clean(body.city, 120);
+    if (requestedCity && requestedCity !== TOLEDO_CITY) {
+      throw new OtpError(400, 'UNSUPPORTED_BRANCH_CITY', `BlueTap branches are currently limited to ${TOLEDO_CITY}.`);
+    }
+    result.city = TOLEDO_CITY;
+  }
+  if (result.barangay && !TOLEDO_BARANGAY_SET.has(result.barangay)) {
+    throw new OtpError(400, 'INVALID_TOLEDO_BARANGAY', 'Choose a barangay from the approved Toledo City list.');
   }
   if (!partial || Object.prototype.hasOwnProperty.call(body, 'status')) {
     const status = clean(body.status || 'active').toLowerCase();
     if (!BRANCH_STATUS.has(status)) throw new OtpError(400, 'INVALID_BRANCH_STATUS', 'Branch status must be active or inactive.');
     result.status = status;
+    result.active = status === 'active';
   }
   if (!partial && (!result.name || !result.barangay || !result.city || !result.address)) {
     throw new OtpError(400, 'INVALID_BRANCH', 'Branch name and location details are required.');
@@ -58,8 +72,8 @@ function branchInput(body, { partial = false } = {}) {
     result.longitude = longitude;
   }
   if (!partial || Object.prototype.hasOwnProperty.call(body, 'serviceRadiusKm')) {
-    const radius = body.serviceRadiusKm === '' || body.serviceRadiusKm == null ? null : Number(body.serviceRadiusKm);
-    if (radius !== null && (!Number.isFinite(radius) || radius <= 0 || radius > 500)) {
+    const radius = body.serviceRadiusKm === '' || body.serviceRadiusKm == null ? DEFAULT_SERVICE_RADIUS_KM : Number(body.serviceRadiusKm);
+    if (!Number.isFinite(radius) || radius <= 0 || radius > 500) {
       throw new OtpError(400, 'INVALID_SERVICE_RADIUS', 'Service radius must be between 0 and 500 km.');
     }
     result.serviceRadiusKm = radius;

@@ -218,6 +218,8 @@ export default function DistributorProfilePage() {
   const toastAnim = useRef(new Animated.Value(0)).current;
   const toastTimerRef = useRef(null);
   const [loading, setLoading] = useState(true);
+  const [profileError, setProfileError] = useState('');
+  const [profileLoadAttempt, setProfileLoadAttempt] = useState(0);
   const [userData, setUserData] = useState(null);
   const [editingProfile, setEditingProfile] = useState(false);
   const [savingProfile, setSavingProfile] = useState(false);
@@ -228,6 +230,8 @@ export default function DistributorProfilePage() {
     let isMounted = true;
 
     const loadProfile = async () => {
+      setLoading(true);
+      setProfileError('');
       const user = auth.currentUser;
       const localProfile = findLocalUserForAuthRole(user, 'distributor');
 
@@ -269,6 +273,7 @@ export default function DistributorProfilePage() {
         }
       } catch (error) {
         console.log('Distributor profile read error:', error.message);
+        if (isMounted) setProfileError('Your profile could not be refreshed. Check your connection and try again.');
       } finally {
         if (isMounted) setLoading(false);
       }
@@ -280,7 +285,7 @@ export default function DistributorProfilePage() {
       isMounted = false;
       if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
     };
-  }, [router]);
+  }, [profileLoadAttempt, router]);
 
   useEffect(() => {
     Animated.timing(editFadeAnim, {
@@ -445,6 +450,15 @@ export default function DistributorProfilePage() {
               )}
             </View>
             <View style={styles.infoDivider} />
+
+            {!!profileError && (
+              <View accessibilityRole="alert" style={styles.profileError}>
+                <Text style={styles.profileErrorText}>{profileError}</Text>
+                <TouchableOpacity onPress={() => setProfileLoadAttempt((attempt) => attempt + 1)}>
+                  <Text style={styles.profileRetryText}>Try again</Text>
+                </TouchableOpacity>
+              </View>
+            )}
 
             {loading && !userData ? (
               <View style={styles.infoLoading}>
@@ -683,6 +697,16 @@ const styles = createPortalStyleSheet({
     fontWeight: '600',
     marginTop: 8,
   },
+  profileError: {
+    backgroundColor: '#FFF5F5',
+    borderColor: '#F2B8B5',
+    borderRadius: 12,
+    borderWidth: 1,
+    marginTop: 14,
+    padding: 12,
+  },
+  profileErrorText: { color: '#B3261E', fontSize: 12, fontWeight: '700', lineHeight: 18 },
+  profileRetryText: { color: BLUE, fontSize: 12, fontWeight: '800', marginTop: 8 },
   profileField: {
     marginTop: 14,
   },

@@ -9,6 +9,36 @@ const STATUS_META = {
     color: '#F59E0B',
     label: 'Pending',
   },
+  'outside radius pending approval': {
+    backgroundColor: '#FFF8E6',
+    color: '#B7791F',
+    label: 'Waiting for branch approval',
+  },
+  'awaiting distributor assignment': {
+    backgroundColor: '#EFF6FF',
+    color: BLUE,
+    label: 'Waiting for distributor assignment',
+  },
+  'distributor assigned': {
+    backgroundColor: '#ECFDF5',
+    color: '#059669',
+    label: 'Distributor assigned',
+  },
+  'branch transfer pending': {
+    backgroundColor: '#F3E8FF',
+    color: '#7C3AED',
+    label: 'Branch transfer in progress',
+  },
+  approved: {
+    backgroundColor: '#ECFDF5',
+    color: '#059669',
+    label: 'Approved',
+  },
+  'declined outside service area': {
+    backgroundColor: '#FEF2F2',
+    color: '#DC2626',
+    label: 'Declined: outside service area',
+  },
   accepted: {
     backgroundColor: '#EFF6FF',
     color: BLUE,

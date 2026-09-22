@@ -9,7 +9,7 @@ function fixture(overrides = {}) {
     ['users/requester-1', { role: 'requester', fullName: 'Nishi Requester', contactNumber: '09171234567', address: 'Poblacion, Pinamungajan' }],
     ['users/requester-2', { role: 'requester', fullName: 'Other Requester', contactNumber: '09170000000', address: 'Cebu' }],
     ['users/admin-1', { role: 'admin' }],
-    ['branches/central', { name: 'BlueTap Central', address: 'Main Street', barangay: 'Poblacion', city: 'Pinamungajan', latitude: 10.267, longitude: 123.584, status: 'active' }],
+    ['branches/central', { name: 'BlueTap Central', address: 'Main Street', barangay: 'Poblacion', city: 'Toledo City', latitude: 10.267, longitude: 123.584, serviceRadiusKm: 5, status: 'active' }],
     ['branches/inactive', { name: 'Inactive', latitude: 10.3, longitude: 123.6, status: 'inactive' }],
     ['branches/unlocated', { name: 'Unlocated', status: 'active' }],
     ['products/refill', { product_name: 'Refill', price: 35, active: true, branchIds: ['central'] }],
@@ -86,6 +86,14 @@ test('order stores product, branch, delivery, distance, and price snapshots', as
   const result = await call(createRequesterOrdersHandler(fixture().getAdmin), 'POST', 'requester-token', validOrder()); const order = result.body.order;
   assert.equal(order.items[0].productNameSnapshot, 'Refill'); assert.equal(order.branchId, 'central'); assert.equal(order.branchNameSnapshot, 'BlueTap Central');
   assert.deepEqual(order.deliveryLocation, { latitude: 10.27, longitude: 123.58 }); assert.equal(typeof order.distanceKmSnapshot, 'number');
+});
+test('server creates outside-radius orders with trusted distance and service-radius snapshots', async () => {
+  const result = await call(createRequesterOrdersHandler(fixture().getAdmin), 'POST', 'requester-token', validOrder({ deliveryLocation: { latitude: 10.36, longitude: 123.68 } }));
+  assert.equal(result.statusCode, 201);
+  assert.equal(result.body.order.status, 'outside_radius_pending_approval');
+  assert.equal(result.body.order.outsideServiceArea, true);
+  assert.equal(result.body.order.serviceRadiusKmSnapshot, 5);
+  assert.ok(result.body.order.distanceKmSnapshot > result.body.order.serviceRadiusKmSnapshot);
 });
 test('inactive products cannot be ordered', async () => {
   const result = await call(createRequesterOrdersHandler(fixture().getAdmin), 'POST', 'requester-token', validOrder({ items: [{ productId: 'inactive', quantity: 1 }] }));

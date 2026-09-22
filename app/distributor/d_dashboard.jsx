@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
   View,
   Text,
   StyleSheet,
@@ -15,6 +16,11 @@ import { createShadow } from '../../components/shadowStyles';
 import { createPortalStyleSheet, useBlueTapTheme } from '../../components/BlueTapTheme';
 import { USER_PORTAL_BOTTOM_CONTENT_INSET, USER_PORTAL_LAYOUT } from '../../constants/userPortalLayout';
 import { BLUETAP_COLORS } from '../../constants/bluetapTheme';
+import {
+  normalizeDistributorOrderStatus,
+  toDistributorScreenOrder,
+  useAssignedDistributorOrders,
+} from '../../services/distributorOrders';
 
 const BLUE = BLUETAP_COLORS.primary;
 const BLUE_LIGHT = BLUETAP_COLORS.primarySoft;
@@ -22,42 +28,9 @@ const CARD_BORDER = BLUETAP_COLORS.border;
 const TEXT_MUTED = BLUETAP_COLORS.textSecondary;
 const TEXT_DARK = BLUETAP_COLORS.textPrimary;
 
-const DISTRIBUTOR_NAME = 'Distributor';
-
-const DASHBOARD_SUMMARY = [
-  {
-    label: 'Pending Requests',
-    value: '2',
-  },
-  {
-    label: 'Scheduled Today',
-    value: '3',
-  },
-  {
-    label: 'Delivered Today',
-    value: '1',
-  },
-];
-
-const CURRENT_REQUEST = {
-  requestId: 'BT-01245',
-  orderDate: 'Jan 25, 2026',
-  customerName: 'Jeanne Ortega',
-  requesterUniqueId: 'REQ-000001',
-  contactNumber: '09123456789',
-  deliveryAddress: 'Poblacion, Toledo City',
-  distributorName: DISTRIBUTOR_NAME,
-  distributorUniqueId: 'DIS-000001',
-  productsOrdered: 'Purified Mineral Water',
-  quantity: '3 Gallons',
-  containerType: 'New Container',
-  total_cost: 75,
-  deliveryDate: 'Jan 25, 2026',
-  status: 'Out for Delivery',
-};
-
 const STATUS_ACTIONS = {
-  pending: 'Accept Request',
+  'distributor assigned': 'Review Assignment',
+  pending: 'Review Assignment',
   accepted: 'Schedule Delivery',
   scheduled: 'Start Delivery',
   'out for delivery': 'Delivered',
@@ -80,6 +53,15 @@ const getStatusActionLabel = (status) =>
 const formatAmountDue = (amount) =>
   `\u20B1${Number(amount || 0).toFixed(2)}`;
 
+const occursToday = (value) => {
+  const date = value?.toDate?.() || (value?.seconds ? new Date(value.seconds * 1000) : value ? new Date(value) : null);
+  const today = new Date();
+  return date && !Number.isNaN(date.getTime())
+    && date.getFullYear() === today.getFullYear()
+    && date.getMonth() === today.getMonth()
+    && date.getDate() === today.getDate();
+};
+
 const getNumericQuantity = (quantity) => {
   const match = String(quantity || '').match(/\d+(\.\d+)?/);
   const parsedQuantity = Number(match?.[0] ?? quantity);
@@ -100,7 +82,7 @@ const getDistributorRequestItems = (request) => {
 
       return {
         id: item.product_id || item.id || `${request.requestId}-${index}`,
-        productName: item.product_name || item.productName || 'Product',
+        productName: item.product_name || item.productName || item.productNameSnapshot || 'Product',
         quantity: Number.isFinite(quantity) ? quantity : item.quantity,
         unitPrice: Number.isFinite(unitPrice) ? unitPrice : 0,
         subtotal: Number.isFinite(subtotal) ? subtotal : 0,
@@ -109,7 +91,7 @@ const getDistributorRequestItems = (request) => {
   }
 
   const quantity = getNumericQuantity(request.quantity);
-  const totalAmount = Number(request.total_cost || request.totalAmount || 0);
+  const totalAmount = Number(request.total_cost || request.totalAmount || request.totalAtOrder || 0);
   const unitPrice = quantity > 0 ? totalAmount / quantity : totalAmount;
 
   return [
@@ -152,8 +134,15 @@ export default function DistributorDashboard() {
   useBlueTapTheme();
   const router = useRouter();
   const [detailsVisible, setDetailsVisible] = useState(false);
+  const { orders, loading, error, refresh } = useAssignedDistributorOrders();
   const todayText = formatDashboardDate(new Date());
-  const activeRequest = CURRENT_REQUEST;
+  const screenOrders = useMemo(() => orders.map(toDistributorScreenOrder), [orders]);
+  const activeRequest = screenOrders.find((order) => !['delivered', 'cancelled', 'canceled', 'declined'].includes(normalizeDistributorOrderStatus(order.status)));
+  const dashboardSummary = useMemo(() => [
+    { label: 'Pending Requests', value: String(screenOrders.filter((order) => ['distributor assigned', 'pending'].includes(normalizeDistributorOrderStatus(order.status))).length) },
+    { label: 'Scheduled Today', value: String(screenOrders.filter((order) => ['accepted', 'scheduled', 'out for delivery'].includes(normalizeDistributorOrderStatus(order.status)) && occursToday(order.scheduledDateTime)).length) },
+    { label: 'Delivered Today', value: String(screenOrders.filter((order) => normalizeDistributorOrderStatus(order.status) === 'delivered' && occursToday(order.deliveredDateTime)).length) },
+  ], [screenOrders]);
   const primaryActionLabel = activeRequest
     ? getStatusActionLabel(activeRequest.status)
     : '';
@@ -195,7 +184,7 @@ export default function DistributorDashboard() {
   const handleCurrentRequestAction = () => {
     if (!activeRequest) return;
 
-    if (normalizeStatus(activeRequest.status) === 'pending') {
+    if (['pending', 'distributor assigned'].includes(normalizeStatus(activeRequest.status))) {
       router.replace('/distributor/d_requests');
       return;
     }
@@ -217,13 +206,13 @@ export default function DistributorDashboard() {
           <View style={styles.welcomeSection}>
             <Text style={styles.welcomeText}>WELCOME!</Text>
             <Text style={styles.greetingText}>
-              Good Morning, {DISTRIBUTOR_NAME}
+              Good Morning, Distributor
             </Text>
             <Text style={styles.dateText}>{todayText}</Text>
           </View>
 
           <View style={styles.summaryRow}>
-            {DASHBOARD_SUMMARY.map((item) => (
+            {dashboardSummary.map((item) => (
               <View key={item.label} style={styles.summaryCard}>
                 <Text style={styles.summaryValue}>{item.value}</Text>
                 <Text style={styles.summaryLabel}>{item.label}</Text>
@@ -234,7 +223,11 @@ export default function DistributorDashboard() {
           <View style={styles.currentRequestSection}>
             <Text style={styles.sectionTitle}>Current Request</Text>
 
-            {activeRequest ? (
+            {loading ? (
+              <View style={styles.emptyRequestCard}><ActivityIndicator color={BLUE} /><Text style={styles.emptyRequestText}>Loading assigned deliveries...</Text></View>
+            ) : error ? (
+              <View style={styles.emptyRequestCard}><Text style={styles.emptyRequestTitle}>Unable to load deliveries.</Text><Text style={styles.emptyRequestText}>{error}</Text><TouchableOpacity onPress={refresh} style={styles.viewDetailsButton}><Text style={styles.viewDetailsText}>Try Again</Text></TouchableOpacity></View>
+            ) : activeRequest ? (
               <View style={styles.currentRequestCard}>
                 <View style={styles.requestCardHeader}>
                   <View style={styles.requestTitleBlock}>
@@ -328,7 +321,7 @@ export default function DistributorDashboard() {
               <View style={styles.emptyRequestCard}>
                 <Text style={styles.emptyRequestTitle}>No active delivery.</Text>
                 <Text style={styles.emptyRequestText}>
-                  Go to the Requests page to accept a new order.
+                  New branch assignments will appear here.
                 </Text>
               </View>
             )}

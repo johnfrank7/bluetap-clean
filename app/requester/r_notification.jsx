@@ -16,10 +16,14 @@ const formatWhen = (value) => {
 const messageFor = (order) => {
   const id = order.request_id || order.requestId || order.id;
   const provider = order.branchNameSnapshot || order.water_station || 'your provider';
-  const status = order.status || 'Pending';
-  return status.toLowerCase() === 'pending'
-    ? `Order ${id} was sent to ${provider} and is awaiting review.`
-    : `Order ${id} is now ${status}. Provider: ${provider}.`;
+  const status = (order.status || 'Pending').toString().trim().toLowerCase().replace(/[_-]+/g, ' ');
+  if (order.transferState === 'accepted') return `Order ${id} was transferred to ${provider} and is awaiting distributor assignment.`;
+  if (status === 'outside radius pending approval') return `Order ${id} is waiting for branch approval.`;
+  if (status === 'awaiting distributor assignment') return `Order ${id} was approved and is waiting for distributor assignment.`;
+  if (status === 'distributor assigned') return `A distributor has been assigned to your order ${id}.`;
+  if (status === 'branch transfer pending') return `Order ${id} has a branch transfer in progress.`;
+  if (status === 'declined outside service area') return `Order ${id} was declined because the delivery location is outside the branch’s service area.`;
+  return status === 'pending' ? `Order ${id} was sent to ${provider} and is awaiting review.` : `Order ${id} is now ${order.status}. Provider: ${provider}.`;
 };
 
 export default function RequesterNotification() {

@@ -25,6 +25,13 @@ const themeButton = read('components/ThemeIconButton.jsx');
 const header = read('components/BlueTapHeader.jsx');
 const rootLayout = read('app/_layout.jsx');
 const landing = read('app/index.jsx');
+const distributorDashboard = read('app/distributor/d_dashboard.jsx');
+const distributorRequests = read('app/distributor/d_requests.jsx');
+const distributorScheduled = read('app/distributor/d_scheduled_requests.jsx');
+const distributorHistory = read('app/distributor/d_history.jsx');
+const distributorNotifications = read('app/distributor/d_notification.jsx');
+const distributorOrders = read('services/distributorOrders.js');
+const managerRequests = read('app/manager/request.jsx');
 
 test('new request is structured into delivery, provider, product, details, and review sections', () => {
   for (const label of ['Delivery location', 'Select provider branch', 'Select products', 'Order details', 'Review request']) assert.match(form, new RegExp(label));
@@ -44,8 +51,8 @@ test('denied location explains why access is needed and manual pin remains avail
 test('branches are ranked using Haversine distance and labeled approximate', () => {
   assert.match(location, /haversineDistanceKm/); assert.match(location, /sort\(\(left, right\) => left\.distanceKm - right\.distanceKm\)/); assert.match(form, /Approx\./);
 });
-test('map renders a clear initial location prompt plus requester and provider markers with fit view', () => {
-  assert.match(map, /Select your delivery location/); assert.match(map, /Your delivery location/); assert.match(map, /requesterMarker/); assert.match(map, /branchMarker/); assert.match(map, /Fit view/);
+test('map renders a clear initial location prompt plus draggable requester and provider markers with fit view', () => {
+  assert.match(map, /Tap to place a location pin/); assert.match(map, /Your delivery location/); assert.match(map, /requesterMarker/); assert.match(map, /branchMarker/); assert.match(map, /Fit view/); assert.match(map, /PanResponder/); assert.match(map, /Normal delivery area/);
 });
 test('map uses OpenStreetMap without a paid routing dependency', () => assert.match(map, /tile\.openstreetmap\.org/));
 test('product card uses a prominent contain image and a placeholder', () => {
@@ -64,8 +71,8 @@ test('Admin Products supports add, edit, archive, image preview, and branch avai
   for (const label of ['Add product', 'Edit product', 'Deactivate', 'Choose image', 'Branch availability']) assert.match(adminProducts, new RegExp(label));
   assert.doesNotMatch(adminProducts, /Delete product/);
 });
-test('Admin Branches requires coordinates and includes a shared map picker', () => {
-  assert.match(adminBranches, /latitude/); assert.match(adminBranches, /longitude/); assert.match(adminBranches, /LocationMap/); assert.match(adminBranches, /Coordinates are required/);
+test('Admin Branches uses a location-first Toledo City form with a shared interactive map picker', () => {
+  assert.match(adminBranches, /TOLEDO_BARANGAYS/); assert.match(adminBranches, /TOLEDO_CITY/); assert.match(adminBranches, /Use my current location/); assert.match(adminBranches, /LocationMap/); assert.match(adminBranches, /Coordinates/); assert.match(adminBranches, /Delivery coverage/);
 });
 test('Requester catalog is short-cached, deduplicated, and exposes shared queries', () => {
   assert.match(ordering, /CACHE_MS = 30_000/); assert.match(ordering, /catalogRequest/);
@@ -117,4 +124,31 @@ test('Requester Add Request control remains visibly rendered before and after it
   assert.match(nav, /primaryAction=\{isPrimaryAction\}/);
   assert.match(nav, /primaryActionIcon/);
   assert.match(nav, /return <Text style=\{styles\.primaryActionIcon\}>\+<\/Text>/);
+});
+
+test('Distributor pages retain their distinct committed layouts while using the scoped assignment API', () => {
+  for (const screen of [distributorDashboard, distributorRequests, distributorScheduled, distributorHistory, distributorNotifications]) {
+    assert.match(screen, /useAssignedDistributorOrders/);
+    assert.doesNotMatch(screen, /PENDING_REQUESTS|SCHEDULED_REQUESTS|HISTORY_REQUESTS|CURRENT_REQUEST|DASHBOARD_SUMMARY/);
+    assert.doesNotMatch(screen, /Jeanne Ortega|Franz Caliguid|Maylene Minoza|Chane Sarcon|Angelyn Paculba/);
+  }
+  assert.match(distributorDashboard, /Current Request/);
+  assert.match(distributorDashboard, /\['pending', 'distributor assigned'\]/);
+  assert.match(distributorRequests, /Choose Delivery Schedule/);
+  assert.match(distributorScheduled, /Scheduled Requests/);
+  assert.match(distributorHistory, /Request History/);
+  assert.match(distributorNotifications, /NOTIFICATION/);
+  assert.match(distributorOrders, /getApiUrl\('\/api\/distributor\/orders'\)/);
+  assert.match(distributorOrders, /updateAssignedDistributorOrder/);
+  assert.match(distributorRequests, /schedule-delivery/);
+  assert.match(distributorScheduled, /start-delivery|mark-delivered/);
+  assert.doesNotMatch(distributorRequests, /setScheduledRequests|new Promise\(\(resolve\)/);
+  assert.doesNotMatch(distributorOrders, /onSnapshot|firebase\/firestore/);
+});
+
+test('Manager dispatch presents durable source-branch transfer decisions without a chat surface', () => {
+  assert.match(managerRequests, /sourceDecisionEvents/);
+  assert.match(managerRequests, /Transfer decisions/);
+  assert.match(managerRequests, /accepted.*transfer of Order|declined.*transfer of Order/);
+  assert.doesNotMatch(managerRequests, /conversation|typing indicator|read receipt/);
 });

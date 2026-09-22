@@ -43,6 +43,31 @@ async function requireRequester(req, auth, db) {
   return { decoded, profile: { ...profile, uid: decoded.uid } };
 }
 
+async function requireActiveDistributor(req, auth, db) {
+  const decoded = await verifiedIdentity(req, auth);
+  const profileSnapshot = await db.collection('users').doc(decoded.uid).get();
+  const profile = profileSnapshot.data() || {};
+  const distributorStatus = String(profile.approvalStatus || profile.status || '').trim().toLowerCase();
+  if (!profileSnapshot.exists || profile.role !== 'distributor') {
+    throw new OtpError(403, 'DISTRIBUTOR_REQUIRED', 'Distributor access is required.');
+  }
+  if (profile.mustChangePassword === true) throw new OtpError(403, 'PASSWORD_CHANGE_REQUIRED', 'You must change your temporary password before accessing BlueTap.');
+  if (!['active', 'approved'].includes(distributorStatus) || ['inactive', 'disabled'].includes(String(profile.accountStatus || '').toLowerCase())) {
+    throw new OtpError(403, 'DISTRIBUTOR_INACTIVE', 'This Distributor account is not active.');
+  }
+  const branchId = String(profile.branchId || '').trim();
+  if (!branchId) throw new OtpError(403, 'BRANCH_ACCESS_DENIED', 'This Distributor account is not assigned to a branch.');
+  const branchSnapshot = await db.collection('branches').doc(branchId).get();
+  if (!branchSnapshot.exists || branchSnapshot.data()?.status !== 'active') {
+    throw new OtpError(403, 'BRANCH_INACTIVE', 'This branch is currently inactive. Please contact BlueTap.');
+  }
+  if (typeof auth.getUser === 'function') {
+    const authUser = await auth.getUser(decoded.uid);
+    if (authUser?.disabled === true) throw new OtpError(403, 'DISTRIBUTOR_INACTIVE', 'This Distributor account is not active.');
+  }
+  return { decoded, profile: { ...profile, uid: decoded.uid }, branch: { id: branchSnapshot.id, ...branchSnapshot.data() } };
+}
+
 async function requireActiveManager(req, auth, db) {
   const decoded = await verifiedIdentity(req, auth);
   const profileSnapshot = await db.collection('users').doc(decoded.uid).get();
@@ -60,6 +85,10 @@ async function requireActiveManager(req, auth, db) {
   if (!branchSnapshot.exists || branchSnapshot.data()?.status !== 'active') {
     throw new OtpError(403, 'BRANCH_INACTIVE', 'This branch is currently inactive. Please contact the BlueTap administrator.');
   }
+  if (typeof auth.getUser === 'function') {
+    const authUser = await auth.getUser(decoded.uid);
+    if (authUser?.disabled === true) throw new OtpError(403, 'MANAGER_INACTIVE', 'This Manager account is inactive. Please contact the BlueTap administrator.');
+  }
   return { decoded, profile: { ...profile, uid: decoded.uid }, branch: { id: branchSnapshot.id, ...branchSnapshot.data() } };
 }
 
@@ -71,4 +100,4 @@ function requireManagerBranch(managerContext, requestedBranchId) {
   return assigned;
 }
 
-module.exports = { bearerToken, requireActiveManager, requireAdmin, requireManagerBranch, requireRequester, verifiedIdentity };
+module.exports = { bearerToken, requireActiveDistributor, requireActiveManager, requireAdmin, requireManagerBranch, requireRequester, verifiedIdentity };

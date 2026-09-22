@@ -36,10 +36,20 @@ test('registration config counters and audit logs are backend-only', () => {
   }
 });
 
+test('Manager operational events are backend-only rather than client-readable inbox documents', () => {
+  assert.match(rules, /match \/managerOperationalEvents\/\{eventId\} \{ allow read, write: if false; \}/);
+});
+
 test('request access stays bound to the authenticated requester', () => {
   assert.match(rules, /allow read:\s*if isRequester\(\) && resource\.data\.requester_id == request\.auth\.uid;/);
-  assert.match(rules, /match \/requests\/\{requestId\}[\s\S]*allow create:\s*if false;/);
-  assert.match(rules, /match \/requests\/\{requestId\}[\s\S]*allow delete:\s*if false;/);
+  assert.match(rules, /match \/requests\/\{requestId\}[\s\S]*allow create, update, delete:\s*if false;/);
+});
+
+test('dispatch reads stay scoped to current Branch ownership and assigned Distributors', () => {
+  assert.match(rules, /isManagerBranch\(resource\.data\.branchId\)/);
+  assert.match(rules, /isManagerBranch\(resource\.data\.transferToBranchId\)[\s\S]*branch_transfer_pending/);
+  assert.match(rules, /function isDistributor\(\)[\s\S]*currentUser\(\)\.role == 'distributor'/);
+  assert.match(rules, /resource\.data\.assignedDistributorUid == request\.auth\.uid[\s\S]*resource\.data\.branchId == currentUser\(\)\.branchId/);
 });
 
 test('branch definitions and Admin audit logs are backend-write-only', () => {

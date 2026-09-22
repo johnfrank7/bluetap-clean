@@ -28,6 +28,12 @@ import { createShadow } from '../../components/shadowStyles';
 import { createPortalStyleSheet, useBlueTapTheme } from '../../components/BlueTapTheme';
 import { USER_PORTAL_BOTTOM_CONTENT_INSET, USER_PORTAL_LAYOUT } from '../../constants/userPortalLayout';
 import { BLUETAP_COLORS } from '../../constants/bluetapTheme';
+import {
+  normalizeDistributorOrderStatus,
+  toDistributorScreenOrder,
+  updateAssignedDistributorOrder,
+  useAssignedDistributorOrders,
+} from '../../services/distributorOrders';
 
 const BLUE = BLUETAP_COLORS.primary;
 const BLUE_LIGHT = BLUETAP_COLORS.primarySoft;
@@ -55,34 +61,7 @@ const SCHEDULE_OPTIONS = [
   { value: 'custom', label: 'Custom Date & Time' },
 ];
 
-const PENDING_REQUESTS = [
-  {
-    id: 'BT-01245',
-    quantity: '3 Gallons',
-    productName: 'Purified Mineral Water',
-    container: 'New Container',
-    requester: 'Jeanne Ortega',
-    requesterId: 'REQ-000001',
-    distributor: 'Distributor',
-    distributorId: 'DIS-000001',
-    contact: '09123456789',
-    address: 'Poblacion, Toledo City',
-    deliveryDate: 'Jan 25, 2026',
-  },
-  {
-    id: 'BT-01212',
-    quantity: '2 Gallons',
-    productName: 'Purified Mineral Water',
-    container: 'Exchange Container',
-    requester: 'Franz Caliguid',
-    requesterId: 'REQ-000002',
-    distributor: 'Distributor',
-    distributorId: 'DIS-000001',
-    contact: '09123456789',
-    address: 'Tajao, Pinamungajan',
-    deliveryDate: 'Jan 25, 2026',
-  },
-];
+const ASSIGNMENT_STATUSES = new Set(['distributor assigned', 'pending']);
 
 const getStartOfDay = (date) =>
   new Date(date.getFullYear(), date.getMonth(), date.getDate());
@@ -245,7 +224,7 @@ const PendingRequestCard = memo(function PendingRequestCard({
       <View style={styles.requestCardHeader}>
         <Text style={styles.requestId}>Request ID: {request.id}</Text>
         <Animated.View style={{ opacity: fadeAnim }}>
-          <SoftStatusBadge status="Pending" />
+          <SoftStatusBadge status={request.status} />
         </Animated.View>
       </View>
 
@@ -375,7 +354,6 @@ export default function DistributorRequests() {
   const sheetAnim = useRef(new Animated.Value(0)).current;
   const toastAnim = useRef(new Animated.Value(0)).current;
   const successTimer = useRef(null);
-  const submitTimer = useRef(null);
   const [detailsRequest, setDetailsRequest] = useState(null);
   const [scheduleSheetVisible, setScheduleSheetVisible] = useState(false);
   const [selectedRequest, setSelectedRequest] = useState(null);
@@ -386,14 +364,16 @@ export default function DistributorRequests() {
   );
   const [scheduleError, setScheduleError] = useState('');
   const [processingRequestId, setProcessingRequestId] = useState('');
-  const [scheduledRequests, setScheduledRequests] = useState({});
   const [successVisible, setSuccessVisible] = useState(false);
+  const { orders, loading, error, refresh } = useAssignedDistributorOrders();
   const selectedDetailsRequest = getDetailsRequestData(detailsRequest);
 
   const pendingRequests = useMemo(
     () =>
-      PENDING_REQUESTS.filter((request) => !scheduledRequests[request.id]),
-    [scheduledRequests]
+      orders
+        .map(toDistributorScreenOrder)
+        .filter((request) => ASSIGNMENT_STATUSES.has(normalizeDistributorOrderStatus(request.status))),
+    [orders]
   );
 
   const customDateOptions = useMemo(() => {
@@ -414,7 +394,6 @@ export default function DistributorRequests() {
   useEffect(() => {
     return () => {
       if (successTimer.current) clearTimeout(successTimer.current);
-      if (submitTimer.current) clearTimeout(submitTimer.current);
     };
   }, []);
 
@@ -546,23 +525,24 @@ export default function DistributorRequests() {
     if (!resolvedSchedule) return;
 
     setScheduleError('');
-    setProcessingRequestId(selectedRequest.id);
-
-    await new Promise((resolve) => {
-      submitTimer.current = setTimeout(resolve, 520);
-    });
-
-    setScheduledRequests((currentRequests) => ({
-      ...currentRequests,
-      [selectedRequest.id]: resolvedSchedule,
-    }));
-    setProcessingRequestId('');
-    closeScheduleSheet(true);
-    showSuccessFeedback();
+    setProcessingRequestId(selectedRequest.sourceId);
+    try {
+      await updateAssignedDistributorOrder(selectedRequest.sourceId, 'schedule-delivery', {
+        scheduledAt: resolvedSchedule.scheduledAt,
+      });
+      await refresh();
+      closeScheduleSheet(true);
+      showSuccessFeedback();
+    } catch (submitError) {
+      setScheduleError(submitError.message || 'The delivery schedule could not be saved.');
+    } finally {
+      setProcessingRequestId('');
+    }
   }, [
     closeScheduleSheet,
     getResolvedSchedule,
     processingRequestId,
+    refresh,
     selectedRequest,
     showSuccessFeedback,
   ]);
@@ -572,7 +552,7 @@ export default function DistributorRequests() {
       <PendingRequestCard
         request={item}
         index={index}
-        isProcessing={processingRequestId === item.id}
+        isProcessing={processingRequestId === item.sourceId}
         onViewDetails={setDetailsRequest}
         onAccept={openScheduleSheet}
       />
@@ -624,7 +604,7 @@ export default function DistributorRequests() {
     [customDate, processingRequestId]
   );
 
-  const keyExtractor = useCallback((item) => item.id, []);
+  const keyExtractor = useCallback((item) => item.sourceId, []);
   const dateKeyExtractor = useCallback((item) => getDateKey(item), []);
 
   return (
@@ -644,16 +624,8 @@ export default function DistributorRequests() {
               <Text style={styles.subtitle}>Pending Requests</Text>
             </View>
           }
-          ListEmptyComponent={
-            <View style={styles.emptyCard}>
-              <Text style={styles.emptyTitle}>No pending requests.</Text>
-              <Text style={styles.emptyText}>
-                New customer requests will appear here when they are ready to
-                schedule.
-              </Text>
-            </View>
-          }
-          extraData={processingRequestId}
+          ListEmptyComponent={loading ? <View style={styles.emptyCard}><ActivityIndicator color={BLUE} /><Text style={styles.emptyText}>Loading assigned requests...</Text></View> : error ? <View style={styles.emptyCard}><Text style={styles.emptyTitle}>Requests unavailable.</Text><Text style={styles.emptyText}>{error}</Text><TouchableOpacity onPress={refresh} style={styles.secondaryActionButton}><Text style={styles.secondaryActionText}>Try Again</Text></TouchableOpacity></View> : <View style={styles.emptyCard}><Text style={styles.emptyTitle}>No pending requests.</Text><Text style={styles.emptyText}>New branch assignments will appear here when they are ready to schedule.</Text></View>}
+          extraData={`${processingRequestId}:${loading}:${error}`}
         />
       </View>
 

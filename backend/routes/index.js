@@ -11,6 +11,9 @@ const { createAdminBranchesHandler, createAdminManagersHandler } = require('../a
 const { createRequiredPasswordChangeHandler } = require('../auth/requiredPasswordChangeHandler');
 const { createPasswordRecoveryHandler } = require('../auth/passwordRecoveryHandler');
 const { createManagerContextHandler } = require('../manager/managerContextHandler');
+const { createOutsideRadiusApprovalsHandler } = require('../manager/outsideRadiusApprovalHandler');
+const { createManagerDispatchHandler } = require('../manager/dispatchHandler');
+const { createDistributorAssignedOrdersHandler } = require('../distributor/assignedOrdersHandler');
 const { createAdminAccountsHandler } = require('../admin/accountManagementHandler');
 const { createAdminDistributorsHandler } = require('../admin/distributorManagementHandler');
 const { createSessionPolicyHandler } = require('../auth/sessionPolicyHandler');
@@ -44,6 +47,9 @@ const routes = new Map([
   ['/api/requester/catalog', createRequesterCatalogHandler()],
   ['/api/requester/orders', createRequesterOrdersHandler()],
   ['/api/manager/context', createManagerContextHandler()],
+  ['/api/manager/outside-radius-orders', createOutsideRadiusApprovalsHandler()],
+  ['/api/manager/dispatch-orders', createManagerDispatchHandler()],
+  ['/api/distributor/orders', createDistributorAssignedOrdersHandler()],
   ['/api/auth/complete-required-password-change', createRequiredPasswordChangeHandler()],
   ['/api/auth/password-recovery', createPasswordRecoveryHandler()],
   ['/api/auth/session-policy', createSessionPolicyHandler()],

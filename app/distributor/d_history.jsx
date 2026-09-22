@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
   ScrollView,
   StyleSheet,
   Text,
@@ -15,6 +16,11 @@ import { createShadow } from '../../components/shadowStyles';
 import { createPortalStyleSheet, useBlueTapTheme } from '../../components/BlueTapTheme';
 import { USER_PORTAL_BOTTOM_CONTENT_INSET, USER_PORTAL_LAYOUT } from '../../constants/userPortalLayout';
 import { BLUETAP_COLORS } from '../../constants/bluetapTheme';
+import {
+  normalizeDistributorOrderStatus,
+  toDistributorScreenOrder,
+  useAssignedDistributorOrders,
+} from '../../services/distributorOrders';
 
 const BLUE = BLUETAP_COLORS.primary;
 const BLUE_LIGHT = BLUETAP_COLORS.primarySoft;
@@ -22,40 +28,7 @@ const CARD_BORDER = BLUETAP_COLORS.border;
 const TEXT_MUTED = BLUETAP_COLORS.textSecondary;
 const TEXT_DARK = BLUETAP_COLORS.textPrimary;
 
-const HISTORY_REQUESTS = [
-  {
-    id: 'BT-01267',
-    quantity: '3 Gallons',
-    productName: 'Purified Mineral Water',
-    container: 'Exchange Container',
-    requester: 'Chane Sarcon',
-    requesterId: 'REQ-000003',
-    distributor: 'Distributor',
-    distributorId: 'DIS-000001',
-    contact: '09123456789',
-    address: 'Magdugo, Toledo City',
-    scheduledDateTime: 'Jan 25, 2026, 9:00 AM',
-    deliveredDateTime: 'Jan 25, 2026, 10:15 AM',
-    amountPaid: '\u20B175.00',
-    status: 'Delivered',
-  },
-  {
-    id: 'BT-01265',
-    quantity: '2 Gallons',
-    productName: 'Purified Mineral Water',
-    container: 'New Container',
-    requester: 'Angelyn Paculba',
-    requesterId: 'REQ-000004',
-    distributor: 'Distributor',
-    distributorId: 'DIS-000001',
-    contact: '09123456789',
-    address: 'Pinamungajan',
-    scheduledDateTime: 'Jan 25, 2026, 11:00 AM',
-    deliveredDateTime: 'Jan 25, 2026, 12:05 PM',
-    amountPaid: '\u20B150.00',
-    status: 'Delivered',
-  },
-];
+const HISTORY_STATUSES = new Set(['delivered', 'cancelled', 'canceled', 'declined']);
 
 const getAmountNumber = (amount) =>
   Number(String(amount || '').replace(/[^\d.]/g, '')) || 0;
@@ -185,6 +158,10 @@ export default function DistributorHistory() {
   useBlueTapTheme();
   const router = useRouter();
   const [selectedRequest, setSelectedRequest] = useState(null);
+  const { orders, loading, error, refresh } = useAssignedDistributorOrders();
+  const historyRequests = useMemo(() => orders
+    .map(toDistributorScreenOrder)
+    .filter((request) => HISTORY_STATUSES.has(normalizeDistributorOrderStatus(request.status))), [orders]);
   const selectedDetailsRequest = getDetailsRequestData(selectedRequest);
 
   return (
@@ -219,9 +196,12 @@ export default function DistributorHistory() {
             </TouchableOpacity>
           </View>
 
-          {HISTORY_REQUESTS.map((request) => (
+          {loading ? <View style={styles.emptyCard}><ActivityIndicator color={BLUE} /><Text style={styles.emptyText}>Loading assigned history...</Text></View>
+            : error ? <View style={styles.emptyCard}><Text style={styles.emptyTitle}>History unavailable.</Text><Text style={styles.emptyText}>{error}</Text><TouchableOpacity onPress={refresh} style={styles.fullWidthActionButton}><Text style={styles.secondaryActionText}>Try Again</Text></TouchableOpacity></View>
+              : historyRequests.length === 0 ? <View style={styles.emptyCard}><Text style={styles.emptyTitle}>No delivery history.</Text><Text style={styles.emptyText}>Completed assigned deliveries will appear here.</Text></View>
+                : historyRequests.map((request) => (
             <HistoryRequestCard
-              key={request.id}
+              key={request.sourceId}
               request={request}
               onViewDetails={setSelectedRequest}
             />
@@ -382,4 +362,15 @@ const styles = createPortalStyleSheet({
     fontSize: 13,
     fontWeight: '600',
   },
+  emptyCard: {
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderColor: CARD_BORDER,
+    borderRadius: USER_PORTAL_LAYOUT.cardRadius,
+    borderWidth: 1,
+    marginTop: 2,
+    padding: 24,
+  },
+  emptyTitle: { color: TEXT_DARK, fontSize: 16, fontWeight: 'bold' },
+  emptyText: { color: TEXT_MUTED, fontSize: 13, lineHeight: 19, marginTop: 7, textAlign: 'center' },
 });

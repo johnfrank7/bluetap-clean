@@ -5,6 +5,7 @@ const { applyCors } = require('../utils/cors');
 const { OtpError } = require('../utils/otpError');
 const { safeProduct } = require('../admin/productManagementHandler');
 const { safeBranch } = require('../admin/branchManagementHandler');
+const { DEFAULT_SERVICE_RADIUS_KM } = require('../../constants/toledoBarangays.json');
 
 const clean = (value, max = 240) => String(value || '').trim().slice(0, max);
 const coordinate = (value, minimum, maximum) => {
@@ -14,6 +15,10 @@ const coordinate = (value, minimum, maximum) => {
 };
 const validBranchLocation = (branch = {}) =>
   coordinate(branch.latitude, -90, 90) !== null && coordinate(branch.longitude, -180, 180) !== null;
+const serviceRadiusKm = (branch = {}) => {
+  const radius = Number(branch.serviceRadiusKm);
+  return Number.isFinite(radius) && radius > 0 ? radius : DEFAULT_SERVICE_RADIUS_KM;
+};
 const radians = (degrees) => degrees * (Math.PI / 180);
 const distanceKm = (from, to) => {
   const earthRadiusKm = 6371;
@@ -145,6 +150,9 @@ async function buildTrustedOrder(db, requester, body) {
   const quantity = items.reduce((sum, item) => sum + item.quantity, 0);
   const totalAtOrder = Math.round(items.reduce((sum, item) => sum + item.totalAtOrder, 0) * 100) / 100;
   const deliveryLocation = { latitude, longitude };
+  const distanceKmSnapshot = distanceKm(deliveryLocation, branch);
+  const serviceRadiusKmSnapshot = serviceRadiusKm(branch);
+  const outsideServiceArea = distanceKmSnapshot > serviceRadiusKmSnapshot;
   return {
     requesterUid: requester.decoded.uid,
     requester_id: requester.decoded.uid,
@@ -157,11 +165,16 @@ async function buildTrustedOrder(db, requester, body) {
     addressSnapshot: summary.address,
     address: summary.address,
     branchId,
+    initialBranchId: branchId,
+    currentBranchId: branchId,
     branchNameSnapshot: branch.name,
+    initialBranchNameSnapshot: branch.name,
     branchAddressSnapshot: [branch.address, branch.barangay, branch.city].filter(Boolean).join(', '),
     water_station: branch.name,
     deliveryLocation,
-    distanceKmSnapshot: distanceKm(deliveryLocation, branch),
+    distanceKmSnapshot,
+    serviceRadiusKmSnapshot,
+    outsideServiceArea,
     items,
     productId: items[0]?.productId || '',
     product_id: items[0]?.productId || '',
@@ -175,7 +188,7 @@ async function buildTrustedOrder(db, requester, body) {
     container: clean(body.container, 80),
     expectedDeliveryDate: body.expectedDeliveryDate ? clean(body.expectedDeliveryDate, 40) : '',
     delivery_date: body.expectedDeliveryDate ? clean(body.expectedDeliveryDate, 40) : '',
-    status: 'Pending',
+    status: outsideServiceArea ? 'outside_radius_pending_approval' : 'Pending',
   };
 }
 
@@ -199,7 +212,7 @@ function createRequesterOrdersHandler(getAdmin = getFirebaseAdmin) {
         const snapshot = orderId ? await ref.get() : null;
         const current = snapshot?.data();
         if (!snapshot?.exists || (current.requesterUid || current.requester_id) !== requester.decoded.uid) throw new OtpError(404, 'ORDER_NOT_FOUND', 'Order not found.');
-        if (String(current.status).toLowerCase() !== 'pending') throw new OtpError(409, 'ORDER_NOT_CANCELLABLE', 'Only pending orders can be cancelled.');
+        if (!['pending', 'outside_radius_pending_approval'].includes(String(current.status).toLowerCase())) throw new OtpError(409, 'ORDER_NOT_CANCELLABLE', 'Only pending orders can be cancelled.');
         const now = new Date();
         await ref.update({ status: 'Cancelled', updatedAt: now, updated_at: now, cancelledAt: now });
         return res.status(200).json({ order: safeOrder(orderId, { ...current, status: 'Cancelled', updatedAt: now, updated_at: now, cancelledAt: now }) });
@@ -215,4 +228,4 @@ function createRequesterOrdersHandler(getAdmin = getFirebaseAdmin) {
   };
 }
 
-module.exports = { createRequesterCatalogHandler, createRequesterOrdersHandler, distanceKm, productAvailableAtBranch };
+module.exports = { createRequesterCatalogHandler, createRequesterOrdersHandler, distanceKm, productAvailableAtBranch, serviceRadiusKm };

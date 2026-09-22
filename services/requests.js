@@ -80,6 +80,7 @@ const normalizeRequest = (id, data = {}) => {
         .toString()
         .trim(),
     distributor_name: data.distributor_name || data.distributorName || data.branchNameSnapshot || '',
+    assignedDistributorName: data.assignedDistributorNameSnapshot || data.distributor_name || data.distributorName || '',
     contact_number: data.contact_number || '',
     address: data.address || data.addressSnapshot || '',
     product_id: data.product_id || items[0]?.product_id || '',
@@ -92,6 +93,9 @@ const normalizeRequest = (id, data = {}) => {
     container: data.container || '',
     water_station: data.water_station || data.branchNameSnapshot || '',
     branchId: (data.branchId || '').toString().trim(),
+    currentBranchName: data.currentBranchNameSnapshot || data.branchNameSnapshot || data.water_station || '',
+    transferState: data.transferState || '',
+    transferToBranchName: data.transferToBranchNameSnapshot || '',
     delivery_date: data.delivery_date || '',
     total_cost: totalCost,
     status: data.status || 'Pending',
@@ -113,6 +117,8 @@ const inactiveCurrentRequestStatuses = new Set([
   'canceled',
   'delivered',
   'rejected',
+  'declined_outside_service_area',
+  'declined outside service area',
 ]);
 
 export const isCurrentRequesterRequest = (request) => {

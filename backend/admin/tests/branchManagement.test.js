@@ -69,7 +69,7 @@ async function call(handler, method, token, body) {
   return res;
 }
 
-const branch = (code) => ({ name: `Branch ${code}`, code, barangay: 'Central', city: 'Toledo', address: `${code} Main Street`, latitude: 10.267, longitude: 123.584 });
+const branch = (code) => ({ name: `Branch ${code}`, code, barangay: 'Poblacion', city: 'Toledo City', address: `${code} Main Street`, latitude: 10.267, longitude: 123.584 });
 
 test('legacy Manager promotion endpoint is retired', async () => {
   const f = fixture();
@@ -79,6 +79,21 @@ test('legacy Manager promotion endpoint is retired', async () => {
   const result = await call(managers, 'POST', 'admin-token', { identifier: 'manager@example.test', branchId: 'a1' });
   assert.equal(result.statusCode, 405);
   assert.equal(f.records.get('users/manager-1').role, 'requester');
+});
+
+test('new Toledo City branches receive the configured normal delivery radius and reject unsupported locations', async () => {
+  const f = fixture(); const branches = createAdminBranchesHandler(f.getAdmin);
+  const created = await call(branches, 'POST', 'admin-token', branch('RADIUS'));
+  assert.equal(created.statusCode, 201);
+  assert.equal(created.body.branch.city, 'Toledo City');
+  assert.equal(created.body.branch.serviceRadiusKm, 5);
+  assert.equal(created.body.branch.active, true);
+  const invalidBarangay = await call(branches, 'POST', 'admin-token', { ...branch('BAD-BGY'), barangay: 'Not a Toledo barangay' });
+  assert.equal(invalidBarangay.statusCode, 400);
+  assert.equal(invalidBarangay.body.error.reason, 'INVALID_TOLEDO_BARANGAY');
+  const invalidCity = await call(branches, 'POST', 'admin-token', { ...branch('BAD-CITY'), city: 'Cebu City' });
+  assert.equal(invalidCity.statusCode, 400);
+  assert.equal(invalidCity.body.error.reason, 'UNSUPPORTED_BRANCH_CITY');
 });
 
 test('Manager context derives its active Branch and rejects cross-branch or inactive access', async () => {

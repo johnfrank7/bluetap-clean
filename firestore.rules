@@ -23,6 +23,16 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/branches/$(currentUser().branchId)).data.status == 'active';
     }
 
+    function isDistributor() {
+      return signedIn()
+        && currentUser().role == 'distributor'
+        && currentUser().mustChangePassword != true
+        && (currentUser().approvalStatus == 'active' || currentUser().approvalStatus == 'approved'
+          || currentUser().status == 'active' || currentUser().status == 'approved')
+        && currentUser().branchId is string
+        && get(/databases/$(database)/documents/branches/$(currentUser().branchId)).data.status == 'active';
+    }
+
     function isAdmin() {
       return signedIn() && currentUser().role == 'admin'
         && currentUser().mustChangePassword != true
@@ -43,6 +53,9 @@ service cloud.firestore {
     match /registrationLimits/{document=**} { allow read, write: if false; }
     match /systemConfig/{document=**} { allow read, write: if false; }
     match /adminAuditLogs/{document=**} { allow read, write: if false; }
+    // Manager operational events are created and scoped by trusted Render Node
+    // dispatch actions. Clients cannot forge, alter, or directly enumerate them.
+    match /managerOperationalEvents/{eventId} { allow read, write: if false; }
     match /branches/{branchId} {
       allow get: if isManager() && branchId == currentUser().branchId;
       allow list, create, update, delete: if false;
@@ -86,10 +99,19 @@ service cloud.firestore {
       // Requester queries are scoped with requester_id == request.auth.uid.
       allow read: if isRequester() && resource.data.requester_id == request.auth.uid;
       allow read: if isManagerBranch(resource.data.branchId);
-      allow update: if isManagerBranch(resource.data.branchId)
-        && request.resource.data.branchId == resource.data.branchId;
-      allow create: if false;
-      allow delete: if false;
+      // A target Branch Manager may inspect only an incoming, still-pending
+      // transfer. The source branch remains the owner until acceptance.
+      allow read: if isManagerBranch(resource.data.transferToBranchId)
+        && resource.data.status == 'branch_transfer_pending';
+      // Distributors receive exact fulfillment data only after a trusted
+      // server assignment to their UID and current branch.
+      allow read: if isDistributor()
+        && resource.data.assignedDistributorUid == request.auth.uid
+        && resource.data.branchId == currentUser().branchId;
+      // Creation, cancellation, and outside-radius decisions are Render Node
+      // operations. This keeps radius/distance snapshots and Manager scope
+      // authoritative instead of accepting client-written decisions.
+      allow create, update, delete: if false;
     }
   }
 }

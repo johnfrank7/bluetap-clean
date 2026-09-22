@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
   ScrollView,
   StyleSheet,
   Text,
@@ -15,6 +16,12 @@ import { createShadow } from '../../components/shadowStyles';
 import { createPortalStyleSheet, useBlueTapTheme } from '../../components/BlueTapTheme';
 import { USER_PORTAL_BOTTOM_CONTENT_INSET, USER_PORTAL_LAYOUT } from '../../constants/userPortalLayout';
 import { BLUETAP_COLORS } from '../../constants/bluetapTheme';
+import {
+  normalizeDistributorOrderStatus,
+  toDistributorScreenOrder,
+  updateAssignedDistributorOrder,
+  useAssignedDistributorOrders,
+} from '../../services/distributorOrders';
 
 const BLUE = BLUETAP_COLORS.primary;
 const BLUE_LIGHT = BLUETAP_COLORS.primarySoft;
@@ -22,38 +29,7 @@ const CARD_BORDER = BLUETAP_COLORS.border;
 const TEXT_MUTED = BLUETAP_COLORS.textSecondary;
 const TEXT_DARK = BLUETAP_COLORS.textPrimary;
 
-const SCHEDULED_REQUESTS = [
-  {
-    id: 'BT-01245',
-    quantity: '3 Gallons',
-    productName: 'Purified Mineral Water',
-    container: 'New Container',
-    requester: 'Jeanne Ortega',
-    requesterId: 'REQ-000001',
-    distributor: 'Distributor',
-    distributorId: 'DIS-000001',
-    contact: '09123456789',
-    address: 'Poblacion, Toledo City',
-    scheduledDateTime: 'Jan 25, 2026, 9:00 AM',
-    amountDue: '\u20B175.00',
-    status: 'Scheduled',
-  },
-  {
-    id: 'BT-01212',
-    quantity: '2 Gallons',
-    productName: 'Purified Mineral Water',
-    container: 'Exchange Container',
-    requester: 'Franz Caliguid',
-    requesterId: 'REQ-000002',
-    distributor: 'Distributor',
-    distributorId: 'DIS-000001',
-    contact: '09123456789',
-    address: 'Tajao, Pinamungajan',
-    scheduledDateTime: 'Jan 25, 2026, 10:00 AM',
-    amountDue: '\u20B150.00',
-    status: 'Scheduled',
-  },
-];
+const UPCOMING_STATUSES = new Set(['accepted', 'scheduled', 'out for delivery']);
 
 const getAmountNumber = (amount) =>
   Number(String(amount || '').replace(/[^\d.]/g, '')) || 0;
@@ -102,7 +78,10 @@ const getDetailsRequestData = (request) => {
   };
 };
 
-const ScheduledRequestCard = ({ request, onViewDetails }) => {
+const ScheduledRequestCard = ({ request, onAdvance, onViewDetails, processing }) => {
+  const isOutForDelivery = normalizeDistributorOrderStatus(request.status) === 'out for delivery';
+  const action = isOutForDelivery ? 'mark-delivered' : 'start-delivery';
+  const label = isOutForDelivery ? 'Mark Delivered' : 'Start Delivery';
   return (
     <View style={styles.requestCard}>
       <View style={styles.requestCardHeader}>
@@ -177,8 +156,13 @@ const ScheduledRequestCard = ({ request, onViewDetails }) => {
           <Text style={styles.secondaryActionText}>View Details</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity activeOpacity={0.85} style={styles.primaryActionButton}>
-          <Text style={styles.primaryActionText}>Start Delivery</Text>
+        <TouchableOpacity
+          activeOpacity={0.85}
+          disabled={processing}
+          onPress={() => onAdvance(request, action)}
+          style={[styles.primaryActionButton, processing && styles.actionButtonDisabled]}
+        >
+          {processing ? <ActivityIndicator color="#FFFFFF" size="small" /> : <Text style={styles.primaryActionText}>{label}</Text>}
         </TouchableOpacity>
       </View>
     </View>
@@ -189,7 +173,26 @@ export default function DistributorScheduledRequests() {
   useBlueTapTheme();
   const router = useRouter();
   const [selectedRequest, setSelectedRequest] = useState(null);
+  const [processingRequestId, setProcessingRequestId] = useState('');
+  const [actionError, setActionError] = useState('');
+  const { orders, loading, error, refresh } = useAssignedDistributorOrders();
+  const scheduledRequests = useMemo(() => orders
+    .map(toDistributorScreenOrder)
+    .filter((request) => UPCOMING_STATUSES.has(normalizeDistributorOrderStatus(request.status))), [orders]);
   const selectedDetailsRequest = getDetailsRequestData(selectedRequest);
+  const advanceDelivery = async (request, action) => {
+    if (processingRequestId) return;
+    setActionError('');
+    setProcessingRequestId(request.sourceId);
+    try {
+      await updateAssignedDistributorOrder(request.sourceId, action);
+      await refresh();
+    } catch (updateError) {
+      setActionError(updateError.message || 'The delivery could not be updated.');
+    } finally {
+      setProcessingRequestId('');
+    }
+  };
 
   return (
     <SafeAreaView edges={['left', 'right', 'bottom']} style={styles.container}>
@@ -223,10 +226,16 @@ export default function DistributorScheduledRequests() {
             </TouchableOpacity>
           </View>
 
-          {SCHEDULED_REQUESTS.map((request) => (
+          {!!actionError && <View style={styles.actionErrorCard}><Text style={styles.actionErrorText}>{actionError}</Text></View>}
+          {loading ? <View style={styles.emptyCard}><ActivityIndicator color={BLUE} /><Text style={styles.emptyText}>Loading assigned schedule...</Text></View>
+            : error ? <View style={styles.emptyCard}><Text style={styles.emptyTitle}>Schedule unavailable.</Text><Text style={styles.emptyText}>{error}</Text><TouchableOpacity onPress={refresh} style={styles.secondaryActionButton}><Text style={styles.secondaryActionText}>Try Again</Text></TouchableOpacity></View>
+              : scheduledRequests.length === 0 ? <View style={styles.emptyCard}><Text style={styles.emptyTitle}>No scheduled deliveries.</Text><Text style={styles.emptyText}>Accepted and upcoming assigned deliveries will appear here.</Text></View>
+                : scheduledRequests.map((request) => (
             <ScheduledRequestCard
-              key={request.id}
+              key={request.sourceId}
               request={request}
+              processing={processingRequestId === request.sourceId}
+              onAdvance={advanceDelivery}
               onViewDetails={setSelectedRequest}
             />
           ))}
@@ -411,4 +420,25 @@ const styles = createPortalStyleSheet({
     fontSize: 13,
     fontWeight: 'bold',
   },
+  actionButtonDisabled: { opacity: 0.65 },
+  actionErrorCard: {
+    backgroundColor: '#FFF5F5',
+    borderColor: '#F2B8B5',
+    borderRadius: 12,
+    borderWidth: 1,
+    marginBottom: 12,
+    padding: 12,
+  },
+  actionErrorText: { color: '#B3261E', fontSize: 13, fontWeight: '700', lineHeight: 18 },
+  emptyCard: {
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderColor: CARD_BORDER,
+    borderRadius: USER_PORTAL_LAYOUT.cardRadius,
+    borderWidth: 1,
+    marginTop: 2,
+    padding: 24,
+  },
+  emptyTitle: { color: TEXT_DARK, fontSize: 16, fontWeight: 'bold' },
+  emptyText: { color: TEXT_MUTED, fontSize: 13, lineHeight: 19, marginTop: 7, textAlign: 'center' },
 });
