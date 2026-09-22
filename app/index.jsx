@@ -15,7 +15,13 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { StatusBar } from 'expo-status-bar';
 import { useRouter } from 'expo-router';
 
-import { BLUETAP_COLORS } from '../constants/bluetapTheme';
+import {
+  BLUETAP_COLORS,
+  BLUETAP_DARK_PORTAL_COLORS,
+  BLUETAP_LIGHT_PORTAL_COLORS,
+} from '../constants/bluetapTheme';
+import { useBlueTapTheme } from '../components/BlueTapTheme';
+import ThemeIconButton from '../components/ThemeIconButton';
 import { warmFaceServiceForSignup } from '../services/apiWarmup';
 
 const BLUE = BLUETAP_COLORS.primary;
@@ -30,25 +36,25 @@ const logo = require('../assets/icons/bluetaplogo.png');
 const whiteLogo = require('../assets/icons/bluetapwhitelogo.png');
 
 const LIGHT_THEME = {
-  surface: '#FFFFFF',
-  softSurface: BLUE_LIGHT,
-  card: '#FFFFFF',
-  border: '#E4EEF5',
-  text: TEXT_DARK,
-  muted: TEXT_MUTED,
-  accent: BLUE,
+  surface: BLUETAP_LIGHT_PORTAL_COLORS.surface,
+  softSurface: BLUETAP_LIGHT_PORTAL_COLORS.primarySoft,
+  card: BLUETAP_LIGHT_PORTAL_COLORS.surface,
+  border: BLUETAP_LIGHT_PORTAL_COLORS.border,
+  text: BLUETAP_LIGHT_PORTAL_COLORS.textPrimary,
+  muted: BLUETAP_LIGHT_PORTAL_COLORS.textSecondary,
+  accent: BLUETAP_LIGHT_PORTAL_COLORS.primary,
   footerText: '#526A7F',
 };
 
 const DARK_THEME = {
-  surface: '#07131F',
-  softSurface: '#0A1928',
-  card: '#0E2235',
-  border: '#1C3C55',
-  text: '#F5FAFF',
-  muted: '#9FB4C8',
-  accent: '#70BDF2',
-  footerText: '#9FB4C8',
+  surface: BLUETAP_DARK_PORTAL_COLORS.background,
+  softSurface: BLUETAP_DARK_PORTAL_COLORS.header,
+  card: BLUETAP_DARK_PORTAL_COLORS.surface,
+  border: BLUETAP_DARK_PORTAL_COLORS.border,
+  text: BLUETAP_DARK_PORTAL_COLORS.textPrimary,
+  muted: BLUETAP_DARK_PORTAL_COLORS.textSecondary,
+  accent: BLUETAP_DARK_PORTAL_COLORS.primaryLight,
+  footerText: BLUETAP_DARK_PORTAL_COLORS.textSecondary,
 };
 
 const steps = [
@@ -293,8 +299,8 @@ function DistributorMockup({ isDark = false }) {
 function WebLanding({ router, width }) {
   const scrollRef = useRef(null);
   const sectionOffsets = useRef({});
-  const themeProgress = useRef(new Animated.Value(0)).current;
-  const [isDark, setIsDark] = useState(false);
+  const { isDark } = useBlueTapTheme();
+  const themeProgress = useRef(new Animated.Value(isDark ? 1 : 0)).current;
   const isDesktop = width >= DESKTOP_BREAKPOINT;
   const isTablet = width >= TABLET_BREAKPOINT && !isDesktop;
   const isNarrow = width < 420;
@@ -376,17 +382,7 @@ function WebLanding({ router, width }) {
             )}
 
             <View style={styles.navbarActions}>
-              <TouchableOpacity
-                accessibilityLabel={isDark ? 'Switch to light theme' : 'Switch to dark theme'}
-                accessibilityRole="button"
-                activeOpacity={0.8}
-                onPress={() => setIsDark((currentTheme) => !currentTheme)}
-                style={[styles.themeToggle, isDark && styles.themeToggleDark]}
-              >
-                <Text style={[styles.themeToggleText, isDark && styles.themeToggleTextDark]}>
-                  {isDark ? '☀' : '☾'}
-                </Text>
-              </TouchableOpacity>
+              <ThemeIconButton style={styles.themeToggleSpacing} />
               {!isNarrow && (
                 <TouchableOpacity
                 accessibilityLabel="Log in"
@@ -737,10 +733,7 @@ const styles = StyleSheet.create({
   actionButtonTextInverseOutline: { color: '#FFFFFF' },
   navGetStarted: { minHeight: 42, borderRadius: 11, paddingHorizontal: 17 },
   navGetStartedCompact: { minHeight: 40, paddingHorizontal: 12, borderRadius: 10 },
-  themeToggle: { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: '#EEF8FF', borderWidth: 1, borderColor: '#CFE9F9', marginRight: 8 },
-  themeToggleDark: { backgroundColor: '#193650', borderColor: '#427AA2' },
-  themeToggleText: { color: BLUE_DARK, fontSize: 20, fontWeight: '800', lineHeight: 21 },
-  themeToggleTextDark: { color: '#FFD67A' },
+  themeToggleSpacing: { marginRight: 8 },
   heroSection: { width: '100%', backgroundColor: '#FFFFFF', overflow: 'hidden' },
   heroContent: {
     width: '100%',

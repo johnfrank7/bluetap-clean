@@ -3,6 +3,7 @@ import { StyleSheet, View } from 'react-native';
 import { Stack } from 'expo-router';
 
 import { USER_PORTAL_LAYOUT } from '../constants/userPortalLayout';
+import { useBlueTapTheme } from './BlueTapTheme';
 
 export function UserPortalFrame({ children, style, ...props }) {
   return (
@@ -13,8 +14,9 @@ export function UserPortalFrame({ children, style, ...props }) {
 }
 
 export default function UserPortalShell({ header = null, navigation }) {
+  const { colors } = useBlueTapTheme();
   return (
-    <View style={styles.root}>
+    <View style={[styles.root, { backgroundColor: colors.background }]}>
       {header}
 
       <View style={styles.screenContent}>

@@ -6,14 +6,14 @@ import {
   Image,
   StyleSheet,
   TouchableOpacity,
-  useColorScheme,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { usePathname, useRouter, useSegments } from 'expo-router';
-import { BLUETAP_COLORS, BLUETAP_DARK_COLORS } from '../constants/bluetapTheme';
+import { BLUETAP_COLORS } from '../constants/bluetapTheme';
 import { USER_PORTAL_LAYOUT } from '../constants/userPortalLayout';
 import { createShadow } from './shadowStyles';
+import { useBlueTapTheme } from './BlueTapTheme';
 
 const BLUE = BLUETAP_COLORS.primary;
 const ICON_SIZE = 26;
@@ -202,12 +202,11 @@ function BottomNav({ items, floating = true }) {
   const router = useRouter();
   const segments = useSegments();
   const reduceMotion = useReduceMotion();
-  const colorScheme = useColorScheme();
+  const { colors } = useBlueTapTheme();
   const insets = useSafeAreaInsets();
-  const isDark = colorScheme === 'dark';
-  const navSurface = isDark ? BLUETAP_DARK_COLORS.surface : BLUETAP_COLORS.surface;
-  const navBorder = isDark ? BLUETAP_DARK_COLORS.border : BLUETAP_COLORS.border;
-  const navIconColor = isDark ? BLUETAP_DARK_COLORS.primaryLight : BLUE;
+  const navSurface = colors.navSurface;
+  const navBorder = colors.border;
+  const navIconColor = colors.navIcon;
 
   const activeIndex = useMemo(
     () =>
@@ -239,7 +238,7 @@ function BottomNav({ items, floating = true }) {
             style={[
               styles.navButton,
               isPrimaryAction && styles.primaryNavButton,
-              isPrimaryAction && { borderColor: navSurface },
+              isPrimaryAction && { backgroundColor: colors.navActive, borderColor: navSurface },
               isPrimaryAction && isActive && styles.primaryNavButtonActive,
             ]}
           >

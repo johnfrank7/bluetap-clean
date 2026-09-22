@@ -23,7 +23,9 @@ import RequestDetailsModal from '../../components/RequestDetailsModal';
 import SoftStatusBadge from '../../components/SoftStatusBadge';
 import { createShadow } from '../../components/shadowStyles';
 import ProductCard from '../../components/ProductCard';
+import { createPortalStyleSheet, useBlueTapTheme } from '../../components/BlueTapTheme';
 import { USER_PORTAL_BOTTOM_CONTENT_INSET, USER_PORTAL_LAYOUT } from '../../constants/userPortalLayout';
+import { BLUETAP_COLORS } from '../../constants/bluetapTheme';
 import { subscribeProducts } from '../../services/products';
 import {
   cancelRequest,
@@ -34,11 +36,11 @@ const REQUESTER_APP_MAX_WIDTH = USER_PORTAL_LAYOUT.maxWidth;
 const DASHBOARD_HORIZONTAL_PADDING = USER_PORTAL_LAYOUT.gutter;
 const PRODUCT_CARD_WIDTH_RATIO = 0.88;
 const PRODUCT_CAROUSEL_HEIGHT = 290;
-const BLUE = '#187BCD';
-const BLUE_LIGHT = '#E3F2FD';
-const CARD_BORDER = '#D7ECFF';
-const TEXT_MUTED = '#6F8EA8';
-const TEXT_DARK = '#20384D';
+const BLUE = BLUETAP_COLORS.primary;
+const BLUE_LIGHT = BLUETAP_COLORS.primarySoft;
+const CARD_BORDER = BLUETAP_COLORS.border;
+const TEXT_MUTED = BLUETAP_COLORS.textSecondary;
+const TEXT_DARK = BLUETAP_COLORS.textPrimary;
 const formatPrice = (price) => `\u20B1${Number(price || 0).toFixed(2)}`;
 const formatDashboardDate = (date) =>
   new Intl.DateTimeFormat('en-US', {
@@ -258,6 +260,7 @@ const isUnavailableStock = (stockText) =>
   stockText.toLowerCase().includes('unavailable');
 
 export default function RequesterDashboard() {
+  const { colors, isDark } = useBlueTapTheme();
   const router = useRouter(); 
   const productCarouselRef = useRef(null);
   const { width: windowWidth } = useWindowDimensions();
@@ -467,7 +470,7 @@ export default function RequesterDashboard() {
 
   return (
     <LinearGradient
-      colors={['#187BCD', '#42A5F5']}
+      colors={isDark ? [colors.background, colors.header] : [colors.primary, colors.primaryLight]}
       style={styles.gradient}
       start={{ x: 0, y: 0 }}
       end={{ x: 0, y: 1 }}
@@ -710,7 +713,7 @@ export default function RequesterDashboard() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = createPortalStyleSheet({
   gradient: {
     flex: 1,
     alignItems: 'center',

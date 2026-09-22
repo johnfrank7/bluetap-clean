@@ -20,6 +20,11 @@ const adminProducts = read('app/admin/products.jsx');
 const adminBranches = read('app/admin/branches.jsx');
 const location = read('services/location.js');
 const ordering = read('services/requesterOrdering.js');
+const theme = read('components/BlueTapTheme.jsx');
+const themeButton = read('components/ThemeIconButton.jsx');
+const header = read('components/BlueTapHeader.jsx');
+const rootLayout = read('app/_layout.jsx');
+const landing = read('app/index.jsx');
 
 test('new request is structured into delivery, provider, product, details, and review sections', () => {
   for (const label of ['Delivery location', 'Select provider branch', 'Select products', 'Order details', 'Review request']) assert.match(form, new RegExp(label));
@@ -75,4 +80,24 @@ test('dashboard supports both a current order card and a no-current-request stat
 });
 test('new ordering surfaces use shared BlueTap theme tokens', () => {
   assert.match(form, /BLUETAP_COLORS/); assert.match(productCard, /BLUETAP_COLORS/); assert.match(notifications, /BLUETAP_COLORS/);
+});
+test('landing, Requester, and Distributor share one persisted light-default theme', () => {
+  assert.match(rootLayout, /BlueTapThemeProvider/);
+  assert.match(theme, /BLUETAP_THEME_STORAGE_KEY = 'bluetap-theme'/);
+  assert.match(theme, /storedTheme === 'dark' \? 'dark' : 'light'/);
+  assert.match(theme, /AsyncStorage\.setItem\(BLUETAP_THEME_STORAGE_KEY/);
+  assert.match(landing, /useBlueTapTheme/);
+  assert.match(header, /ThemeIconButton/);
+});
+test('shared theme toggle is accessible and follows the landing moon and sun pattern', () => {
+  assert.match(themeButton, /Switch to light theme/);
+  assert.match(themeButton, /Switch to dark theme/);
+  assert.match(themeButton, /accessibilityRole="button"/);
+  assert.match(themeButton, /isDark \? '☀' : '☾'/);
+});
+test('floating portal navigation uses theme tokens while its positioning wrapper stays transparent', () => {
+  assert.match(nav, /colors\.navSurface/);
+  assert.match(nav, /colors\.navIcon/);
+  assert.match(portalShell, /backgroundColor: 'transparent'/);
+  assert.doesNotMatch(nav, /useColorScheme/);
 });

@@ -17,17 +17,19 @@ import { findLocalUserForAuthRole } from '../../localUsers';
 import RequestDetailsModal from '../../components/RequestDetailsModal';
 import SoftStatusBadge, { normalizeStatus } from '../../components/SoftStatusBadge';
 import { createShadow } from '../../components/shadowStyles';
+import { createPortalStyleSheet, useBlueTapTheme } from '../../components/BlueTapTheme';
 import { USER_PORTAL_BOTTOM_CONTENT_INSET, USER_PORTAL_LAYOUT } from '../../constants/userPortalLayout';
+import { BLUETAP_COLORS } from '../../constants/bluetapTheme';
 import {
   cancelRequest,
   subscribeRequesterRequests,
 } from '../../services/requests';
 
-const BLUE = '#187BCD';
-const BLUE_LIGHT = '#E3F2FD';
-const CARD_BORDER = '#D7ECFF';
-const TEXT_MUTED = '#6F8EA8';
-const TEXT_DARK = '#20384D';
+const BLUE = BLUETAP_COLORS.primary;
+const BLUE_LIGHT = BLUETAP_COLORS.primarySoft;
+const CARD_BORDER = BLUETAP_COLORS.border;
+const TEXT_MUTED = BLUETAP_COLORS.textSecondary;
+const TEXT_DARK = BLUETAP_COLORS.textPrimary;
 
 const ACTIVE_TAB = 'active';
 const HISTORY_TAB = 'history';
@@ -306,6 +308,7 @@ const RequestCard = ({
 };
 
 export default function RequesterRequests() {
+  const { colors, isDark } = useBlueTapTheme();
   const router = useRouter();
   const [requests, setRequests] = useState([]);
   const [selectedRequest, setSelectedRequest] = useState(null);
@@ -383,7 +386,7 @@ export default function RequesterRequests() {
 
   return (
     <LinearGradient
-      colors={['#187BCD', '#42A5F5']}
+      colors={isDark ? [colors.background, colors.header] : [colors.primary, colors.primaryLight]}
       style={styles.gradient}
       start={{ x: 0, y: 0 }}
       end={{ x: 0, y: 1 }}
@@ -485,7 +488,7 @@ export default function RequesterRequests() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = createPortalStyleSheet({
   gradient: {
     flex: 1,
     alignItems: 'center',

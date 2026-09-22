@@ -5,14 +5,16 @@ import { StatusBar } from 'expo-status-bar';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { createShadow } from '../../components/shadowStyles';
+import { createPortalStyleSheet, useBlueTapTheme } from '../../components/BlueTapTheme';
 import { USER_PORTAL_BOTTOM_CONTENT_INSET, USER_PORTAL_LAYOUT } from '../../constants/userPortalLayout';
 
 export default function BlueTapAIPage() {
+  const { colors, isDark } = useBlueTapTheme();
   const router = useRouter();
 
   return (
     <LinearGradient
-      colors={['#187BCD', '#42A5F5']}
+      colors={isDark ? [colors.background, colors.header] : [colors.primary, colors.primaryLight]}
       style={styles.gradient}
       start={{ x: 0, y: 0 }}
       end={{ x: 0, y: 1 }}
@@ -77,7 +79,7 @@ export default function BlueTapAIPage() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = createPortalStyleSheet({
   gradient: {
     flex: 1,
     alignItems: 'center',

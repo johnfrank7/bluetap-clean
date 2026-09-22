@@ -22,13 +22,15 @@ import { normalizeRole, signOutAndClearSessions } from '../../services/authSessi
 import { ensureUserUniqueId, getProfileUniqueId } from '../../services/uniqueIds';
 import BlueTapHeader from '../../components/BlueTapHeader';
 import { createShadow } from '../../components/shadowStyles';
+import { createPortalStyleSheet, useBlueTapTheme } from '../../components/BlueTapTheme';
 import { USER_PORTAL_BOTTOM_CONTENT_INSET, USER_PORTAL_LAYOUT } from '../../constants/userPortalLayout';
+import { BLUETAP_COLORS } from '../../constants/bluetapTheme';
 
-const BLUE = '#187BCD';
-const BLUE_LIGHT = '#E3F2FD';
-const CARD_BORDER = '#D7ECFF';
-const TEXT_MUTED = '#6F8EA8';
-const TEXT_DARK = '#20384D';
+const BLUE = BLUETAP_COLORS.primary;
+const BLUE_LIGHT = BLUETAP_COLORS.primarySoft;
+const CARD_BORDER = BLUETAP_COLORS.border;
+const TEXT_MUTED = BLUETAP_COLORS.textSecondary;
+const TEXT_DARK = BLUETAP_COLORS.textPrimary;
 const USE_NATIVE_DRIVER = Platform.OS !== 'web';
 
 const getProfileObject = (profile) => profile || {};
@@ -187,6 +189,7 @@ const ProfileField = memo(function ProfileField({
   saving = false,
   value,
 }) {
+  const { colors } = useBlueTapTheme();
   return (
     <View style={styles.profileField}>
       <Text style={styles.label}>{label}</Text>
@@ -196,7 +199,7 @@ const ProfileField = memo(function ProfileField({
           value={value}
           onChangeText={onChangeText}
           placeholder={placeholder || label}
-          placeholderTextColor="#90A4AE"
+          placeholderTextColor={colors.muted}
           keyboardType={keyboardType}
           editable={!saving}
           multiline={multiline}
@@ -209,6 +212,7 @@ const ProfileField = memo(function ProfileField({
 });
 
 export default function DistributorProfilePage() {
+  useBlueTapTheme();
   const router = useRouter();
   const editFadeAnim = useRef(new Animated.Value(0)).current;
   const toastAnim = useRef(new Animated.Value(0)).current;
@@ -610,7 +614,7 @@ export default function DistributorProfilePage() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = createPortalStyleSheet({
   container: {
     flex: 1,
     backgroundColor: '#F4FAFF',

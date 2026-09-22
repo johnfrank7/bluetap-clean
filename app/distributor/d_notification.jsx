@@ -3,9 +3,11 @@ import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-nati
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import BlueTapHeader from '../../components/BlueTapHeader';
+import { createPortalStyleSheet, useBlueTapTheme } from '../../components/BlueTapTheme';
 import { USER_PORTAL_BOTTOM_CONTENT_INSET, USER_PORTAL_LAYOUT } from '../../constants/userPortalLayout';
 
 export default function DistributorNotification() {
+  useBlueTapTheme();
   const router = useRouter();
 
   return (
@@ -44,7 +46,7 @@ export default function DistributorNotification() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = createPortalStyleSheet({
   container: {
     flex: 1,
     backgroundColor: '#FFFFFF',

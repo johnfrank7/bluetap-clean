@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import SoftStatusBadge from './SoftStatusBadge';
 import { createShadow } from './shadowStyles';
+import { createPortalStyleSheet, useBlueTapTheme } from './BlueTapTheme';
 
 const BLUE = '#187BCD';
 const BLUE_LIGHT = '#E3F2FD';
@@ -51,6 +52,7 @@ export default function RequestDetailsModal({
   onClose,
   request,
 }) {
+  useBlueTapTheme();
   const requesterUniqueId =
     request?.requesterUniqueId || request?.requester_unique_id || '';
   const distributorName =
@@ -236,7 +238,7 @@ export default function RequestDetailsModal({
   );
 }
 
-const styles = StyleSheet.create({
+const styles = createPortalStyleSheet({
   backdrop: {
     flex: 1,
     backgroundColor: 'rgba(8, 31, 51, 0.46)',

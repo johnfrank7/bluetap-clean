@@ -2,6 +2,7 @@ import React from 'react';
 import { Image, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { BLUETAP_COLORS, BLUETAP_LAYOUT } from '../constants/bluetapTheme';
 import { normalizeLocation } from '../services/location';
+import { useBlueTapTheme } from './BlueTapTheme';
 
 const TILE_SIZE = 256;
 const MAP_HEIGHT = 250;
@@ -34,7 +35,9 @@ const fitZoom = (points) => {
   return 14;
 };
 
-export default function LocationMap({ location, branches = [], selectedBranchId, onLocationChange, onSelectBranch }) {
+export default function LocationMap({ location, branches = [], selectedBranchId, onLocationChange, onSelectBranch, themed = false }) {
+  const { colors, isDark } = useBlueTapTheme();
+  const useDarkSurface = themed && isDark;
   const [width, setWidth] = React.useState(0);
   const [fitVersion, setFitVersion] = React.useState(0);
   const requester = normalizeLocation(location);
@@ -68,7 +71,7 @@ export default function LocationMap({ location, branches = [], selectedBranchId,
     const y = clamp(event.nativeEvent.locationY, 0, MAP_HEIGHT);
     onLocationChange(unproject({ x: left + x, y: top + y }, zoom));
   };
-  return <View key={fitVersion} style={styles.shell} onLayout={(event) => setWidth(Math.max(0, event.nativeEvent.layout.width))}>
+  return <View key={fitVersion} style={[styles.shell, useDarkSurface && { backgroundColor: colors.surface, borderColor: colors.border }]} onLayout={(event) => setWidth(Math.max(0, event.nativeEvent.layout.width))}>
     <Pressable accessibilityRole="image" accessibilityLabel="Delivery and provider map" onPress={chooseLocation} style={styles.map}>
       {tiles.map((tile) => <Image key={`${zoom}-${tile.rawX}-${tile.y}`} source={{ uri: `https://tile.openstreetmap.org/${zoom}/${tile.x}/${tile.y}.png` }} style={[styles.tile, { left: tile.rawX * TILE_SIZE - left, top: tile.y * TILE_SIZE - top }]} />)}
       {!requester && <View pointerEvents="none" style={styles.selectionPrompt}><Text style={styles.selectionPromptText}>Select your delivery location</Text></View>}
@@ -81,7 +84,7 @@ export default function LocationMap({ location, branches = [], selectedBranchId,
       })}
       <View pointerEvents="none" style={styles.attribution}><Text style={styles.attributionText}>© OpenStreetMap contributors</Text></View>
     </Pressable>
-    <View style={styles.mapFooter}><Text style={styles.help}>{onLocationChange ? 'Tap the map to adjust the delivery pin.' : 'Branch location preview'}</Text><TouchableOpacity onPress={() => setFitVersion((value) => value + 1)} style={styles.fitButton}><Text style={styles.fitText}>Fit view</Text></TouchableOpacity></View>
+    <View style={styles.mapFooter}><Text style={[styles.help, useDarkSurface && { color: colors.textSecondary }]}>{onLocationChange ? 'Tap the map to adjust the delivery pin.' : 'Branch location preview'}</Text><TouchableOpacity onPress={() => setFitVersion((value) => value + 1)} style={[styles.fitButton, useDarkSurface && { backgroundColor: colors.primarySoft }]}><Text style={[styles.fitText, useDarkSurface && { color: colors.primaryLight }]}>Fit view</Text></TouchableOpacity></View>
   </View>;
 }
 

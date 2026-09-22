@@ -12,13 +12,15 @@ import BlueTapHeader from '../../components/BlueTapHeader';
 import RequestDetailsModal from '../../components/RequestDetailsModal';
 import SoftStatusBadge from '../../components/SoftStatusBadge';
 import { createShadow } from '../../components/shadowStyles';
+import { createPortalStyleSheet, useBlueTapTheme } from '../../components/BlueTapTheme';
 import { USER_PORTAL_BOTTOM_CONTENT_INSET, USER_PORTAL_LAYOUT } from '../../constants/userPortalLayout';
+import { BLUETAP_COLORS } from '../../constants/bluetapTheme';
 
-const BLUE = '#187BCD';
-const BLUE_LIGHT = '#E3F2FD';
-const CARD_BORDER = '#D7ECFF';
-const TEXT_MUTED = '#6F8EA8';
-const TEXT_DARK = '#20384D';
+const BLUE = BLUETAP_COLORS.primary;
+const BLUE_LIGHT = BLUETAP_COLORS.primarySoft;
+const CARD_BORDER = BLUETAP_COLORS.border;
+const TEXT_MUTED = BLUETAP_COLORS.textSecondary;
+const TEXT_DARK = BLUETAP_COLORS.textPrimary;
 
 const SCHEDULED_REQUESTS = [
   {
@@ -184,6 +186,7 @@ const ScheduledRequestCard = ({ request, onViewDetails }) => {
 };
 
 export default function DistributorScheduledRequests() {
+  useBlueTapTheme();
   const router = useRouter();
   const [selectedRequest, setSelectedRequest] = useState(null);
   const selectedDetailsRequest = getDetailsRequestData(selectedRequest);
@@ -239,7 +242,7 @@ export default function DistributorScheduledRequests() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = createPortalStyleSheet({
   container: {
     flex: 1,
     backgroundColor: '#F4FAFF',

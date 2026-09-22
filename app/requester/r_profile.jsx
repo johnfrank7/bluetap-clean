@@ -23,13 +23,15 @@ import { findLocalUserForAuthRole, saveLocalUser } from '../../localUsers';
 import { normalizeRole, signOutAndClearSessions } from '../../services/authSession';
 import { ensureUserUniqueId, getProfileUniqueId } from '../../services/uniqueIds';
 import { createShadow } from '../../components/shadowStyles';
+import { createPortalStyleSheet, useBlueTapTheme } from '../../components/BlueTapTheme';
 import { USER_PORTAL_BOTTOM_CONTENT_INSET, USER_PORTAL_LAYOUT } from '../../constants/userPortalLayout';
+import { BLUETAP_COLORS } from '../../constants/bluetapTheme';
 
-const BLUE = '#187BCD';
-const BLUE_LIGHT = '#E3F2FD';
-const CARD_BORDER = '#D7ECFF';
-const TEXT_MUTED = '#6F8EA8';
-const TEXT_DARK = '#20384D';
+const BLUE = BLUETAP_COLORS.primary;
+const BLUE_LIGHT = BLUETAP_COLORS.primarySoft;
+const CARD_BORDER = BLUETAP_COLORS.border;
+const TEXT_MUTED = BLUETAP_COLORS.textSecondary;
+const TEXT_DARK = BLUETAP_COLORS.textPrimary;
 const USE_NATIVE_DRIVER = Platform.OS !== 'web';
 
 const PROFILE_CACHE_TTL_MS = 60000;
@@ -87,6 +89,7 @@ const ProfileField = memo(function ProfileField({
   saving = false,
   value,
 }) {
+  const { colors } = useBlueTapTheme();
   return (
     <View style={styles.profileField}>
       <Text style={styles.label}>{label}</Text>
@@ -96,7 +99,7 @@ const ProfileField = memo(function ProfileField({
           value={value}
           onChangeText={onChangeText}
           placeholder={placeholder || label}
-          placeholderTextColor="#90A4AE"
+          placeholderTextColor={colors.muted}
           keyboardType={keyboardType}
           editable={!saving}
           multiline={multiline}
@@ -109,6 +112,7 @@ const ProfileField = memo(function ProfileField({
 });
 
 export default function ProfilePage() {
+  const { colors, isDark } = useBlueTapTheme();
   const router = useRouter();
   const editFadeAnim = useRef(new Animated.Value(0)).current;
   const [loading, setLoading] = useState(!cachedRequesterProfile);
@@ -317,7 +321,7 @@ export default function ProfilePage() {
 
   return (
     <LinearGradient
-      colors={['#187BCD', '#42A5F5']}
+      colors={isDark ? [colors.background, colors.header] : [colors.primary, colors.primaryLight]}
       style={styles.gradient}
       start={{ x: 0, y: 0 }}
       end={{ x: 0, y: 1 }}
@@ -484,7 +488,7 @@ export default function ProfilePage() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = createPortalStyleSheet({
   gradient: {
     flex: 1,
     alignItems: 'center',

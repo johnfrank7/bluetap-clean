@@ -26,8 +26,44 @@ export const BLUETAP_LOGIN_GRADIENT = [
 ];
 
 export const BLUETAP_DARK_COLORS = Object.freeze({
+  background: '#07131F',
+  header: '#0A1928',
   surface: '#0E2235',
+  surfaceAlt: '#112A40',
+  surfaceElevated: '#163B59',
   border: '#1C3C55',
+  input: '#0A1928',
+  text: '#F5FAFF',
+  textPrimary: '#F5FAFF',
+  textSecondary: '#9FB4C8',
+  muted: '#9FB4C8',
   primary: '#2186D9',
+  primaryDark: '#1565C0',
   primaryLight: '#70BDF2',
+  primarySoft: '#163B59',
+  success: '#22C55E',
+  successSoft: '#103B2A',
+  warning: '#F59E0B',
+  warningSoft: '#493814',
+  danger: '#EF4444',
+  dangerSoft: '#48262A',
+  disabled: '#6F879C',
+  white: '#FFFFFF',
+});
+
+export const BLUETAP_LIGHT_PORTAL_COLORS = Object.freeze({
+  ...BLUETAP_COLORS,
+  header: BLUETAP_COLORS.primary,
+  surfaceElevated: BLUETAP_COLORS.surface,
+  input: BLUETAP_COLORS.surfaceAlt,
+  navSurface: BLUETAP_COLORS.surface,
+  navIcon: BLUETAP_COLORS.primary,
+  navActive: BLUETAP_COLORS.primary,
+});
+
+export const BLUETAP_DARK_PORTAL_COLORS = Object.freeze({
+  ...BLUETAP_DARK_COLORS,
+  navSurface: BLUETAP_DARK_COLORS.surface,
+  navIcon: BLUETAP_DARK_COLORS.primaryLight,
+  navActive: BLUETAP_DARK_COLORS.primary,
 });

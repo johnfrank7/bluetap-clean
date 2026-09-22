@@ -5,16 +5,19 @@ import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { USER_PORTAL_LAYOUT } from '../constants/userPortalLayout';
 import { UserPortalFrame } from './UserPortalShell';
+import { useBlueTapTheme } from './BlueTapTheme';
+import ThemeIconButton from './ThemeIconButton';
 
 const BlueTapHeader = memo(function BlueTapHeader({
   notificationPath,
   rightContent = null,
 }) {
   const router = useRouter();
+  const { colors, isDark } = useBlueTapTheme();
 
   const openHome = useCallback(() => {
-    router.replace('/requester/r_dashboard');
-  }, [router]);
+    router.replace(notificationPath?.startsWith('/distributor') ? '/distributor/d_dashboard' : '/requester/r_dashboard');
+  }, [notificationPath, router]);
 
   const openNotifications = useCallback(() => {
     if (notificationPath) {
@@ -23,7 +26,7 @@ const BlueTapHeader = memo(function BlueTapHeader({
   }, [notificationPath, router]);
 
   return (
-    <SafeAreaView edges={['top']} style={styles.safeArea}>
+    <SafeAreaView edges={['top']} style={[styles.safeArea, { backgroundColor: colors.header }]}>
       <StatusBar style="light" />
 
       <UserPortalFrame>
@@ -45,7 +48,11 @@ const BlueTapHeader = memo(function BlueTapHeader({
           <View style={styles.headerActions}>
             {rightContent}
 
+            <ThemeIconButton inverse={!isDark} />
+
             <TouchableOpacity
+              accessibilityLabel="Open notifications"
+              accessibilityRole="button"
               activeOpacity={0.85}
               hitSlop={8}
               onPress={openNotifications}
