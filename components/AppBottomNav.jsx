@@ -5,6 +5,7 @@ import {
   Easing,
   Image,
   StyleSheet,
+  Text,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -143,6 +144,7 @@ function NavIcon({
   keepIconFixed,
   reduceMotion,
   tintColor = BLUE,
+  primaryAction = false,
 }) {
   const progress = useRef(new Animated.Value(isActive ? 1 : 0)).current;
 
@@ -154,6 +156,10 @@ function NavIcon({
       useNativeDriver: true,
     }).start();
   }, [isActive, progress, reduceMotion]);
+
+  if (primaryAction) {
+    return <Text style={styles.primaryActionIcon}>+</Text>;
+  }
 
   const activeOpacity = keepIconFixed
     ? 1
@@ -250,6 +256,7 @@ function BottomNav({ items, floating = true }) {
               keepIconFixed={item.keepIconFixed}
               reduceMotion={reduceMotion}
               tintColor={isPrimaryAction ? BLUETAP_COLORS.white : navIconColor}
+              primaryAction={isPrimaryAction}
             />
           </TouchableOpacity>
         );
@@ -325,5 +332,12 @@ const styles = StyleSheet.create({
   navIcon: {
     width: ICON_SIZE,
     height: ICON_SIZE,
+  },
+  primaryActionIcon: {
+    color: BLUETAP_COLORS.white,
+    fontSize: 32,
+    fontWeight: '500',
+    lineHeight: 34,
+    marginTop: -2,
   },
 });

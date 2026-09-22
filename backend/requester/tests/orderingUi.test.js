@@ -78,8 +78,20 @@ test('profile renders missing values as Not provided', () => assert.match(profil
 test('dashboard supports both a current order card and a no-current-request state', () => {
   assert.match(dashboard, /Current Request/); assert.match(dashboard, /No current request/i);
 });
+test('Requester dashboard reads the authoritative catalog instead of a client Firestore product listener', () => {
+  assert.match(dashboard, /getActiveProducts/);
+  assert.match(dashboard, /getActiveProducts\(\{ force: true \}\)/);
+  assert.doesNotMatch(dashboard, /subscribeProducts/);
+  assert.match(dashboard, /Unable to load products right now/);
+  assert.match(dashboard, /Retry/);
+});
 test('new ordering surfaces use shared BlueTap theme tokens', () => {
   assert.match(form, /BLUETAP_COLORS/); assert.match(productCard, /BLUETAP_COLORS/); assert.match(notifications, /BLUETAP_COLORS/);
+});
+test('new request uses the same light-default gradient treatment as the Requester dashboard', () => {
+  assert.match(form, /LinearGradient/);
+  assert.match(form, /colors\.primaryLight/);
+  assert.match(form, /backgroundColor:'transparent'/);
 });
 test('landing, Requester, and Distributor share one persisted light-default theme', () => {
   assert.match(rootLayout, /BlueTapThemeProvider/);
@@ -100,4 +112,9 @@ test('floating portal navigation uses theme tokens while its positioning wrapper
   assert.match(nav, /colors\.navIcon/);
   assert.match(portalShell, /backgroundColor: 'transparent'/);
   assert.doesNotMatch(nav, /useColorScheme/);
+});
+test('Requester Add Request control remains visibly rendered before and after its route is active', () => {
+  assert.match(nav, /primaryAction=\{isPrimaryAction\}/);
+  assert.match(nav, /primaryActionIcon/);
+  assert.match(nav, /return <Text style=\{styles\.primaryActionIcon\}>\+<\/Text>/);
 });

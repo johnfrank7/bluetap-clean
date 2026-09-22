@@ -26,7 +26,7 @@ import ProductCard from '../../components/ProductCard';
 import { createPortalStyleSheet, useBlueTapTheme } from '../../components/BlueTapTheme';
 import { USER_PORTAL_BOTTOM_CONTENT_INSET, USER_PORTAL_LAYOUT } from '../../constants/userPortalLayout';
 import { BLUETAP_COLORS } from '../../constants/bluetapTheme';
-import { subscribeProducts } from '../../services/products';
+import { getActiveProducts } from '../../services/requesterOrdering';
 import {
   cancelRequest,
   subscribeRequesterCurrentRequests,
@@ -267,6 +267,7 @@ export default function RequesterDashboard() {
   const todayText = formatDashboardDate(new Date());
   const [products, setProducts] = useState([]);
   const [productsLoading, setProductsLoading] = useState(true);
+  const [productsError, setProductsError] = useState('');
   const [activeProductIndex, setActiveProductIndex] = useState(0);
   const [currentRequests, setCurrentRequests] = useState([]);
   const [cancellingRequestId, setCancellingRequestId] = useState('');
@@ -286,18 +287,50 @@ export default function RequesterDashboard() {
   const productCarouselSideInset =
     (productCarouselWidth - productCarouselItemWidth) / 2;
 
-  useEffect(() => {
-    const unsubscribe = subscribeProducts(
-      (nextProducts) => {
-        setProducts(nextProducts);
-        setProductsLoading(false);
-      },
-      () => {
-        setProductsLoading(false);
-      }
-    );
+  const loadProducts = useCallback(async (force = false) => {
+    setProductsLoading(true);
+    setProductsError('');
+    try {
+      setProducts(await getActiveProducts({ force }));
+    } catch (error) {
+      setProducts([]);
+      setProductsError(error?.message || 'Unable to load products right now.');
+    } finally {
+      setProductsLoading(false);
+    }
+  }, []);
 
-    return unsubscribe;
+  useEffect(() => {
+    let mounted = true;
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (!user) {
+        if (mounted) {
+          setProducts([]);
+          setProductsLoading(false);
+          setProductsError('Requester authentication is required.');
+        }
+        return;
+      }
+
+      getActiveProducts({ force: true })
+        .then((nextProducts) => {
+          if (mounted) setProducts(nextProducts);
+        })
+        .catch((error) => {
+          if (mounted) {
+            setProducts([]);
+            setProductsError(error?.message || 'Unable to load products right now.');
+          }
+        })
+        .finally(() => {
+          if (mounted) setProductsLoading(false);
+        });
+    });
+
+    return () => {
+      mounted = false;
+      unsubscribe();
+    };
   }, []);
 
   useEffect(() => {
@@ -499,7 +532,12 @@ export default function RequesterDashboard() {
                 </View>
               ) : products.length === 0 ? (
                 <View style={styles.productStateCard}>
-                  <Text style={styles.productName}>No products available.</Text>
+                  <Text style={styles.productName}>{productsError || 'No products available.'}</Text>
+                  {!!productsError && (
+                    <TouchableOpacity accessibilityRole="button" onPress={() => loadProducts(true)} style={styles.catalogRetry}>
+                      <Text style={styles.catalogRetryText}>Retry</Text>
+                    </TouchableOpacity>
+                  )}
                 </View>
               ) : (
                 <>
@@ -782,6 +820,19 @@ const styles = createPortalStyleSheet({
       radius: 10,
       offset: { width: 0, height: 5 },
     }),
+  },
+  catalogRetry: {
+    marginTop: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: BLUE,
+    borderRadius: 9,
+  },
+  catalogRetryText: {
+    color: BLUE,
+    fontSize: 13,
+    fontWeight: '900',
   },
   productCard: {
     flex: 1,
