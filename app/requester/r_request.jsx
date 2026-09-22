@@ -17,6 +17,7 @@ import { findLocalUserForAuthRole } from '../../localUsers';
 import RequestDetailsModal from '../../components/RequestDetailsModal';
 import SoftStatusBadge, { normalizeStatus } from '../../components/SoftStatusBadge';
 import { createShadow } from '../../components/shadowStyles';
+import { USER_PORTAL_BOTTOM_CONTENT_INSET, USER_PORTAL_LAYOUT } from '../../constants/userPortalLayout';
 import {
   cancelRequest,
   subscribeRequesterRequests,
@@ -496,15 +497,16 @@ const styles = StyleSheet.create({
   },
   phoneWrapper: {
     width: '100%',
-    maxWidth: 480,
+    maxWidth: USER_PORTAL_LAYOUT.maxWidth,
+    minWidth: 0,
     alignSelf: 'center',
     flex: 1,
   },
   scrollContent: {
     flexGrow: 1,
-    paddingHorizontal: 20,
+    paddingHorizontal: USER_PORTAL_LAYOUT.gutter,
     paddingTop: 20,
-    paddingBottom: 150,
+    paddingBottom: USER_PORTAL_BOTTOM_CONTENT_INSET,
   },
   pageTitle: {
     fontSize: 24,
@@ -554,7 +556,7 @@ const styles = StyleSheet.create({
   },
   requestCard: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 20,
+    borderRadius: USER_PORTAL_LAYOUT.cardRadius,
     padding: 16,
     marginBottom: 14,
     borderWidth: 1,
@@ -661,7 +663,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
     borderColor: CARD_BORDER,
-    borderRadius: 20,
+    borderRadius: USER_PORTAL_LAYOUT.cardRadius,
     padding: 16,
     ...createShadow({
       color: '#0D47A1',

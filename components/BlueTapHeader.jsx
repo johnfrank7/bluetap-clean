@@ -3,6 +3,8 @@ import { Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { USER_PORTAL_LAYOUT } from '../constants/userPortalLayout';
+import { UserPortalFrame } from './UserPortalShell';
 
 const BlueTapHeader = memo(function BlueTapHeader({
   notificationPath,
@@ -24,7 +26,7 @@ const BlueTapHeader = memo(function BlueTapHeader({
     <SafeAreaView edges={['top']} style={styles.safeArea}>
       <StatusBar style="light" />
 
-      <View style={styles.frame}>
+      <UserPortalFrame>
         <View style={styles.header}>
           <TouchableOpacity
             activeOpacity={0.85}
@@ -56,7 +58,7 @@ const BlueTapHeader = memo(function BlueTapHeader({
             </TouchableOpacity>
           </View>
         </View>
-      </View>
+      </UserPortalFrame>
     </SafeAreaView>
   );
 });
@@ -68,17 +70,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#187BCD',
     zIndex: 30,
   },
-  frame: {
-    width: '100%',
-    maxWidth: 480,
-    minWidth: 0,
-    alignSelf: 'center',
-  },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 20,
+    paddingHorizontal: USER_PORTAL_LAYOUT.gutter,
     paddingTop: 10,
     paddingBottom: 12,
   },

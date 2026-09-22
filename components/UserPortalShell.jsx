@@ -1,0 +1,63 @@
+import React from 'react';
+import { StyleSheet, View } from 'react-native';
+import { Stack } from 'expo-router';
+
+import { USER_PORTAL_LAYOUT } from '../constants/userPortalLayout';
+
+export function UserPortalFrame({ children, style, ...props }) {
+  return (
+    <View {...props} style={[styles.frame, style]}>
+      {children}
+    </View>
+  );
+}
+
+export default function UserPortalShell({ header = null, navigation }) {
+  return (
+    <View style={styles.root}>
+      {header}
+
+      <View style={styles.screenContent}>
+        <Stack
+          screenOptions={{
+            headerShown: false,
+            animation: 'none',
+          }}
+        />
+      </View>
+
+      <View pointerEvents="box-none" style={styles.navOverlay}>
+        <UserPortalFrame pointerEvents="box-none" style={styles.navFrame}>
+          {navigation}
+        </UserPortalFrame>
+      </View>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  root: {
+    flex: 1,
+    minWidth: 0,
+  },
+  frame: {
+    width: '100%',
+    maxWidth: USER_PORTAL_LAYOUT.maxWidth,
+    minWidth: 0,
+    alignSelf: 'center',
+  },
+  screenContent: {
+    flex: 1,
+    minWidth: 0,
+  },
+  navOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    backgroundColor: 'transparent',
+    borderWidth: 0,
+    zIndex: 20,
+  },
+  navFrame: {
+    flex: 1,
+  },
+});

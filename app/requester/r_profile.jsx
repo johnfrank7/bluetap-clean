@@ -23,6 +23,7 @@ import { findLocalUserForAuthRole, saveLocalUser } from '../../localUsers';
 import { normalizeRole, signOutAndClearSessions } from '../../services/authSession';
 import { ensureUserUniqueId, getProfileUniqueId } from '../../services/uniqueIds';
 import { createShadow } from '../../components/shadowStyles';
+import { USER_PORTAL_BOTTOM_CONTENT_INSET, USER_PORTAL_LAYOUT } from '../../constants/userPortalLayout';
 
 const BLUE = '#187BCD';
 const BLUE_LIGHT = '#E3F2FD';
@@ -475,8 +476,6 @@ export default function ProfilePage() {
             </TouchableOpacity>
           </View>
 
-          <View style={{ height: 130 }} />
-
           </ScrollView>
 
         </View>
@@ -497,13 +496,15 @@ const styles = StyleSheet.create({
   },
   phoneWrapper: {
     width: '100%',
-    maxWidth: 480,
+    maxWidth: USER_PORTAL_LAYOUT.maxWidth,
+    minWidth: 0,
     alignSelf: 'center',
     flex: 1,
   },
   scrollContent: {
-    paddingHorizontal: 20,
+    paddingHorizontal: USER_PORTAL_LAYOUT.gutter,
     paddingTop: 18,
+    paddingBottom: USER_PORTAL_BOTTOM_CONTENT_INSET,
   },
   profileTitle: {
     fontSize: 26,
@@ -514,7 +515,7 @@ const styles = StyleSheet.create({
   infoSection: {
     marginTop: 18,
     backgroundColor: '#FFFFFF',
-    borderRadius: 20,
+    borderRadius: USER_PORTAL_LAYOUT.cardRadius,
     borderWidth: 1,
     borderColor: CARD_BORDER,
     padding: 16,
@@ -634,7 +635,7 @@ const styles = StyleSheet.create({
   helpCard: {
     marginTop: 22,
     backgroundColor: '#FFFFFF',
-    borderRadius: 20,
+    borderRadius: USER_PORTAL_LAYOUT.cardRadius,
     borderWidth: 1,
     borderColor: CARD_BORDER,
     padding: 18,

@@ -24,3 +24,10 @@ export const BLUETAP_LOGIN_GRADIENT = [
   BLUETAP_COLORS.primary,
   BLUETAP_COLORS.primaryLight,
 ];
+
+export const BLUETAP_DARK_COLORS = Object.freeze({
+  surface: '#0E2235',
+  border: '#1C3C55',
+  primary: '#2186D9',
+  primaryLight: '#70BDF2',
+});

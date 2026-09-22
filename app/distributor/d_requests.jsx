@@ -25,6 +25,7 @@ import BlueTapHeader from '../../components/BlueTapHeader';
 import RequestDetailsModal from '../../components/RequestDetailsModal';
 import SoftStatusBadge from '../../components/SoftStatusBadge';
 import { createShadow } from '../../components/shadowStyles';
+import { USER_PORTAL_BOTTOM_CONTENT_INSET, USER_PORTAL_LAYOUT } from '../../constants/userPortalLayout';
 
 const BLUE = '#187BCD';
 const BLUE_LIGHT = '#E3F2FD';
@@ -830,14 +831,15 @@ const styles = StyleSheet.create({
   },
   phoneWrapper: {
     width: '100%',
-    maxWidth: 480,
+    maxWidth: USER_PORTAL_LAYOUT.maxWidth,
+    minWidth: 0,
     alignSelf: 'center',
     flex: 1,
   },
   listContent: {
-    paddingHorizontal: 20,
+    paddingHorizontal: USER_PORTAL_LAYOUT.gutter,
     paddingTop: 18,
-    paddingBottom: 150,
+    paddingBottom: USER_PORTAL_BOTTOM_CONTENT_INSET,
   },
   pageHeader: {
     marginBottom: 14,
@@ -856,7 +858,7 @@ const styles = StyleSheet.create({
   },
   requestCard: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 20,
+    borderRadius: USER_PORTAL_LAYOUT.cardRadius,
     padding: 16,
     marginBottom: 14,
     borderWidth: 1,
@@ -973,7 +975,7 @@ const styles = StyleSheet.create({
   },
   emptyCard: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 20,
+    borderRadius: USER_PORTAL_LAYOUT.cardRadius,
     padding: 18,
     borderWidth: 1,
     borderColor: '#D7ECFF',
@@ -1007,11 +1009,11 @@ const styles = StyleSheet.create({
   },
   bottomSheet: {
     width: '100%',
-    maxWidth: 480,
+    maxWidth: USER_PORTAL_LAYOUT.maxWidth,
     backgroundColor: '#FFFFFF',
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
-    paddingHorizontal: 20,
+    paddingHorizontal: USER_PORTAL_LAYOUT.gutter,
     paddingTop: 10,
     paddingBottom: 28,
   },

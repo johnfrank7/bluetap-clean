@@ -6,17 +6,19 @@ import {
   Image,
   StyleSheet,
   TouchableOpacity,
+  useColorScheme,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { usePathname, useRouter, useSegments } from 'expo-router';
-import { BLUETAP_COLORS } from '../constants/bluetapTheme';
+import { BLUETAP_COLORS, BLUETAP_DARK_COLORS } from '../constants/bluetapTheme';
+import { USER_PORTAL_LAYOUT } from '../constants/userPortalLayout';
 import { createShadow } from './shadowStyles';
 
 const BLUE = BLUETAP_COLORS.primary;
 const ICON_SIZE = 26;
 const ACTIVE_SCALE = 1.1;
 const NAV_HORIZONTAL_PADDING = 28;
-export const REQUESTER_FLOATING_NAV_RESERVE = 116;
 const ANIMATION_DURATION = 250;
 
 const requesterItems = [
@@ -200,6 +202,12 @@ function BottomNav({ items, floating = true }) {
   const router = useRouter();
   const segments = useSegments();
   const reduceMotion = useReduceMotion();
+  const colorScheme = useColorScheme();
+  const insets = useSafeAreaInsets();
+  const isDark = colorScheme === 'dark';
+  const navSurface = isDark ? BLUETAP_DARK_COLORS.surface : BLUETAP_COLORS.surface;
+  const navBorder = isDark ? BLUETAP_DARK_COLORS.border : BLUETAP_COLORS.border;
+  const navIconColor = isDark ? BLUETAP_DARK_COLORS.primaryLight : BLUE;
 
   const activeIndex = useMemo(
     () =>
@@ -208,7 +216,14 @@ function BottomNav({ items, floating = true }) {
   );
 
   return (
-    <View style={[styles.bottomNav, floating ? styles.floatingNav : styles.flowNav]}>
+    <View
+      style={[
+        styles.bottomNav,
+        { backgroundColor: navSurface, borderColor: navBorder },
+        floating && styles.floatingNav,
+        floating && { bottom: USER_PORTAL_LAYOUT.navBottomOffset + insets.bottom },
+      ]}
+    >
       {items.map((item, index) => {
         const isActive = index === activeIndex;
         const isPrimaryAction = item.key === 'add';
@@ -221,7 +236,12 @@ function BottomNav({ items, floating = true }) {
             accessibilityLabel={item.label}
             activeOpacity={0.78}
             onPress={() => router.replace(item.route)}
-            style={[styles.navButton, isPrimaryAction && styles.primaryNavButton, isPrimaryAction && isActive && styles.primaryNavButtonActive]}
+            style={[
+              styles.navButton,
+              isPrimaryAction && styles.primaryNavButton,
+              isPrimaryAction && { borderColor: navSurface },
+              isPrimaryAction && isActive && styles.primaryNavButtonActive,
+            ]}
           >
             <NavIcon
               activeIcon={item.activeIcon}
@@ -230,7 +250,7 @@ function BottomNav({ items, floating = true }) {
               isActive={isActive}
               keepIconFixed={item.keepIconFixed}
               reduceMotion={reduceMotion}
-              tintColor={isPrimaryAction ? BLUETAP_COLORS.white : BLUE}
+              tintColor={isPrimaryAction ? BLUETAP_COLORS.white : navIconColor}
             />
           </TouchableOpacity>
         );
@@ -252,10 +272,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    backgroundColor: '#FFFFFF',
     paddingVertical: 14,
     paddingHorizontal: NAV_HORIZONTAL_PADDING,
-    borderRadius: 22,
+    borderRadius: USER_PORTAL_LAYOUT.cardRadius,
+    borderWidth: 1,
     zIndex: 20,
     ...createShadow({
       color: '#000',
@@ -267,10 +287,9 @@ const styles = StyleSheet.create({
   },
   floatingNav: {
     position: 'absolute',
-    bottom: 14,
-    left: 20,
-    right: 20,
-    minHeight: 64,
+    left: USER_PORTAL_LAYOUT.gutter,
+    right: USER_PORTAL_LAYOUT.gutter,
+    minHeight: USER_PORTAL_LAYOUT.navHeight,
     minWidth: 0,
   },
   navButton: {
@@ -286,7 +305,7 @@ const styles = StyleSheet.create({
     marginTop: -24,
     backgroundColor: BLUE,
     borderWidth: 4,
-    borderColor: BLUETAP_COLORS.white,
+    borderColor: BLUETAP_COLORS.surface,
     alignSelf: 'center',
     ...createShadow({ color: BLUE, elevation: 6, opacity: 0.28, radius: 8, offset: { width: 0, height: 4 } }),
   },

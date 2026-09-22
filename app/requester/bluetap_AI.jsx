@@ -5,6 +5,7 @@ import { StatusBar } from 'expo-status-bar';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { createShadow } from '../../components/shadowStyles';
+import { USER_PORTAL_BOTTOM_CONTENT_INSET, USER_PORTAL_LAYOUT } from '../../constants/userPortalLayout';
 
 export default function BlueTapAIPage() {
   const router = useRouter();
@@ -68,8 +69,7 @@ export default function BlueTapAIPage() {
             </TouchableOpacity>
           </View>
 
-          <View style={{ height: 120 }} />
-          </ScrollView>
+        </ScrollView>
 
         </View>
       </SafeAreaView>
@@ -90,13 +90,14 @@ const styles = StyleSheet.create({
   phoneWrapper: {
     flex: 1,
     width: '100%',
-    maxWidth: 480,
+    maxWidth: USER_PORTAL_LAYOUT.maxWidth,
+    minWidth: 0,
     alignSelf: 'center',
   },
   scrollContent: {
-    paddingHorizontal: 20,
+    paddingHorizontal: USER_PORTAL_LAYOUT.gutter,
     paddingTop: 20,
-    paddingBottom: 140,
+    paddingBottom: USER_PORTAL_BOTTOM_CONTENT_INSET,
   },
   aiTitleRow: {
     flexDirection: 'row',
@@ -137,7 +138,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     paddingHorizontal: 24,
     paddingVertical: 8,
-    borderRadius: 20,
+    borderRadius: USER_PORTAL_LAYOUT.cardRadius,
   },
   chipText: {
     color: '#187BCD',

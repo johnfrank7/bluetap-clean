@@ -9,6 +9,9 @@ const form = read('app/requester/requestform.jsx');
 const map = read('components/LocationMap.jsx');
 const productCard = read('components/ProductCard.jsx');
 const layout = read('app/requester/_layout.jsx');
+const distributorLayout = read('app/distributor/_layout.jsx');
+const portalShell = read('components/UserPortalShell.jsx');
+const portalLayout = read('constants/userPortalLayout.js');
 const nav = read('components/AppBottomNav.jsx');
 const notifications = read('app/requester/r_notification.jsx');
 const profile = read('app/requester/r_profile.jsx');
@@ -44,10 +47,10 @@ test('product card uses a prominent contain image and a placeholder', () => {
   assert.match(productCard, /resizeMode="contain"/); assert.match(productCard, /placeholder/i); assert.match(productCard, /height:158/);
 });
 test('Requester floating navigation reserves shared content space instead of covering controls', () => {
-  assert.match(layout, /SafeAreaView/); assert.match(layout, /navOverlay/); assert.match(layout, /navFrame/); assert.match(layout, /maxWidth: 480/); assert.match(layout, /REQUESTER_FLOATING_NAV_RESERVE/); assert.match(nav, /primaryNavButton/); assert.match(nav, /label: 'Add Request'/); assert.doesNotMatch(nav, /floating=\{false\}/);
+  assert.match(layout, /UserPortalShell/); assert.match(distributorLayout, /UserPortalShell/); assert.match(portalShell, /backgroundColor: 'transparent'/); assert.match(portalShell, /navOverlay/); assert.match(portalLayout, /maxWidth: 480/); assert.match(portalLayout, /USER_PORTAL_BOTTOM_CONTENT_INSET/); assert.match(nav, /useSafeAreaInsets/); assert.match(nav, /primaryNavButton/); assert.match(nav, /label: 'Add Request'/); assert.doesNotMatch(nav, /floating=\{false\}/);
 });
 test('Requester form uses keyboard avoidance and safe bottom content space', () => {
-  assert.match(form, /KeyboardAvoidingView/); assert.match(form, /minWidth:0/); assert.match(form, /maxWidth:'100%'/);
+  assert.match(form, /KeyboardAvoidingView/); assert.match(form, /USER_PORTAL_LAYOUT\.maxWidth/); assert.match(form, /USER_PORTAL_BOTTOM_CONTENT_INSET/); assert.match(form, /minWidth:0/); assert.match(form, /maxWidth:'100%'/);
 });
 test('location selection unlocks providers and supports GPS retry or a manual map pin', () => {
   assert.match(form, /rankBranchesByDistance/); assert.match(form, /Choose a delivery location to see nearby BlueTap providers/); assert.match(form, /Delivery location selected/); assert.match(form, /Retry/); assert.match(map, /onLocationChange/);

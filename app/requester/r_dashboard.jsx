@@ -23,14 +23,15 @@ import RequestDetailsModal from '../../components/RequestDetailsModal';
 import SoftStatusBadge from '../../components/SoftStatusBadge';
 import { createShadow } from '../../components/shadowStyles';
 import ProductCard from '../../components/ProductCard';
+import { USER_PORTAL_BOTTOM_CONTENT_INSET, USER_PORTAL_LAYOUT } from '../../constants/userPortalLayout';
 import { subscribeProducts } from '../../services/products';
 import {
   cancelRequest,
   subscribeRequesterCurrentRequests,
 } from '../../services/requests';
 
-const REQUESTER_APP_MAX_WIDTH = 480;
-const DASHBOARD_HORIZONTAL_PADDING = 20;
+const REQUESTER_APP_MAX_WIDTH = USER_PORTAL_LAYOUT.maxWidth;
+const DASHBOARD_HORIZONTAL_PADDING = USER_PORTAL_LAYOUT.gutter;
 const PRODUCT_CARD_WIDTH_RATIO = 0.88;
 const PRODUCT_CAROUSEL_HEIGHT = 290;
 const BLUE = '#187BCD';
@@ -721,7 +722,8 @@ const styles = StyleSheet.create({
   },
   phoneWrapper: {
     width: '100%',
-    maxWidth: 480,
+    maxWidth: USER_PORTAL_LAYOUT.maxWidth,
+    minWidth: 0,
     alignSelf: 'center',
     flex: 1,
   },
@@ -729,7 +731,7 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     paddingHorizontal: DASHBOARD_HORIZONTAL_PADDING,
     paddingTop: 20,
-    paddingBottom: 150,
+    paddingBottom: USER_PORTAL_BOTTOM_CONTENT_INSET,
   },
   welcomeSection: {
     marginTop: 0,
@@ -767,7 +769,7 @@ const styles = StyleSheet.create({
   productStateCard: {
     minHeight: 146,
     backgroundColor: '#FFFFFF',
-    borderRadius: 20,
+    borderRadius: USER_PORTAL_LAYOUT.cardRadius,
     alignItems: 'center',
     justifyContent: 'center',
     ...createShadow({
@@ -781,7 +783,7 @@ const styles = StyleSheet.create({
   productCard: {
     flex: 1,
     backgroundColor: '#FFFFFF',
-    borderRadius: 20,
+    borderRadius: USER_PORTAL_LAYOUT.cardRadius,
     paddingHorizontal: 16,
     paddingTop: 14,
     paddingBottom: 12,
@@ -897,7 +899,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
     borderColor: CARD_BORDER,
-    borderRadius: 20,
+    borderRadius: USER_PORTAL_LAYOUT.cardRadius,
     padding: 16,
     position: 'relative',
     ...createShadow({
@@ -1012,7 +1014,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
     borderColor: CARD_BORDER,
-    borderRadius: 20,
+    borderRadius: USER_PORTAL_LAYOUT.cardRadius,
     padding: 16,
     ...createShadow({
       color: '#0D47A1',
@@ -1044,7 +1046,7 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: 320,
     backgroundColor: '#FFFFFF',
-    borderRadius: 20,
+    borderRadius: USER_PORTAL_LAYOUT.cardRadius,
     padding: 20,
     alignItems: 'center',
   },

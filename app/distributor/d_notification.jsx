@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-nati
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import BlueTapHeader from '../../components/BlueTapHeader';
+import { USER_PORTAL_BOTTOM_CONTENT_INSET, USER_PORTAL_LAYOUT } from '../../constants/userPortalLayout';
 
 export default function DistributorNotification() {
   const router = useRouter();
@@ -37,7 +38,6 @@ export default function DistributorNotification() {
             </View>
           </View>
 
-          <View style={{ height: 140 }} />
         </ScrollView>
       </View>
     </SafeAreaView>
@@ -52,21 +52,9 @@ const styles = StyleSheet.create({
   phoneWrapper: {
     flex: 1,
     width: '100%',
-    maxWidth: 480,
+    maxWidth: USER_PORTAL_LAYOUT.maxWidth,
+    minWidth: 0,
     alignSelf: 'center',
-  },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingTop: 10,
-    paddingBottom: 12,
-  },
-  appName: {
-    fontSize: 22,
-    fontWeight: 'bold',
-    color: '#187BCD',
   },
   backIcon: {
     fontSize: 24,
@@ -74,8 +62,9 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   scrollContent: {
-    paddingHorizontal: 20,
+    paddingHorizontal: USER_PORTAL_LAYOUT.gutter,
     paddingTop: 20,
+    paddingBottom: USER_PORTAL_BOTTOM_CONTENT_INSET,
   },
   card: {
     borderWidth: 2,
