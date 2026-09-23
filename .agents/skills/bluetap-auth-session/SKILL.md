@@ -21,3 +21,4 @@ description: Preserve BlueTap public and privileged login, trusted profile reuse
 - Session revocation remains server-authoritative through Firebase refresh-token revocation; account UI never handles tokens.
 - A stale login error must never overwrite a completed trusted authentication; maintain one submission pipeline and ignore superseded completion/error callbacks.
 - Password recovery uses a distinct, verified, short-lived recovery authorization. A completed recovery updates Firebase Auth server-side, revokes prior refresh tokens, and still routes only through normal role, onboarding, and status rules.
+- Login throttling is primarily account/identifier scoped, with a separate higher-threshold IP abuse limiter. A normal per-account cooldown must not globally block unrelated BlueTap accounts.

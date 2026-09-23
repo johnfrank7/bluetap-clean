@@ -43,10 +43,20 @@ const safeAccessMessage = (code) => {
   return 'Administrator access required.';
 };
 
-const safeSignInMessage = (code) => {
-  if (code === 'auth/user-disabled') return 'This account is disabled. Please contact support.';
-  if (code === 'auth/network-request-failed') return 'Unable to reach the sign-in service. Check your connection and try again.';
-  if (code === 'auth/too-many-requests') return 'Too many sign-in attempts. Please wait and try again.';
+const safeSignInMessage = (code, error) => {
+  if (code === 'auth/user-disabled' || error?.code === 'ACCOUNT_DISABLED') return 'This account is disabled. Please contact support.';
+  if (code === 'auth/network-request-failed' || error?.code === 'NETWORK_ERROR') return 'Unable to reach the sign-in service. Check your connection and try again.';
+  if (code === 'auth/too-many-requests' || code === 'LOGIN_RATE_LIMITED' || code === 'username/LOGIN_RATE_LIMITED' || error?.code === 'LOGIN_RATE_LIMITED' || error?.reason === 'too-many-attempts') {
+    if (error?.retryAfterSeconds) {
+      const total = Math.max(1, Math.round(Number(error.retryAfterSeconds)));
+      if (total >= 60) {
+        const mins = Math.ceil(total / 60);
+        return `Too many login attempts. Try again in ${mins} minute${mins === 1 ? '' : 's'}.`;
+      }
+      return `Too many login attempts. Try again in ${total} second${total === 1 ? '' : 's'}.`;
+    }
+    return 'Too many sign-in attempts. Please wait and try again.';
+  }
   if (code === 'auth/quota-exceeded') return 'Authentication is temporarily rate-limited. Please wait and try again.';
   return 'Invalid credentials or Administrator access required.';
 };
@@ -163,12 +173,12 @@ export default function PrivilegedLogin() {
       });
     }
     setError(code.endsWith('TOKEN_REFRESH_FAILED') && loginError?.firebaseCode === 'auth/quota-exceeded'
-      ? safeSignInMessage('auth/quota-exceeded')
+      ? safeSignInMessage('auth/quota-exceeded', loginError)
       : code === 'BRANCH_INACTIVE'
       ? loginError.message
       : /^(ADMIN|MANAGER)_/.test(code)
         ? safeAccessMessage(code)
-        : safeSignInMessage(safeFirebaseAuthCode(loginError, 'auth/invalid-credential')));
+        : safeSignInMessage(safeFirebaseAuthCode(loginError, 'auth/invalid-credential'), loginError));
   }, []);
 
   React.useEffect(() => {

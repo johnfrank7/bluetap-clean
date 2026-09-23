@@ -73,6 +73,138 @@ const parseBody = (req) => {
   try { return JSON.parse(req.body); } catch { throw new OtpError(400, 'invalid-request', 'Invalid request.'); }
 };
 
+const ACCOUNT_FAILURE_THRESHOLD = 5;
+const IP_ABUSE_THRESHOLD = 30;
+const IP_WINDOW_MS = 15 * 60 * 1000;
+const ACCOUNT_RESET_MS = 15 * 60 * 1000;
+
+function getAccountCooldownSeconds(failures) {
+  if (failures <= 5) return 60;
+  if (failures === 6) return 300;
+  return 900;
+}
+
+function formatRetryDuration(seconds) {
+  const total = Math.max(1, Math.round(Number(seconds)));
+  if (total >= 60) {
+    const mins = Math.ceil(total / 60);
+    return `${mins} minute${mins === 1 ? '' : 's'}`;
+  }
+  return `${total} second${total === 1 ? '' : 's'}`;
+}
+
+function getRateLimitDocId(hashSecret, prefix, value) {
+  if (!hashSecret) throw new Error('Missing login rate-limit configuration');
+  return createHmac('sha256', hashSecret).update(`${prefix}:${value}`).digest('hex');
+}
+
+const millis = (val) => Number(val?.toMillis?.() || val?.getTime?.() || val || 0);
+
+async function checkIpRateLimit({ db, ip, hashSecret, now = Date.now }) {
+  if (!hashSecret) throw new Error('Missing login rate-limit configuration');
+  const currentTime = now();
+  const ipId = getRateLimitDocId(hashSecret, 'ip-login', ip);
+  const ipRef = db.collection('authRateLimits').doc(ipId);
+
+  await db.runTransaction(async (tx) => {
+    const ipSnap = await tx.get(ipRef);
+    const ipData = ipSnap.data() || {};
+    const ipResetAt = millis(ipData.resetAt);
+    const ipActive = ipResetAt > currentTime;
+    const ipCount = ipActive ? Number(ipData.count || 0) : 0;
+    if (ipCount >= IP_ABUSE_THRESHOLD) {
+      const retryAfterSeconds = Math.max(1, Math.ceil((ipResetAt - currentTime) / 1000));
+      throw new OtpError(
+        429,
+        'too-many-attempts',
+        'Too many login attempts from this network. Please try again later.',
+        { retryAfterSeconds, code: 'LOGIN_RATE_LIMITED' }
+      );
+    }
+    tx.set(ipRef, {
+      count: ipCount + 1,
+      resetAt: new Date(ipActive ? ipResetAt : currentTime + IP_WINDOW_MS),
+      type: 'ip',
+    });
+  });
+}
+
+async function checkAccountRateLimit({ db, targetId, hashSecret, now = Date.now }) {
+  if (!hashSecret) throw new Error('Missing login rate-limit configuration');
+  const currentTime = now();
+  const accountId = getRateLimitDocId(hashSecret, 'account-login', targetId);
+  const accountRef = db.collection('authRateLimits').doc(accountId);
+
+  await db.runTransaction(async (tx) => {
+    const accountSnap = await tx.get(accountRef);
+    const accountData = accountSnap.data() || {};
+    const blockedUntil = millis(accountData.blockedUntil);
+    if (blockedUntil > currentTime) {
+      const retryAfterSeconds = Math.max(1, Math.ceil((blockedUntil - currentTime) / 1000));
+      throw new OtpError(
+        429,
+        'too-many-attempts',
+        `Too many login attempts. Please try again in ${formatRetryDuration(retryAfterSeconds)}.`,
+        { retryAfterSeconds, code: 'LOGIN_RATE_LIMITED' }
+      );
+    }
+  });
+}
+
+async function checkLoginRateLimits({ db, ip, normalized, hashSecret, now = Date.now }) {
+  await checkIpRateLimit({ db, ip, hashSecret, now });
+  await checkAccountRateLimit({ db, targetId: normalized, hashSecret, now });
+}
+
+async function recordLoginFailure({ db, targetId, hashSecret, now = Date.now }) {
+  if (!hashSecret || !targetId) return null;
+  const currentTime = now();
+  const accountId = getRateLimitDocId(hashSecret, 'account-login', targetId);
+  const accountRef = db.collection('authRateLimits').doc(accountId);
+
+  return await db.runTransaction(async (tx) => {
+    const accountSnap = await tx.get(accountRef);
+    const accountData = accountSnap.data() || {};
+
+    const resetAt = millis(accountData.resetAt);
+    const active = resetAt > currentTime;
+    const previousFailures = active ? Number(accountData.count || 0) : 0;
+    const newFailures = previousFailures + 1;
+
+    let blockedUntil = null;
+    let retryAfterSeconds = 0;
+    if (newFailures >= ACCOUNT_FAILURE_THRESHOLD) {
+      retryAfterSeconds = getAccountCooldownSeconds(newFailures);
+      blockedUntil = new Date(currentTime + retryAfterSeconds * 1000);
+    }
+
+    tx.set(accountRef, {
+      count: newFailures,
+      blockedUntil,
+      resetAt: new Date(active ? resetAt : currentTime + ACCOUNT_RESET_MS),
+      type: 'account',
+    });
+
+    return {
+      rateLimited: newFailures >= ACCOUNT_FAILURE_THRESHOLD,
+      retryAfterSeconds,
+    };
+  });
+}
+
+async function recordLoginSuccess({ db, targetId, hashSecret }) {
+  if (!hashSecret || !targetId) return;
+  const accountId = getRateLimitDocId(hashSecret, 'account-login', targetId);
+  const accountRef = db.collection('authRateLimits').doc(accountId);
+  try {
+    await db.runTransaction(async (tx) => {
+      tx.set(accountRef, { count: 0, blockedUntil: null, resetAt: new Date(0), type: 'account' });
+    });
+  } catch (err) {
+    console.warn('[public-login]', { stage: 'LOGIN_RATE_LIMIT_RESET_FAILED', error: err.message });
+  }
+}
+
 async function checkUsername(db, username) {
   const normalized = normalizeUsername(username);
   const [claimed, reservation] = await Promise.all([
@@ -84,21 +216,7 @@ async function checkUsername(db, username) {
   return { available: !claimed.exists && !reserved, normalizedUsername: normalized };
 }
 
-async function limitLogin(db, ip, hashSecret) {
-  if (!hashSecret) throw new Error('Missing login rate-limit configuration');
-  const id = createHmac('sha256', hashSecret).update('username-login:' + ip).digest('hex');
-  const ref = db.collection('authRateLimits').doc(id);
-  await db.runTransaction(async (tx) => {
-    const data = (await tx.get(ref)).data() || {};
-    const now = Date.now();
-    const active = Number(data.resetAt?.toMillis?.() || data.resetAt || 0) > now;
-    const count = active ? Number(data.count || 0) : 0;
-    if (count >= 10) throw new OtpError(429, 'too-many-attempts', 'Too many login attempts. Please try again later.');
-    tx.set(ref, { count: count + 1, resetAt: new Date(active ? Number(data.resetAt?.toMillis?.() || data.resetAt) : now + 15 * 60 * 1000) });
-  });
-}
-
-function createUsernameHandler(action, getAdmin = getFirebaseAdmin) {
+function createUsernameHandler(action, getAdmin = getFirebaseAdmin, { now = Date.now } = {}) {
   return async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     if (!applyCors(req, res)) return;
@@ -123,25 +241,65 @@ function createUsernameHandler(action, getAdmin = getFirebaseAdmin) {
       } else {
         try { normalized = normalizeUsername(body.username); } catch { throw genericLogin(); }
       }
-      await limitLogin(db, getClientIp(req), process.env.EMAIL_OTP_HASH_SECRET);
+      // 1. Check IP Abuse
+      await checkIpRateLimit({
+        db,
+        ip: getClientIp(req),
+        hashSecret: process.env.EMAIL_OTP_HASH_SECRET,
+        now,
+      });
+
+      // 2. Safe server-side identifier resolution to determine canonical account identity
       let expectedUid;
       let user;
       if (isEmail) {
         user = await auth.getUserByEmail(normalized).catch((error) => {
-          if (error.code === 'auth/user-not-found') throw genericLogin();
+          if (error.code === 'auth/user-not-found') return null;
           throw error;
         });
-        expectedUid = user.uid;
+        if (user) expectedUid = user.uid;
       } else {
         const registry = await db.collection('usernames').doc(normalized).get();
-        if (!registry.exists) throw genericLogin();
-        expectedUid = registry.data()?.uid;
-        if (typeof expectedUid !== 'string' || !expectedUid || expectedUid.includes('/')) throw mappingError();
-        user = await auth.getUser(expectedUid).catch((error) => {
-          if (error.code === 'auth/user-not-found' || error.code === 'auth/invalid-uid') throw mappingError();
-          throw error;
-        });
+        if (registry.exists) {
+          expectedUid = registry.data()?.uid;
+          if (typeof expectedUid !== 'string' || !expectedUid || expectedUid.includes('/')) throw mappingError();
+          user = await auth.getUser(expectedUid).catch((error) => {
+            if (error.code === 'auth/user-not-found' || error.code === 'auth/invalid-uid') throw mappingError();
+            throw error;
+          });
+        }
       }
+
+      // Canonical account identifier: Firebase UID for existing accounts, normalized identifier fallback for unknown accounts
+      const canonicalAccountId = expectedUid || normalized;
+
+      // 3. Primary Account Cooldown Check (shared across username & email for the same real account)
+      await checkAccountRateLimit({
+        db,
+        targetId: canonicalAccountId,
+        hashSecret: process.env.EMAIL_OTP_HASH_SECRET,
+        now,
+      });
+
+      // 4. Handle non-existent account with generic response and failure recording
+      if (!user || !expectedUid) {
+        const failResult = await recordLoginFailure({
+          db,
+          targetId: canonicalAccountId,
+          hashSecret: process.env.EMAIL_OTP_HASH_SECRET,
+          now,
+        });
+        if (failResult?.rateLimited) {
+          throw new OtpError(
+            429,
+            'too-many-attempts',
+            `Too many login attempts. Please try again in ${formatRetryDuration(failResult.retryAfterSeconds)}.`,
+            { retryAfterSeconds: failResult.retryAfterSeconds, code: 'LOGIN_RATE_LIMITED' }
+          );
+        }
+        throw genericLogin();
+      }
+
       if (user.uid !== expectedUid) throw mappingError();
       if (!user.email) throw setupError();
       stage('USERNAME_RESOLVED', { expectedUid });
@@ -160,10 +318,26 @@ function createUsernameHandler(action, getAdmin = getFirebaseAdmin) {
       const result = await response.json().catch(() => null);
       if (!response.ok) {
         const providerCode = String(result?.error?.message || '').split(/[ :]/)[0];
-        if (['INVALID_LOGIN_CREDENTIALS', 'INVALID_PASSWORD', 'EMAIL_NOT_FOUND'].includes(providerCode)) throw genericLogin();
+        if (['INVALID_LOGIN_CREDENTIALS', 'INVALID_PASSWORD', 'EMAIL_NOT_FOUND'].includes(providerCode)) {
+          const failResult = await recordLoginFailure({
+            db,
+            targetId: canonicalAccountId,
+            hashSecret: process.env.EMAIL_OTP_HASH_SECRET,
+            now,
+          });
+          if (failResult?.rateLimited) {
+            throw new OtpError(
+              429,
+              'too-many-attempts',
+              `Too many login attempts. Please try again in ${formatRetryDuration(failResult.retryAfterSeconds)}.`,
+              { retryAfterSeconds: failResult.retryAfterSeconds, code: 'LOGIN_RATE_LIMITED' }
+            );
+          }
+          throw genericLogin();
+        }
         if (providerCode === 'USER_DISABLED') throw new OtpError(403, 'account-disabled', 'This account is disabled. Please contact support.');
         if (providerCode === 'TOO_MANY_ATTEMPTS_TRY_LATER' || response.status === 429) {
-          throw new OtpError(429, 'too-many-attempts', 'Too many login attempts. Please try again later.');
+          throw new OtpError(429, 'too-many-attempts', 'Too many login attempts. Please try again later.', { code: 'LOGIN_RATE_LIMITED', retryAfterSeconds: 300 });
         }
         throw new Error('Firebase password provider unavailable');
       }
@@ -195,6 +369,8 @@ function createUsernameHandler(action, getAdmin = getFirebaseAdmin) {
         throw new OtpError(403, 'privileged-login-required', 'This account must use the Administrator sign-in portal.');
       }
       if (!['public', 'unified'].includes(portal) && profile.role !== portal) throw new OtpError(403, 'portal-role-mismatch', 'This account cannot use this sign-in portal.');
+      // Reset account failed attempts upon successful authentication.
+      await recordLoginSuccess({ db, targetId: expectedUid, hashSecret: process.env.EMAIL_OTP_HASH_SECRET });
       // Onboarding/approval is a routing decision after authentication.
       const customToken = await auth.createCustomToken(expectedUid);
       stage('SUCCESS');
@@ -204,13 +380,46 @@ function createUsernameHandler(action, getAdmin = getFirebaseAdmin) {
       if (error.reason === 'invalid-credential') stage('INVALID_CREDENTIALS');
       if (error.reason === 'account-mapping-invalid') stage('MAPPING_INVALID');
       if (!known) console.error('Username auth request failed', { code: 'USERNAME_AUTH_ERROR' });
-      return res.status(known ? error.status : 503).json({ error: {
-        code: known ? errorCodes[error.reason] || 'INVALID_REQUEST' : 'SERVER_ERROR',
-        reason: known ? error.reason : 'service-unavailable',
-        message: known ? error.message : 'Login is temporarily unavailable. Please try again.',
+      const status = known ? error.status : 503;
+      const reason = known ? error.reason : 'service-unavailable';
+      const message = known ? error.message : 'Login is temporarily unavailable. Please try again.';
+      const retryAfterSeconds = error.details?.retryAfterSeconds;
+      const code = status === 429
+        ? 'LOGIN_RATE_LIMITED'
+        : (known ? errorCodes[reason] || 'INVALID_REQUEST' : 'SERVER_ERROR');
+
+      if (status === 429) {
+        return res.status(429).json({
+          code: 'LOGIN_RATE_LIMITED',
+          ...(retryAfterSeconds != null ? { retryAfterSeconds } : {}),
+          error: {
+            code: 'LOGIN_RATE_LIMITED',
+            reason,
+            message,
+            ...(retryAfterSeconds != null ? { retryAfterSeconds } : {}),
+          },
+        });
+      }
+
+      return res.status(status).json({ error: {
+        code,
+        reason,
+        message,
       } });
     }
   };
 }
 
-module.exports = { createUsernameHandler, checkUsername };
+module.exports = {
+  createUsernameHandler,
+  checkUsername,
+  checkIpRateLimit,
+  checkAccountRateLimit,
+  checkLoginRateLimits,
+  recordLoginFailure,
+  recordLoginSuccess,
+  getAccountCooldownSeconds,
+  formatRetryDuration,
+  ACCOUNT_FAILURE_THRESHOLD,
+  IP_ABUSE_THRESHOLD,
+};

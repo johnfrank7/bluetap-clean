@@ -12,8 +12,12 @@ const call = async (path, body) => {
     });
     const data = await response.json().catch(() => null);
     if (!response.ok) {
-      const error = new Error(data?.error?.message || 'The authentication service is unavailable.');
-      error.code = data?.error?.code || `username/${data?.error?.reason || 'service-unavailable'}`;
+      const error = new Error(data?.error?.message || data?.message || 'The authentication service is unavailable.');
+      error.code = data?.error?.code || data?.code || `username/${data?.error?.reason || 'service-unavailable'}`;
+      error.reason = data?.error?.reason || data?.reason;
+      if (data?.error?.retryAfterSeconds != null || data?.retryAfterSeconds != null) {
+        error.retryAfterSeconds = Number(data?.error?.retryAfterSeconds ?? data?.retryAfterSeconds);
+      }
       error.authenticationServiceError = true;
       throw error;
     }
