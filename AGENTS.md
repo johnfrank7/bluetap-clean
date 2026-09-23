@@ -6,6 +6,7 @@ This repository is BlueTap. Before substantial work, inspect the relevant skill 
 - Keep Manager actions branch-scoped and do not trust client-supplied branch or role fields.
 - Never commit secrets, `.env` files, service-account JSON, private keys, tokens, or credentials.
 - Diagnose the root cause before refactoring. Prefer focused changes, preserve role-specific routes and layouts, and protect valid UI from destructive rewrites.
+- Before continuing work created by another coding agent or entering a dirty working tree, read `bluetap-agent-handoff` and inspect Git status and diff first.
 - After substantial work run `npm test`, `npm run build`, and `git diff --check`.
 - Before committing, inspect `git diff` for unexpected large deletions. Do not push without explicit approval.
 
@@ -21,3 +22,4 @@ This repository is BlueTap. Before substantial work, inspect the relevant skill 
 | Deployment and environment boundaries | `bluetap-backend-deployment` |
 | Admin or Manager UI | `bluetap-ui-design` |
 | Requester or Distributor portal UI | `bluetap-user-portal-ui` |
+| Agent switching, interrupted work, or a dirty tree | `bluetap-agent-handoff` |
