@@ -11,6 +11,9 @@ const light = Object.freeze({
   sidebar: '#0E5F9F', sidebarHover: '#187BCD', sidebarActive: '#287FBE', sidebarBorder: 'rgba(255,255,255,0.14)',
   header: '#F8FCFF', input: '#F8FCFF', inputBorder: '#BDD5E6', placeholder: '#64748B', overlay: 'rgba(8,31,51,.48)',
   tooltip: '#12304A', tooltipText: '#FFFFFF', neutral: '#EEF3F7', successSoft: '#E3F7EC', warningSoft: '#FFF7E5',
+  requesterRole: '#EAF6FF', requesterRoleText: '#1565C0',
+  distributorRole: '#E5F7F3', distributorRoleText: '#0F766E',
+  managerRole: '#F2EDFF', managerRoleText: '#6D28D9',
 });
 
 const dark = Object.freeze({
@@ -22,6 +25,9 @@ const dark = Object.freeze({
   sidebar: '#0A1928', sidebarHover: '#112A40', sidebarActive: '#163B59', sidebarBorder: '#1C3C55',
   header: '#0A1928', input: '#0A1928', inputBorder: '#1C3C55', placeholder: '#8EA6BB', overlay: 'rgba(2,10,18,.72)',
   tooltip: '#F5FAFF', tooltipText: '#07131F', neutral: '#112A40', successSoft: '#103B2A', warningSoft: '#493814', dangerSoft: '#48262A', disabled: '#6F879C',
+  requesterRole: '#163B59', requesterRoleText: '#70BDF2',
+  distributorRole: '#103D3B', distributorRoleText: '#5EEAD4',
+  managerRole: '#31264A', managerRoleText: '#D8B4FE',
 });
 
 const AdminThemeContext = React.createContext(null);
