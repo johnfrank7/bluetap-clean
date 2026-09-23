@@ -13,6 +13,7 @@ const { createPasswordRecoveryHandler } = require('../auth/passwordRecoveryHandl
 const { createManagerContextHandler } = require('../manager/managerContextHandler');
 const { createOutsideRadiusApprovalsHandler } = require('../manager/outsideRadiusApprovalHandler');
 const { createManagerDispatchHandler } = require('../manager/dispatchHandler');
+const { createManagerWorkspaceHandler } = require('../manager/workspaceHandler');
 const { createDistributorAssignedOrdersHandler } = require('../distributor/assignedOrdersHandler');
 const { createAdminAccountsHandler } = require('../admin/accountManagementHandler');
 const { createAdminDistributorsHandler } = require('../admin/distributorManagementHandler');
@@ -48,6 +49,7 @@ const routes = new Map([
   ['/api/requester/catalog', createRequesterCatalogHandler()],
   ['/api/requester/orders', createRequesterOrdersHandler()],
   ['/api/manager/context', createManagerContextHandler()],
+  ['/api/manager/workspace', createManagerWorkspaceHandler()],
   ['/api/manager/outside-radius-orders', createOutsideRadiusApprovalsHandler()],
   ['/api/manager/dispatch-orders', createManagerDispatchHandler()],
   ['/api/distributor/orders', createDistributorAssignedOrdersHandler()],

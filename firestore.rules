@@ -58,7 +58,13 @@ service cloud.firestore {
     // dispatch actions. Clients cannot forge, alter, or directly enumerate them.
     match /managerOperationalEvents/{eventId} { allow read, write: if false; }
     match /branches/{branchId} {
-      allow get: if isManager() && branchId == currentUser().branchId;
+      // Manager may read only their own assigned branch (Admin-written branchId).
+      // Distributor may read only their own authoritative assigned branch.
+      // Pending-approval fields never satisfy this check.
+      // Branchless, pending, or unapproved Distributors are blocked by isDistributor().
+      allow get: if
+        (isManager() && branchId == currentUser().branchId) ||
+        (isDistributor() && branchId == currentUser().branchId);
       allow list, create, update, delete: if false;
     }
 

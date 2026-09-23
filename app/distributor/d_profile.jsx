@@ -221,10 +221,12 @@ export default function DistributorProfilePage() {
   const [profileError, setProfileError] = useState('');
   const [profileLoadAttempt, setProfileLoadAttempt] = useState(0);
   const [userData, setUserData] = useState(null);
+  const [resolvedBranchName, setResolvedBranchName] = useState('');
   const [editingProfile, setEditingProfile] = useState(false);
   const [savingProfile, setSavingProfile] = useState(false);
   const [profileDraft, setProfileDraft] = useState(() => buildProfileDraft());
   const [toastVisible, setToastVisible] = useState(false);
+
 
   useEffect(() => {
     let isMounted = true;
@@ -287,6 +289,29 @@ export default function DistributorProfilePage() {
     };
   }, [profileLoadAttempt, router]);
 
+  // Resolve the authoritative branch name from the branches collection.
+  // branchId on the user document is the sole operational branch assignment
+  // (set by Admin only). This is a display-only read — never writes or infers
+  // a branch from other sources.
+  useEffect(() => {
+    const branchId = String(userData?.branchId || '').trim();
+    if (!branchId) {
+      setResolvedBranchName('');
+      return;
+    }
+    let cancelled = false;
+    getDoc(doc(db, 'branches', branchId))
+      .then((snap) => {
+        if (cancelled || !snap.exists()) return;
+        const name = String(snap.data()?.name || '').trim();
+        if (name) setResolvedBranchName(name);
+      })
+      .catch(() => {
+        // Silent — fallback to legacy waterStation field in profileDisplay
+      });
+    return () => { cancelled = true; };
+  }, [userData?.branchId]);
+
   useEffect(() => {
     Animated.timing(editFadeAnim, {
       toValue: editingProfile ? 1 : 0,
@@ -301,12 +326,16 @@ export default function DistributorProfilePage() {
       contactNumber: getContactNumber(userData),
       email: userData?.email || auth.currentUser?.email || '',
       address: getAddress(userData),
-      waterStation: getWaterStation(userData) || 'Not Assigned',
+      // Prefer the branch name resolved from the authoritative branches document
+      // (requires that Admin has assigned branchId). Fall back to the legacy
+      // waterStation profile field for older accounts, then 'Not Assigned'.
+      waterStation: resolvedBranchName || getWaterStation(userData) || 'Not Assigned',
       distributorId: getDistributorId(userData) || 'Not set',
       role: getRoleLabel(userData?.role || 'distributor'),
     }),
-    [userData]
+    [userData, resolvedBranchName]
   );
+
 
   const updateProfileDraft = (field, value) => {
     setProfileDraft((currentDraft) => ({

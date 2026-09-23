@@ -57,3 +57,30 @@ test('branch definitions and Admin audit logs are backend-write-only', () => {
   assert.match(rules, /request\.auth\.token\.manager == true/);
   assert.match(rules, /request\.auth\.token\.admin == true/);
 });
+
+test('approved Distributor may get only their own authoritative assigned branch', () => {
+  // The rule must include isDistributor() gating the branch get.
+  assert.match(rules, /isDistributor\(\) && branchId == currentUser\(\)\.branchId/);
+  // Both Manager and Distributor paths must appear in the branches block.
+  assert.match(rules, /match \/branches\/\{branchId\}[\s\S]*isManager\(\) && branchId == currentUser\(\)\.branchId[\s\S]*isDistributor\(\) && branchId == currentUser\(\)\.branchId/);
+});
+
+test('Distributor branch rule never references requestedBranchId for access', () => {
+  // requestedBranchId must not appear in the branches match block.
+  const branchBlock = rules.match(/match \/branches\/\{branchId\}\s*\{[\s\S]*?\}/)?.[0] || '';
+  assert.ok(branchBlock.length > 0, 'branches block must be present');
+  assert.ok(!branchBlock.includes('requestedBranchId'), 'requestedBranchId must not appear in branch access rule');
+});
+
+test('isDistributor() requires approval status — branchless and pending Distributors are blocked', () => {
+  // isDistributor() checks distributorStatus/approvalStatus/status and branchId is string.
+  assert.match(rules, /function isDistributor\(\)[\s\S]*distributorStatus == 'active' \|\| currentUser\(\)\.distributorStatus == 'approved'/);
+  assert.match(rules, /function isDistributor\(\)[\s\S]*currentUser\(\)\.branchId is string/);
+});
+
+test('branch list create update delete remain blocked for all clients', () => {
+  assert.match(rules, /match \/branches\/\{branchId\}[\s\S]*allow list, create, update, delete:\s*if false;/);
+  // Confirm no allow list rule exists for branches.
+  const branchBlock = rules.match(/match \/branches\/\{branchId\}\s*\{[\s\S]*?\}/)?.[0] || '';
+  assert.ok(!branchBlock.includes('allow list: if'), 'branch listing must remain blocked');
+});

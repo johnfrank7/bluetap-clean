@@ -34,6 +34,7 @@ const EXPECTED_ROUTES = [
   '/api/manager/context',
   '/api/manager/dispatch-orders',
   '/api/manager/outside-radius-orders',
+  '/api/manager/workspace',
   '/api/requester/catalog',
   '/api/requester/orders',
   '/api/verification/face-service-status',

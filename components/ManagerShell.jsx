@@ -15,6 +15,7 @@ import { useRouter } from 'expo-router';
 
 import { BLUETAP_COLORS } from '../constants/bluetapTheme';
 import { useAdminTheme } from './AdminTheme';
+import AdminIcon from './AdminIcon';
 import { getModuleSession, signOutAndClearSessions } from '../services/authSession';
 
 export const MANAGER_COLORS = {
@@ -32,13 +33,14 @@ export const MANAGER_COLORS = {
 };
 
 const NAV_ITEMS = [
-  { key: 'dashboard', label: 'Dashboard', path: '/manager/dashboard' },
-  { key: 'products', label: 'Products', path: '/manager/products' },
-  { key: 'requests', label: 'Requests', path: '/manager/request' },
-  { key: 'distributors', label: 'Distributors', path: '/manager/distributors' },
-  { key: 'analytics', label: 'Analytics', path: '/manager/analytics' },
-  { key: 'profile', label: 'Profile', path: '/manager/profile' },
+  { key: 'dashboard', label: 'Dashboard', path: '/manager/dashboard', icon: 'dashboard' },
+  { key: 'products', label: 'Products', path: '/manager/products', icon: 'products' },
+  { key: 'requests', label: 'Requests', path: '/manager/request', icon: 'security' },
+  { key: 'distributors', label: 'Distributors', path: '/manager/distributors', icon: 'distributors' },
+  { key: 'analytics', label: 'Analytics', path: '/manager/analytics', icon: 'accounts' },
+  { key: 'profile', label: 'Profile', path: '/manager/profile', icon: 'theme' },
 ];
+
 
 export function ManagerWaterDrop({ color, size = 18, outline = false }) {
   const { colors } = useAdminTheme();
@@ -124,6 +126,11 @@ export default function ManagerShell({
         ]}
         onPress={() => router.replace(item.path)}
       >
+        <AdminIcon
+          name={item.icon}
+          size={isCompactLayout ? 16 : 18}
+          color={isActive ? '#FFFFFF' : '#CBEAFF'}
+        />
         <Text style={[styles.navText, isActive && styles.navTextActive]}>
           {item.label}
         </Text>
@@ -278,7 +285,9 @@ const createStyles = (colors) => StyleSheet.create({
   },
   navItem: {
     minHeight: 44,
-    justifyContent: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
     borderRadius: 8,
     paddingHorizontal: 18,
     marginBottom: 4,
