@@ -15,7 +15,7 @@ test('account workspace DTO exposes only safe normalized fields', () => {
     username: 'dinawater', approvalStatus: 'pending', branchId: 'branch-a', mustChangePassword: true,
     password: 'must-never-leak', faceEmbedding: [1, 2, 3], accountSource: 'public_registration',
   }, new Map([['branch-a', 'North Branch']]), { metadata: { lastSignInTime: '2026-09-20T00:00:00Z' } });
-  assert.deepEqual(Object.keys(account).sort(), ['accountSource','branchId','branchName','createdAt','email','fullName','lastSignInAt','mustChangePassword','onboarding','requestedBranchId','requestedBranchName','role','sessionIdleTimeoutOverrideMinutes','sessionPolicy','status','uid','updatedAt','username'].sort());
+  assert.deepEqual(Object.keys(account).sort(), ['accountSource','branchId','branchName','createdAt','displayUid','email','fullName','lastSignInAt','mustChangePassword','onboarding','publicUid','requestedBranchId','requestedBranchName','role','sessionIdleTimeoutOverrideMinutes','sessionPolicy','status','uid','uniqueId','updatedAt','username'].sort());
   assert.equal(account.status, 'pending');
   assert.equal(account.email, 'dina@example.test');
   assert.equal(account.branchName, 'North Branch');

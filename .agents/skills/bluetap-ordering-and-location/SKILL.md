@@ -48,7 +48,8 @@ Use this skill for BlueTap product catalogs, provider selection, order creation,
 - Do not change `currentBranchId` or `branchId` when a transfer is proposed. Change both only after target acceptance; a decline returns the source-owned order to assignment without deleting historical transfer data.
 - Preserve append-only assignment, transfer, and dispatch event histories with server timestamps and actor IDs. Derive Manager and Distributor notifications/queues from those server-scoped order states; do not create a general delivery chat or expose unrelated orders.
 - Persist each accepted or declined branch-transfer outcome as a server-written, deduplicated Manager operational event scoped to the source Branch. Source Managers retrieve it through an authorized backend endpoint; target and unrelated Branch Managers cannot enumerate it.
-- Return exact delivery coordinates only to the current owning Branch Manager and the assigned active Distributor. Distributor order endpoints must filter by both the authenticated UID and current Branch ownership.
+- Admin Distributor Override: When necessary for platform-wide intervention, authorized Admins can override distributor assignment via `/api/admin/dispatch-override`. This action strictly enforces same-branch ownership (the replacement distributor must belong to the order's owning branch) and requires a documented audit reason recorded in `assignmentHistory` with `event: 'ADMIN_DISPATCH_OVERRIDE'` and the Admin's UID.
+- Outside-radius request flow: Selecting a branch outside the normal service radius presents a clear distance comparison and warning. The outside-radius approval request is submitted seamlessly via the primary form submission without requiring a separate pre-submission button, and proceeds to Manager outside-radius review upon order creation. Nearest provider cards indicate proximity badge without forcing active selection styles over the user's chosen branch.
 
 ## Location and maps
 

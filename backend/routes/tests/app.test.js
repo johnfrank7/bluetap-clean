@@ -11,6 +11,7 @@ const EXPECTED_ROUTES = [
   '/api/admin/accounts',
   '/api/admin/branches',
   '/api/admin/dashboard/overview',
+  '/api/admin/dispatch-override',
   '/api/admin/distributors',
   '/api/admin/managers',
   '/api/admin/products',

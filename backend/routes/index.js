@@ -20,6 +20,7 @@ const { createAdminDistributorsHandler } = require('../admin/distributorManageme
 const { createSessionPolicyHandler } = require('../auth/sessionPolicyHandler');
 const { createAdminDashboardOverviewHandler } = require('../admin/dashboardOverviewHandler');
 const { createAdminProductsHandler } = require('../admin/productManagementHandler');
+const { createAdminDispatchOverrideHandler } = require('../admin/adminDispatchOverrideHandler');
 const { createRequesterCatalogHandler, createRequesterOrdersHandler } = require('../requester/orderingHandler');
 
 const routes = new Map([
@@ -46,6 +47,7 @@ const routes = new Map([
   ['/api/admin/distributors', createAdminDistributorsHandler()],
   ['/api/admin/dashboard/overview', createAdminDashboardOverviewHandler()],
   ['/api/admin/products', createAdminProductsHandler()],
+  ['/api/admin/dispatch-override', createAdminDispatchOverrideHandler()],
   ['/api/requester/catalog', createRequesterCatalogHandler()],
   ['/api/requester/orders', createRequesterOrdersHandler()],
   ['/api/manager/context', createManagerContextHandler()],

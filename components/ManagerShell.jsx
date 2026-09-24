@@ -1,11 +1,12 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
+  Animated,
   Image,
   Modal,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   useWindowDimensions,
   View,
@@ -13,7 +14,9 @@ import {
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import { collection, onSnapshot, query, where } from 'firebase/firestore';
 
+import { db } from '../firebase';
 import { BLUETAP_COLORS } from '../constants/bluetapTheme';
 import { useAdminTheme } from './AdminTheme';
 import AdminIcon from './AdminIcon';
@@ -35,114 +38,111 @@ export const MANAGER_COLORS = {
 
 const NAV_ITEMS = [
   { key: 'dashboard', label: 'Dashboard', path: '/manager/dashboard', icon: 'dashboard' },
-  { key: 'products', label: 'Products', path: '/manager/products', icon: 'products' },
   { key: 'requests', label: 'Requests', path: '/manager/request', icon: 'security' },
   { key: 'distributors', label: 'Distributors', path: '/manager/distributors', icon: 'distributors' },
+  { key: 'products', label: 'Products', path: '/manager/products', icon: 'products' },
   { key: 'analytics', label: 'Analytics', path: '/manager/analytics', icon: 'accounts' },
   { key: 'profile', label: 'Profile', path: '/manager/profile', icon: 'theme' },
 ];
 
+const DESKTOP_WIDTH = 244;
+const COLLAPSED_WIDTH = 76;
+const DRAWER_WIDTH = 286;
 
 export function ManagerWaterDrop({ color, size = 18, outline = false }) {
   const { colors } = useAdminTheme();
-  const styles = createStyles(colors);
   const dropColor = color || colors.primaryLight;
   return (
     <View
-      style={[
-        styles.drop,
-        {
-          width: size,
-          height: size,
-          borderRadius: size / 2,
-          backgroundColor: outline ? 'transparent' : dropColor,
-          borderColor: dropColor,
-          borderWidth: outline ? 1.5 : 0,
-        },
-      ]}
+      style={{
+        width: size,
+        height: size,
+        borderRadius: size / 2,
+        backgroundColor: outline ? 'transparent' : dropColor,
+        borderColor: dropColor,
+        borderWidth: outline ? 1.5 : 0,
+        transform: [{ rotate: '45deg' }],
+        borderTopLeftRadius: 3,
+      }}
     />
   );
 }
 
 export function ManagerPill({ children, tone = 'blue' }) {
   const { colors } = useAdminTheme();
-  const styles = createStyles(colors);
-  const toneStyles = {
-    blue: styles.pillBlue,
-    green: styles.pillGreen,
-    red: styles.pillRed,
-    cyan: styles.pillCyan,
+  const toneBg = {
+    blue: colors.primarySoft,
+    green: colors.successSoft,
+    red: colors.dangerSoft,
+    cyan: colors.neutral,
   };
-  const textStyles = {
-    blue: styles.pillTextBlue,
-    green: styles.pillTextGreen,
-    red: styles.pillTextRed,
-    cyan: styles.pillTextCyan,
+  const toneText = {
+    blue: colors.primary,
+    green: colors.success,
+    red: colors.danger,
+    cyan: colors.primaryLight,
   };
 
   return (
-    <View style={[styles.pill, toneStyles[tone] || toneStyles.blue]}>
-      <Text style={[styles.pillText, textStyles[tone] || textStyles.blue]}>
+    <View style={{
+      alignSelf: 'flex-start',
+      borderRadius: 999,
+      paddingHorizontal: 11,
+      paddingVertical: 5,
+      backgroundColor: toneBg[tone] || toneBg.blue,
+    }}>
+      <Text style={{
+        fontSize: 12,
+        fontWeight: 'bold',
+        color: toneText[tone] || toneText.blue,
+      }}>
         {children}
       </Text>
     </View>
   );
 }
 
-export function ManagerThemeSwitcher({ colors, isCompact }) {
+function SidebarThemeToggle({ collapsed, colors }) {
   const { resolvedTheme, setPreference } = useAdminTheme();
   const isDark = resolvedTheme === 'dark';
-  const label = isDark ? 'Dark' : 'Light';
+  const label = isDark ? 'Dark mode' : 'Light mode';
+
   return (
-    <TouchableOpacity
-      accessibilityRole="switch"
-      accessibilityLabel={isDark ? 'Switch to light theme' : 'Switch to dark theme'}
-      accessibilityState={{ checked: isDark }}
-      onPress={() => setPreference(isDark ? 'light' : 'dark')}
-      style={[
-        {
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: 7,
-          paddingHorizontal: 10,
-          paddingVertical: 5,
-          borderRadius: 8,
-          backgroundColor: colors.surfaceAlt || 'rgba(0,0,0,0.04)',
-          borderWidth: 1,
-          borderColor: colors.border,
-        },
-      ]}
-    >
-      <View
-        style={{
-          width: 36,
-          height: 20,
-          borderRadius: 999,
-          backgroundColor: isDark ? colors.primary : colors.success,
-          padding: 2,
-          justifyContent: 'center',
-        }}
+    <View style={[styles.themeSection, { borderTopColor: colors.sidebarBorder }]}>
+      <TouchableOpacity
+        accessibilityRole="switch"
+        accessibilityLabel={isDark ? 'Switch to light theme' : 'Switch to dark theme'}
+        accessibilityState={{ checked: isDark }}
+        onPress={() => setPreference(isDark ? 'light' : 'dark')}
+        style={[styles.themeToggle, collapsed && styles.themeToggleCollapsed]}
       >
-        <View
-          style={{
-            width: 16,
-            height: 16,
-            borderRadius: 999,
-            backgroundColor: '#FFFFFF',
-            alignSelf: isDark ? 'flex-end' : 'flex-start',
-            shadowColor: '#000',
-            shadowOpacity: 0.18,
-            shadowRadius: 2,
-            shadowOffset: { width: 0, height: 1 },
-          }}
-        />
-      </View>
-      {!isCompact && (
-        <Text style={{ color: colors.textPrimary, fontSize: 12, fontWeight: '800' }}>
-          {label}
-        </Text>
-      )}
-    </TouchableOpacity>
+        <View style={[styles.themeTrack, { backgroundColor: isDark ? colors.primary : 'rgba(255,255,255,0.28)' }]}>
+          <View style={[styles.themeThumb, isDark && styles.themeThumbDark]}>
+            <Text style={{ fontSize: 10, textAlign: 'center', lineHeight: 22, color: isDark ? '#0F172A' : '#F59E0B' }}>
+              {isDark ? '☾' : '☀'}
+            </Text>
+          </View>
+        </View>
+        {!collapsed && <Text style={styles.themeLabel}>{label}</Text>}
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+function SidebarLogoutControl({ collapsed, onPress, colors }) {
+  return (
+    <View style={styles.navItemWrap}>
+      <TouchableOpacity
+        accessibilityRole="button"
+        accessibilityLabel="Log out"
+        accessibilityHint={collapsed ? 'Log out of BlueTap' : undefined}
+        onPress={onPress}
+        style={[styles.logout, collapsed && styles.logoutCollapsed, { borderTopColor: colors.sidebarBorder }]}
+      >
+        <AdminIcon name="logout" size={21} color="#FFD7D7" />
+        {!collapsed && <Text style={styles.logoutText}>Log out</Text>}
+      </TouchableOpacity>
+    </View>
   );
 }
 
@@ -153,21 +153,113 @@ export default function ManagerShell({
   title,
 }) {
   const { colors, resolvedTheme } = useAdminTheme();
-  const styles = createStyles(colors);
   const router = useRouter();
   const { width } = useWindowDimensions();
-  const isCompactLayout = width < 768;
+  const compact = width < 900;
   const managerSession = getModuleSession('manager');
+  const [collapsed, setCollapsed] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const [confirmLogout, setConfirmLogout] = useState(false);
+  const [actionableRequestsCount, setActionableRequestsCount] = useState(0);
 
-  React.useEffect(() => {
+  const sidebarWidth = useRef(new Animated.Value(DESKTOP_WIDTH)).current;
+  const drawerProgress = useRef(new Animated.Value(0)).current;
+
+  // Branch-scoped actionable requests subscription
+  const managerBranchId = managerSession?.branchId || managerSession?.branch?.id || '';
+
+  useEffect(() => {
+    if (!managerBranchId) {
+      setActionableRequestsCount(0);
+      return;
+    }
+
+    let count1 = 0;
+    let count2 = 0;
+    let unsub1 = null;
+    let unsub2 = null;
+
+    try {
+      const q1 = query(
+        collection(db, 'requests'),
+        where('branchId', '==', managerBranchId),
+        where('status', 'in', ['pending', 'outside_radius_pending_approval', 'awaiting_distributor_assignment'])
+      );
+      unsub1 = onSnapshot(
+        q1,
+        (snap) => {
+          count1 = snap.size;
+          setActionableRequestsCount(count1 + count2);
+        },
+        () => {}
+      );
+
+      const q2 = query(
+        collection(db, 'requests'),
+        where('transferToBranchId', '==', managerBranchId),
+        where('status', '==', 'branch_transfer_pending')
+      );
+      unsub2 = onSnapshot(
+        q2,
+        (snap) => {
+          count2 = snap.size;
+          setActionableRequestsCount(count1 + count2);
+        },
+        () => {}
+      );
+    } catch (err) {
+      console.log('Manager requests badge error:', err?.message);
+    }
+
+    return () => {
+      if (typeof unsub1 === 'function') unsub1();
+      if (typeof unsub2 === 'function') unsub2();
+    };
+  }, [managerBranchId]);
+
+  useEffect(() => {
+    Animated.timing(sidebarWidth, {
+      toValue: collapsed ? COLLAPSED_WIDTH : DESKTOP_WIDTH,
+      duration: 240,
+      useNativeDriver: false,
+    }).start();
+  }, [collapsed, sidebarWidth]);
+
+  useEffect(() => {
+    if (!compact) setDrawerOpen(false);
+  }, [compact]);
+
+  useEffect(() => {
+    Animated.timing(drawerProgress, {
+      toValue: drawerOpen ? 1 : 0,
+      duration: 240,
+      useNativeDriver: false,
+    }).start();
+  }, [drawerOpen, drawerProgress]);
+
+  useEffect(() => {
     if (!globalThis.addEventListener) return undefined;
     const onKeyDown = (event) => {
-      if (event.key === 'Escape' && confirmLogout) setConfirmLogout(false);
+      if (event.key !== 'Escape') return;
+      if (confirmLogout) setConfirmLogout(false);
+      else if (drawerOpen) setDrawerOpen(false);
     };
     globalThis.addEventListener('keydown', onKeyDown);
     return () => globalThis.removeEventListener?.('keydown', onKeyDown);
-  }, [confirmLogout]);
+  }, [confirmLogout, drawerOpen]);
+
+  const toggleNavigation = () => {
+    if (compact) {
+      setDrawerOpen((open) => !open);
+    } else {
+      setCollapsed((value) => !value);
+    }
+  };
+
+  const navigate = (path) => {
+    router.replace(path);
+    if (compact) setDrawerOpen(false);
+  };
 
   const completeLogout = async () => {
     setConfirmLogout(false);
@@ -175,100 +267,158 @@ export default function ManagerShell({
     router.replace('/login');
   };
 
-  const navigationItems = NAV_ITEMS.map((item) => {
-    const isActive = active === item.key;
-
-    return (
-      <TouchableOpacity
-        key={item.key}
-        activeOpacity={0.85}
-        style={[
-          styles.navItem,
-          isCompactLayout && styles.navItemCompact,
-          isActive && styles.navItemActive,
-        ]}
-        onPress={() => router.replace(item.path)}
-      >
-        <AdminIcon
-          name={item.icon}
-          size={isCompactLayout ? 16 : 18}
-          color={isActive ? '#FFFFFF' : '#CBEAFF'}
+  const renderSidebar = (isCollapsed, mobile = false) => (
+    <Animated.View
+      style={[
+        styles.sidebar,
+        mobile && styles.drawer,
+        {
+          width: mobile ? DRAWER_WIDTH : sidebarWidth,
+          backgroundColor: colors.sidebar,
+          borderRightColor: colors.sidebarBorder,
+          transform: mobile
+            ? [
+                {
+                  translateX: drawerProgress.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [-DRAWER_WIDTH, 0],
+                  }),
+                },
+              ]
+            : undefined,
+        },
+      ]}
+    >
+      <View style={[styles.brand, { borderBottomColor: colors.sidebarBorder }, isCollapsed && styles.brandCollapsed]}>
+        <Image
+          source={require('../assets/icons/bluetapwhitelogo.png')}
+          style={[styles.brandLogo, isCollapsed && styles.brandLogoCollapsed]}
+          resizeMode="contain"
         />
-        <Text style={[styles.navText, isActive && styles.navTextActive]}>
-          {item.label}
-        </Text>
-      </TouchableOpacity>
-    );
-  });
-
-  return (
-    <SafeAreaView style={styles.root}>
-      <StatusBar style={resolvedTheme === 'dark' ? 'light' : 'dark'} />
-      <View style={[styles.layout, isCompactLayout && styles.layoutCompact]}>
-        <View style={[styles.sidebar, isCompactLayout && styles.sidebarCompact]}>
-          <View style={[styles.brand, isCompactLayout && styles.brandCompact]}>
-            <Image
-              source={require('../assets/icons/bluetapwhitelogo.png')}
-              style={styles.brandIcon}
-              resizeMode="contain"
-              tintColor="#FFFFFF"
-            />
-            <Text style={styles.brandText}>BlueTap</Text>
+        {!isCollapsed && (
+          <View style={{ flex: 1 }}>
+            <Text style={styles.brandName}>BlueTap</Text>
+            <Text style={styles.brandRole}>Manager</Text>
+            {!!managerSession?.branchName && (
+              <Text style={styles.brandBranch} numberOfLines={1}>
+                {managerSession.branchName}
+              </Text>
+            )}
           </View>
-          {!!managerSession?.branchName && <Text style={[styles.branchName, isCompactLayout && styles.branchNameCompact]} numberOfLines={1}>{managerSession.branchName}</Text>}
+        )}
+      </View>
 
-          {isCompactLayout ? (
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.navListCompact}
-            >
-              {navigationItems}
-            </ScrollView>
-          ) : (
-            <View style={styles.navList}>{navigationItems}</View>
-          )}
+      <View style={styles.navigation}>
+        {NAV_ITEMS.map((item) => {
+          const isActive = active === item.key;
+          const isReq = item.key === 'requests';
+          const label = isReq && actionableRequestsCount > 0
+            ? `Requests [${actionableRequestsCount}]`
+            : item.label;
 
-          {!isCompactLayout && (
-            <View style={styles.sidebarFooter}>
-              <Text style={styles.footerText}>BlueTap Manager v2</Text>
-            </View>
-          )}
-        </View>
-
-        <View style={styles.main}>
-          <View style={[styles.topbar, isCompactLayout && styles.topbarCompact]}>
-            <View style={[styles.titleBlock, isCompactLayout && styles.titleBlockCompact]}>
-              <Text style={styles.pageTitle}>{title}</Text>
-              {!!subtitle && <Text style={styles.pageSubtitle}>{subtitle}</Text>}
-            </View>
-
-            <View style={[styles.topbarActions, isCompactLayout && styles.topbarActionsCompact]}>
-              <ManagerThemeSwitcher colors={colors} isCompact={isCompactLayout} />
-
+          return (
+            <View key={item.key} style={styles.navItemWrap}>
               <TouchableOpacity
-                activeOpacity={0.85}
+                accessibilityRole="button"
+                accessibilityLabel={label}
+                accessibilityState={{ selected: isActive }}
+                onPress={() => navigate(item.path)}
                 style={[
-                  styles.logoutButton,
-                  isCompactLayout && styles.logoutButtonCompact,
+                  styles.navItem,
+                  isCollapsed && styles.navItemCollapsed,
+                  isActive && {
+                    backgroundColor: colors.sidebarActive,
+                    borderColor: 'rgba(255,255,255,.42)',
+                  },
                 ]}
-                onPress={() => setConfirmLogout(true)}
               >
-                <Text style={styles.logoutText}>Logout</Text>
+                <AdminIcon name={item.icon} size={20} color={isActive ? '#FFFFFF' : '#CBEAFF'} />
+                {!isCollapsed && (
+                  <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingRight: 4 }}>
+                    <Text numberOfLines={1} style={styles.navText}>
+                      {item.label}
+                    </Text>
+                    {isReq && (
+                      <View style={[styles.badgePill, { backgroundColor: actionableRequestsCount > 0 ? colors.warning : 'rgba(255,255,255,0.2)' }]}>
+                        <Text style={styles.badgePillText}>{actionableRequestsCount}</Text>
+                      </View>
+                    )}
+                  </View>
+                )}
+                {isActive && <View style={styles.activeMarker} />}
               </TouchableOpacity>
             </View>
+          );
+        })}
+      </View>
+
+      <View style={styles.sidebarBottom}>
+        <SidebarThemeToggle collapsed={isCollapsed} colors={colors} />
+        <SidebarLogoutControl
+          collapsed={isCollapsed}
+          colors={colors}
+          onPress={() => setConfirmLogout(true)}
+        />
+      </View>
+    </Animated.View>
+  );
+
+  return (
+    <SafeAreaView style={[styles.root, { backgroundColor: colors.background }]}>
+      <StatusBar style={resolvedTheme === 'dark' ? 'light' : 'dark'} />
+      <View style={styles.layout}>
+        {!compact && renderSidebar(collapsed)}
+
+        <View style={styles.main}>
+          <View style={[styles.header, { backgroundColor: colors.header, borderBottomColor: colors.border }]}>
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel="Toggle navigation"
+              onPress={toggleNavigation}
+              style={[styles.menuButton, { backgroundColor: colors.primarySoft, borderColor: colors.border }]}
+            >
+              <AdminIcon
+                name={compact ? (drawerOpen ? 'close' : 'menu') : (collapsed ? 'menu' : 'close')}
+                color={colors.primary}
+                size={23}
+              />
+            </TouchableOpacity>
+
+            <View style={styles.heading}>
+              <Text numberOfLines={1} style={[styles.title, { color: colors.textPrimary }]}>
+                {title}
+              </Text>
+              {!!subtitle && (
+                <Text numberOfLines={2} style={[styles.subtitle, { color: colors.textSecondary }]}>
+                  {subtitle}
+                </Text>
+              )}
+            </View>
+
+            <View style={[styles.managerBadge, { backgroundColor: colors.primarySoft, borderColor: colors.border }]}>
+              <AdminIcon name="security" color={colors.primary} size={16} />
+              <Text style={[styles.managerBadgeText, { color: colors.primary }]}>Manager</Text>
+            </View>
           </View>
 
-          <ScrollView
-            contentContainerStyle={[
-              styles.content,
-              isCompactLayout && styles.contentCompact,
-            ]}
-            showsVerticalScrollIndicator={false}
-          >
+          <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
             {children}
           </ScrollView>
         </View>
+
+        {compact && (
+          <>
+            {drawerOpen && (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Close navigation"
+                onPress={() => setDrawerOpen(false)}
+                style={[styles.backdrop, { backgroundColor: colors.overlay }]}
+              />
+            )}
+            {renderSidebar(false, true)}
+          </>
+        )}
       </View>
 
       <Modal visible={confirmLogout} transparent animationType="fade" onRequestClose={() => setConfirmLogout(false)}>
@@ -294,297 +444,55 @@ export default function ManagerShell({
   );
 }
 
-const createStyles = (colors) => StyleSheet.create({
-  root: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  layout: {
-    flex: 1,
-    flexDirection: 'row',
-    backgroundColor: colors.background,
-  },
-  layoutCompact: {
-    flexDirection: 'column',
-  },
-  sidebar: {
-    width: 230,
-    backgroundColor: colors.sidebar,
-    borderRightWidth: 1,
-    borderRightColor: 'rgba(255,255,255,0.08)',
-  },
-  sidebarCompact: {
-    width: '100%',
-    borderRightWidth: 0,
-  },
-  brand: {
-    height: 74,
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 28,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.08)',
-  },
-  brandCompact: {
-    height: 56,
-    paddingHorizontal: 20,
-  },
-  brandIcon: {
-    width: 26,
-    height: 26,
-    marginRight: 10,
-  },
-  brandText: {
-    color: '#FFFFFF',
-    fontSize: 19,
-    fontWeight: 'bold',
-  },
-  branchName: {
-    color: '#CBEAFF',
-    fontSize: 12,
-    fontWeight: '700',
-    paddingHorizontal: 28,
-    paddingTop: 10,
-  },
-  branchNameCompact: {
-    paddingHorizontal: 20,
-    paddingTop: 7,
-  },
-  navList: {
-    paddingTop: 14,
-    paddingHorizontal: 14,
-  },
-  navListCompact: {
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-  },
-  navItem: {
-    minHeight: 44,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    borderRadius: 8,
-    paddingHorizontal: 18,
-    marginBottom: 4,
-    borderWidth: 1,
-    borderColor: 'transparent',
-  },
-  navItemCompact: {
-    minHeight: 36,
-    paddingHorizontal: 13,
-    marginRight: 6,
-    marginBottom: 0,
-  },
-  navItemActive: {
-    backgroundColor: colors.sidebarActive,
-    borderColor: colors.primaryLight,
-  },
-  navText: {
-    color: '#E3F2FD',
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  navTextActive: {
-    color: '#FFFFFF',
-  },
-  sidebarFooter: {
-    marginTop: 'auto',
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255,255,255,0.08)',
-    padding: 20,
-  },
-  footerText: {
-    color: '#E3F2FD',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  main: {
-    flex: 1,
-    minWidth: 0,
-  },
-  topbar: {
-    minHeight: 88,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 28,
-    paddingTop: 18,
-    paddingBottom: 12,
-  },
-  topbarCompact: {
-    alignItems: 'stretch',
-    flexDirection: 'column',
-    paddingHorizontal: 16,
-    paddingTop: 16,
-  },
-  titleBlock: {
-    flex: 1,
-    minWidth: 0,
-    paddingRight: 20,
-  },
-  titleBlockCompact: {
-    paddingRight: 0,
-  },
-  pageTitle: {
-    color: colors.textPrimary,
-    fontSize: 23,
-    fontWeight: 'bold',
-    letterSpacing: 0,
-  },
-  pageSubtitle: {
-    color: colors.textSecondary,
-    fontSize: 13,
-    fontWeight: '500',
-    marginTop: 4,
-  },
-  topbarActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  topbarActionsCompact: {
-    width: '100%',
-    marginTop: 14,
-  },
-  searchBox: {
-    width: 230,
-    height: 40,
-    justifyContent: 'center',
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
-    paddingHorizontal: 15,
-  },
-  searchBoxCompact: {
-    flex: 1,
-    width: undefined,
-  },
-  searchInput: {
-    color: colors.textPrimary,
-    fontSize: 13,
-    outlineStyle: 'none',
-  },
-  logoutButton: {
-    height: 40,
-    minWidth: 82,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: colors.primary,
-    backgroundColor: colors.surface,
-    marginLeft: 10,
-    paddingHorizontal: 18,
-  },
-  logoutButtonCompact: {
-    minWidth: 72,
-    paddingHorizontal: 14,
-  },
-  logoutText: {
-    color: colors.primary,
-    fontSize: 13,
-    fontWeight: 'bold',
-  },
-  content: {
-    paddingHorizontal: 28,
-    paddingBottom: 30,
-  },
-  contentCompact: {
-    paddingHorizontal: 16,
-    paddingBottom: 24,
-  },
-  drop: {
-    transform: [{ rotate: '45deg' }],
-    borderTopLeftRadius: 3,
-  },
-  pill: {
-    alignSelf: 'flex-start',
-    borderRadius: 999,
-    paddingHorizontal: 11,
-    paddingVertical: 5,
-  },
-  pillText: {
-    fontSize: 12,
-    fontWeight: 'bold',
-  },
-  pillBlue: {
-    backgroundColor: colors.primarySoft,
-  },
-  pillGreen: {
-    backgroundColor: colors.successSoft,
-  },
-  pillRed: {
-    backgroundColor: colors.dangerSoft,
-  },
-  pillCyan: {
-    backgroundColor: colors.neutral,
-  },
-  pillTextBlue: {
-    color: colors.primary,
-  },
-  pillTextGreen: {
-    color: colors.success,
-  },
-  pillTextRed: {
-    color: colors.danger,
-  },
-  pillTextCyan: {
-    color: colors.primaryLight,
-  },
-  modalBackdrop: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 20,
-  },
-  modal: {
-    width: '100%',
-    maxWidth: 420,
-    borderWidth: 1,
-    borderRadius: 18,
-    padding: 22,
-  },
-  modalIcon: {
-    width: 46,
-    height: 46,
-    borderRadius: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 14,
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: '900',
-  },
-  modalBody: {
-    fontSize: 14,
-    lineHeight: 21,
-    marginTop: 7,
-  },
-  modalActions: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    gap: 10,
-    marginTop: 22,
-  },
-  modalSecondary: {
-    minHeight: 44,
-    paddingHorizontal: 17,
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderRadius: 10,
-  },
-  modalSecondaryText: {
-    fontWeight: '800',
-  },
-  modalDanger: {
-    minHeight: 44,
-    paddingHorizontal: 17,
-    justifyContent: 'center',
-    borderRadius: 10,
-  },
-  modalDangerText: {
-    color: '#FFFFFF',
-    fontWeight: '900',
-  },
+const styles = StyleSheet.create({
+  root: { flex: 1 },
+  layout: { flex: 1, flexDirection: 'row' },
+  sidebar: { zIndex: 4, overflow: 'visible', borderRightWidth: 1 },
+  drawer: { position: 'absolute', left: 0, top: 0, bottom: 0, elevation: 18, shadowColor: '#000', shadowOpacity: 0.32, shadowRadius: 20, shadowOffset: { width: 4, height: 0 } },
+  brand: { minHeight: 86, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 22, gap: 11, borderBottomWidth: 1, paddingVertical: 12 },
+  brandCollapsed: { justifyContent: 'center', paddingHorizontal: 12 },
+  brandLogo: { width: 34, height: 34 },
+  brandLogoCollapsed: { width: 38, height: 38 },
+  brandName: { color: '#FFFFFF', fontSize: 19, fontWeight: '900' },
+  brandRole: { color: '#CBEAFF', fontSize: 12, marginTop: 1, fontWeight: '700' },
+  brandBranch: { color: '#90CDF4', fontSize: 11, marginTop: 2, fontWeight: '600' },
+  navigation: { paddingHorizontal: 12, paddingTop: 16 },
+  navItemWrap: { position: 'relative', zIndex: 10 },
+  navItem: { minHeight: 48, flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 13, marginBottom: 6, borderRadius: 12, borderWidth: 1, borderColor: 'transparent' },
+  navItemCollapsed: { justifyContent: 'center', paddingHorizontal: 0 },
+  navText: { color: '#F5FBFF', fontSize: 13, fontWeight: '800', flex: 1 },
+  activeMarker: { width: 4, height: 18, borderRadius: 999, backgroundColor: '#E0F3FF' },
+  sidebarBottom: { marginTop: 'auto' },
+  themeSection: { borderTopWidth: 1, paddingHorizontal: 16, paddingVertical: 14 },
+  themeToggle: { minHeight: 42, flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 2, borderRadius: 12 },
+  themeToggleCollapsed: { justifyContent: 'center', paddingHorizontal: 0 },
+  themeTrack: { width: 52, height: 28, borderRadius: 999, padding: 3, justifyContent: 'center' },
+  themeThumb: { width: 22, height: 22, borderRadius: 999, backgroundColor: '#FFFFFF', shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 3, shadowOffset: { width: 0, height: 1 }, elevation: 2 },
+  themeThumbDark: { alignSelf: 'flex-end' },
+  themeLabel: { color: '#FFFFFF', fontSize: 13, fontWeight: '800' },
+  logout: { minHeight: 60, flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 22, borderTopWidth: 1 },
+  logoutCollapsed: { justifyContent: 'center', paddingHorizontal: 0 },
+  logoutText: { color: '#FFE1E1', fontWeight: '900', fontSize: 13 },
+  main: { flex: 1, minWidth: 0 },
+  header: { minHeight: 92, flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 24, borderBottomWidth: 1 },
+  menuButton: { width: 42, height: 42, borderRadius: 11, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  heading: { flex: 1, minWidth: 0 },
+  title: { fontSize: 24, fontWeight: '900' },
+  subtitle: { fontSize: 13, lineHeight: 18, marginTop: 3 },
+  managerBadge: { minHeight: 34, flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1, borderRadius: 999, paddingHorizontal: 10 },
+  managerBadgeText: { fontSize: 12, fontWeight: '900' },
+  content: { paddingHorizontal: 28, paddingBottom: 32, paddingTop: 14, flexGrow: 1 },
+  backdrop: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, zIndex: 3 },
+  modalBackdrop: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 20 },
+  modal: { width: '100%', maxWidth: 420, borderWidth: 1, borderRadius: 18, padding: 22 },
+  modalIcon: { width: 46, height: 46, borderRadius: 14, alignItems: 'center', justifyContent: 'center', marginBottom: 14 },
+  modalTitle: { fontSize: 20, fontWeight: '900' },
+  modalBody: { fontSize: 14, lineHeight: 21, marginTop: 7 },
+  modalActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 22 },
+  modalSecondary: { minHeight: 44, paddingHorizontal: 17, justifyContent: 'center', borderWidth: 1, borderRadius: 10 },
+  modalSecondaryText: { fontWeight: '800' },
+  modalDanger: { minHeight: 44, paddingHorizontal: 17, justifyContent: 'center', borderRadius: 10 },
+  modalDangerText: { color: '#FFFFFF', fontWeight: '900' },
+  badgePill: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 999, minWidth: 20, alignItems: 'center', justifyContent: 'center' },
+  badgePillText: { color: '#FFFFFF', fontSize: 11, fontWeight: '900' },
 });

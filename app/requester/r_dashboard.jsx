@@ -552,12 +552,12 @@ export default function RequesterDashboard() {
           >
 
             <View style={styles.welcomeSection}>
-              <Text style={styles.welcomeText}>WELCOME!</Text>
+              <Text style={[styles.welcomeText, isDark && { color: colors.textPrimary }]}>WELCOME!</Text>
               <TypewriterGreeting
                 text={`Good Morning, ${requesterName}`}
-                style={styles.greetingText}
+                style={[styles.greetingText, isDark && { color: colors.textPrimary }]}
               />
-              <Text style={styles.dateText}>{todayText}</Text>
+              <Text style={[styles.dateText, isDark && { color: colors.muted }]}>{todayText}</Text>
             </View>
 
             <View style={styles.productsSection}>

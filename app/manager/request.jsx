@@ -20,6 +20,7 @@ import { subscribeProducts } from '../../services/products';
 import { haversineDistanceKm } from '../../services/location';
 import { useAdminTheme } from '../../components/AdminTheme';
 import AdminIcon from '../../components/AdminIcon';
+import TopToastFeedback from '../../components/TopToastFeedback';
 import ManagerShell, { MANAGER_COLORS, ManagerPill } from '../../components/ManagerShell';
 
 
@@ -39,7 +40,7 @@ const orderProducts = (order) =>
 const orderDistance = (order) =>
   order.distanceKmSnapshot == null ? 'Distance unavailable' : `Approx. ${Number(order.distanceKmSnapshot).toFixed(1)} km`;
 
-function OutsideRadiusApprovalQueue({ styles, colors, onOrderApproved }) {
+function OutsideRadiusApprovalQueue({ styles, colors, onOrderApproved, onShowToast }) {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -68,9 +69,15 @@ function OutsideRadiusApprovalQueue({ styles, colors, onOrderApproved }) {
     try {
       await decideOutsideRadiusOrder(order.id, action);
       setOrders((current) => current.filter((item) => item.id !== order.id));
-      if (action === 'approve') onOrderApproved?.();
+      if (action === 'approve') {
+        onOrderApproved?.();
+        onShowToast?.('Outside-radius order approved.', 'success');
+      } else {
+        onShowToast?.('Outside-radius order declined.', 'info');
+      }
     } catch (updateFailure) {
       setError(updateFailure.message);
+      onShowToast?.(updateFailure.message || 'Unable to update order.', 'error');
     } finally {
       setUpdatingId('');
     }
@@ -392,7 +399,7 @@ function EditOrderModal({ visible, order, onClose, onSaveSuccess, colors, styles
   );
 }
 
-function BranchTransfersQueue({ data, styles, onRefresh, colors }) {
+function BranchTransfersQueue({ data, styles, onRefresh, colors, onShowToast }) {
   const [updatingId, setUpdatingId] = useState('');
   const [decliningOrderId, setDecliningOrderId] = useState('');
   const [declineReason, setDeclineReason] = useState('');
@@ -407,8 +414,14 @@ function BranchTransfersQueue({ data, styles, onRefresh, colors }) {
       setDecliningOrderId('');
       setDeclineReason('');
       onRefresh?.();
+      const isAccept = action === 'accept-transfer';
+      onShowToast?.(
+        isAccept ? 'Transfer request accepted.' : 'Transfer request declined.',
+        isAccept ? 'success' : 'info'
+      );
     } catch (err) {
       setError(err.message);
+      onShowToast?.(err.message || 'Failed to update transfer.', 'error');
     } finally {
       setUpdatingId('');
     }
@@ -524,7 +537,7 @@ function BranchTransfersQueue({ data, styles, onRefresh, colors }) {
   );
 }
 
-function BranchOrdersOverview({ data, styles, onRefresh, colors }) {
+function BranchOrdersOverview({ data, styles, onRefresh, colors, onShowToast }) {
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [modalVisible, setModalVisible] = useState(false);
   const [filter, setFilter] = useState('');
@@ -608,7 +621,10 @@ function BranchOrdersOverview({ data, styles, onRefresh, colors }) {
         visible={modalVisible}
         order={selectedOrder}
         onClose={() => setModalVisible(false)}
-        onSaveSuccess={onRefresh}
+        onSaveSuccess={() => {
+          onRefresh?.();
+          onShowToast?.('Order details updated successfully.', 'success');
+        }}
         colors={colors}
         styles={styles}
       />
@@ -619,6 +635,7 @@ function BranchOrdersOverview({ data, styles, onRefresh, colors }) {
 export default function ManagerRequestPage() {
   const { colors } = useAdminTheme();
   const styles = createStyles(colors);
+  const [toast, setToast] = useState({ visible: false, message: '', type: 'success' });
 
   const [dispatchData, setDispatchData] = useState({
     orders: [],
@@ -639,20 +656,30 @@ export default function ManagerRequestPage() {
     loadDispatch();
   }, []);
 
+  const showToast = (message, type = 'success') => {
+    setToast({ visible: true, message, type });
+  };
+
   return (
     <ManagerShell
       active="requests"
       title="Requests & Exceptions"
       subtitle="Delivery approvals, branch transfers, and order adjustments"
     >
+      <TopToastFeedback
+        visible={toast.visible}
+        message={toast.message}
+        type={toast.type}
+        onDismiss={() => setToast((t) => ({ ...t, visible: false }))}
+      />
       {/* 1. Outside Radius Approvals */}
-      <OutsideRadiusApprovalQueue styles={styles} colors={colors} onOrderApproved={loadDispatch} />
+      <OutsideRadiusApprovalQueue styles={styles} colors={colors} onOrderApproved={loadDispatch} onShowToast={showToast} />
 
       {/* 2. Branch Transfers Queue */}
-      <BranchTransfersQueue data={dispatchData} styles={styles} onRefresh={loadDispatch} colors={colors} />
+      <BranchTransfersQueue data={dispatchData} styles={styles} onRefresh={loadDispatch} colors={colors} onShowToast={showToast} />
 
       {/* 3. Branch Orders Overview & Situational Order Edit */}
-      <BranchOrdersOverview data={dispatchData} styles={styles} onRefresh={loadDispatch} colors={colors} />
+      <BranchOrdersOverview data={dispatchData} styles={styles} onRefresh={loadDispatch} colors={colors} onShowToast={showToast} />
     </ManagerShell>
   );
 }

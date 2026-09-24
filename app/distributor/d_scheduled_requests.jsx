@@ -20,6 +20,7 @@ import BlueTapEmptyState from '../../components/BlueTapEmptyState';
 import DistributorProfileBanner from '../../components/DistributorProfileBanner';
 import PortalSwipeContainer, { DISTRIBUTOR_TABS } from '../../components/PortalSwipeContainer';
 import { createPortalStyleSheet, useBlueTapTheme } from '../../components/BlueTapTheme';
+import TopToastFeedback from '../../components/TopToastFeedback';
 import { USER_PORTAL_BOTTOM_CONTENT_INSET, USER_PORTAL_LAYOUT } from '../../constants/userPortalLayout';
 import { BLUETAP_COLORS } from '../../constants/bluetapTheme';
 import {
@@ -251,6 +252,7 @@ export default function DistributorScheduledRequests() {
   const [selectedDayOffset, setSelectedDayOffset] = useState(1); // default tomorrow
   const [selectedSlotIndex, setSelectedSlotIndex] = useState(0);
   const [rescheduleError, setRescheduleError] = useState('');
+  const [toast, setToast] = useState({ visible: false, message: '', type: 'success' });
 
   const { isComplete, loading: profileLoading } = useDistributorProfile();
   const { orders, loading, error, refresh } = useAssignedDistributorOrders();
@@ -281,8 +283,11 @@ export default function DistributorScheduledRequests() {
     try {
       await updateAssignedDistributorOrder(request.sourceId, action);
       await refresh();
+      const isDelivered = action === 'mark-delivered';
+      setToast({ visible: true, message: isDelivered ? 'Delivery completed successfully!' : 'Delivery started.', type: isDelivered ? 'success' : 'info' });
     } catch (updateError) {
       setActionError(updateError.message || 'The delivery could not be updated.');
+      setToast({ visible: true, message: updateError.message || 'The delivery could not be updated.', type: 'error' });
     } finally {
       setProcessingRequestId('');
     }
@@ -305,8 +310,10 @@ export default function DistributorScheduledRequests() {
       await refresh();
       setFailingRequest(null);
       setFailureReason('');
+      setToast({ visible: true, message: 'Delivery marked as failed.', type: 'warning' });
     } catch (err) {
       setFailError(err.message || 'Failed to report delivery failure.');
+      setToast({ visible: true, message: err.message || 'Failed to report delivery failure.', type: 'error' });
     } finally {
       setProcessingRequestId('');
     }
@@ -334,8 +341,10 @@ export default function DistributorScheduledRequests() {
       await rescheduleAssignedDelivery(reschedulingRequest.sourceId, target.toISOString());
       await refresh();
       setReschedulingRequest(null);
+      setToast({ visible: true, message: 'Delivery rescheduled successfully.', type: 'success' });
     } catch (err) {
       setRescheduleError(err.message || 'Failed to reschedule delivery.');
+      setToast({ visible: true, message: err.message || 'Failed to reschedule delivery.', type: 'error' });
     } finally {
       setProcessingRequestId('');
     }
@@ -343,6 +352,12 @@ export default function DistributorScheduledRequests() {
 
   return (
     <SafeAreaView edges={['left', 'right', 'bottom']} style={styles.container}>
+      <TopToastFeedback
+        visible={toast.visible}
+        message={toast.message}
+        type={toast.type}
+        onDismiss={() => setToast((t) => ({ ...t, visible: false }))}
+      />
       <BlueTapHeader notificationPath="/distributor/d_notification" />
 
       <PortalSwipeContainer tabs={DISTRIBUTOR_TABS} currentRoute="/distributor/d_scheduled_requests">

@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -22,6 +23,7 @@ import { createShadow } from '../../components/shadowStyles';
 import BlueTapEmptyState from '../../components/BlueTapEmptyState';
 import PortalSwipeContainer, { REQUESTER_TABS } from '../../components/PortalSwipeContainer';
 import { createPortalStyleSheet, useBlueTapTheme } from '../../components/BlueTapTheme';
+import TopToastFeedback from '../../components/TopToastFeedback';
 import { USER_PORTAL_BOTTOM_CONTENT_INSET, USER_PORTAL_LAYOUT } from '../../constants/userPortalLayout';
 import { BLUETAP_COLORS } from '../../constants/bluetapTheme';
 import {
@@ -322,6 +324,7 @@ export default function RequesterRequests() {
   const [selectedRequest, setSelectedRequest] = useState(null);
   const [activeTab, setActiveTab] = useState(ACTIVE_TAB);
   const [cancellingRequestId, setCancellingRequestId] = useState('');
+  const [toast, setToast] = useState({ visible: false, message: '', type: 'info' });
   const [ordersLoading, setOrdersLoading] = useState(true);
   const [ordersError, setOrdersError] = useState('');
   const isActiveOrdersTab = activeTab === ACTIVE_TAB;
@@ -392,6 +395,7 @@ export default function RequesterRequests() {
             : currentRequest
         )
       );
+      setToast({ visible: true, message: 'Order request cancelled successfully.', type: 'info' });
     } catch (error) {
       if (error.savedLocal) {
         setRequests((currentRequests) =>
@@ -401,9 +405,11 @@ export default function RequesterRequests() {
               : currentRequest
           )
         );
+        setToast({ visible: true, message: 'Order request cancelled locally.', type: 'info' });
         return;
       }
 
+      setToast({ visible: true, message: error.message || 'Cancel failed.', type: 'error' });
       Alert.alert('Cancel failed', error.message);
     } finally {
       setCancellingRequestId('');
@@ -433,22 +439,31 @@ export default function RequesterRequests() {
       end={{ x: 0, y: 1 }}
     >
       <SafeAreaView edges={['left', 'right', 'bottom']} style={styles.container}>
+        <TopToastFeedback
+          visible={toast.visible}
+          message={toast.message}
+          type={toast.type}
+          onDismiss={() => setToast((current) => ({ ...current, visible: false }))}
+        />
         <StatusBar style="light" />
 
         <PortalSwipeContainer tabs={REQUESTER_TABS} currentRoute="/requester/r_request">
           <View style={styles.phoneWrapper}>
-            <View style={styles.fixedHeaderArea}>
+            <View style={[styles.fixedHeaderArea, { backgroundColor: isDark ? colors.background : colors.primary }]}>
               <Text style={styles.pageTitle}>MY ORDERS</Text>
               <Text style={styles.subtitle}>View and manage your water orders.</Text>
 
               <View style={styles.orderTabs}>
-                <TouchableOpacity
-                  style={[
+                <Pressable
+                  accessibilityRole="tab"
+                  accessibilityState={{ selected: activeTab === ACTIVE_TAB }}
+                  onPress={() => setActiveTab(ACTIVE_TAB)}
+                  style={({ pressed, hovered }) => [
                     styles.orderTab,
                     activeTab === ACTIVE_TAB && styles.orderTabActive,
+                    hovered && (activeTab === ACTIVE_TAB ? styles.orderTabActiveHovered : styles.orderTabHovered),
+                    pressed && styles.orderTabPressed,
                   ]}
-                  activeOpacity={0.85}
-                  onPress={() => setActiveTab(ACTIVE_TAB)}
                 >
                   <Text
                     style={[
@@ -458,15 +473,18 @@ export default function RequesterRequests() {
                   >
                     Active Orders
                   </Text>
-                </TouchableOpacity>
+                </Pressable>
 
-                <TouchableOpacity
-                  style={[
+                <Pressable
+                  accessibilityRole="tab"
+                  accessibilityState={{ selected: activeTab === HISTORY_TAB }}
+                  onPress={() => setActiveTab(HISTORY_TAB)}
+                  style={({ pressed, hovered }) => [
                     styles.orderTab,
                     activeTab === HISTORY_TAB && styles.orderTabActive,
+                    hovered && (activeTab === HISTORY_TAB ? styles.orderTabActiveHovered : styles.orderTabHovered),
+                    pressed && styles.orderTabPressed,
                   ]}
-                  activeOpacity={0.85}
-                  onPress={() => setActiveTab(HISTORY_TAB)}
                 >
                   <Text
                     style={[
@@ -476,7 +494,7 @@ export default function RequesterRequests() {
                   >
                     History
                   </Text>
-                </TouchableOpacity>
+                </Pressable>
               </View>
 
               {isActiveOrdersTab && (
@@ -515,8 +533,6 @@ export default function RequesterRequests() {
                       ? 'Pending and ongoing water orders will appear here.'
                       : 'Delivered and cancelled orders will appear here.'
                   }
-                  actionLabel={isActiveOrdersTab ? 'Add Request' : undefined}
-                  onAction={isActiveOrdersTab ? () => router.replace('/requester/requestform') : undefined}
                 />
               ) : (
                 displayedRequests.map((request) => (
@@ -564,12 +580,13 @@ const styles = createPortalStyleSheet({
   fixedHeaderArea: {
     paddingHorizontal: USER_PORTAL_LAYOUT.gutter,
     paddingTop: 16,
-    paddingBottom: 4,
+    paddingBottom: 12,
+    zIndex: 10,
   },
   scrollContent: {
     flexGrow: 1,
     paddingHorizontal: USER_PORTAL_LAYOUT.gutter,
-    paddingTop: 4,
+    paddingTop: 12,
     paddingBottom: USER_PORTAL_BOTTOM_CONTENT_INSET,
   },
   pageTitle: {
@@ -608,7 +625,17 @@ const styles = createPortalStyleSheet({
     justifyContent: 'center',
   },
   orderTabActive: {
-    backgroundColor: 'rgba(255,255,255,0.9)',
+    backgroundColor: 'rgba(255,255,255,0.95)',
+  },
+  orderTabHovered: {
+    backgroundColor: 'rgba(255,255,255,0.32)',
+  },
+  orderTabActiveHovered: {
+    backgroundColor: '#FFFFFF',
+    opacity: 0.98,
+  },
+  orderTabPressed: {
+    opacity: 0.78,
   },
   orderTabText: {
     color: 'rgba(255,255,255,0.9)',

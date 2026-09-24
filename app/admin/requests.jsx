@@ -18,6 +18,8 @@ import { db } from '../../firebase';
 import { getBranches } from '../../services/branchManagement';
 import { ADMIN_CACHE_KEYS, useAdminData } from '../../services/adminDataCache';
 import { requesterOrderStatusLabel } from '../../constants/requesterOrderStatus';
+import { getAdminOverrideDetails, submitAdminOverrideAssignment } from '../../services/adminDispatchOverride';
+import TopToastFeedback from '../../components/TopToastFeedback';
 
 const ACTIONABLE_STATUSES = new Set([
   'pending',
@@ -97,6 +99,83 @@ export default function AdminRequestsPage() {
 
   const branchState = useAdminData(ADMIN_CACHE_KEYS.branches, getBranches);
   const branches = branchState.data || [];
+
+  const [overrideModalVisible, setOverrideModalVisible] = useState(false);
+  const [overrideLoading, setOverrideLoading] = useState(false);
+  const [overrideData, setOverrideData] = useState(null);
+  const [overrideError, setOverrideError] = useState('');
+  const [overrideSuccess, setOverrideSuccess] = useState('');
+  const [selectedOverrideDistributor, setSelectedOverrideDistributor] = useState('');
+  const [overrideDayOffset, setOverrideDayOffset] = useState(0);
+  const [overrideSlotIndex, setOverrideSlotIndex] = useState(0);
+  const [toast, setToast] = useState({ visible: false, message: '', type: 'info' });
+
+  const showToast = (message, type = 'info') => {
+    setToast({ visible: true, message, type });
+  };
+
+  const OVERRIDE_TIME_SLOTS = [
+    { label: '09:00 AM', hours: 9, minutes: 0 },
+    { label: '11:00 AM', hours: 11, minutes: 0 },
+    { label: '01:00 PM', hours: 13, minutes: 0 },
+    { label: '03:00 PM', hours: 15, minutes: 0 },
+    { label: '05:00 PM', hours: 17, minutes: 0 },
+  ];
+
+  const openOverride = async (order) => {
+    if (!order) return;
+    setOverrideModalVisible(true);
+    setOverrideLoading(true);
+    setOverrideError('');
+    setOverrideSuccess('');
+    try {
+      const data = await getAdminOverrideDetails(order.id || order.requestId);
+      setOverrideData(data);
+      setSelectedOverrideDistributor(data.eligibleDistributors?.[0]?.uid || '');
+      setOverrideDayOffset(0);
+      setOverrideSlotIndex(0);
+    } catch (err) {
+      setOverrideError(err.message || 'Failed to load override details.');
+    } finally {
+      setOverrideLoading(false);
+    }
+  };
+
+  const submitOverride = async () => {
+    if (!selectedOverrideDistributor) {
+      setOverrideError('Please select an eligible distributor.');
+      return;
+    }
+    const slot = OVERRIDE_TIME_SLOTS[overrideSlotIndex] || OVERRIDE_TIME_SLOTS[0];
+    const sched = new Date();
+    sched.setDate(sched.getDate() + overrideDayOffset);
+    sched.setHours(slot.hours, slot.minutes, 0, 0);
+
+    setOverrideLoading(true);
+    setOverrideError('');
+    try {
+      const res = await submitAdminOverrideAssignment(
+        selectedOrder.id || selectedOrder.requestId,
+        selectedOverrideDistributor,
+        sched.toISOString()
+      );
+      setOverrideSuccess('Distributor successfully reassigned via Admin Override.');
+      showToast('Distributor successfully reassigned via Admin Override.', 'success');
+      if (res.order) {
+        setSelectedOrder(res.order);
+      }
+      setTimeout(() => {
+        setOverrideModalVisible(false);
+        setOverrideSuccess('');
+      }, 1500);
+    } catch (err) {
+      const msg = err.message || 'Failed to execute Admin Override.';
+      setOverrideError(msg);
+      showToast(msg, 'error');
+    } finally {
+      setOverrideLoading(false);
+    }
+  };
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -235,6 +314,12 @@ export default function AdminRequestsPage() {
       title="Request Oversight"
       subtitle="Platform-wide read-only view of customer orders and dispatch status across all branches."
     >
+      <TopToastFeedback
+        visible={toast.visible}
+        message={toast.message}
+        type={toast.type}
+        onDismiss={() => setToast((prev) => ({ ...prev, visible: false }))}
+      />
       {/* Metrics Summary Row */}
       <View style={styles.metricsRow}>
         <View style={styles.metricCard}>
@@ -551,6 +636,16 @@ export default function AdminRequestsPage() {
                     <Text style={styles.modalValue}>
                       {selectedOrder?.distributorNameSnapshot || selectedOrder?.distributorName || 'Not assigned'}
                     </Text>
+                    {!['delivered', 'cancelled', 'canceled', 'declined'].includes((selectedOrder?.status || '').toLowerCase()) && (
+                      <TouchableOpacity
+                        accessibilityRole="button"
+                        accessibilityLabel="Admin Override: Reassign Distributor"
+                        onPress={() => openOverride(selectedOrder)}
+                        style={styles.overrideTriggerBtn}
+                      >
+                        <Text style={styles.overrideTriggerBtnText}>Admin Override</Text>
+                      </TouchableOpacity>
+                    )}
                   </View>
                   <View style={styles.modalGridItem}>
                     <Text style={styles.modalLabel}>Scheduled Delivery</Text>
@@ -671,6 +766,168 @@ export default function AdminRequestsPage() {
                 style={styles.modalCloseButton}
               >
                 <Text style={styles.modalCloseButtonText}>Close</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Admin Override Modal */}
+      <Modal
+        visible={overrideModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => !overrideLoading && setOverrideModalVisible(false)}
+      >
+        <View style={styles.modalBackdrop}>
+          <View accessibilityViewIsModal style={[styles.modalCard, { backgroundColor: colors.surface, borderColor: colors.border, maxWidth: 520 }]}>
+            <View style={styles.modalHeader}>
+              <View>
+                <Text style={[styles.modalTitle, { color: colors.warning }]}>
+                  Admin Override: Reassign Distributor
+                </Text>
+                <Text style={styles.modalSub}>
+                  Emergency platform reassignment · Scoped strictly to fulfillment branch
+                </Text>
+              </View>
+              <TouchableOpacity
+                accessibilityRole="button"
+                accessibilityLabel="Close override modal"
+                disabled={overrideLoading}
+                onPress={() => setOverrideModalVisible(false)}
+                style={styles.closeBtn}
+              >
+                <Text style={styles.closeBtnText}>✕</Text>
+              </TouchableOpacity>
+            </View>
+
+            {overrideLoading && !overrideData ? (
+              <View style={{ padding: 30, alignItems: 'center' }}>
+                <ActivityIndicator size="small" color={colors.primary} />
+                <Text style={{ marginTop: 10, color: colors.textSecondary }}>Loading branch distributors...</Text>
+              </View>
+            ) : (
+              <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 480 }}>
+                <View style={styles.overrideNoticeBox}>
+                  <Text style={styles.overrideNoticeText}>
+                    Emergency Platform Override: Normal operational dispatch is owned by Branch Managers. Reassignments here are restricted strictly to the fulfillment branch ({overrideData?.branchName || 'Branch'}) and permanently recorded in the Admin Audit Log.
+                  </Text>
+                </View>
+
+                {!!overrideError && (
+                  <View style={styles.overrideErrorBox}>
+                    <Text style={styles.overrideErrorText}>{overrideError}</Text>
+                  </View>
+                )}
+
+                {!!overrideSuccess && (
+                  <View style={styles.overrideSuccessBox}>
+                    <Text style={styles.overrideSuccessText}>{overrideSuccess}</Text>
+                  </View>
+                )}
+
+                <View style={{ marginTop: 12 }}>
+                  <Text style={styles.overrideLabel}>Fulfillment Branch (Locked)</Text>
+                  <Text style={styles.overrideValueLocked}>{overrideData?.branchName || 'Current Branch'}</Text>
+                </View>
+
+                <View style={{ marginTop: 12 }}>
+                  <Text style={styles.overrideLabel}>Current Assigned Distributor</Text>
+                  <Text style={styles.overrideValueLocked}>
+                    {overrideData?.currentDistributorName || 'None assigned'}
+                  </Text>
+                </View>
+
+                <View style={{ marginTop: 14 }}>
+                  <Text style={styles.overrideLabel}>Select Same-Branch Distributor</Text>
+                  {(!overrideData?.eligibleDistributors || overrideData.eligibleDistributors.length === 0) ? (
+                    <Text style={{ color: colors.danger, fontSize: 13, marginTop: 4 }}>
+                      No eligible active distributors found for this branch.
+                    </Text>
+                  ) : (
+                    <View style={{ gap: 6, marginTop: 6 }}>
+                      {overrideData.eligibleDistributors.map((dist) => {
+                        const isSelected = selectedOverrideDistributor === dist.uid;
+                        return (
+                          <TouchableOpacity
+                            key={dist.uid}
+                            onPress={() => setSelectedOverrideDistributor(dist.uid)}
+                            style={[
+                              styles.overrideDistItem,
+                              isSelected && { borderColor: colors.primary, backgroundColor: colors.primarySoft },
+                            ]}
+                          >
+                            <Text style={[styles.overrideDistName, isSelected && { color: colors.primary }]}>
+                              {dist.name}
+                            </Text>
+                            <Text style={styles.overrideDistPhone}>{dist.phone || 'No phone'}</Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  )}
+                </View>
+
+                <View style={{ marginTop: 14 }}>
+                  <Text style={styles.overrideLabel}>Delivery Day</Text>
+                  <View style={{ flexDirection: 'row', gap: 8, marginTop: 6 }}>
+                    {['Today', 'Tomorrow', 'In 2 Days'].map((dayLabel, idx) => (
+                      <TouchableOpacity
+                        key={dayLabel}
+                        onPress={() => setOverrideDayOffset(idx)}
+                        style={[
+                          styles.overridePillBtn,
+                          overrideDayOffset === idx && { backgroundColor: colors.primary, borderColor: colors.primary },
+                        ]}
+                      >
+                        <Text style={[styles.overridePillText, overrideDayOffset === idx && { color: '#FFFFFF' }]}>
+                          {dayLabel}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
+
+                <View style={{ marginTop: 14 }}>
+                  <Text style={styles.overrideLabel}>Delivery Time Slot</Text>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 6 }}>
+                    {OVERRIDE_TIME_SLOTS.map((slot, idx) => (
+                      <TouchableOpacity
+                        key={slot.label}
+                        onPress={() => setOverrideSlotIndex(idx)}
+                        style={[
+                          styles.overridePillBtn,
+                          overrideSlotIndex === idx && { backgroundColor: colors.primary, borderColor: colors.primary },
+                        ]}
+                      >
+                        <Text style={[styles.overridePillText, overrideSlotIndex === idx && { color: '#FFFFFF' }]}>
+                          {slot.label}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
+              </ScrollView>
+            )}
+
+            <View style={styles.modalFooter}>
+              <TouchableOpacity
+                disabled={overrideLoading}
+                onPress={() => setOverrideModalVisible(false)}
+                style={[styles.modalCloseButton, { marginRight: 8 }]}
+              >
+                <Text style={styles.modalCloseButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                disabled={overrideLoading || !selectedOverrideDistributor}
+                onPress={submitOverride}
+                style={[styles.overrideSubmitBtn, (!selectedOverrideDistributor || overrideLoading) && { opacity: 0.5 }]}
+              >
+                {overrideLoading ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.overrideSubmitBtnText}>Confirm Reassignment</Text>
+                )}
               </TouchableOpacity>
             </View>
           </View>

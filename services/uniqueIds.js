@@ -26,6 +26,13 @@ const ROLE_CONFIG = {
   },
 };
 
+const PUBLIC_PREFIXES = {
+  requester: 'Req',
+  distributor: 'Dis',
+  manager: 'Mgr',
+  admin: 'Adm',
+};
+
 export const normalizeUniqueIdRole = (role) =>
   role?.toString().trim().toLowerCase() || '';
 
@@ -33,6 +40,8 @@ export const getProfileUniqueId = (profile = {}) => {
   const safeProfile = profile || {};
 
   return (
+    safeProfile.publicUid ||
+    safeProfile.displayUid ||
     safeProfile.unique_id ||
     safeProfile.uniqueId ||
     safeProfile.uid ||
@@ -45,11 +54,9 @@ export const getUniqueIdConfig = (role) =>
   ROLE_CONFIG[normalizeUniqueIdRole(role)] || null;
 
 export const formatUniqueId = (role, number) => {
-  const config = getUniqueIdConfig(role);
-
-  if (!config) return '';
-
-  return `${config.prefix}-${String(Number(number) || 0).padStart(6, '0')}`;
+  const normRole = normalizeUniqueIdRole(role);
+  const prefix = PUBLIC_PREFIXES[normRole] || ROLE_CONFIG[normRole]?.prefix || 'Acc';
+  return `${prefix}${String(Number(number) || 0).padStart(3, '0')}`;
 };
 
 const parseUniqueIdNumber = (role, uniqueId) => {

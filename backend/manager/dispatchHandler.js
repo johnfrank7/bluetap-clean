@@ -9,7 +9,7 @@ const DISTRIBUTOR_ASSIGNED = 'distributor_assigned';
 const TRANSFER_PENDING = 'branch_transfer_pending';
 const MANAGER_OPERATIONAL_EVENTS = 'managerOperationalEvents';
 const ACTIVE_ASSIGNMENT_STATUSES = new Set([DISTRIBUTOR_ASSIGNED, 'accepted', 'scheduled', 'out_for_delivery', 'delivery_failed']);
-const MANAGER_VISIBLE_STATUSES = new Set([AWAITING_ASSIGNMENT, DISTRIBUTOR_ASSIGNED, 'accepted', 'scheduled', 'out_for_delivery', 'delivery_failed', TRANSFER_PENDING]);
+const MANAGER_VISIBLE_STATUSES = new Set([AWAITING_ASSIGNMENT, 'pending', DISTRIBUTOR_ASSIGNED, 'accepted', 'scheduled', 'out_for_delivery', 'delivery_failed', TRANSFER_PENDING]);
 const clean = (value, max = 240) => String(value || '').trim().slice(0, max);
 const safeNumber = (value) => Number.isFinite(Number(value)) ? Number(value) : null;
 const owningBranchId = (order = {}) => clean(order.currentBranchId || order.branchId, 128);
@@ -149,14 +149,7 @@ async function getTargetManagers(db, auth, branchId) {
   return active.filter(Boolean);
 }
 
-async function distributorIsBusy(db, distributorUid, excludingOrderId = '') {
-  const snapshot = await db.collection('requests').get();
-  return snapshot.docs.some((item) => item.id !== excludingOrderId
-    && clean(item.data()?.assignedDistributorUid || item.data()?.distributor_id, 128) === distributorUid
-    && ACTIVE_ASSIGNMENT_STATUSES.has(clean(item.data()?.status, 80).toLowerCase()));
-}
-
-async function resolveEligibleDistributor(db, auth, distributorUid, branchId, excludingOrderId = '') {
+async function resolveEligibleDistributor(db, auth, distributorUid, branchId) {
   const uid = clean(distributorUid, 128);
   const snapshot = uid ? await db.collection('users').doc(uid).get() : null;
   if (!snapshot?.exists || !isEligibleDistributor(snapshot.data(), branchId)) {
@@ -166,10 +159,42 @@ async function resolveEligibleDistributor(db, auth, distributorUid, branchId, ex
     const account = await auth.getUser(uid).catch(() => null);
     if (!account || account.disabled === true) throw new OtpError(409, 'DISTRIBUTOR_NOT_ELIGIBLE', 'That Distributor account is not active.');
   }
-  if (await distributorIsBusy(db, uid, excludingOrderId)) {
-    throw new OtpError(409, 'DISTRIBUTOR_BUSY', 'That Distributor already has an active delivery assignment.');
-  }
   return { uid, data: snapshot.data() };
+}
+
+const MAX_ACTIVE_ASSIGNMENTS = 5;
+const SCHEDULE_CONFLICT_WINDOW_MS = 30 * 60 * 1000;
+
+async function checkDistributorWorkloadAndSchedule(db, distributorUid, currentOrderId, targetScheduledAt) {
+  const snapshot = await db.collection('requests').where('assignedDistributorUid', '==', distributorUid).get();
+  const activeOrders = (snapshot.docs || [])
+    .map((doc) => ({ id: doc.id, ...doc.data() }))
+    .filter((order) => order.id !== currentOrderId && ACTIVE_ASSIGNMENT_STATUSES.has(clean(order.status, 80).toLowerCase()));
+
+  if (activeOrders.length >= MAX_ACTIVE_ASSIGNMENTS) {
+    throw new OtpError(
+      409,
+      'DISTRIBUTOR_WORKLOAD_EXCEEDED',
+      `Distributor has reached the maximum active capacity of ${MAX_ACTIVE_ASSIGNMENTS} deliveries.`
+    );
+  }
+
+  if (targetScheduledAt) {
+    const targetTime = targetScheduledAt.getTime();
+    for (const order of activeOrders) {
+      const scheduledRaw = order.scheduledAt || order.scheduled_at;
+      if (scheduledRaw) {
+        const existingTime = new Date(scheduledRaw).getTime();
+        if (!Number.isNaN(existingTime) && Math.abs(existingTime - targetTime) < SCHEDULE_CONFLICT_WINDOW_MS) {
+          throw new OtpError(
+            409,
+            'DISTRIBUTOR_SCHEDULE_CONFLICT',
+            'Distributor already has an active delivery scheduled within 30 minutes of this time slot.'
+          );
+        }
+      }
+    }
+  }
 }
 
 async function getAvailableDistributors(db, auth, branchId) {
@@ -180,7 +205,7 @@ async function getAvailableDistributors(db, auth, branchId) {
       const account = await auth.getUser(item.id).catch(() => null);
       if (!account || account.disabled === true) return null;
     }
-    return await distributorIsBusy(db, item.id) ? null : safeDistributor(item.id, item.data());
+    return safeDistributor(item.id, item.data());
   }));
   return availability.filter(Boolean).sort((left, right) => left.name.localeCompare(right.name));
 }
@@ -292,13 +317,16 @@ function createManagerDispatchHandler(getAdmin = getFirebaseAdmin) {
         if (!scheduledAt || Number.isNaN(scheduledAt.getTime()) || scheduledAt.getTime() < now.getTime() - (5 * 60 * 1000)) {
           throw new OtpError(400, 'INVALID_DELIVERY_SCHEDULE', 'Choose a current or future delivery time.');
         }
-        const target = await resolveEligibleDistributor(db, auth, body.distributorUid, managerBranchId, orderId);
+        const target = await resolveEligibleDistributor(db, auth, body.distributorUid, managerBranchId);
+        await checkDistributorWorkloadAndSchedule(db, target.uid, orderId, scheduledAt);
         result = await updateOrder(db, orderId, async (current) => {
           requireOwningManager(manager, current);
           const assignedUid = clean(current.assignedDistributorUid || current.distributor_id, 128);
           const currentStatus = clean(current.status, 80).toLowerCase();
           const assigning = action === 'assign-distributor';
-          if ((assigning && (assignedUid || currentStatus !== AWAITING_ASSIGNMENT)) || (!assigning && (!assignedUid || ![DISTRIBUTOR_ASSIGNED, 'accepted', 'scheduled'].includes(currentStatus)))) {
+          const assignableStatuses = new Set([AWAITING_ASSIGNMENT, 'pending', 'accepted']);
+          const reassignableStatuses = new Set([DISTRIBUTOR_ASSIGNED, 'accepted', 'scheduled', 'delivery_failed']);
+          if ((assigning && (assignedUid || !assignableStatuses.has(currentStatus))) || (!assigning && (!assignedUid || !reassignableStatuses.has(currentStatus)))) {
             throw new OtpError(409, 'ORDER_NOT_ASSIGNABLE', 'This order is not ready for that Distributor action.');
           }
           const event = assigning ? 'DISTRIBUTOR_ASSIGNED' : 'DISTRIBUTOR_REASSIGNED';

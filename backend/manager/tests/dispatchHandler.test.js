@@ -317,3 +317,96 @@ test('Distributor profile completeness blocks mutation actions with 409 PROFILE_
   assert.equal(acceptSuccess.statusCode, 200);
   assert.equal(acceptSuccess.body.order.status, 'accepted');
 });
+
+test('Manager assignment enforces distributor eligibility: rejects cross-branch and unapproved distributors', async () => {
+  const f = fixture();
+  const dispatch = createManagerDispatchHandler(f.getAdmin);
+
+  // Cross-branch distributor rejection
+  const crossBranch = await call(dispatch, 'PATCH', 'manager-a-token', {
+    orderId: 'order-a',
+    action: 'assign-distributor',
+    distributorUid: 'distributor-b',
+    scheduledAt: defaultSchedule,
+  });
+  assert.equal(crossBranch.statusCode, 409);
+  assert.equal(crossBranch.body.error.reason, 'DISTRIBUTOR_NOT_ELIGIBLE');
+
+  // Unapproved / inactive distributor rejection
+  const unapproved = await call(dispatch, 'PATCH', 'manager-a-token', {
+    orderId: 'order-a',
+    action: 'assign-distributor',
+    distributorUid: 'distributor-inactive',
+    scheduledAt: defaultSchedule,
+  });
+  assert.equal(unapproved.statusCode, 409);
+  assert.equal(unapproved.body.error.reason, 'DISTRIBUTOR_NOT_ELIGIBLE');
+});
+
+test('Manager assignment prevents conflicting schedule slots but permits non-conflicting assignments', async () => {
+  const f = fixture();
+  const dispatch = createManagerDispatchHandler(f.getAdmin);
+
+  const baseTime = new Date(Date.now() + 86400000); // Tomorrow
+  baseTime.setHours(10, 0, 0, 0);
+
+  // Assign order-a to distributor-a at 10:00 AM
+  const firstAssign = await call(dispatch, 'PATCH', 'manager-a-token', {
+    orderId: 'order-a',
+    action: 'assign-distributor',
+    distributorUid: 'distributor-a',
+    scheduledAt: baseTime.toISOString(),
+  });
+  assert.equal(firstAssign.statusCode, 200);
+  assert.equal(firstAssign.body.order.status, 'distributor_assigned');
+
+  // Attempt to assign order-decline to distributor-a at 10:15 AM (within 30-min conflict window)
+  const conflictTime = new Date(baseTime.getTime() + 15 * 60 * 1000);
+  const conflictAssign = await call(dispatch, 'PATCH', 'manager-a-token', {
+    orderId: 'order-decline',
+    action: 'assign-distributor',
+    distributorUid: 'distributor-a',
+    scheduledAt: conflictTime.toISOString(),
+  });
+  assert.equal(conflictAssign.statusCode, 409);
+  assert.equal(conflictAssign.body.error.reason, 'DISTRIBUTOR_SCHEDULE_CONFLICT');
+
+  // Non-conflicting slot: assign order-decline at 2:00 PM (4 hours later)
+  const nonConflictTime = new Date(baseTime.getTime() + 4 * 60 * 60 * 1000);
+  const nonConflictAssign = await call(dispatch, 'PATCH', 'manager-a-token', {
+    orderId: 'order-decline',
+    action: 'assign-distributor',
+    distributorUid: 'distributor-a',
+    scheduledAt: nonConflictTime.toISOString(),
+  });
+  assert.equal(nonConflictAssign.statusCode, 200);
+  assert.equal(nonConflictAssign.body.order.status, 'distributor_assigned');
+});
+
+test('Manager assignment enforces maximum active workload capacity', async () => {
+  const f = fixture();
+  const dispatch = createManagerDispatchHandler(f.getAdmin);
+
+  // Create 5 existing active orders assigned to distributor-a with non-conflicting times
+  for (let i = 1; i <= 5; i++) {
+    const time = new Date(Date.now() + (i * 3600000) + 86400000).toISOString();
+    f.records.set(`requests/active-order-${i}`, {
+      requestId: `BT-ACT-${i}`,
+      branchId: 'branch-a',
+      currentBranchId: 'branch-a',
+      status: 'scheduled',
+      assignedDistributorUid: 'distributor-a',
+      scheduledAt: time,
+    });
+  }
+
+  // Attempting to assign another order to distributor-a should be rejected due to capacity
+  const overloadAssign = await call(dispatch, 'PATCH', 'manager-a-token', {
+    orderId: 'order-a',
+    action: 'assign-distributor',
+    distributorUid: 'distributor-a',
+    scheduledAt: new Date(Date.now() + 86400000 + 36000000).toISOString(),
+  });
+  assert.equal(overloadAssign.statusCode, 409);
+  assert.equal(overloadAssign.body.error.reason, 'DISTRIBUTOR_WORKLOAD_EXCEEDED');
+});

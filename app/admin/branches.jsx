@@ -9,6 +9,7 @@ import { useAdminTheme } from '../../components/AdminTheme';
 import { createBranch, getBranches, updateBranch } from '../../services/branchManagement';
 import { requestCurrentLocation } from '../../services/location';
 import { ADMIN_CACHE_KEYS, useAdminData } from '../../services/adminDataCache';
+import TopToastFeedback from '../../components/TopToastFeedback';
 
 const { DEFAULT_SERVICE_RADIUS_KM, TOLEDO_BARANGAYS, TOLEDO_CITY } = require('../../constants/toledoBarangays.json');
 const RADIUS_CHOICES = [3, 5, 10, 15];
@@ -20,6 +21,8 @@ export default function AdminBranchesPage() {
   const { data, loading, refreshing, error, refresh } = useAdminData(ADMIN_CACHE_KEYS.branches, getBranches);
   const branches = data || [];
   const [form, setForm] = React.useState(empty); const [editingId, setEditingId] = React.useState(''); const [saving, setSaving] = React.useState(false); const [message, setMessage] = React.useState('');
+  const [toast, setToast] = React.useState({ visible: false, message: '', type: 'info' });
+  const showToast = (msg, type = 'info') => setToast({ visible: true, message: msg, type });
   const [barangayOpen, setBarangayOpen] = React.useState(false); const [barangayQuery, setBarangayQuery] = React.useState(''); const [locating, setLocating] = React.useState(false); const [locationError, setLocationError] = React.useState('');
   const customRadius = !RADIUS_CHOICES.includes(Number(form.serviceRadiusKm));
   const filteredBarangays = React.useMemo(() => TOLEDO_BARANGAYS.filter((barangay) => barangay.toLowerCase().includes(barangayQuery.trim().toLowerCase())), [barangayQuery]);
@@ -42,13 +45,14 @@ export default function AdminBranchesPage() {
     try {
       const payload = { name: form.name, barangay: form.barangay, city: TOLEDO_CITY, address: form.address, latitude: Number(form.latitude), longitude: Number(form.longitude), serviceRadiusKm: form.serviceRadiusKm };
       if (editingId) await updateBranch(editingId, payload); else await createBranch({ ...payload, code: form.code });
-      const wasEditing = Boolean(editingId); cancel(); await refresh({ force: true }); setMessage(wasEditing ? 'Branch updated.' : 'Branch created.');
-    } catch (saveError) { setMessage(saveError.message); } finally { setSaving(false); }
+      const wasEditing = Boolean(editingId); cancel(); await refresh({ force: true }); const branchMsg = wasEditing ? 'Branch updated.' : 'Branch created.'; setMessage(branchMsg); showToast(branchMsg, 'success');
+    } catch (saveError) { setMessage(saveError.message); showToast(saveError.message, 'error'); } finally { setSaving(false); }
   };
-  const toggle = async (branch) => { setSaving(true); setMessage(''); try { await updateBranch(branch.id, { status: branch.status === 'active' ? 'inactive' : 'active' }); await refresh({ force: true }); } catch (toggleError) { setMessage(toggleError.message); } finally { setSaving(false); } };
+  const toggle = async (branch) => { setSaving(true); setMessage(''); try { await updateBranch(branch.id, { status: branch.status === 'active' ? 'inactive' : 'active' }); await refresh({ force: true }); const toggleMsg = branch.status === 'active' ? 'Branch deactivated.' : 'Branch activated.'; setMessage(toggleMsg); showToast(toggleMsg, 'success'); } catch (toggleError) { setMessage(toggleError.message); showToast(toggleError.message, 'error'); } finally { setSaving(false); } };
   const previewLocation = isValidLocation(form) ? { latitude: Number(form.latitude), longitude: Number(form.longitude) } : null;
 
   return <AdminShell title="Branches" subtitle="Create provider locations and set their normal delivery coverage.">
+    <TopToastFeedback visible={toast.visible} message={toast.message} type={toast.type} onDismiss={() => setToast((t) => ({ ...t, visible: false }))} />
     <View style={styles.formCard}><Text style={styles.eyebrow}>BRANCH DIRECTORY</Text><Text style={styles.cardTitle}>{editingId ? 'Edit branch' : 'Create branch'}</Text><Text style={styles.help}>Choose a Toledo City address and pin it on the interactive map. Coordinates are technical metadata, not a primary form field.</Text>
       <View style={styles.fields}>
         <Field styles={styles} label="Branch name"><TextInput value={form.name} onChangeText={(value) => setForm((current) => ({ ...current, name: value }))} style={styles.input} /></Field>

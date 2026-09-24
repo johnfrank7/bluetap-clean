@@ -5,6 +5,7 @@ import { useAdminTheme } from '../../components/AdminTheme';
 import ManagerShell, { MANAGER_COLORS, ManagerPill, ManagerWaterDrop } from '../../components/ManagerShell';
 import { getModuleSession } from '../../services/authSession';
 import { getManagerWorkspace } from '../../services/managerWorkspace';
+import { formatPhilippinePhone } from '../../services/phoneUtils';
 
 const clean = (value, fallback = 'Not set') =>
   typeof value === 'string' && value.trim() ? value.trim() : fallback;
@@ -39,6 +40,9 @@ export default function ManagerProfilePage() {
   // Authoritative values — workspace API is preferred, session is the fallback for
   // data already persisted at login (branchId, branchName, email).
   const managerFullName = clean(workspaceManager?.fullName, '');
+  const managerUid = clean(workspaceManager?.publicUid || workspaceManager?.displayUid || workspaceManager?.uniqueId || session?.publicUid || session?.uid, loading ? '—' : 'Not set');
+  const rawContact = clean(workspaceManager?.phone || workspaceManager?.contactNumber || session?.phone || session?.contactNumber, '');
+  const managerContact = rawContact ? formatPhilippinePhone(rawContact) : (loading ? '—' : 'Not set');
   const managerEmail = clean(workspaceManager?.email || session?.email, '');
   const branchName = clean(workspaceBranch?.name || session?.branchName, 'Not assigned');
   const branchBarangay = clean(workspaceBranch?.barangay, '');
@@ -79,27 +83,39 @@ export default function ManagerProfilePage() {
 
         <View style={styles.detailGrid}>
           <View style={styles.detailBox}>
-            <Text style={styles.detailLabel}>Unique ID</Text>
+            <Text style={styles.detailLabel}>UID</Text>
             <Text style={styles.detailValue} numberOfLines={1}>
-              {clean(workspaceManager?.uid || session?.uid, loading ? '—' : 'Not set')}
+              {managerUid}
             </Text>
           </View>
           <View style={styles.detailBox}>
-            <Text style={styles.detailLabel}>Email</Text>
+            <Text style={styles.detailLabel}>Full Name</Text>
+            <Text style={styles.detailValue} numberOfLines={1}>
+              {managerFullName || (loading ? '—' : 'Not set')}
+            </Text>
+          </View>
+          <View style={styles.detailBox}>
+            <Text style={styles.detailLabel}>Contact Number</Text>
+            <Text style={styles.detailValue} numberOfLines={1}>
+              {managerContact}
+            </Text>
+          </View>
+          <View style={styles.detailBox}>
+            <Text style={styles.detailLabel}>Email Address</Text>
             <Text style={styles.detailValue} numberOfLines={1}>
               {managerEmail || (loading ? '—' : 'Not set')}
-            </Text>
-          </View>
-          <View style={styles.detailBox}>
-            <Text style={styles.detailLabel}>Branch</Text>
-            <Text style={styles.detailValue} numberOfLines={1}>
-              {branchName}
             </Text>
           </View>
           <View style={styles.detailBox}>
             <Text style={styles.detailLabel}>Location</Text>
             <Text style={styles.detailValue} numberOfLines={1}>
               {branchLocation}
+            </Text>
+          </View>
+          <View style={styles.detailBox}>
+            <Text style={styles.detailLabel}>Branch</Text>
+            <Text style={styles.detailValue} numberOfLines={1}>
+              {branchName}
             </Text>
           </View>
           <View style={styles.detailBox}>

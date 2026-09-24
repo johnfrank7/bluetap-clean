@@ -31,6 +31,7 @@ import BlueTapEmptyState from '../../components/BlueTapEmptyState';
 import DistributorProfileBanner from '../../components/DistributorProfileBanner';
 import PortalSwipeContainer, { DISTRIBUTOR_TABS } from '../../components/PortalSwipeContainer';
 import { createPortalStyleSheet, useBlueTapTheme } from '../../components/BlueTapTheme';
+import TopToastFeedback from '../../components/TopToastFeedback';
 import { USER_PORTAL_BOTTOM_CONTENT_INSET, USER_PORTAL_LAYOUT } from '../../constants/userPortalLayout';
 import { BLUETAP_COLORS } from '../../constants/bluetapTheme';
 import {
@@ -383,6 +384,7 @@ export default function DistributorRequests() {
   const [scheduleError, setScheduleError] = useState('');
   const [processingRequestId, setProcessingRequestId] = useState('');
   const [successVisible, setSuccessVisible] = useState(false);
+  const [toast, setToast] = useState({ visible: false, message: '', type: 'success' });
   const [declineTargetRequest, setDeclineTargetRequest] = useState(null);
   const [declineReason, setDeclineReason] = useState('');
   const [declining, setDeclining] = useState(false);
@@ -406,9 +408,11 @@ export default function DistributorRequests() {
     try {
       await acceptAssignedOrder(request.sourceId);
       await refresh();
+      setToast({ visible: true, message: 'Assignment accepted successfully.', type: 'success' });
       showSuccessFeedback();
     } catch (acceptErr) {
       console.log('Accept error:', acceptErr);
+      setToast({ visible: true, message: acceptErr.message || 'Failed to accept assignment.', type: 'error' });
     } finally {
       setProcessingRequestId('');
     }
@@ -439,9 +443,11 @@ export default function DistributorRequests() {
       await declineAssignedOrder(declineTargetRequest.sourceId, declineReason);
       await refresh();
       setDeclineTargetRequest(null);
+      setToast({ visible: true, message: 'Assignment declined and returned to dispatch queue.', type: 'info' });
       showSuccessFeedback();
     } catch (err) {
       setDeclineError(err.message || 'Failed to decline assignment.');
+      setToast({ visible: true, message: err.message || 'Failed to decline assignment.', type: 'error' });
     } finally {
       setDeclining(false);
     }
@@ -613,9 +619,11 @@ export default function DistributorRequests() {
       });
       await refresh();
       closeScheduleSheet(true);
+      setToast({ visible: true, message: 'Delivery scheduled successfully.', type: 'success' });
       showSuccessFeedback();
     } catch (submitError) {
       setScheduleError(submitError.message || 'The delivery schedule could not be saved.');
+      setToast({ visible: true, message: submitError.message || 'The delivery schedule could not be saved.', type: 'error' });
     } finally {
       setProcessingRequestId('');
     }
@@ -734,28 +742,12 @@ export default function DistributorRequests() {
         </View>
       </PortalSwipeContainer>
 
-      {successVisible && (
-        <Animated.View
-          style={[
-            styles.successToast,
-            {
-              opacity: toastAnim,
-              transform: [
-                {
-                  translateY: toastAnim.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [16, 0],
-                  }),
-                },
-              ],
-            },
-          ]}
-        >
-          <Text style={styles.successToastText}>
-            {'\u2713'} Request Scheduled Successfully
-          </Text>
-        </Animated.View>
-      )}
+      <TopToastFeedback
+        visible={toast.visible}
+        message={toast.message}
+        type={toast.type}
+        onDismiss={() => setToast((t) => ({ ...t, visible: false }))}
+      />
 
       <RequestDetailsModal
         visible={!!detailsRequest}
@@ -1141,7 +1133,7 @@ const styles = createPortalStyleSheet({
     minHeight: 44,
     borderWidth: 1.5,
     borderColor: '#2563EB',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: BLUETAP_COLORS.surface,
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
@@ -1175,7 +1167,7 @@ const styles = createPortalStyleSheet({
     opacity: 0.65,
   },
   emptyCard: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: BLUETAP_COLORS.surface,
     borderRadius: USER_PORTAL_LAYOUT.cardRadius,
     padding: 18,
     borderWidth: 1,
@@ -1211,7 +1203,7 @@ const styles = createPortalStyleSheet({
   bottomSheet: {
     width: '100%',
     maxWidth: USER_PORTAL_LAYOUT.maxWidth,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: BLUETAP_COLORS.surface,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     paddingHorizontal: USER_PORTAL_LAYOUT.gutter,
@@ -1248,7 +1240,7 @@ const styles = createPortalStyleSheet({
     borderRadius: 14,
     borderWidth: 1.5,
     borderColor: '#C8E6FA',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: BLUETAP_COLORS.surface,
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 13,
@@ -1307,7 +1299,7 @@ const styles = createPortalStyleSheet({
     borderRadius: 13,
     borderWidth: 1,
     borderColor: '#C8E6FA',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: BLUETAP_COLORS.surface,
     paddingVertical: 9,
     paddingHorizontal: 10,
     alignItems: 'center',
@@ -1344,7 +1336,7 @@ const styles = createPortalStyleSheet({
     borderRadius: 12,
     borderWidth: 1,
     borderColor: '#C8E6FA',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: BLUETAP_COLORS.surface,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1390,7 +1382,7 @@ const styles = createPortalStyleSheet({
     borderColor: '#2563EB',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: BLUETAP_COLORS.surface,
   },
   sheetCancelText: {
     color: '#2563EB',

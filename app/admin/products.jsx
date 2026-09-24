@@ -8,6 +8,7 @@ import { BLUETAP_LAYOUT } from '../../constants/bluetapTheme';
 import { ADMIN_CACHE_KEYS, useAdminData } from '../../services/adminDataCache';
 import { adminProductErrorMessage, createAdminProduct, getAdminProducts, updateAdminProduct } from '../../services/adminProducts';
 import { getBranches } from '../../services/branchManagement';
+import TopToastFeedback from '../../components/TopToastFeedback';
 
 const empty = { product_name:'',description:'',price:'',containerType:'',size:'',active:true,branchIds:[],image:'',imagePath:'',imageFile:null,imagePreview:'' };
 const money = (value) => `₱${Number(value || 0).toFixed(2)}`;
@@ -18,6 +19,8 @@ export default function AdminProductsPage() {
   const branchesState = useAdminData(ADMIN_CACHE_KEYS.branches, getBranches);
   const products = productsState.data || []; const branches = branchesState.data || [];
   const [search,setSearch] = React.useState(''); const [modal,setModal] = React.useState(false); const [editing,setEditing] = React.useState(null); const [form,setForm] = React.useState(empty); const [saving,setSaving] = React.useState(false); const [message,setMessage] = React.useState('');
+  const [toast, setToast] = React.useState({ visible: false, message: '', type: 'info' });
+  const showToast = (msg, type = 'info') => setToast({ visible: true, message: msg, type });
   const filtered = products.filter((product) => product.product_name.toLowerCase().includes(search.trim().toLowerCase()));
   const open = (product = null) => { setEditing(product); setForm(product ? { ...empty,...product,price:String(product.price),imagePreview:product.imageUrl || product.image || '' } : empty); setMessage(''); setModal(true); };
   const close = () => { if (!saving) { setModal(false); setEditing(null); setForm(empty); } };
@@ -28,16 +31,22 @@ export default function AdminProductsPage() {
   };
   const toggleBranch = (id) => setForm((current) => ({...current,branchIds:current.branchIds.includes(id) ? current.branchIds.filter((item) => item !== id) : [...current.branchIds,id]}));
   const save = async () => {
-    const price = Number(form.price); if (!form.product_name.trim() || !Number.isFinite(price) || price < 0) return setMessage('Enter a product name and valid price.');
+    const price = Number(form.price);
+    if (!form.product_name.trim() || !Number.isFinite(price) || price < 0) {
+      setMessage('Enter a product name and valid price.');
+      showToast('Enter a product name and valid price.', 'error');
+      return;
+    }
     setSaving(true); setMessage('');
     try {
       const payload = { product_name:form.product_name.trim(),description:form.description.trim(),price,containerType:form.containerType.trim(),size:form.size.trim(),active:form.active,branchIds:form.branchIds };
       if (editing) await updateAdminProduct(editing.id,payload,form.imageFile); else await createAdminProduct(payload,form.imageFile);
-      setModal(false); setEditing(null); setForm(empty); await productsState.refresh({force:true}); setMessage('Product saved. Requesters will see the updated catalog on refresh.');
-    } catch (error) { setMessage(adminProductErrorMessage(error)); } finally { setSaving(false); }
+      setModal(false); setEditing(null); setForm(empty); await productsState.refresh({force:true}); setMessage('Product saved. Requesters will see the updated catalog on refresh.'); showToast('Product saved successfully.', 'success');
+    } catch (error) { const err = adminProductErrorMessage(error); setMessage(err); showToast(err, 'error'); } finally { setSaving(false); }
   };
-  const toggleActive = async (product) => { setSaving(true); setMessage(''); try { await updateAdminProduct(product.id,{active:!product.active},null); await productsState.refresh({force:true}); } catch(error){setMessage(adminProductErrorMessage(error));} finally{setSaving(false);} };
+  const toggleActive = async (product) => { setSaving(true); setMessage(''); try { await updateAdminProduct(product.id,{active:!product.active},null); await productsState.refresh({force:true}); const toggleMsg = product.active ? 'Product deactivated.' : 'Product activated.'; setMessage(toggleMsg); showToast(toggleMsg, 'success'); } catch(error){ const err = adminProductErrorMessage(error); setMessage(err); showToast(err, 'error'); } finally{setSaving(false);} };
   return <AdminShell title="Products" subtitle="Manage the authoritative product catalog, pricing, images, and availability.">
+    <TopToastFeedback visible={toast.visible} message={toast.message} type={toast.type} onDismiss={() => setToast((t) => ({ ...t, visible: false }))} />
     <View style={styles.toolbar}><View><Text style={styles.eyebrow}>PRODUCT CATALOG</Text><Text style={styles.heading}>Products and pricing</Text></View><View style={styles.toolbarActions}><TextInput value={search} onChangeText={setSearch} placeholder="Search products" placeholderTextColor={colors.textSecondary} style={styles.search}/><TouchableOpacity onPress={() => open()} style={styles.primary}><Text style={styles.primaryText}>Add product</Text></TouchableOpacity></View></View>
     {!!message && <View accessibilityRole="alert" style={styles.notice}><Text style={styles.noticeText}>{message}</Text></View>}
     {productsState.loading && !productsState.data ? <View style={styles.grid}>{[1,2,3].map((key)=><CardSkeleton key={key} style={styles.skeleton}/>)}</View> : productsState.error ? <View style={styles.empty}><Text style={styles.emptyTitle}>Unable to load products</Text><TouchableOpacity onPress={()=>productsState.refresh({force:true})}><Text style={styles.retry}>Retry</Text></TouchableOpacity></View> : filtered.length === 0 ? <View style={styles.empty}><Text style={styles.emptyTitle}>No products available</Text><Text style={styles.emptyText}>Add the first BlueTap product to publish it to Requesters.</Text></View> : <View style={styles.grid}>{filtered.map((product)=><View key={product.id} style={styles.card}><View style={styles.imageSurface}>{product.image ? <Image source={{uri:product.image}} style={styles.image} resizeMode="contain"/> : <Text style={styles.placeholder}>BlueTap</Text>}</View><View style={styles.cardBody}><View style={styles.row}><Text style={styles.name}>{product.product_name}</Text><StatusBadge status={product.active ? 'active' : 'inactive'}/></View><Text style={styles.price}>{money(product.price)}</Text><Text style={styles.detail}>{[product.containerType,product.size].filter(Boolean).join(' · ') || 'Product details not provided'}</Text><Text style={styles.availability}>{product.branchIds?.length ? `${product.branchIds.length} selected branch${product.branchIds.length === 1 ? '' : 'es'}` : 'Available at all active branches'}</Text><View style={styles.cardActions}><TouchableOpacity onPress={()=>open(product)} style={styles.secondary}><Text style={styles.secondaryText}>Edit</Text></TouchableOpacity><TouchableOpacity disabled={saving} onPress={()=>toggleActive(product)} style={[styles.secondary,product.active&&styles.danger]}><Text style={[styles.secondaryText,product.active&&styles.dangerText]}>{product.active?'Deactivate':'Activate'}</Text></TouchableOpacity></View></View></View>)}</View>}

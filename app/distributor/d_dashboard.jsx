@@ -59,14 +59,22 @@ const formatAmountDue = (amount) =>
 
 const occursToday = (value) => {
   if (!value) return false;
-  const date = value instanceof Date
-    ? value
-    : value?.toDate?.() || (value?.seconds ? new Date(value.seconds * 1000) : new Date(value));
-  const today = new Date();
-  return date && !Number.isNaN(date.getTime())
-    && date.getFullYear() === today.getFullYear()
-    && date.getMonth() === today.getMonth()
-    && date.getDate() === today.getDate();
+  try {
+    const date = value instanceof Date
+      ? value
+      : value?.toDate?.() || (value?.seconds ? new Date(value.seconds * 1000) : new Date(value));
+    const today = new Date();
+    return Boolean(
+      date &&
+      typeof date.getTime === 'function' &&
+      !Number.isNaN(date.getTime()) &&
+      date.getFullYear() === today.getFullYear() &&
+      date.getMonth() === today.getMonth() &&
+      date.getDate() === today.getDate()
+    );
+  } catch {
+    return false;
+  }
 };
 
 const getNumericQuantity = (quantity) => {
@@ -80,7 +88,7 @@ const getDistributorRequestItems = (request) => {
   if (!request) return [];
 
   if (Array.isArray(request.items) && request.items.length > 0) {
-    return request.items.map((item, index) => {
+    return request.items.filter(Boolean).map((item, index) => {
       const quantity = Number(item.quantity || 0);
       const unitPrice = Number(item.product_price ?? item.unitPrice ?? 0);
       const subtotal = Number(
@@ -88,8 +96,8 @@ const getDistributorRequestItems = (request) => {
       );
 
       return {
-        id: item.product_id || item.id || `${request.requestId}-${index}`,
-        productName: item.product_name || item.productName || item.productNameSnapshot || 'Product',
+        id: String(item.product_id || item.id || `${request.requestId}-${index}`),
+        productName: String(item.product_name || item.productName || item.productNameSnapshot || 'Product'),
         quantity: Number.isFinite(quantity) ? quantity : item.quantity,
         unitPrice: Number.isFinite(unitPrice) ? unitPrice : 0,
         subtotal: Number.isFinite(subtotal) ? subtotal : 0,
@@ -137,15 +145,46 @@ const getDistributorTotalAmount = (request) => {
   );
 };
 
-export default function DistributorDashboard() {
+class DistributorErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error, errorInfo) {
+    console.error('DistributorDashboard caught render error:', error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <SafeAreaView edges={['left', 'right', 'bottom']} style={{ flex: 1, backgroundColor: BLUETAP_COLORS.background, justifyContent: 'center', alignItems: 'center', padding: 20 }}>
+          <BlueTapEmptyState
+            title="Dashboard Temporarily Unavailable"
+            description="A temporary error occurred while rendering your dashboard. Please try reloading."
+            actionLabel="Reload Dashboard"
+            onAction={() => this.setState({ hasError: false, error: null })}
+          />
+        </SafeAreaView>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+function DistributorDashboardContent() {
   useBlueTapTheme();
   const router = useRouter();
   const [detailsVisible, setDetailsVisible] = useState(false);
   const { orders, loading, error, refresh } = useAssignedDistributorOrders();
   const { isComplete, loading: profileLoading } = useDistributorProfile();
   const todayText = formatDashboardDate(new Date());
-  const screenOrders = useMemo(() => orders.map(toDistributorScreenOrder), [orders]);
-  const activeRequest = screenOrders.find((order) => !['delivered', 'cancelled', 'canceled', 'declined'].includes(normalizeDistributorOrderStatus(order.status)));
+  const screenOrders = useMemo(() => (Array.isArray(orders) ? orders : []).filter(Boolean).map(toDistributorScreenOrder), [orders]);
+  const activeRequest = screenOrders.find((order) => order && !['delivered', 'cancelled', 'canceled', 'declined'].includes(normalizeDistributorOrderStatus(order.status)));
   const dashboardSummary = useMemo(() => [
     {
       label: 'Pending Requests',
@@ -396,6 +435,14 @@ export default function DistributorDashboard() {
         request={detailsRequestData}
       />
     </SafeAreaView>
+  );
+}
+
+export default function DistributorDashboard() {
+  return (
+    <DistributorErrorBoundary>
+      <DistributorDashboardContent />
+    </DistributorErrorBoundary>
   );
 }
 

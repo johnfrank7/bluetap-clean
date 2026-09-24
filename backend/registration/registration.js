@@ -6,6 +6,8 @@ const { readRegistrationSession, isRegistrationFaceVerified } = require('./regis
 const { decodeImage } = require('../verification/faceVerification');
 const { createRenderFaceClient } = require('../verification/renderFaceClient');
 const { createRegistrationLimitService } = require('./registrationLimits');
+const { normalizePhilippinePhone } = require('../utils/phoneUtils');
+const { generateNextPublicUid } = require('../utils/publicUidGenerator');
 
 const RESERVATION_TTL = 15 * 60 * 1000;
 
@@ -72,8 +74,9 @@ function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, render 
     };
     const role = input?.role;
     if (!['requester', 'distributor'].includes(role)) throw new OtpError(400, 'invalid-registration', 'Choose a valid account type.');
-    const phone = text('phone', 13);
-    if (!/^\+639\d{9}$/.test(phone)) throw new OtpError(400, 'invalid-registration', 'Enter a valid Philippine mobile number.');
+    const phoneInput = text('phone', 25);
+    const phone = normalizePhilippinePhone(phoneInput);
+    if (!phone) throw new OtpError(400, 'invalid-registration', 'Enter a valid Philippine mobile number.');
     if (typeof input.password !== 'string' || input.password.trim().length < 8 || input.password.length > 128) {
       throw new OtpError(400, 'invalid-registration', 'Password must be between 8 and 128 characters.');
     }
@@ -159,9 +162,14 @@ function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, render 
         requestedBranchId: session.requestedBranchId, requestedBranchNameSnapshot: session.requestedBranchNameSnapshot || null,
         branchId: existing?.branchId || null, branchNameSnapshot: existing?.branchNameSnapshot || null,
       } : {};
+      const publicPrefix = profile.role === 'requester' ? 'Req' : 'Dis';
+      const number = Number(counts[profile.role] || 0) + 1;
+      const publicUid = existing?.publicUid || existing?.displayUid || `${publicPrefix}${String(number).padStart(3, '0')}`;
       const recoveryProfile = {
         ...profile, uid: user.uid, email: user.email,
-        unique_id: existing?.unique_id || `${profile.role === 'requester' ? 'REQ' : 'DIS'}-${String(Number(counts[profile.role] || 0) + 1).padStart(6, '0')}`,
+        publicUid,
+        displayUid: publicUid,
+        unique_id: existing?.unique_id || `${profile.role === 'requester' ? 'REQ' : 'DIS'}-${String(number).padStart(6, '0')}`,
         approvalStatus: existing?.approvalStatus || (profile.role === 'distributor' ? 'pending' : 'approved'),
         status: existing?.status || (profile.role === 'distributor' ? 'Pending' : 'Approved'),
         ...distributorApplication,
@@ -191,12 +199,19 @@ function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, render 
           finalization: { status: 'pending', uid: user.uid, startedAt: new Date(now()) }, profileRecovery: recoveryProfile });
         return;
       }
-      const number = Number(counts[profile.role] || 0) + 1;
       const prefix = profile.role === 'requester' ? 'REQ' : 'DIS';
       const pending = profile.role === 'distributor';
       tx.set(counter, { [profile.role]: number }, { merge: true });
+      tx.set(db.collection('accountCounters').doc(profile.role), {
+        role: profile.role,
+        lastNumber: number,
+        count: number,
+        updatedAt: new Date(now()),
+      }, { merge: true });
       tx.set(ref, {
         ...profile, uid: user.uid, email: user.email,
+        publicUid,
+        displayUid: publicUid,
         unique_id: `${prefix}-${String(number).padStart(6, '0')}`,
         approvalStatus: pending ? 'pending' : 'approved', status: pending ? 'Pending' : 'Approved',
         ...(pending ? { distributorStatus: 'pending', requestedBranchId: session.requestedBranchId, requestedBranchNameSnapshot: session.requestedBranchNameSnapshot || null, branchId: null, branchNameSnapshot: null } : {}),

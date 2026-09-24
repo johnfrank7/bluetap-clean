@@ -1,5 +1,6 @@
 const { createHmac, randomUUID } = require('node:crypto');
 const { OtpError } = require('../utils/otpError');
+const { normalizePhilippinePhone } = require('../utils/phoneUtils');
 const { loadRegistrationSecurity, policySnapshot } = require('./registrationSecurity');
 const { checkFinalizedRegistrationLimits } = require('./registrationLimits');
 
@@ -33,7 +34,9 @@ function validatePersonalInfo(input) {
   if (!['requester', 'distributor'].includes(input?.role) || required.some((key) => typeof input?.[key] !== 'string' || !input[key].trim())) {
     throw new OtpError(400, 'invalid-registration', 'Complete your personal information before identity verification.');
   }
-  if (!/^\+639\d{9}$/.test(input.phone || '')) throw new OtpError(400, 'invalid-registration', 'Enter a valid Philippine mobile number.');
+  const normalizedPhone = normalizePhilippinePhone(input.phone || '');
+  if (!normalizedPhone) throw new OtpError(400, 'invalid-registration', 'Enter a valid Philippine mobile number.');
+  input.phone = normalizedPhone;
   if (input.role === 'distributor' && (typeof input.requestedBranchId !== 'string' || !input.requestedBranchId.trim())) {
     throw new OtpError(400, 'branch-required', 'Choose the BlueTap branch you are applying to.');
   }

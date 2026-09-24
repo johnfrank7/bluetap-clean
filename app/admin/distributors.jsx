@@ -5,6 +5,7 @@ import { TableSkeleton } from '../../components/AdminSkeleton';
 import { useAdminTheme } from '../../components/AdminTheme';
 import { getBranches, getDistributors, updateDistributor } from '../../services/branchManagement';
 import { ADMIN_CACHE_KEYS, useAdminData } from '../../services/adminDataCache';
+import TopToastFeedback from '../../components/TopToastFeedback';
 
 const labels = { pending: 'Pending', active: 'Active', inactive: 'Inactive', rejected: 'Rejected', approved: 'Active' };
 const branchLabel = (item) => item.branchName || (item.branchId ? item.branchId : 'Branch assignment required');
@@ -15,11 +16,23 @@ export default function DistributorManagement() {
   const branchState = useAdminData(ADMIN_CACHE_KEYS.branches, getBranches);
   const items = distributorState.data || []; const activeBranches = (branchState.data || []).filter((branch) => branch.status === 'active');
   const [filter, setFilter] = React.useState('pending'); const [query, setQuery] = React.useState(''); const [debouncedQuery, setDebouncedQuery] = React.useState(''); const [actionError, setActionError] = React.useState(''); const [busy, setBusy] = React.useState(''); const [approval, setApproval] = React.useState(null); const [branchQuery, setBranchQuery] = React.useState('');
+  const [toast, setToast] = React.useState({ visible: false, message: '', type: 'info' });
+  const showToast = (message, type = 'info') => setToast({ visible: true, message, type });
   React.useEffect(() => { const timer = setTimeout(() => setDebouncedQuery(query.trim().toLowerCase()), 200); return () => clearTimeout(timer); }, [query]);
   const act = async (uid, action, options = {}) => {
     setBusy(uid + action); setActionError('');
-    try { await updateDistributor(uid, action, options); await Promise.all([distributorState.refresh({ force: true }), branchState.refresh({ force: false })]); if (action === 'approve') setApproval(null); }
-    catch (caught) { setActionError(caught.message || 'Unable to update this distributor.'); }
+    try {
+      await updateDistributor(uid, action, options);
+      await Promise.all([distributorState.refresh({ force: true }), branchState.refresh({ force: false })]);
+      if (action === 'approve') setApproval(null);
+      const actionMsg = action === 'approve' ? 'Distributor approved successfully.' : action === 'reject' ? 'Distributor application rejected.' : action === 'deactivate' ? 'Distributor account deactivated.' : 'Distributor account reactivated.';
+      showToast(actionMsg, 'success');
+    }
+    catch (caught) {
+      const msg = caught.message || 'Unable to update this distributor.';
+      setActionError(msg);
+      showToast(msg, 'error');
+    }
     finally { setBusy(''); }
   };
   const openApproval = (item) => { setApproval({ item, branchId: activeBranches.some((branch) => branch.id === item.requestedBranchId) ? item.requestedBranchId : '' }); setBranchQuery(''); };
@@ -31,6 +44,7 @@ export default function DistributorManagement() {
   const branchChoices = activeBranches.filter((branch) => `${branch.name} ${branch.code || ''}`.toLowerCase().includes(branchQuery.trim().toLowerCase()));
 
   return <AdminShell title="Distributor Management" subtitle="Review applications and manage branch-assigned Distributor accounts.">
+    <TopToastFeedback visible={toast.visible} message={toast.message} type={toast.type} onDismiss={() => setToast((t) => ({ ...t, visible: false }))} />
     <View style={styles.card}>
       <View style={styles.tabs}>{['pending', 'active', 'inactive', 'rejected'].map((value) => <Pressable key={value} onPress={() => setFilter(value)} style={[styles.tab, filter === value && styles.tabActive]}><Text style={[styles.tabText, filter === value && styles.tabTextActive]}>{labels[value]} ({items.filter((item) => item.approvalStatus === value || (value === 'active' && item.approvalStatus === 'approved')).length})</Text></Pressable>)}</View>
       <TextInput value={query} onChangeText={setQuery} placeholder="Search name, username, email, or branch" placeholderTextColor={colors.textSecondary} style={styles.search} />

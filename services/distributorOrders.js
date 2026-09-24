@@ -55,26 +55,51 @@ export const formatDistributorOrderDate = (value, fallback = 'Not set') => {
     : fallback;
 };
 
+function safeString(val, fallback = '') {
+  if (val == null) return fallback;
+  if (typeof val === 'string') return val.trim();
+  if (typeof val === 'number' || typeof val === 'boolean') return String(val);
+  if (typeof val === 'object') {
+    if (val.addressText) return String(val.addressText).trim();
+    if (val.address) return safeString(val.address, fallback);
+    if (val.street || val.barangay || val.city) {
+      return [val.street, val.barangay, val.city].filter(Boolean).join(', ');
+    }
+    if (val.name) return String(val.name).trim();
+    if (val.fullName) return String(val.fullName).trim();
+    if (val.label) return String(val.label).trim();
+    try {
+      return JSON.stringify(val);
+    } catch {
+      return fallback;
+    }
+  }
+  return String(val);
+}
+
 export function toDistributorScreenOrder(order = {}) {
-  const items = Array.isArray(order.items) ? order.items : [];
+  const items = Array.isArray(order.items) ? order.items.filter(Boolean) : [];
   const quantity = items.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0);
-  const productNames = items.map((item) => item.productNameSnapshot).filter(Boolean);
-  const totalAmount = Number(order.totalAtOrder || 0);
-  const deliveryDate = formatDistributorOrderDate(order.expectedDeliveryDate, 'Not set');
-  const status = order.status || 'distributor_assigned';
-  const requestId = order.requestId || order.id || 'Not set';
-  const requesterName = order.requesterName || 'Not set';
-  const requesterId = order.requesterUniqueId || '';
+  const productNames = items.map((item) => safeString(item.productNameSnapshot || item.product_name || item.name)).filter(Boolean);
+  const totalAmount = Number(order.totalAtOrder || order.total_cost || order.totalAmount || 0);
+  const deliveryDate = formatDistributorOrderDate(order.expectedDeliveryDate || order.delivery_date, 'Not set');
+  const status = safeString(order.status, 'distributor_assigned');
+  const requestId = safeString(order.requestId || order.id || order.request_id, 'Not set');
+  const requesterName = safeString(order.requesterName || order.customerName || order.requester_name, 'Not set');
+  const requesterId = safeString(order.requesterUniqueId || order.requester_unique_id || order.requesterId, '');
   const mappedItems = items.map((item, index) => ({
-    id: `${order.id || requestId}-${index}`,
-    productName: item.productNameSnapshot || 'Product',
+    id: safeString(item.id || item.product_id || `${order.id || requestId}-${index}`),
+    productName: safeString(item.productNameSnapshot || item.product_name || item.name, 'Product'),
     quantity: Number(item.quantity) || 0,
-    unitPrice: Number(item.quantity) > 0 ? Number(item.totalAtOrder || 0) / Number(item.quantity) : Number(item.totalAtOrder || 0),
-    subtotal: Number(item.totalAtOrder || 0),
+    unitPrice: Number(item.quantity) > 0 ? Number(item.totalAtOrder || item.line_total || 0) / Number(item.quantity) : Number(item.totalAtOrder || item.line_total || 0),
+    subtotal: Number(item.totalAtOrder || item.line_total || 0),
   }));
 
+  const rawAddress = order.deliveryAddress || order.address || order.deliveryLocation?.address;
+  const resolvedAddress = safeString(rawAddress, 'Not set');
+
   return {
-    sourceId: order.id || requestId,
+    sourceId: safeString(order.id || requestId, 'Not set'),
     id: requestId,
     requestId,
     status,
@@ -83,15 +108,15 @@ export function toDistributorScreenOrder(order = {}) {
     requesterName,
     requesterId,
     requesterUniqueId: requesterId,
-    contact: order.contactNumber || 'Not set',
-    contactNumber: order.contactNumber || 'Not set',
-    address: order.address || 'Not set',
-    deliveryAddress: order.address || 'Not set',
+    contact: safeString(order.contactNumber || order.contact_number || order.phone, 'Not set'),
+    contactNumber: safeString(order.contactNumber || order.contact_number || order.phone, 'Not set'),
+    address: resolvedAddress,
+    deliveryAddress: resolvedAddress,
     productName: productNames[0] || 'Product',
     productsOrdered: productNames.length > 1 ? `${productNames[0]} +${productNames.length - 1} more` : productNames[0] || 'Product',
     quantity: quantity ? String(quantity) : 'Not set',
-    container: order.container || 'Not set',
-    containerType: order.container || 'Not set',
+    container: safeString(order.container || order.containerType, 'Not set'),
+    containerType: safeString(order.container || order.containerType, 'Not set'),
     totalAmount,
     total_cost: totalAmount,
     amountDue: `₱${totalAmount.toFixed(2)}`,
@@ -100,17 +125,17 @@ export function toDistributorScreenOrder(order = {}) {
     scheduledDateTime: formatDistributorOrderDate(order.scheduledAt || order.expectedDeliveryDate, 'Not set'),
     deliveredDateTime: formatDistributorOrderDate(order.deliveredAt || order.updatedAt, 'Not set'),
     orderDate: formatDistributorOrderDate(order.createdAt, 'Not set'),
-    waterStation: order.currentBranchName || 'Not set',
-    paymentMethod: order.paymentMethod || 'Not set',
-    distributor: order.assignedDistributorName || '',
-    distributorName: order.assignedDistributorName || '',
-    distributorId: '',
-    distributorUniqueId: '',
+    waterStation: safeString(order.currentBranchName || order.branchNameSnapshot || order.waterStation || order.water_station, 'Not set'),
+    paymentMethod: safeString(order.paymentMethod || order.payment_method, 'Not set'),
+    distributor: safeString(order.assignedDistributorName || order.distributor_name, ''),
+    distributorName: safeString(order.assignedDistributorName || order.distributor_name, ''),
+    distributorId: safeString(order.assignedDistributorUid || order.distributor_id, ''),
+    distributorUniqueId: safeString(order.distributorUniqueId || order.distributor_unique_id, ''),
     items: mappedItems,
     grandTotalAmount: totalAmount,
-    failureReason: order.failureReason || '',
-    notes: order.notes || order.specialInstructions || '',
-    specialInstructions: order.notes || order.specialInstructions || '',
+    failureReason: safeString(order.failureReason, ''),
+    notes: safeString(order.notes || order.specialInstructions, ''),
+    specialInstructions: safeString(order.notes || order.specialInstructions, ''),
     deliveryLocation: order.deliveryLocation || null,
     scheduledAt: order.scheduledAt || null,
     deliveredAt: order.deliveredAt || null,
@@ -127,10 +152,35 @@ export function useAssignedDistributorOrders() {
   const refresh = React.useCallback(async () => {
     setLoading(true);
     setError('');
-    try { setOrders(await getAssignedDistributorOrders()); }
-    catch (loadFailure) { setError(loadFailure.message || 'Assigned deliveries are temporarily unavailable.'); }
-    finally { setLoading(false); }
+    try {
+      setOrders(await getAssignedDistributorOrders());
+    } catch (loadFailure) {
+      setError(loadFailure.message || 'Assigned deliveries are temporarily unavailable.');
+    } finally {
+      setLoading(false);
+    }
   }, []);
-  React.useEffect(() => { refresh(); }, [refresh]);
+
+  React.useEffect(() => {
+    let active = true;
+    const unsubscribe = auth.onAuthStateChanged?.((user) => {
+      if (user && active) {
+        refresh();
+      } else if (!user && active) {
+        setOrders([]);
+        setLoading(false);
+      }
+    });
+
+    if (auth.currentUser) {
+      refresh();
+    }
+
+    return () => {
+      active = false;
+      if (typeof unsubscribe === 'function') unsubscribe();
+    };
+  }, [refresh]);
+
   return { orders, loading, error, refresh };
 }

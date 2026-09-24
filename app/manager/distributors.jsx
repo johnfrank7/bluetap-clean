@@ -17,6 +17,7 @@ import { getModuleSession } from '../../services/authSession';
 import { dispatchManagerOrder, getManagerDispatch } from '../../services/managerOrderApprovals';
 import { haversineDistanceKm } from '../../services/location';
 import { useAdminTheme } from '../../components/AdminTheme';
+import TopToastFeedback from '../../components/TopToastFeedback';
 import ManagerShell, { MANAGER_COLORS, ManagerPill } from '../../components/ManagerShell';
 
 const normalizeApplicationStatus = (status) =>
@@ -106,7 +107,7 @@ function buildScheduleDate(dayOffset, slot) {
   return target;
 }
 
-function DistributorDispatchQueue({ styles, colors }) {
+function DistributorDispatchQueue({ styles, colors, onShowToast }) {
   const [data, setData] = useState({ orders: [], incomingTransfers: [], sourceDecisionEvents: [], distributors: [], branches: [] });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -168,9 +169,12 @@ function DistributorDispatchQueue({ styles, colors }) {
         scheduledAt: scheduledAt.toISOString(),
       });
       setAssigningOrderId('');
+      onShowToast?.(isReassign ? 'Distributor reassigned successfully.' : 'Distributor assigned and delivery scheduled.', 'success');
       await load();
     } catch (actError) {
-      setScheduleError(actError.message || 'Failed to assign distributor.');
+      const msg = actError.message || 'Failed to assign distributor.';
+      setScheduleError(msg);
+      onShowToast?.(msg, 'error');
     } finally {
       setUpdatingId('');
     }
@@ -184,18 +188,23 @@ function DistributorDispatchQueue({ styles, colors }) {
       await dispatchManagerOrder(orderId, 'request-transfer', { targetBranchId, transferReason });
       setTransferringOrderId('');
       setTransferReason('');
+      onShowToast?.('Branch transfer requested successfully.', 'success');
       await load();
     } catch (actionFailure) {
-      setError(actionFailure.message);
+      const msg = actionFailure.message || 'Failed to request transfer.';
+      setError(msg);
+      onShowToast?.(msg, 'error');
     } finally {
       setUpdatingId('');
     }
   };
 
   const dispatchableOrders = data.orders.filter(
-    (order) =>
-      order.status !== 'branch_transfer_pending' &&
-      ['awaiting_distributor_assignment', 'distributor_assigned', 'accepted', 'scheduled', 'delivery_failed'].includes(order.status)
+    (order) => {
+      const st = String(order.status || '').trim().toLowerCase().replace(/\s+/g, '_');
+      return st !== 'branch_transfer_pending' &&
+        ['awaiting_distributor_assignment', 'pending', 'distributor_assigned', 'accepted', 'scheduled', 'delivery_failed'].includes(st);
+    }
   );
 
   return (
@@ -421,6 +430,11 @@ export default function ManagerDistributorsPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [search, setSearch] = useState('');
+  const [toast, setToast] = useState({ visible: false, message: '', type: 'info' });
+
+  const showToast = (message, type = 'info') => {
+    setToast({ visible: true, message, type });
+  };
 
   useEffect(() => {
     let firestoreRegistered = [];
@@ -490,8 +504,14 @@ export default function ManagerDistributorsPage() {
 
   return (
     <ManagerShell active="distributors" title="Distributors" subtitle="Order dispatch, assignment and registered roster">
+      <TopToastFeedback
+        visible={toast.visible}
+        message={toast.message}
+        type={toast.type}
+        onDismiss={() => setToast((prev) => ({ ...prev, visible: false }))}
+      />
       {/* Dispatch & Scheduling Queue */}
-      <DistributorDispatchQueue styles={styles} colors={colors} />
+      <DistributorDispatchQueue styles={styles} colors={colors} onShowToast={showToast} />
 
       {/* Registered Distributors Roster */}
       <View style={styles.card}>

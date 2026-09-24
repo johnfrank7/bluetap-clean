@@ -20,9 +20,11 @@ import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { findLocalUserForAuthRole, saveLocalUser } from '../../localUsers';
 import { normalizeRole, signOutAndClearSessions } from '../../services/authSession';
 import { ensureUserUniqueId, getProfileUniqueId } from '../../services/uniqueIds';
+import { formatPhilippinePhone, normalizePhilippinePhone } from '../../services/phoneUtils';
 import BlueTapHeader from '../../components/BlueTapHeader';
 import { createShadow } from '../../components/shadowStyles';
 import { createPortalStyleSheet, useBlueTapTheme } from '../../components/BlueTapTheme';
+import TopToastFeedback from '../../components/TopToastFeedback';
 import { USER_PORTAL_BOTTOM_CONTENT_INSET, USER_PORTAL_LAYOUT } from '../../constants/userPortalLayout';
 import { BLUETAP_COLORS } from '../../constants/bluetapTheme';
 
@@ -225,7 +227,7 @@ export default function DistributorProfilePage() {
   const [editingProfile, setEditingProfile] = useState(false);
   const [savingProfile, setSavingProfile] = useState(false);
   const [profileDraft, setProfileDraft] = useState(() => buildProfileDraft());
-  const [toastVisible, setToastVisible] = useState(false);
+  const [toast, setToast] = useState({ visible: false, message: '', type: 'success' });
 
 
   useEffect(() => {
@@ -323,7 +325,7 @@ export default function DistributorProfilePage() {
   const profileDisplay = useMemo(
     () => ({
       fullName: getFullName(userData),
-      contactNumber: getContactNumber(userData),
+      contactNumber: formatPhilippinePhone(getContactNumber(userData)) || getContactNumber(userData),
       email: userData?.email || auth.currentUser?.email || '',
       address: getAddress(userData),
       // Prefer the branch name resolved from the authoritative branches document
@@ -402,6 +404,12 @@ export default function DistributorProfilePage() {
       return;
     }
 
+    const normalizedPhone = normalizePhilippinePhone(contactNumber);
+    if (!normalizedPhone) {
+      Alert.alert('Invalid Contact Number', 'Please enter a valid Philippine mobile number (e.g. 09XXXXXXXXX or +639XXXXXXXXX).');
+      return;
+    }
+
     if (!address) {
       Alert.alert('Missing address', 'Complete address cannot be empty.');
       return;
@@ -409,7 +417,7 @@ export default function DistributorProfilePage() {
 
     const { updates, localUpdates } = buildChangedProfileUpdate(userData || {}, {
       fullName,
-      contactNumber,
+      contactNumber: normalizedPhone,
       address,
     });
     const hasChanges = Object.keys(updates).length > 0;
@@ -434,9 +442,10 @@ export default function DistributorProfilePage() {
       setUserData(nextProfile);
       setProfileDraft(buildProfileDraft(nextProfile));
       setEditingProfile(false);
-      showSuccessToast();
+      setToast({ visible: true, message: 'Profile updated successfully.', type: 'success' });
     } catch (error) {
       console.log('Distributor profile save error:', error.message);
+      setToast({ visible: true, message: error.message || 'Profile could not be saved.', type: 'error' });
       Alert.alert('Profile not saved', error.message);
     } finally {
       setSavingProfile(false);
@@ -497,6 +506,11 @@ export default function DistributorProfilePage() {
             ) : (
               <>
                 <ProfileField
+                  label="UID"
+                  value={profileDisplay.distributorId}
+                />
+
+                <ProfileField
                   label="Full Name"
                   value={editingProfile ? profileDraft.fullName : profileDisplay.fullName}
                   editable={editingProfile}
@@ -534,11 +548,6 @@ export default function DistributorProfilePage() {
                 <ProfileField
                   label="Water Station"
                   value={profileDisplay.waterStation}
-                />
-
-                <ProfileField
-                  label="Unique ID"
-                  value={profileDisplay.distributorId}
                 />
 
                 <ProfileField
@@ -631,28 +640,12 @@ export default function DistributorProfilePage() {
         </ScrollView>
       </View>
 
-      {toastVisible && (
-        <Animated.View
-          style={[
-            styles.successToast,
-            {
-              opacity: toastAnim,
-              transform: [
-                {
-                  translateY: toastAnim.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [16, 0],
-                  }),
-                },
-              ],
-            },
-          ]}
-        >
-          <Text style={styles.successToastText}>
-            {'\u2713'} Profile updated successfully
-          </Text>
-        </Animated.View>
-      )}
+      <TopToastFeedback
+        visible={toast.visible}
+        message={toast.message}
+        type={toast.type}
+        onDismiss={() => setToast((t) => ({ ...t, visible: false }))}
+      />
     </SafeAreaView>
   );
 }

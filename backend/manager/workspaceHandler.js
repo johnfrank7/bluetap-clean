@@ -24,7 +24,9 @@ const safeAccount = (id, profile = {}) => ({
   phone: clean(profile.phone || profile.contactNumber || profile.contact_number, 40),
   address: clean(profile.address || profile.completeAddress, 300),
   barangay: clean(profile.barangay, 120),
-  uniqueId: clean(profile.uniqueId || profile.unique_id, 80),
+  publicUid: clean(profile.publicUid || profile.displayUid || profile.uniqueId || profile.unique_id, 80),
+  displayUid: clean(profile.displayUid || profile.publicUid || profile.uniqueId || profile.unique_id, 80),
+  uniqueId: clean(profile.publicUid || profile.displayUid || profile.uniqueId || profile.unique_id, 80),
   createdAt: profile.createdAt || profile.created_at || null,
   distributorStatus: distributorState(profile),
 });

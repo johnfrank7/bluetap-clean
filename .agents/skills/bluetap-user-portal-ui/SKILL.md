@@ -44,7 +44,11 @@ Preserve these invariants:
 
 - Primary tab navigation in Requester and Distributor portals supports swipe navigation via `PortalSwipeContainer`. Swiping is guarded against accidental vertical scroll triggers (`|dx| > 50` and `|dx| > 2.2 * |dy|`).
 - Empty lists and query results must render `BlueTapEmptyState` with the shared sad water droplet motif, informative headline, contextual explanation, and call-to-action button where appropriate.
-- Headers, view tabs, and primary action controls (e.g. "Add Request" or scheduled delivery tabs) must remain pinned in a fixed container above the `ScrollView` so filters and actions remain instantly operable during scrolling.
+- Headers, view tabs, and primary action controls (e.g. "Add Request" or scheduled delivery tabs) must remain pinned in a fixed container above the `ScrollView` so filters and actions remain instantly operable during scrolling. The pinned header area must use an opaque background surface (`colors.background` in dark mode, `colors.primary` or `colors.surface` in light mode) and proper vertical spacing so scrollable order cards never visibly clip or show through beneath the header controls.
+- Tab toggles (such as Active Orders / History in `r_request.jsx` and delivery tabs in `d_scheduled_requests.jsx`) must provide distinct active, hover, and pressed visual states via `Pressable` for consistent web and touch feedback.
+- When a primary action button (such as "Add Request") is already pinned in the fixed header area, do not duplicate it inside the empty state view below.
+- User portal feedback across forms and actions uses `TopToastFeedback` for theme-aware, top-anchored, auto-dismissing feedback messages (`success`, `error`, `warning`, `info`).
+- Public user identifiers must display formatted public UIDs (`Req001`, `Dis001`, `Mgr001`, `Adm001`) with label "UID" positioned at the top of profile fields above Full Name. Contact numbers must validate and normalize Philippine mobile numbers (`+639XXXXXXXXX`, formatted for display as `09XX XXX XXXX`).
 
 ## Deferred messaging scope
 

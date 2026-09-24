@@ -22,8 +22,10 @@ import { doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
 import { findLocalUserForAuthRole, saveLocalUser } from '../../localUsers';
 import { normalizeRole, signOutAndClearSessions } from '../../services/authSession';
 import { ensureUserUniqueId, getProfileUniqueId } from '../../services/uniqueIds';
+import { formatPhilippinePhone, normalizePhilippinePhone } from '../../services/phoneUtils';
 import { createShadow } from '../../components/shadowStyles';
 import { createPortalStyleSheet, useBlueTapTheme } from '../../components/BlueTapTheme';
+import TopToastFeedback from '../../components/TopToastFeedback';
 import { USER_PORTAL_BOTTOM_CONTENT_INSET, USER_PORTAL_LAYOUT } from '../../constants/userPortalLayout';
 import { BLUETAP_COLORS } from '../../constants/bluetapTheme';
 
@@ -119,6 +121,7 @@ export default function ProfilePage() {
   const [userData, setUserData] = useState(cachedRequesterProfile);
   const [editingProfile, setEditingProfile] = useState(false);
   const [savingProfile, setSavingProfile] = useState(false);
+  const [toast, setToast] = useState({ visible: false, message: '', type: 'success' });
   const [profileDraft, setProfileDraft] = useState(() =>
     buildProfileDraft(cachedRequesterProfile || {})
   );
@@ -221,7 +224,7 @@ export default function ProfilePage() {
     () => ({
       fullName: getFullName(userData),
       uniqueId: getProfileUniqueId(userData) || userData?.uid || auth.currentUser?.uid || '',
-      phone: userData?.phone || '',
+      phone: formatPhilippinePhone(userData?.phone) || userData?.phone || '',
       email: userData?.email || auth.currentUser?.email || '',
       address: userData?.address || '',
     }),
@@ -272,10 +275,16 @@ export default function ProfilePage() {
       return;
     }
 
+    const normalizedPhone = normalizePhilippinePhone(phone);
+    if (!normalizedPhone) {
+      Alert.alert('Invalid Contact Number', 'Please enter a valid Philippine mobile number (e.g. 09XXXXXXXXX or +639XXXXXXXXX).');
+      return;
+    }
+
     const nameParts = splitFullName(fullName);
     const profileUpdate = {
       ...nameParts,
-      phone,
+      phone: normalizedPhone,
       address,
     };
     const nextProfile = {
@@ -311,8 +320,10 @@ export default function ProfilePage() {
       }
 
       setEditingProfile(false);
+      setToast({ visible: true, message: 'Profile updated successfully.', type: 'success' });
     } catch (error) {
       console.log('Requester profile edit error:', error.message);
+      setToast({ visible: true, message: error.message || 'Profile could not be saved.', type: 'error' });
       Alert.alert('Profile not saved', error.message);
     } finally {
       setSavingProfile(false);
@@ -327,6 +338,12 @@ export default function ProfilePage() {
       end={{ x: 0, y: 1 }}
     >
       <SafeAreaView edges={['left', 'right', 'bottom']} style={styles.container}>
+        <TopToastFeedback
+          visible={toast.visible}
+          message={toast.message}
+          type={toast.type}
+          onDismiss={() => setToast((current) => ({ ...current, visible: false }))}
+        />
         <StatusBar style="light" />
 
         <View style={styles.phoneWrapper}>
@@ -363,7 +380,7 @@ export default function ProfilePage() {
             ) : (
               <>
                 <ProfileField
-                  label="Unique ID"
+                  label="UID"
                   value={profileDisplay.uniqueId}
                 />
 
