@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import {
   Image,
+  Modal,
   ScrollView,
   StyleSheet,
   Text,
@@ -88,12 +89,66 @@ export function ManagerPill({ children, tone = 'blue' }) {
   );
 }
 
+export function ManagerThemeSwitcher({ colors, isCompact }) {
+  const { resolvedTheme, setPreference } = useAdminTheme();
+  const isDark = resolvedTheme === 'dark';
+  const label = isDark ? 'Dark' : 'Light';
+  return (
+    <TouchableOpacity
+      accessibilityRole="switch"
+      accessibilityLabel={isDark ? 'Switch to light theme' : 'Switch to dark theme'}
+      accessibilityState={{ checked: isDark }}
+      onPress={() => setPreference(isDark ? 'light' : 'dark')}
+      style={[
+        {
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 7,
+          paddingHorizontal: 10,
+          paddingVertical: 5,
+          borderRadius: 8,
+          backgroundColor: colors.surfaceAlt || 'rgba(0,0,0,0.04)',
+          borderWidth: 1,
+          borderColor: colors.border,
+        },
+      ]}
+    >
+      <View
+        style={{
+          width: 36,
+          height: 20,
+          borderRadius: 999,
+          backgroundColor: isDark ? colors.primary : colors.success,
+          padding: 2,
+          justifyContent: 'center',
+        }}
+      >
+        <View
+          style={{
+            width: 16,
+            height: 16,
+            borderRadius: 999,
+            backgroundColor: '#FFFFFF',
+            alignSelf: isDark ? 'flex-end' : 'flex-start',
+            shadowColor: '#000',
+            shadowOpacity: 0.18,
+            shadowRadius: 2,
+            shadowOffset: { width: 0, height: 1 },
+          }}
+        />
+      </View>
+      {!isCompact && (
+        <Text style={{ color: colors.textPrimary, fontSize: 12, fontWeight: '800' }}>
+          {label}
+        </Text>
+      )}
+    </TouchableOpacity>
+  );
+}
+
 export default function ManagerShell({
   active = 'dashboard',
   children,
-  onSearchChange,
-  searchPlaceholder = 'Search users, barangay...',
-  searchValue,
   subtitle,
   title,
 }) {
@@ -101,13 +156,21 @@ export default function ManagerShell({
   const styles = createStyles(colors);
   const router = useRouter();
   const { width } = useWindowDimensions();
-  const [internalSearch, setInternalSearch] = useState('');
   const isCompactLayout = width < 768;
-  const visibleSearchValue = searchValue ?? internalSearch;
   const managerSession = getModuleSession('manager');
-  const handleSearchChange = onSearchChange || setInternalSearch;
+  const [confirmLogout, setConfirmLogout] = useState(false);
 
-  const handleLogout = async () => {
+  React.useEffect(() => {
+    if (!globalThis.addEventListener) return undefined;
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape' && confirmLogout) setConfirmLogout(false);
+    };
+    globalThis.addEventListener('keydown', onKeyDown);
+    return () => globalThis.removeEventListener?.('keydown', onKeyDown);
+  }, [confirmLogout]);
+
+  const completeLogout = async () => {
+    setConfirmLogout(false);
     await signOutAndClearSessions();
     router.replace('/login');
   };
@@ -181,15 +244,7 @@ export default function ManagerShell({
             </View>
 
             <View style={[styles.topbarActions, isCompactLayout && styles.topbarActionsCompact]}>
-              <View style={[styles.searchBox, isCompactLayout && styles.searchBoxCompact]}>
-                <TextInput
-                  style={styles.searchInput}
-                  placeholder={searchPlaceholder}
-                  placeholderTextColor="#95A6B8"
-                  value={visibleSearchValue}
-                  onChangeText={handleSearchChange}
-                />
-              </View>
+              <ManagerThemeSwitcher colors={colors} isCompact={isCompactLayout} />
 
               <TouchableOpacity
                 activeOpacity={0.85}
@@ -197,7 +252,7 @@ export default function ManagerShell({
                   styles.logoutButton,
                   isCompactLayout && styles.logoutButtonCompact,
                 ]}
-                onPress={handleLogout}
+                onPress={() => setConfirmLogout(true)}
               >
                 <Text style={styles.logoutText}>Logout</Text>
               </TouchableOpacity>
@@ -215,6 +270,26 @@ export default function ManagerShell({
           </ScrollView>
         </View>
       </View>
+
+      <Modal visible={confirmLogout} transparent animationType="fade" onRequestClose={() => setConfirmLogout(false)}>
+        <View style={[styles.modalBackdrop, { backgroundColor: colors.overlay }]}>
+          <View accessibilityViewIsModal style={[styles.modal, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <View style={[styles.modalIcon, { backgroundColor: colors.dangerSoft }]}>
+              <AdminIcon name="logout" color={colors.danger} size={24} />
+            </View>
+            <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>Log out of BlueTap?</Text>
+            <Text style={[styles.modalBody, { color: colors.textSecondary }]}>You will need to sign in again to access Manager tools.</Text>
+            <View style={styles.modalActions}>
+              <TouchableOpacity accessibilityRole="button" accessibilityLabel="Cancel logout" onPress={() => setConfirmLogout(false)} style={[styles.modalSecondary, { borderColor: colors.border, backgroundColor: colors.surfaceAlt }]}>
+                <Text style={[styles.modalSecondaryText, { color: colors.textPrimary }]}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity accessibilityRole="button" accessibilityLabel="Confirm logout" onPress={completeLogout} style={[styles.modalDanger, { backgroundColor: colors.danger }]}>
+                <Text style={styles.modalDangerText}>Log out</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -455,5 +530,61 @@ const createStyles = (colors) => StyleSheet.create({
   },
   pillTextCyan: {
     color: colors.primaryLight,
+  },
+  modalBackdrop: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 20,
+  },
+  modal: {
+    width: '100%',
+    maxWidth: 420,
+    borderWidth: 1,
+    borderRadius: 18,
+    padding: 22,
+  },
+  modalIcon: {
+    width: 46,
+    height: 46,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 14,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: '900',
+  },
+  modalBody: {
+    fontSize: 14,
+    lineHeight: 21,
+    marginTop: 7,
+  },
+  modalActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 10,
+    marginTop: 22,
+  },
+  modalSecondary: {
+    minHeight: 44,
+    paddingHorizontal: 17,
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderRadius: 10,
+  },
+  modalSecondaryText: {
+    fontWeight: '800',
+  },
+  modalDanger: {
+    minHeight: 44,
+    paddingHorizontal: 17,
+    justifyContent: 'center',
+    borderRadius: 10,
+  },
+  modalDangerText: {
+    color: '#FFFFFF',
+    fontWeight: '900',
   },
 });

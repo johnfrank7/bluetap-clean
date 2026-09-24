@@ -221,7 +221,7 @@ export default function DistributorHistory() {
 const styles = createPortalStyleSheet({
   container: {
     flex: 1,
-    backgroundColor: '#F4FAFF',
+    backgroundColor: BLUETAP_COLORS.background,
   },
   phoneWrapper: {
     width: '100%',
@@ -262,7 +262,7 @@ const styles = createPortalStyleSheet({
     minHeight: 40,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: BLUETAP_COLORS.surface,
   },
   scheduleTabActive: {
     backgroundColor: BLUE,
@@ -276,7 +276,7 @@ const styles = createPortalStyleSheet({
     color: '#FFFFFF',
   },
   requestCard: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: BLUETAP_COLORS.surface,
     borderRadius: USER_PORTAL_LAYOUT.cardRadius,
     padding: 16,
     marginBottom: 14,
@@ -351,7 +351,7 @@ const styles = createPortalStyleSheet({
     minHeight: 44,
     borderWidth: 1.5,
     borderColor: '#2563EB',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: BLUETAP_COLORS.surface,
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
@@ -364,7 +364,7 @@ const styles = createPortalStyleSheet({
   },
   emptyCard: {
     alignItems: 'center',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: BLUETAP_COLORS.surface,
     borderColor: CARD_BORDER,
     borderRadius: USER_PORTAL_LAYOUT.cardRadius,
     borderWidth: 1,

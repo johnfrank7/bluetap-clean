@@ -32,6 +32,13 @@ export async function updateAssignedDistributorOrder(orderId, action, payload = 
   return result?.order || null;
 }
 
+export const acceptAssignedOrder = (orderId) => updateAssignedDistributorOrder(orderId, 'accept-assignment');
+export const declineAssignedOrder = (orderId, declineReason = '') => updateAssignedDistributorOrder(orderId, 'decline-assignment', { declineReason });
+export const startAssignedDelivery = (orderId) => updateAssignedDistributorOrder(orderId, 'start-delivery');
+export const failAssignedDelivery = (orderId, failureReason) => updateAssignedDistributorOrder(orderId, 'fail-delivery', { failureReason });
+export const rescheduleAssignedDelivery = (orderId, scheduledAt) => updateAssignedDistributorOrder(orderId, 'reschedule-delivery', { scheduledAt });
+export const completeAssignedDelivery = (orderId) => updateAssignedDistributorOrder(orderId, 'mark-delivered');
+
 const dateFrom = (value) => value?.toDate?.()
   || (value?.seconds ? new Date(value.seconds * 1000) : value ? new Date(value) : null);
 
@@ -101,6 +108,11 @@ export function toDistributorScreenOrder(order = {}) {
     distributorUniqueId: '',
     items: mappedItems,
     grandTotalAmount: totalAmount,
+    failureReason: order.failureReason || '',
+    notes: order.notes || order.specialInstructions || '',
+    specialInstructions: order.notes || order.specialInstructions || '',
+    deliveryLocation: order.deliveryLocation || null,
+    scheduledAt: order.scheduledAt || null,
   };
 }
 

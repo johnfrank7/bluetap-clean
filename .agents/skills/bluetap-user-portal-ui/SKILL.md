@@ -33,7 +33,12 @@ Preserve these invariants:
 - Light-mode floating navigation uses the shared light surface with BlueTap blue icons.
 - Dark-mode floating navigation uses the landing-page dark elevated surface with theme-aware icons and border.
 - Never create role-specific hardcoded palettes for Requester or Distributor.
-- All user-portal theme colors come from shared semantic tokens, including backgrounds, headers, cards, inputs, tabs, buttons, text, borders, and navigation.
+- All user-portal theme colors come from shared semantic tokens, including backgrounds, headers, cards, inputs, tabs, buttons, text, borders, and navigation. Never use hardcoded colors such as `#F4FAFF` or `#FFFFFF` in distributor screens (`d_dashboard.jsx`, `d_history.jsx`, `d_notification.jsx`, `d_profile.jsx`, `d_requests.jsx`, `d_scheduled_requests.jsx`); use `BLUETAP_COLORS.background`, `BLUETAP_COLORS.surface`, and shared theme tokens.
+
+## Notifications and order events
+
+- Distributor notifications (`app/distributor/d_notification.jsx`) reuse the card visual system from `app/requester/r_notification.jsx`: clean structured notification cards, delivery date/status badges, real order lifecycle events, empty state handling, and theme token adherence.
+- Notifications derive directly from authenticated order states and branch dispatch events; do not use mock notifications or disconnected static lists.
 
 ## Deferred messaging scope
 

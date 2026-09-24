@@ -660,7 +660,7 @@ export default function DistributorProfilePage() {
 const styles = createPortalStyleSheet({
   container: {
     flex: 1,
-    backgroundColor: '#F4FAFF',
+    backgroundColor: BLUETAP_COLORS.background,
   },
   phoneWrapper: {
     width: '100%',
@@ -682,7 +682,7 @@ const styles = createPortalStyleSheet({
   },
   infoSection: {
     marginTop: 18,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: BLUETAP_COLORS.surface,
     borderRadius: USER_PORTAL_LAYOUT.cardRadius,
     borderWidth: 1,
     borderColor: CARD_BORDER,
@@ -780,7 +780,7 @@ const styles = createPortalStyleSheet({
     borderRadius: 13,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: BLUETAP_COLORS.surface,
   },
   cancelEditText: {
     color: BLUE,
@@ -812,7 +812,7 @@ const styles = createPortalStyleSheet({
   },
   helpCard: {
     marginTop: 22,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: BLUETAP_COLORS.surface,
     borderRadius: USER_PORTAL_LAYOUT.cardRadius,
     borderWidth: 1,
     borderColor: CARD_BORDER,

@@ -1,9 +1,11 @@
 import React, { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Modal,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -17,7 +19,9 @@ import { createPortalStyleSheet, useBlueTapTheme } from '../../components/BlueTa
 import { USER_PORTAL_BOTTOM_CONTENT_INSET, USER_PORTAL_LAYOUT } from '../../constants/userPortalLayout';
 import { BLUETAP_COLORS } from '../../constants/bluetapTheme';
 import {
+  failAssignedDelivery,
   normalizeDistributorOrderStatus,
+  rescheduleAssignedDelivery,
   toDistributorScreenOrder,
   updateAssignedDistributorOrder,
   useAssignedDistributorOrders,
@@ -29,7 +33,22 @@ const CARD_BORDER = BLUETAP_COLORS.border;
 const TEXT_MUTED = BLUETAP_COLORS.textSecondary;
 const TEXT_DARK = BLUETAP_COLORS.textPrimary;
 
-const UPCOMING_STATUSES = new Set(['accepted', 'scheduled', 'out for delivery']);
+const UPCOMING_STATUSES = new Set([
+  'accepted',
+  'scheduled',
+  'out for delivery',
+  'out_for_delivery',
+  'delivery failed',
+  'delivery_failed',
+]);
+
+const TIME_SLOTS = [
+  { label: '09:00 AM', hours: 9, minutes: 0 },
+  { label: '11:00 AM', hours: 11, minutes: 0 },
+  { label: '01:00 PM', hours: 13, minutes: 0 },
+  { label: '03:00 PM', hours: 15, minutes: 0 },
+  { label: '05:00 PM', hours: 17, minutes: 0 },
+];
 
 const getAmountNumber = (amount) =>
   Number(String(amount || '').replace(/[^\d.]/g, '')) || 0;
@@ -61,8 +80,7 @@ const getDetailsRequestData = (request) => {
     requesterUniqueId: request.requesterId || request.requester_unique_id || '',
     customerName: request.requester,
     distributorName: request.distributor || request.distributor_name || '',
-    distributorUniqueId:
-      request.distributorId || request.distributor_unique_id || '',
+    distributorUniqueId: request.distributorId || request.distributor_unique_id || '',
     contactNumber: request.contact,
     deliveryAddress: request.address,
     items: [
@@ -78,10 +96,19 @@ const getDetailsRequestData = (request) => {
   };
 };
 
-const ScheduledRequestCard = ({ request, onAdvance, onViewDetails, processing }) => {
-  const isOutForDelivery = normalizeDistributorOrderStatus(request.status) === 'out for delivery';
-  const action = isOutForDelivery ? 'mark-delivered' : 'start-delivery';
-  const label = isOutForDelivery ? 'Mark Delivered' : 'Start Delivery';
+const ScheduledRequestCard = ({
+  request,
+  onAdvance,
+  onOpenFailModal,
+  onOpenRescheduleModal,
+  onViewDetails,
+  processing,
+}) => {
+  const statusNorm = normalizeDistributorOrderStatus(request.status);
+  const isOutForDelivery = statusNorm === 'out for delivery';
+  const isDeliveryFailed = statusNorm === 'delivery failed';
+  const isScheduledOrAccepted = statusNorm === 'accepted' || statusNorm === 'scheduled';
+
   return (
     <View style={styles.requestCard}>
       <View style={styles.requestCardHeader}>
@@ -96,16 +123,12 @@ const ScheduledRequestCard = ({ request, onAdvance, onViewDetails, processing })
             {request.requester}
           </Text>
 
-          <Text style={[styles.compactLabel, styles.compactLabelGap]}>
-            Requester ID
-          </Text>
+          <Text style={[styles.compactLabel, styles.compactLabelGap]}>Requester ID</Text>
           <Text style={styles.compactValue} numberOfLines={1}>
             {request.requesterId || request.requester_unique_id || 'Not set'}
           </Text>
 
-          <Text style={[styles.compactLabel, styles.compactLabelGap]}>
-            Contact Number
-          </Text>
+          <Text style={[styles.compactLabel, styles.compactLabelGap]}>Contact Number</Text>
           <Text style={styles.compactValue} numberOfLines={1}>
             {request.contact}
           </Text>
@@ -117,18 +140,14 @@ const ScheduledRequestCard = ({ request, onAdvance, onViewDetails, processing })
             {request.productName}
           </Text>
 
-          <Text style={[styles.compactLabel, styles.compactLabelGap]}>
-            Distributor ID
-          </Text>
+          <Text style={[styles.compactLabel, styles.compactLabelGap]}>Container Type</Text>
           <Text style={styles.compactValue} numberOfLines={1}>
-            {request.distributorId || request.distributor_unique_id || 'Not set'}
+            {request.container || 'Standard'}
           </Text>
 
-          <Text style={[styles.compactLabel, styles.compactLabelGap]}>
-            Container Type
-          </Text>
+          <Text style={[styles.compactLabel, styles.compactLabelGap]}>Quantity</Text>
           <Text style={styles.compactValue} numberOfLines={1}>
-            {request.container}
+            {request.quantity}
           </Text>
         </View>
       </View>
@@ -139,12 +158,17 @@ const ScheduledRequestCard = ({ request, onAdvance, onViewDetails, processing })
           {request.address}
         </Text>
 
-        <Text style={[styles.compactLabel, styles.compactLabelGap]}>
-          Scheduled Delivery Date & Time
-        </Text>
+        <Text style={[styles.compactLabel, styles.compactLabelGap]}>Scheduled Delivery Date & Time</Text>
         <Text style={styles.compactValue} numberOfLines={1}>
-          {request.scheduledDateTime}
+          {request.scheduledDateTime || 'Not set'}
         </Text>
+
+        {isDeliveryFailed && (
+          <View style={styles.failureNoticeCard}>
+            <Text style={styles.failureNoticeTitle}>Delivery Attempt Failed</Text>
+            <Text style={styles.failureNoticeBody}>{request.failureReason || 'Issue reported during delivery attempt.'}</Text>
+          </View>
+        )}
       </View>
 
       <View style={styles.cardActionsRow}>
@@ -156,14 +180,50 @@ const ScheduledRequestCard = ({ request, onAdvance, onViewDetails, processing })
           <Text style={styles.secondaryActionText}>View Details</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity
-          activeOpacity={0.85}
-          disabled={processing}
-          onPress={() => onAdvance(request, action)}
-          style={[styles.primaryActionButton, processing && styles.actionButtonDisabled]}
-        >
-          {processing ? <ActivityIndicator color="#FFFFFF" size="small" /> : <Text style={styles.primaryActionText}>{label}</Text>}
-        </TouchableOpacity>
+        {/* Status-specific action buttons */}
+        {isScheduledOrAccepted && (
+          <TouchableOpacity
+            activeOpacity={0.85}
+            disabled={processing}
+            onPress={() => onAdvance(request, 'start-delivery')}
+            style={[styles.primaryActionButton, processing && styles.actionButtonDisabled]}
+          >
+            {processing ? <ActivityIndicator color="#FFFFFF" size="small" /> : <Text style={styles.primaryActionText}>Start Delivery</Text>}
+          </TouchableOpacity>
+        )}
+
+        {isOutForDelivery && (
+          <>
+            <TouchableOpacity
+              activeOpacity={0.85}
+              disabled={processing}
+              onPress={() => onOpenFailModal(request)}
+              style={styles.failActionButton}
+            >
+              <Text style={styles.failActionText}>Delivery Failed</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              activeOpacity={0.85}
+              disabled={processing}
+              onPress={() => onAdvance(request, 'mark-delivered')}
+              style={[styles.primaryActionButton, processing && styles.actionButtonDisabled]}
+            >
+              {processing ? <ActivityIndicator color="#FFFFFF" size="small" /> : <Text style={styles.primaryActionText}>Mark Delivered</Text>}
+            </TouchableOpacity>
+          </>
+        )}
+
+        {isDeliveryFailed && (
+          <TouchableOpacity
+            activeOpacity={0.85}
+            disabled={processing}
+            onPress={() => onOpenRescheduleModal(request)}
+            style={styles.rescheduleActionButton}
+          >
+            <Text style={styles.rescheduleActionText}>Reschedule Delivery</Text>
+          </TouchableOpacity>
+        )}
       </View>
     </View>
   );
@@ -175,11 +235,28 @@ export default function DistributorScheduledRequests() {
   const [selectedRequest, setSelectedRequest] = useState(null);
   const [processingRequestId, setProcessingRequestId] = useState('');
   const [actionError, setActionError] = useState('');
+
+  // Failure Modal State
+  const [failingRequest, setFailingRequest] = useState(null);
+  const [failureReason, setFailureReason] = useState('');
+  const [failError, setFailError] = useState('');
+
+  // Reschedule Modal State
+  const [reschedulingRequest, setReschedulingRequest] = useState(null);
+  const [selectedDayOffset, setSelectedDayOffset] = useState(1); // default tomorrow
+  const [selectedSlotIndex, setSelectedSlotIndex] = useState(0);
+  const [rescheduleError, setRescheduleError] = useState('');
+
   const { orders, loading, error, refresh } = useAssignedDistributorOrders();
-  const scheduledRequests = useMemo(() => orders
-    .map(toDistributorScreenOrder)
-    .filter((request) => UPCOMING_STATUSES.has(normalizeDistributorOrderStatus(request.status))), [orders]);
+  const scheduledRequests = useMemo(
+    () =>
+      orders
+        .map(toDistributorScreenOrder)
+        .filter((request) => UPCOMING_STATUSES.has(normalizeDistributorOrderStatus(request.status))),
+    [orders]
+  );
   const selectedDetailsRequest = getDetailsRequestData(selectedRequest);
+
   const advanceDelivery = async (request, action) => {
     if (processingRequestId) return;
     setActionError('');
@@ -194,15 +271,57 @@ export default function DistributorScheduledRequests() {
     }
   };
 
+  const submitFailure = async () => {
+    if (!failingRequest) return;
+    if (!failureReason.trim()) {
+      setFailError('Please explain why the delivery failed (e.g., customer unreachable, address closed).');
+      return;
+    }
+    setProcessingRequestId(failingRequest.sourceId);
+    setFailError('');
+    try {
+      await failAssignedDelivery(failingRequest.sourceId, failureReason.trim());
+      await refresh();
+      setFailingRequest(null);
+      setFailureReason('');
+    } catch (err) {
+      setFailError(err.message || 'Failed to report delivery failure.');
+    } finally {
+      setProcessingRequestId('');
+    }
+  };
+
+  const submitReschedule = async () => {
+    if (!reschedulingRequest) return;
+    const slot = TIME_SLOTS[selectedSlotIndex] || TIME_SLOTS[0];
+    const target = new Date();
+    target.setDate(target.getDate() + selectedDayOffset);
+    target.setHours(slot.hours, slot.minutes, 0, 0);
+
+    if (target.getTime() < Date.now() + 5 * 60 * 1000) {
+      setRescheduleError('Please choose a time slot in the future.');
+      return;
+    }
+
+    setProcessingRequestId(reschedulingRequest.sourceId);
+    setRescheduleError('');
+    try {
+      await rescheduleAssignedDelivery(reschedulingRequest.sourceId, target.toISOString());
+      await refresh();
+      setReschedulingRequest(null);
+    } catch (err) {
+      setRescheduleError(err.message || 'Failed to reschedule delivery.');
+    } finally {
+      setProcessingRequestId('');
+    }
+  };
+
   return (
     <SafeAreaView edges={['left', 'right', 'bottom']} style={styles.container}>
       <BlueTapHeader notificationPath="/distributor/d_notification" />
 
       <View style={styles.phoneWrapper}>
-        <ScrollView
-          contentContainerStyle={styles.scrollContent}
-          showsVerticalScrollIndicator={false}
-        >
+        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
           <Text style={styles.pageTitle}>SCHEDULE</Text>
           <Text style={styles.subtitle}>Scheduled Requests</Text>
 
@@ -212,9 +331,7 @@ export default function DistributorScheduledRequests() {
               activeOpacity={0.85}
               onPress={() => router.replace('/distributor/d_scheduled_requests')}
             >
-              <Text style={[styles.scheduleTabText, styles.scheduleTabTextActive]}>
-                Scheduled
-              </Text>
+              <Text style={[styles.scheduleTabText, styles.scheduleTabTextActive]}>Scheduled</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -226,19 +343,52 @@ export default function DistributorScheduledRequests() {
             </TouchableOpacity>
           </View>
 
-          {!!actionError && <View style={styles.actionErrorCard}><Text style={styles.actionErrorText}>{actionError}</Text></View>}
-          {loading ? <View style={styles.emptyCard}><ActivityIndicator color={BLUE} /><Text style={styles.emptyText}>Loading assigned schedule...</Text></View>
-            : error ? <View style={styles.emptyCard}><Text style={styles.emptyTitle}>Schedule unavailable.</Text><Text style={styles.emptyText}>{error}</Text><TouchableOpacity onPress={refresh} style={styles.secondaryActionButton}><Text style={styles.secondaryActionText}>Try Again</Text></TouchableOpacity></View>
-              : scheduledRequests.length === 0 ? <View style={styles.emptyCard}><Text style={styles.emptyTitle}>No scheduled deliveries.</Text><Text style={styles.emptyText}>Accepted and upcoming assigned deliveries will appear here.</Text></View>
-                : scheduledRequests.map((request) => (
-            <ScheduledRequestCard
-              key={request.sourceId}
-              request={request}
-              processing={processingRequestId === request.sourceId}
-              onAdvance={advanceDelivery}
-              onViewDetails={setSelectedRequest}
-            />
-          ))}
+          {!!actionError && (
+            <View style={styles.actionErrorCard}>
+              <Text style={styles.actionErrorText}>{actionError}</Text>
+            </View>
+          )}
+
+          {loading ? (
+            <View style={styles.emptyCard}>
+              <ActivityIndicator color={BLUE} />
+              <Text style={styles.emptyText}>Loading assigned schedule...</Text>
+            </View>
+          ) : error ? (
+            <View style={styles.emptyCard}>
+              <Text style={styles.emptyTitle}>Schedule unavailable.</Text>
+              <Text style={styles.emptyText}>{error}</Text>
+              <TouchableOpacity onPress={refresh} style={styles.secondaryActionButton}>
+                <Text style={styles.secondaryActionText}>Try Again</Text>
+              </TouchableOpacity>
+            </View>
+          ) : scheduledRequests.length === 0 ? (
+            <View style={styles.emptyCard}>
+              <Text style={styles.emptyTitle}>No scheduled deliveries.</Text>
+              <Text style={styles.emptyText}>Accepted and upcoming assigned deliveries will appear here.</Text>
+            </View>
+          ) : (
+            scheduledRequests.map((request) => (
+              <ScheduledRequestCard
+                key={request.sourceId}
+                request={request}
+                processing={processingRequestId === request.sourceId}
+                onAdvance={advanceDelivery}
+                onOpenFailModal={(req) => {
+                  setFailingRequest(req);
+                  setFailureReason('');
+                  setFailError('');
+                }}
+                onOpenRescheduleModal={(req) => {
+                  setReschedulingRequest(req);
+                  setSelectedDayOffset(1);
+                  setSelectedSlotIndex(0);
+                  setRescheduleError('');
+                }}
+                onViewDetails={setSelectedRequest}
+              />
+            ))
+          )}
         </ScrollView>
       </View>
 
@@ -247,6 +397,122 @@ export default function DistributorScheduledRequests() {
         onClose={() => setSelectedRequest(null)}
         request={selectedDetailsRequest}
       />
+
+      {/* Delivery Failed Modal */}
+      <Modal
+        visible={!!failingRequest}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setFailingRequest(null)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.dialogCard}>
+            <Text style={styles.dialogTitle}>Report Failed Delivery</Text>
+            <Text style={styles.dialogBody}>
+              Order #{failingRequest?.id}. Please state the reason the delivery could not be completed.
+            </Text>
+            <TextInput
+              value={failureReason}
+              onChangeText={setFailureReason}
+              placeholder="e.g. Customer not at home, wrong address, gate locked..."
+              placeholderTextColor="#95A6B8"
+              multiline
+              style={styles.dialogInput}
+            />
+            {!!failError && <Text style={styles.dialogError}>{failError}</Text>}
+            <View style={styles.dialogActions}>
+              <TouchableOpacity
+                disabled={!!processingRequestId}
+                onPress={() => setFailingRequest(null)}
+                style={styles.dialogCancelBtn}
+              >
+                <Text style={styles.dialogCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                disabled={!!processingRequestId}
+                onPress={submitFailure}
+                style={styles.dialogDangerBtn}
+              >
+                {processingRequestId ? (
+                  <ActivityIndicator color="#FFFFFF" size="small" />
+                ) : (
+                  <Text style={styles.dialogDangerText}>Report Failed</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Reschedule Delivery Modal */}
+      <Modal
+        visible={!!reschedulingRequest}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setReschedulingRequest(null)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.dialogCard}>
+            <Text style={styles.dialogTitle}>Reschedule Failed Delivery</Text>
+            <Text style={styles.dialogBody}>
+              Order #{reschedulingRequest?.id}. Select a new delivery slot to re-attempt this order.
+            </Text>
+
+            <Text style={styles.pickerSectionLabel}>Select Date:</Text>
+            <View style={styles.pickerPillRow}>
+              {['Tomorrow', 'In 2 Days', 'In 3 Days'].map((label, idx) => (
+                <TouchableOpacity
+                  key={label}
+                  onPress={() => setSelectedDayOffset(idx + 1)}
+                  style={[styles.pickerPill, selectedDayOffset === idx + 1 && styles.pickerPillActive]}
+                >
+                  <Text style={[styles.pickerPillText, selectedDayOffset === idx + 1 && styles.pickerPillTextActive]}>
+                    {label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <Text style={[styles.pickerSectionLabel, { marginTop: 10 }]}>Select Time Slot:</Text>
+            <View style={styles.pickerPillRow}>
+              {TIME_SLOTS.map((slot, idx) => (
+                <TouchableOpacity
+                  key={slot.label}
+                  onPress={() => setSelectedSlotIndex(idx)}
+                  style={[styles.pickerPill, selectedSlotIndex === idx && styles.pickerPillActive]}
+                >
+                  <Text style={[styles.pickerPillText, selectedSlotIndex === idx && styles.pickerPillTextActive]}>
+                    {slot.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            {!!rescheduleError && <Text style={styles.dialogError}>{rescheduleError}</Text>}
+
+            <View style={styles.dialogActions}>
+              <TouchableOpacity
+                disabled={!!processingRequestId}
+                onPress={() => setReschedulingRequest(null)}
+                style={styles.dialogCancelBtn}
+              >
+                <Text style={styles.dialogCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                disabled={!!processingRequestId}
+                onPress={submitReschedule}
+                style={styles.dialogSuccessBtn}
+              >
+                {processingRequestId ? (
+                  <ActivityIndicator color="#FFFFFF" size="small" />
+                ) : (
+                  <Text style={styles.dialogSuccessText}>Save Schedule</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -254,7 +520,7 @@ export default function DistributorScheduledRequests() {
 const styles = createPortalStyleSheet({
   container: {
     flex: 1,
-    backgroundColor: '#F4FAFF',
+    backgroundColor: BLUETAP_COLORS.background,
   },
   phoneWrapper: {
     width: '100%',
@@ -295,150 +561,326 @@ const styles = createPortalStyleSheet({
     minHeight: 40,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: BLUETAP_COLORS.surface,
   },
   scheduleTabActive: {
     backgroundColor: BLUE,
   },
   scheduleTabText: {
-    color: BLUE,
     fontSize: 13,
     fontWeight: 'bold',
+    color: BLUE,
   },
   scheduleTabTextActive: {
     color: '#FFFFFF',
   },
   requestCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: USER_PORTAL_LAYOUT.cardRadius,
+    borderWidth: 1.5,
+    borderColor: CARD_BORDER,
+    borderRadius: 16,
     padding: 16,
     marginBottom: 14,
-    borderWidth: 1,
-    borderColor: CARD_BORDER,
+    backgroundColor: BLUETAP_COLORS.surface,
     ...createShadow({
       color: '#0D47A1',
-      elevation: 6,
-      opacity: 0.12,
-      radius: 10,
-      offset: { width: 0, height: 5 },
+      offsetY: 3,
+      opacity: 0.08,
+      radius: 8,
     }),
   },
   requestCardHeader: {
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 10,
-    paddingBottom: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: BLUE_LIGHT,
+    alignItems: 'center',
+    marginBottom: 12,
   },
   requestId: {
-    flex: 1,
-    color: BLUE,
-    fontSize: 15,
+    fontSize: 13,
     fontWeight: 'bold',
+    color: BLUE,
   },
   compactInfoGrid: {
     flexDirection: 'row',
     gap: 12,
-    paddingTop: 12,
+    marginBottom: 10,
   },
   compactInfoColumn: {
     flex: 1,
-    minWidth: 0,
   },
   compactLabel: {
-    color: TEXT_MUTED,
     fontSize: 11,
-    fontWeight: 'bold',
-    marginBottom: 3,
+    color: TEXT_MUTED,
+    fontWeight: '600',
+    textTransform: 'uppercase',
   },
   compactLabelGap: {
-    marginTop: 10,
+    marginTop: 8,
   },
   compactPrimaryValue: {
-    color: BLUE,
     fontSize: 14,
-    lineHeight: 18,
+    color: TEXT_DARK,
     fontWeight: 'bold',
+    marginTop: 2,
   },
   compactValue: {
-    color: TEXT_DARK,
     fontSize: 13,
-    lineHeight: 17,
-    fontWeight: '700',
-  },
-  fullWidthInfoBlock: {
-    marginTop: 12,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: BLUE_LIGHT,
+    color: TEXT_DARK,
+    fontWeight: '500',
+    marginTop: 2,
   },
   compactAddressValue: {
-    color: TEXT_DARK,
     fontSize: 13,
+    color: TEXT_DARK,
+    fontWeight: '500',
+    marginTop: 2,
     lineHeight: 18,
-    fontWeight: '700',
+  },
+  fullWidthInfoBlock: {
+    marginTop: 2,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: CARD_BORDER,
+  },
+  failureNoticeCard: {
+    backgroundColor: BLUETAP_COLORS.dangerSoft,
+    borderWidth: 1,
+    borderColor: BLUETAP_COLORS.danger,
+    borderRadius: 8,
+    padding: 10,
+    marginTop: 10,
+  },
+  failureNoticeTitle: {
+    color: BLUETAP_COLORS.danger,
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  failureNoticeBody: {
+    color: BLUETAP_COLORS.textPrimary,
+    fontSize: 12,
+    marginTop: 2,
   },
   cardActionsRow: {
     flexDirection: 'row',
-    gap: 10,
-    marginTop: 16,
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 14,
+    justifyContent: 'flex-end',
   },
   secondaryActionButton: {
-    flex: 1,
-    minHeight: 44,
-    borderWidth: 1.5,
-    borderColor: '#2563EB',
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
+    minHeight: 38,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: BLUE,
+    backgroundColor: BLUETAP_COLORS.surface,
     alignItems: 'center',
     justifyContent: 'center',
   },
   secondaryActionText: {
-    color: '#2563EB',
-    fontSize: 13,
-    fontWeight: '600',
+    color: BLUE,
+    fontSize: 12,
+    fontWeight: 'bold',
   },
   primaryActionButton: {
-    flex: 1,
-    minHeight: 44,
+    minHeight: 38,
+    paddingHorizontal: 14,
+    borderRadius: 8,
     backgroundColor: BLUE,
-    borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
-    ...createShadow({
-      color: BLUE,
-      elevation: 4,
-      opacity: 0.18,
-      radius: 10,
-      offset: { width: 0, height: 4 },
-    }),
   },
   primaryActionText: {
     color: '#FFFFFF',
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: 'bold',
   },
-  actionButtonDisabled: { opacity: 0.65 },
-  actionErrorCard: {
-    backgroundColor: '#FFF5F5',
-    borderColor: '#F2B8B5',
-    borderRadius: 12,
+  failActionButton: {
+    minHeight: 38,
+    paddingHorizontal: 12,
+    borderRadius: 8,
     borderWidth: 1,
-    marginBottom: 12,
-    padding: 12,
-  },
-  actionErrorText: { color: '#B3261E', fontSize: 13, fontWeight: '700', lineHeight: 18 },
-  emptyCard: {
+    borderColor: BLUETAP_COLORS.danger,
+    backgroundColor: BLUETAP_COLORS.dangerSoft,
     alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    borderColor: CARD_BORDER,
-    borderRadius: USER_PORTAL_LAYOUT.cardRadius,
-    borderWidth: 1,
-    marginTop: 2,
-    padding: 24,
+    justifyContent: 'center',
   },
-  emptyTitle: { color: TEXT_DARK, fontSize: 16, fontWeight: 'bold' },
-  emptyText: { color: TEXT_MUTED, fontSize: 13, lineHeight: 19, marginTop: 7, textAlign: 'center' },
+  failActionText: {
+    color: BLUETAP_COLORS.danger,
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  rescheduleActionButton: {
+    minHeight: 38,
+    paddingHorizontal: 14,
+    borderRadius: 8,
+    backgroundColor: BLUETAP_COLORS.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  rescheduleActionText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  actionButtonDisabled: {
+    opacity: 0.6,
+  },
+  emptyCard: {
+    borderWidth: 1.5,
+    borderColor: CARD_BORDER,
+    borderRadius: 16,
+    padding: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: BLUETAP_COLORS.surface,
+  },
+  emptyTitle: {
+    color: TEXT_DARK,
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 6,
+  },
+  emptyText: {
+    color: TEXT_MUTED,
+    fontSize: 13,
+    textAlign: 'center',
+    lineHeight: 19,
+  },
+  actionErrorCard: {
+    backgroundColor: BLUETAP_COLORS.dangerSoft,
+    borderWidth: 1,
+    borderColor: BLUETAP_COLORS.danger,
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 12,
+  },
+  actionErrorText: {
+    color: BLUETAP_COLORS.danger,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 16,
+  },
+  dialogCard: {
+    width: '100%',
+    maxWidth: 440,
+    backgroundColor: BLUETAP_COLORS.surface,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: BLUETAP_COLORS.border,
+    padding: 20,
+  },
+  dialogTitle: {
+    fontSize: 17,
+    fontWeight: 'bold',
+    color: BLUETAP_COLORS.textPrimary,
+  },
+  dialogBody: {
+    fontSize: 13,
+    color: BLUETAP_COLORS.textSecondary,
+    lineHeight: 18,
+    marginTop: 4,
+    marginBottom: 12,
+  },
+  dialogInput: {
+    minHeight: 80,
+    borderWidth: 1,
+    borderColor: BLUETAP_COLORS.border,
+    borderRadius: 8,
+    backgroundColor: BLUETAP_COLORS.background,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    color: BLUETAP_COLORS.textPrimary,
+    fontSize: 13,
+    outlineStyle: 'none',
+  },
+  dialogError: {
+    color: BLUETAP_COLORS.danger,
+    fontSize: 12,
+    fontWeight: '700',
+    marginTop: 6,
+  },
+  dialogActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 8,
+    marginTop: 16,
+  },
+  dialogCancelBtn: {
+    minHeight: 38,
+    paddingHorizontal: 14,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: BLUETAP_COLORS.border,
+    backgroundColor: BLUETAP_COLORS.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dialogCancelText: {
+    color: BLUETAP_COLORS.textPrimary,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  dialogDangerBtn: {
+    minHeight: 38,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    backgroundColor: BLUETAP_COLORS.danger,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dialogDangerText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  dialogSuccessBtn: {
+    minHeight: 38,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    backgroundColor: BLUETAP_COLORS.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dialogSuccessText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  pickerSectionLabel: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    color: BLUETAP_COLORS.textPrimary,
+    marginBottom: 6,
+  },
+  pickerPillRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  pickerPill: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: BLUETAP_COLORS.border,
+    backgroundColor: BLUETAP_COLORS.background,
+  },
+  pickerPillActive: {
+    borderColor: BLUE,
+    backgroundColor: BLUE,
+  },
+  pickerPillText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: BLUETAP_COLORS.textPrimary,
+  },
+  pickerPillTextActive: {
+    color: '#FFFFFF',
+  },
 });

@@ -1,122 +1,249 @@
 import React, { useMemo } from 'react';
-import { ActivityIndicator, View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import BlueTapHeader from '../../components/BlueTapHeader';
+import { BLUETAP_COLORS, BLUETAP_LAYOUT } from '../../constants/bluetapTheme';
 import { createPortalStyleSheet, useBlueTapTheme } from '../../components/BlueTapTheme';
 import { USER_PORTAL_BOTTOM_CONTENT_INSET, USER_PORTAL_LAYOUT } from '../../constants/userPortalLayout';
-import { normalizeDistributorOrderStatus, useAssignedDistributorOrders } from '../../services/distributorOrders';
+import {
+  formatDistributorOrderDate,
+  normalizeDistributorOrderStatus,
+  useAssignedDistributorOrders,
+} from '../../services/distributorOrders';
 
-const notificationMessage = (order) => {
+const asDate = (value) =>
+  value instanceof Date
+    ? value
+    : value?.toDate?.() || (value?.seconds ? new Date(value.seconds * 1000) : value ? new Date(value) : null);
+
+const formatWhen = (value) => {
+  const date = asDate(value);
+  return date && !Number.isNaN(date.getTime()) ? date.toLocaleString() : 'Time unavailable';
+};
+
+const messageFor = (order) => {
   const requestId = order.requestId || order.id || 'your order';
+  const customer = order.requesterName || order.requester || 'the customer';
+  const status = normalizeDistributorOrderStatus(order.status);
   const history = Array.isArray(order.assignmentHistory) ? order.assignmentHistory : [];
   const latestAssignment = history[history.length - 1] || null;
-  if (latestAssignment?.event === 'DISTRIBUTOR_REASSIGNED') return `Request #${requestId} has been reassigned to you.`;
-  if (normalizeDistributorOrderStatus(order.status) === 'delivered') return `Request #${requestId} has been delivered to ${order.requesterName || 'the requester'}.`;
-  return `Request #${requestId} has been assigned to you.`;
+
+  if (latestAssignment?.event === 'DISTRIBUTOR_REASSIGNED') {
+    return `Delivery #${requestId} has been reassigned to you.`;
+  }
+  if (status === 'delivery failed' || status === 'delivery_failed') {
+    return `Delivery #${requestId} failed: ${order.failureReason || 'Delivery issue reported'}. Needs reschedule.`;
+  }
+  if (status === 'delivered') {
+    return `Delivery #${requestId} has been delivered to ${customer}.`;
+  }
+  if (status === 'out for delivery' || status === 'out_for_delivery') {
+    return `Delivery #${requestId} is out for delivery to ${customer}.`;
+  }
+  if (status === 'accepted') {
+    return `You accepted delivery #${requestId} for ${customer}.`;
+  }
+  if (status === 'scheduled') {
+    const timeLabel = formatDistributorOrderDate(order.scheduledAt || order.expectedDeliveryDate);
+    return `Delivery #${requestId} is scheduled for ${timeLabel}.`;
+  }
+  return `Delivery #${requestId} has been assigned to you.`;
 };
 
 export default function DistributorNotification() {
   useBlueTapTheme();
   const router = useRouter();
   const { orders, loading, error, refresh } = useAssignedDistributorOrders();
-  const notifications = useMemo(() => orders.map((order) => ({ id: order.id, message: notificationMessage(order) })), [orders]);
+
+  const events = useMemo(
+    () =>
+      orders.map((order) => ({
+        ...order,
+        message: messageFor(order),
+        when: order.updated_at || order.updatedAt || order.created_at || order.createdAt,
+      })),
+    [orders]
+  );
 
   return (
-    <SafeAreaView edges={['left', 'right', 'bottom']} style={styles.container}>
-      <BlueTapHeader
-        notificationPath="/distributor/d_notification"
-        rightContent={
-          <TouchableOpacity onPress={() => router.back()}>
-            <Text style={styles.backIcon}>{'\u2190'}</Text>
-          </TouchableOpacity>
-        }
-      />
+    <SafeAreaView edges={['left', 'right', 'bottom']} style={styles.safe}>
+      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        <TouchableOpacity accessibilityRole="button" onPress={() => router.back()} style={styles.back}>
+          <Text style={styles.backText}>\u2039 Back</Text>
+        </TouchableOpacity>
 
-      <View style={styles.phoneWrapper}>
-        {/* Main content - light blue border card */}
-        <ScrollView
-          contentContainerStyle={styles.scrollContent}
-          showsVerticalScrollIndicator={false}
-        >
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>NOTIFICATION</Text>
-            <View style={styles.titleDivider} />
-            <View style={styles.cardBody}>
-              {loading ? <View style={styles.state}><ActivityIndicator color="#187BCD" /><Text style={styles.messageText}>Loading assignment updates...</Text></View>
-                : error ? <View style={styles.state}><Text style={styles.messageText}>Notifications are unavailable.</Text><Text style={styles.errorText}>{error}</Text><TouchableOpacity onPress={refresh}><Text style={styles.retryText}>Try Again</Text></TouchableOpacity></View>
-                  : notifications.length === 0 ? <View style={styles.state}><Text style={styles.messageText}>No assignment notifications yet.</Text><Text style={styles.emptyText}>Updates for deliveries assigned to you will appear here.</Text></View>
-                    : notifications.map((notification, index) => <View key={notification.id}><Text style={styles.messageText}>{notification.message}</Text>{index < notifications.length - 1 && <View style={styles.divider} />}</View>)}
-            </View>
+        <Text style={styles.eyebrow}>NOTIFICATION</Text>
+        <Text style={styles.title}>Notifications</Text>
+        <Text style={styles.subtitle}>Updates generated from your assigned BlueTap deliveries.</Text>
+
+        {loading ? (
+          <View style={styles.state}>
+            <ActivityIndicator color={BLUETAP_COLORS.primary} />
+            <Text style={styles.stateText}>Loading delivery updates\u2026</Text>
           </View>
-
-        </ScrollView>
-      </View>
+        ) : error ? (
+          <View style={styles.state}>
+            <Text style={styles.error}>Notifications unavailable</Text>
+            <Text style={styles.stateText}>{error}</Text>
+            <TouchableOpacity onPress={refresh} style={styles.button}>
+              <Text style={styles.buttonText}>Retry</Text>
+            </TouchableOpacity>
+          </View>
+        ) : events.length === 0 ? (
+          <View style={styles.state}>
+            <Text style={styles.emptyTitle}>No assignment notifications yet</Text>
+            <Text style={styles.stateText}>Updates for deliveries assigned to you will appear here.</Text>
+            <TouchableOpacity onPress={() => router.replace('/distributor/d_requests')} style={styles.button}>
+              <Text style={styles.buttonText}>View Assigned Requests</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <View style={styles.list}>
+            {events.map((event) => {
+              const isPending = ['pending', 'distributor assigned', 'distributor_assigned'].includes(
+                normalizeDistributorOrderStatus(event.status)
+              );
+              const destination = isPending ? '/distributor/d_requests' : '/distributor/d_scheduled_requests';
+              return (
+                <TouchableOpacity
+                  key={event.id}
+                  onPress={() => router.push(destination)}
+                  style={styles.card}
+                >
+                  <View style={styles.dot} />
+                  <View style={styles.cardBody}>
+                    <Text style={styles.message}>{event.message}</Text>
+                    <Text style={styles.time}>{formatWhen(event.when)}</Text>
+                  </View>
+                  <Text style={styles.chevron}>\u203A</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        )}
+      </ScrollView>
     </SafeAreaView>
   );
 }
 
 const styles = createPortalStyleSheet({
-  container: {
+  safe: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
+    minWidth: 0,
+    backgroundColor: BLUETAP_COLORS.background,
   },
-  phoneWrapper: {
-    flex: 1,
+  content: {
     width: '100%',
     maxWidth: USER_PORTAL_LAYOUT.maxWidth,
     minWidth: 0,
     alignSelf: 'center',
-  },
-  backIcon: {
-    fontSize: 24,
-    color: '#FFFFFF',
-    fontWeight: 'bold',
-  },
-  scrollContent: {
     paddingHorizontal: USER_PORTAL_LAYOUT.gutter,
     paddingTop: 20,
     paddingBottom: USER_PORTAL_BOTTOM_CONTENT_INSET,
   },
-  card: {
-    borderWidth: 2,
-    borderColor: '#90CAF9',
-    borderRadius: 8,
-    overflow: 'hidden',
+  back: {
+    alignSelf: 'flex-start',
+    paddingVertical: 8,
+    marginBottom: 10,
   },
-  cardTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#187BCD',
+  backText: {
+    color: BLUETAP_COLORS.primary,
+    fontWeight: '900',
+  },
+  eyebrow: {
+    color: BLUETAP_COLORS.primary,
+    fontSize: 11,
+    fontWeight: '900',
     letterSpacing: 1,
-    textAlign: 'center',
-    paddingVertical: 14,
-    paddingHorizontal: 14,
   },
-  titleDivider: {
-    height: 1,
-    backgroundColor: '#90CAF9',
+  title: {
+    color: BLUETAP_COLORS.textPrimary,
+    fontSize: 28,
+    fontWeight: '900',
+    marginTop: 5,
+  },
+  subtitle: {
+    color: BLUETAP_COLORS.textSecondary,
+    fontSize: 14,
+    lineHeight: 20,
+    marginTop: 6,
+    marginBottom: 20,
+  },
+  list: {
+    gap: 10,
+  },
+  card: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: BLUETAP_COLORS.surface,
+    borderWidth: 1,
+    borderColor: BLUETAP_COLORS.border,
+    borderRadius: BLUETAP_LAYOUT.radius.lg,
+    padding: 16,
+    ...BLUETAP_LAYOUT.shadow,
+  },
+  dot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: BLUETAP_COLORS.primary,
   },
   cardBody: {
-    paddingHorizontal: 14,
-    paddingVertical: 16,
+    flex: 1,
+    minWidth: 0,
   },
-  messageText: {
+  message: {
+    color: BLUETAP_COLORS.textPrimary,
     fontSize: 14,
-    color: '#187BCD',
     lineHeight: 20,
+    fontWeight: '700',
   },
-  boldId: {
-    fontWeight: 'bold',
-    color: '#1565C0',
+  time: {
+    color: BLUETAP_COLORS.muted,
+    fontSize: 11,
+    marginTop: 6,
   },
-  divider: {
-    height: 1,
-    backgroundColor: '#90CAF9',
-    marginTop: 14,
+  chevron: {
+    color: BLUETAP_COLORS.primary,
+    fontSize: 24,
   },
-  state: { alignItems: 'center', paddingVertical: 4 },
-  errorText: { color: '#64748B', fontSize: 12, lineHeight: 18, marginTop: 6, textAlign: 'center' },
-  emptyText: { color: '#64748B', fontSize: 12, lineHeight: 18, marginTop: 6, textAlign: 'center' },
-  retryText: { color: '#187BCD', fontSize: 13, fontWeight: 'bold', marginTop: 10 },
+  state: {
+    minHeight: 220,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: BLUETAP_COLORS.surface,
+    borderWidth: 1,
+    borderColor: BLUETAP_COLORS.border,
+    borderRadius: BLUETAP_LAYOUT.radius.lg,
+    padding: 24,
+  },
+  stateText: {
+    color: BLUETAP_COLORS.textSecondary,
+    fontSize: 13,
+    lineHeight: 19,
+    textAlign: 'center',
+    marginTop: 8,
+  },
+  emptyTitle: {
+    color: BLUETAP_COLORS.textPrimary,
+    fontSize: 17,
+    fontWeight: '900',
+  },
+  error: {
+    color: BLUETAP_COLORS.danger,
+    fontSize: 16,
+    fontWeight: '900',
+  },
+  button: {
+    backgroundColor: BLUETAP_COLORS.primary,
+    borderRadius: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    marginTop: 16,
+  },
+  buttonText: {
+    color: '#FFF',
+    fontWeight: '900',
+  },
 });

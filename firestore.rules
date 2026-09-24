@@ -57,6 +57,7 @@ service cloud.firestore {
     // Manager operational events are created and scoped by trusted Render Node
     // dispatch actions. Clients cannot forge, alter, or directly enumerate them.
     match /managerOperationalEvents/{eventId} { allow read, write: if false; }
+    match /requesterActiveOrders/{document=**} { allow read, write: if false; }
     match /branches/{branchId} {
       // Manager may read only their own assigned branch (Admin-written branchId).
       // Distributor may read only their own authoritative assigned branch.
@@ -99,6 +100,8 @@ service cloud.firestore {
     }
 
     match /requests/{requestId} {
+      // Administrator read-only platform-wide oversight.
+      allow read: if isAdmin();
       // Requester queries are scoped with requester_id == request.auth.uid.
       allow read: if isRequester() && resource.data.requester_id == request.auth.uid;
       allow read: if isManagerBranch(resource.data.branchId);

@@ -371,7 +371,7 @@ export default function DistributorDashboard() {
 const styles = createPortalStyleSheet({
   container: {
     flex: 1,
-    backgroundColor: '#F4FAFF',
+    backgroundColor: BLUETAP_COLORS.background,
   },
   phoneWrapper: {
     width: '100%',
@@ -414,7 +414,7 @@ const styles = createPortalStyleSheet({
   summaryCard: {
     flex: 1,
     minHeight: 86,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: BLUETAP_COLORS.surface,
     borderWidth: 1,
     borderColor: CARD_BORDER,
     borderRadius: 16,
@@ -445,7 +445,7 @@ const styles = createPortalStyleSheet({
     marginBottom: 10,
   },
   currentRequestCard: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: BLUETAP_COLORS.surface,
     borderWidth: 1,
     borderColor: CARD_BORDER,
     borderRadius: USER_PORTAL_LAYOUT.cardRadius,
@@ -526,7 +526,7 @@ const styles = createPortalStyleSheet({
   viewDetailsButton: {
     flex: 1,
     height: 44,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: BLUETAP_COLORS.surface,
     borderWidth: 1.5,
     borderColor: '#2563EB',
     borderRadius: 12,
@@ -559,7 +559,7 @@ const styles = createPortalStyleSheet({
     fontWeight: 'bold',
   },
   emptyRequestCard: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: BLUETAP_COLORS.surface,
     borderWidth: 1,
     borderColor: CARD_BORDER,
     borderRadius: USER_PORTAL_LAYOUT.cardRadius,
@@ -600,7 +600,7 @@ const styles = createPortalStyleSheet({
     paddingHorizontal: 10,
   },
   quickActionSecondary: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: BLUETAP_COLORS.surface,
     borderWidth: 1.5,
     borderColor: BLUE,
   },
@@ -623,7 +623,7 @@ const styles = createPortalStyleSheet({
   detailsModal: {
     width: '100%',
     maxWidth: USER_PORTAL_LAYOUT.maxWidth,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: BLUETAP_COLORS.surface,
     borderTopLeftRadius: 22,
     borderTopRightRadius: 22,
     paddingHorizontal: USER_PORTAL_LAYOUT.gutter,

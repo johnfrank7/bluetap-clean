@@ -8,7 +8,8 @@ const AWAITING_ASSIGNMENT = 'awaiting_distributor_assignment';
 const DISTRIBUTOR_ASSIGNED = 'distributor_assigned';
 const TRANSFER_PENDING = 'branch_transfer_pending';
 const MANAGER_OPERATIONAL_EVENTS = 'managerOperationalEvents';
-const ACTIVE_ASSIGNMENT_STATUSES = new Set([DISTRIBUTOR_ASSIGNED, 'accepted', 'scheduled', 'out_for_delivery']);
+const ACTIVE_ASSIGNMENT_STATUSES = new Set([DISTRIBUTOR_ASSIGNED, 'accepted', 'scheduled', 'out_for_delivery', 'delivery_failed']);
+const MANAGER_VISIBLE_STATUSES = new Set([AWAITING_ASSIGNMENT, DISTRIBUTOR_ASSIGNED, 'accepted', 'scheduled', 'out_for_delivery', 'delivery_failed', TRANSFER_PENDING]);
 const clean = (value, max = 240) => String(value || '').trim().slice(0, max);
 const safeNumber = (value) => Number.isFinite(Number(value)) ? Number(value) : null;
 const owningBranchId = (order = {}) => clean(order.currentBranchId || order.branchId, 128);
@@ -86,6 +87,10 @@ function safeOrder(id, data = {}, branchNames = new Map()) {
     transferRequestedAt: data.transferRequestedAt || null,
     assignmentHistory: history(data.assignmentHistory),
     transferHistory: history(data.transferHistory),
+    editHistory: history(data.editHistory),
+    notes: clean(data.notes || data.specialInstructions, 500),
+    specialInstructions: clean(data.notes || data.specialInstructions, 500),
+    failureReason: clean(data.failureReason, 240),
     createdAt: data.createdAt || data.created_at || null,
     updatedAt: data.updatedAt || data.updated_at || null,
   };
@@ -255,7 +260,7 @@ function createManagerDispatchHandler(getAdmin = getFirebaseAdmin) {
         ]);
         const orders = ownedSnapshot.docs
           .map((item) => safeOrder(item.id, item.data(), branchNames))
-          .filter((order) => order.currentBranchId === managerBranchId && [AWAITING_ASSIGNMENT, DISTRIBUTOR_ASSIGNED, TRANSFER_PENDING].includes(order.status));
+          .filter((order) => order.currentBranchId === managerBranchId && MANAGER_VISIBLE_STATUSES.has(order.status));
         const incomingTransfers = incomingSnapshot.docs
           .map((item) => safeOrder(item.id, item.data(), branchNames))
           .filter((order) => order.status === TRANSFER_PENDING && order.transferToBranchId === managerBranchId);
@@ -268,7 +273,7 @@ function createManagerDispatchHandler(getAdmin = getFirebaseAdmin) {
       const body = bodyOf(req);
       const orderId = clean(body.orderId, 128);
       const action = clean(body.action, 48).toLowerCase();
-      if (!orderId || !['assign-distributor', 'reassign-distributor', 'request-transfer', 'accept-transfer', 'decline-transfer'].includes(action)) {
+      if (!orderId || !['assign-distributor', 'reassign-distributor', 'request-transfer', 'accept-transfer', 'decline-transfer', 'edit-order'].includes(action)) {
         throw new OtpError(400, 'INVALID_DISPATCH_ACTION', 'Choose a valid order dispatch action.');
       }
       const requestedOrderSnapshot = await db.collection('requests').doc(orderId).get();
@@ -283,6 +288,10 @@ function createManagerDispatchHandler(getAdmin = getFirebaseAdmin) {
       let result;
 
       if (action === 'assign-distributor' || action === 'reassign-distributor') {
+        const scheduledAt = body.scheduledAt ? new Date(body.scheduledAt) : null;
+        if (!scheduledAt || Number.isNaN(scheduledAt.getTime()) || scheduledAt.getTime() < now.getTime() - (5 * 60 * 1000)) {
+          throw new OtpError(400, 'INVALID_DELIVERY_SCHEDULE', 'Choose a current or future delivery time.');
+        }
         const target = await resolveEligibleDistributor(db, auth, body.distributorUid, managerBranchId, orderId);
         result = await updateOrder(db, orderId, async (current) => {
           requireOwningManager(manager, current);
@@ -294,8 +303,8 @@ function createManagerDispatchHandler(getAdmin = getFirebaseAdmin) {
           }
           const event = assigning ? 'DISTRIBUTOR_ASSIGNED' : 'DISTRIBUTOR_REASSIGNED';
           const entry = assigning
-            ? { event, distributorUid: target.uid, distributorNameSnapshot: fullName(target.data), assignedByManagerUid: manager.decoded.uid, assignedAt: now }
-            : { event, previousDistributorUid: assignedUid, previousDistributorNameSnapshot: clean(current.assignedDistributorNameSnapshot || current.distributor_name, 160), distributorUid: target.uid, distributorNameSnapshot: fullName(target.data), assignedByManagerUid: manager.decoded.uid, assignedAt: now };
+            ? { event, distributorUid: target.uid, distributorNameSnapshot: fullName(target.data), assignedByManagerUid: manager.decoded.uid, assignedAt: now, scheduledAt }
+            : { event, previousDistributorUid: assignedUid, previousDistributorNameSnapshot: clean(current.assignedDistributorNameSnapshot || current.distributor_name, 160), distributorUid: target.uid, distributorNameSnapshot: fullName(target.data), assignedByManagerUid: manager.decoded.uid, assignedAt: now, scheduledAt };
           return updateWithEvent(current, event, manager.decoded.uid, managerBranchId, now, {
             status: DISTRIBUTOR_ASSIGNED,
             assignedDistributorUid: target.uid,
@@ -304,7 +313,94 @@ function createManagerDispatchHandler(getAdmin = getFirebaseAdmin) {
             assignedByManagerUid: manager.decoded.uid,
             distributor_id: target.uid,
             distributor_name: fullName(target.data),
+            scheduledAt,
+            scheduled_at: scheduledAt,
+            expectedDeliveryDate: scheduledAt.toISOString(),
+            delivery_date: scheduledAt.toISOString(),
             assignmentHistory: [...history(current.assignmentHistory), entry],
+          });
+        });
+      } else if (action === 'edit-order') {
+        const rawItems = Array.isArray(body.items) && body.items.length ? body.items : null;
+        if (!rawItems || rawItems.length > 20) {
+          throw new OtpError(400, 'INVALID_ORDER_ITEMS', 'Provide between 1 and 20 order items.');
+        }
+        const submittedItems = rawItems.map((item) => {
+          const productId = clean(item.productId || item.product_id, 128);
+          const quantity = Number(item.quantity);
+          if (!productId || !Number.isInteger(quantity) || quantity < 1 || quantity > 100) {
+            throw new OtpError(400, 'INVALID_ORDER_ITEM', 'Each product needs a quantity between 1 and 100.');
+          }
+          return { productId, quantity };
+        });
+
+        const EDITABLE_STATUSES = new Set(['awaiting_distributor_assignment', 'distributor_assigned', 'accepted', 'scheduled']);
+        const currentCheckStatus = clean(requestedOrder.status, 80).toLowerCase();
+        if (!EDITABLE_STATUSES.has(currentCheckStatus)) {
+          throw new OtpError(409, 'ORDER_NOT_EDITABLE', 'Orders can only be edited before delivery begins.');
+        }
+
+        const items = await Promise.all(submittedItems.map(async (item) => {
+          const snapshot = await db.collection('products').doc(item.productId).get();
+          if (!snapshot.exists) throw new OtpError(404, 'PRODUCT_NOT_FOUND', 'A selected product no longer exists.');
+          const productData = snapshot.data() || {};
+          const active = productData.active !== false && productData.is_active !== false && productData.archived !== true;
+          const price = safeNumber(productData.price);
+          const branchIds = Array.isArray(productData.branchIds)
+            ? productData.branchIds
+            : productData.branchId ? [productData.branchId] : [];
+          const available = branchIds.length === 0 || branchIds.includes(managerBranchId);
+          if (!active || price === null || !available) {
+            throw new OtpError(409, 'PRODUCT_UNAVAILABLE', `${clean(productData.name || productData.product_name, 128) || 'A selected product'} is not available from this branch.`);
+          }
+          const lineTotal = Math.round(price * item.quantity * 100) / 100;
+          return {
+            productId: snapshot.id,
+            productNameSnapshot: clean(productData.name || productData.product_name, 160),
+            unitPriceAtOrder: price,
+            quantity: item.quantity,
+            totalAtOrder: lineTotal,
+            containerTypeSnapshot: clean(productData.containerType, 80),
+            sizeSnapshot: clean(productData.size, 80),
+          };
+        }));
+        const quantity = items.reduce((sum, item) => sum + item.quantity, 0);
+        const totalAtOrder = Math.round(items.reduce((sum, item) => sum + item.totalAtOrder, 0) * 100) / 100;
+        const notes = body.notes !== undefined ? clean(body.notes, 500) : (body.specialInstructions !== undefined ? clean(body.specialInstructions, 500) : undefined);
+        const container = body.container !== undefined ? clean(body.container, 80) : undefined;
+
+        result = await updateOrder(db, orderId, async (current) => {
+          requireOwningManager(manager, current);
+          const status = clean(current.status, 80).toLowerCase();
+          if (!EDITABLE_STATUSES.has(status)) {
+            throw new OtpError(409, 'ORDER_NOT_EDITABLE', 'Orders can only be edited before delivery begins.');
+          }
+          const editEntry = {
+            event: 'ORDER_EDITED',
+            managerUid: manager.decoded.uid,
+            editedAt: now,
+            previousItems: current.items || [],
+            previousTotal: current.totalAtOrder ?? current.total_cost ?? 0,
+            newItems: items,
+            newTotal: totalAtOrder,
+            ...(notes !== undefined ? { notes } : {}),
+            ...(container !== undefined ? { container } : {}),
+          };
+          return updateWithEvent(current, 'ORDER_EDITED', manager.decoded.uid, managerBranchId, now, {
+            items,
+            productId: items[0]?.productId || '',
+            product_id: items[0]?.productId || '',
+            productNameSnapshot: items.map((item) => item.productNameSnapshot).join(', '),
+            product_name: items.map((item) => item.productNameSnapshot).join(', '),
+            unitPriceAtOrder: items[0]?.unitPriceAtOrder || 0,
+            product_price: items[0]?.unitPriceAtOrder || 0,
+            quantity,
+            total_quantity: quantity,
+            totalAtOrder,
+            total_cost: totalAtOrder,
+            ...(notes !== undefined ? { notes, specialInstructions: notes } : {}),
+            ...(container !== undefined ? { container } : {}),
+            editHistory: [...history(current.editHistory), editEntry],
           });
         });
       } else if (action === 'request-transfer') {

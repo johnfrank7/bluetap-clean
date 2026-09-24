@@ -84,3 +84,12 @@ test('branch list create update delete remain blocked for all clients', () => {
   const branchBlock = rules.match(/match \/branches\/\{branchId\}\s*\{[\s\S]*?\}/)?.[0] || '';
   assert.ok(!branchBlock.includes('allow list: if'), 'branch listing must remain blocked');
 });
+
+test('requesterActiveOrders guard documents are strictly backend-only', () => {
+  assert.match(rules, /match \/requesterActiveOrders\/\{document=\*\*\} \{ allow read, write: if false; \}/);
+});
+
+test('Admin has read-only oversight on requests collection while client mutations remain blocked', () => {
+  assert.match(rules, /match \/requests\/\{requestId\}[\s\S]*allow read:\s*if isAdmin\(\);/);
+  assert.match(rules, /match \/requests\/\{requestId\}[\s\S]*allow create, update, delete:\s*if false;/);
+});

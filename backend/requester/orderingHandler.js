@@ -6,6 +6,7 @@ const { OtpError } = require('../utils/otpError');
 const { safeProduct } = require('../admin/productManagementHandler');
 const { safeBranch } = require('../admin/branchManagementHandler');
 const { DEFAULT_SERVICE_RADIUS_KM } = require('../../constants/toledoBarangays.json');
+const { isActiveRequesterOrderStatus } = require('../../constants/requesterOrderStatus');
 
 const clean = (value, max = 240) => String(value || '').trim().slice(0, max);
 const coordinate = (value, minimum, maximum) => {
@@ -46,6 +47,7 @@ const profileSummary = (profile = {}) => {
     email: clean(profile.email, 240).toLowerCase(),
     uniqueId: clean(profile.unique_id || profile.uniqueId, 80),
     complete: Boolean(fullName && contactNumber && address),
+    defaultDeliveryLocation: profile.defaultDeliveryLocation || null,
   };
 };
 const productAvailableAtBranch = (product, branchId) => {
@@ -118,6 +120,8 @@ async function buildTrustedOrder(db, requester, body) {
   const branchId = clean(body.branchId, 128);
   const latitude = coordinate(body.deliveryLocation?.latitude, -90, 90);
   const longitude = coordinate(body.deliveryLocation?.longitude, -180, 180);
+  const accuracyNum = Number(body.deliveryLocation?.accuracy);
+  const accuracy = Number.isFinite(accuracyNum) && accuracyNum >= 0 ? Math.round(accuracyNum * 10) / 10 : null;
   if (!branchId) throw new OtpError(400, 'BRANCH_REQUIRED', 'Select a provider branch.');
   if (latitude === null || longitude === null) throw new OtpError(400, 'DELIVERY_LOCATION_REQUIRED', 'Choose a valid delivery location.');
   const summary = profileSummary(requester.profile);
@@ -149,7 +153,7 @@ async function buildTrustedOrder(db, requester, body) {
   }));
   const quantity = items.reduce((sum, item) => sum + item.quantity, 0);
   const totalAtOrder = Math.round(items.reduce((sum, item) => sum + item.totalAtOrder, 0) * 100) / 100;
-  const deliveryLocation = { latitude, longitude };
+  const deliveryLocation = { latitude, longitude, ...(accuracy !== null ? { accuracy } : {}) };
   const distanceKmSnapshot = distanceKm(deliveryLocation, branch);
   const serviceRadiusKmSnapshot = serviceRadiusKm(branch);
   const outsideServiceArea = distanceKmSnapshot > serviceRadiusKmSnapshot;
@@ -192,6 +196,8 @@ async function buildTrustedOrder(db, requester, body) {
   };
 }
 
+const inFlightRequesterCreations = new Set();
+
 function createRequesterOrdersHandler(getAdmin = getFirebaseAdmin) {
   return async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
@@ -215,15 +221,93 @@ function createRequesterOrdersHandler(getAdmin = getFirebaseAdmin) {
         if (!['pending', 'outside_radius_pending_approval'].includes(String(current.status).toLowerCase())) throw new OtpError(409, 'ORDER_NOT_CANCELLABLE', 'Only pending orders can be cancelled.');
         const now = new Date();
         await ref.update({ status: 'Cancelled', updatedAt: now, updated_at: now, cancelledAt: now });
+        const guardRef = db.collection('requesterActiveOrders').doc(requester.decoded.uid);
+        if (typeof guardRef.delete === 'function') {
+          await guardRef.delete().catch(() => {});
+        }
         return res.status(200).json({ order: safeOrder(orderId, { ...current, status: 'Cancelled', updatedAt: now, updated_at: now, cancelledAt: now }) });
       }
-      const trusted = await buildTrustedOrder(db, requester, body);
-      const ref = db.collection('requests').doc();
-      const now = new Date();
-      const requestNumber = `BT-${now.getFullYear()}-${randomUUID().slice(0, 8).toUpperCase()}`;
-      const saved = { ...trusted, requestId: requestNumber, request_id: requestNumber, createdAt: now, created_at: now, updatedAt: now, updated_at: now };
-      await ref.set(saved);
-      return res.status(201).json({ order: safeOrder(ref.id, saved) });
+
+      // Check process-level in-flight creation (local optimization against rapid double-clicks)
+      if (inFlightRequesterCreations.has(requester.decoded.uid)) {
+        throw new OtpError(409, 'ACTIVE_ORDER_EXISTS', 'You already have an active order in progress. You can only place one order at a time.');
+      }
+      inFlightRequesterCreations.add(requester.decoded.uid);
+      try {
+        // 1. Check existing orders for active order (to quickly catch non-terminal orders)
+        const existingSnapshot = await db.collection('requests').where('requesterUid', '==', requester.decoded.uid).get();
+        const hasActive = existingSnapshot.docs.some((doc) => isActiveRequesterOrderStatus(doc.data()?.status));
+        if (hasActive) {
+          throw new OtpError(409, 'ACTIVE_ORDER_EXISTS', 'You already have an active order in progress. You can only place one order at a time.');
+        }
+
+        // 2. Build trusted order
+        const trusted = await buildTrustedOrder(db, requester, body);
+        const guardRef = db.collection('requesterActiveOrders').doc(requester.decoded.uid);
+        const userRef = db.collection('users').doc(requester.decoded.uid);
+        const ref = db.collection('requests').doc();
+        const now = new Date();
+        const requestNumber = `BT-${now.getFullYear()}-${randomUUID().slice(0, 8).toUpperCase()}`;
+        const saved = { ...trusted, requestId: requestNumber, request_id: requestNumber, createdAt: now, created_at: now, updatedAt: now, updated_at: now };
+
+        const shouldSaveDefault = !requester.profile.defaultDeliveryLocation || body.saveAsDefaultLocation === true;
+        const defaultDeliveryLocation = shouldSaveDefault ? {
+          latitude: trusted.deliveryLocation.latitude,
+          longitude: trusted.deliveryLocation.longitude,
+          ...(trusted.deliveryLocation.accuracy != null ? { accuracy: trusted.deliveryLocation.accuracy } : {}),
+          formattedAddress: trusted.addressSnapshot,
+          barangay: clean(requester.profile.barangay, 120),
+          updatedAt: now,
+        } : null;
+
+        if (typeof db.runTransaction === 'function') {
+          await db.runTransaction(async (tx) => {
+            if (typeof tx.get === 'function') {
+              const guardSnap = await tx.get(guardRef);
+              if (guardSnap && guardSnap.exists) {
+                const guardData = guardSnap.data() || {};
+                if (guardData.orderId) {
+                  const activeDocRef = db.collection('requests').doc(guardData.orderId);
+                  const activeSnap = await tx.get(activeDocRef);
+                  if (activeSnap && activeSnap.exists && isActiveRequesterOrderStatus(activeSnap.data()?.status)) {
+                    throw new OtpError(409, 'ACTIVE_ORDER_EXISTS', 'You already have an active order in progress. You can only place one order at a time.');
+                  }
+                }
+              }
+            }
+            tx.set(ref, saved);
+            tx.set(guardRef, {
+              orderId: ref.id,
+              requestId: requestNumber,
+              requesterUid: requester.decoded.uid,
+              status: saved.status,
+              createdAt: now,
+            });
+            if (defaultDeliveryLocation) {
+              if (typeof tx.update === 'function') {
+                tx.update(userRef, { defaultDeliveryLocation, updatedAt: now });
+              } else if (typeof tx.set === 'function') {
+                tx.set(userRef, { defaultDeliveryLocation, updatedAt: now });
+              }
+            }
+          });
+        } else {
+          await ref.set(saved);
+          await guardRef.set({
+            orderId: ref.id,
+            requestId: requestNumber,
+            requesterUid: requester.decoded.uid,
+            status: saved.status,
+            createdAt: now,
+          });
+          if (defaultDeliveryLocation && typeof userRef.update === 'function') {
+            await userRef.update({ defaultDeliveryLocation, updatedAt: now });
+          }
+        }
+        return res.status(201).json({ order: safeOrder(ref.id, saved) });
+      } finally {
+        inFlightRequesterCreations.delete(requester.decoded.uid);
+      }
     } catch (error) { return responseError(res, error); }
   };
 }

@@ -9,7 +9,8 @@ const asCoordinate = (value, minimum, maximum) => {
 export const normalizeLocation = (location) => {
   const latitude = asCoordinate(location?.latitude, -90, 90);
   const longitude = asCoordinate(location?.longitude, -180, 180);
-  return latitude === null || longitude === null ? null : { latitude, longitude };
+  const accuracy = Number.isFinite(Number(location?.accuracy)) && Number(location?.accuracy) >= 0 ? Number(location.accuracy) : null;
+  return latitude === null || longitude === null ? null : { latitude, longitude, ...(accuracy !== null ? { accuracy } : {}) };
 };
 
 export const haversineDistanceKm = (fromValue, toValue) => {
@@ -32,14 +33,18 @@ export async function requestCurrentLocation() {
     if (!globalThis.navigator?.geolocation) throw locationError('LOCATION_UNAVAILABLE', 'Location is not available in this browser.');
     return new Promise((resolve, reject) => {
       globalThis.navigator.geolocation.getCurrentPosition(
-        (position) => resolve({ latitude: position.coords.latitude, longitude: position.coords.longitude }),
+        (position) => resolve({
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+          accuracy: Number.isFinite(position.coords.accuracy) ? Math.round(position.coords.accuracy * 10) / 10 : null,
+        }),
         (error) => reject(locationError(
           error?.code === 1 ? 'LOCATION_PERMISSION_DENIED' : 'LOCATION_UNAVAILABLE',
           error?.code === 1
             ? 'Location access is needed to automatically find nearby BlueTap providers.'
             : 'Your current location could not be determined. Try again or select a point on the map.'
         )),
-        { enableHighAccuracy: true, timeout: 15_000, maximumAge: 60_000 }
+        { enableHighAccuracy: true, timeout: 15_000, maximumAge: 0 }
       );
     });
   }
@@ -48,8 +53,12 @@ export async function requestCurrentLocation() {
   if (permission.status !== 'granted') {
     throw locationError('LOCATION_PERMISSION_DENIED', 'Location access is needed to automatically find nearby BlueTap providers.');
   }
-  const position = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-  return { latitude: position.coords.latitude, longitude: position.coords.longitude };
+  const position = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+  return {
+    latitude: position.coords.latitude,
+    longitude: position.coords.longitude,
+    accuracy: Number.isFinite(position.coords.accuracy) ? Math.round(position.coords.accuracy * 10) / 10 : null,
+  };
 }
 
 export const rankBranchesByDistance = (branches, location) => (branches || [])

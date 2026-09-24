@@ -2,7 +2,7 @@ import React from 'react';
 import { Text } from 'react-native';
 
 const glyphs = Object.freeze({
-  dashboard: '▦', branches: '⌘', accounts: '◫', distributors: '◉', products: '◇', security: '◈', theme: '◐', logout: '⇥', menu: '☰', close: '×', check: '✓',
+  dashboard: '▦', requests: '▤', branches: '⌘', accounts: '◫', distributors: '◉', products: '◇', security: '◈', theme: '◐', logout: '⇥', menu: '☰', close: '×', check: '✓',
 });
 
 export default function AdminIcon({ name, color = '#FFFFFF', size = 20, style }) {

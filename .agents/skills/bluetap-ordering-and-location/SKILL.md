@@ -25,14 +25,20 @@ Use this skill for BlueTap product catalogs, provider selection, order creation,
 
 - Treat the authenticated UID as the only authoritative Requester identity. Ignore any target UID submitted by a client.
 - Clients submit identifiers, quantities, selected options, and delivery coordinates—not trusted prices or totals.
+- Durable one-active-order guarantee: Use a server-authoritative atomic Firestore transaction guard document at `requesterActiveOrders/{uid}` to strictly prevent concurrent orders. An in-flight process Set acts only as a local Node optimization. Active states include all non-terminal statuses (including `delivery_failed`). At most one active order may exist per Requester across multiple Render instances, tabs, and retries. Cancelling or completing an order clears the guard document.
 - The backend must re-read the product and branch, require both to be active, validate branch availability and the Requester profile, and calculate all monetary values from authoritative prices.
 - Store `branchId`, `productId`, `productNameSnapshot`, `branchNameSnapshot`, `unitPriceAtOrder`, quantity, `totalAtOrder`, delivery-location snapshot, distance snapshot, status, and timestamps.
 - Store `initialBranchId` and `currentBranchId` for fulfillment ownership. The initial selection remains historical context; the current Branch alone controls operational assignment and handoff actions.
 - Historical orders must not change when product price, product metadata, or branch metadata changes.
 - Restrict order/location reads to the Requester owner and only the fulfillment roles assigned to that order or branch.
 
-## Dispatch and branch transfers
+## Dispatch, situational edits, and branch transfers
 
+- Dispatch queue relocation: The order assignment queue lives in `app/manager/distributors.jsx` alongside registered distributors. Order reviews (outside-radius approvals, branch transfers, order details, and situational edits) live in `app/manager/request.jsx`.
+- Atomic assignment and delivery scheduling: Managers assign orders and set the initial delivery date and time slot (`scheduledAt`) atomically in `app/manager/distributors.jsx`. The assigned Distributor does not choose the initial schedule.
+- Situational order edits: Managers may adjust order items, quantities, catalog products, container type, and special notes strictly during the pre-delivery window (`awaiting_distributor_assignment`, `distributor_assigned`, `accepted`, `scheduled`). Edits are strictly blocked once the order is `out_for_delivery` or in any terminal state. Monetary totals are recalculated server-side from authoritative `products` prices and recorded in `editHistory`.
+- Distributor accept / decline lifecycle: Assigned Distributors accept (`accepted`) or decline the assignment. Declining returns the order to `awaiting_distributor_assignment`, unassigns the distributor, and logs the decline note.
+- Delivery failure and rescheduling exception: If delivery cannot be completed, the assigned Distributor reports failure (`delivery_failed`) with a mandatory `failureReason`. Delivery rescheduling is strictly restricted to orders in `delivery_failed` status.
 - After a Manager approves an outside-radius order, keep it owned by the selected Branch in `awaiting_distributor_assignment`; do not auto-assign a Distributor.
 - Resolve Distributor eligibility server-side from the trusted account record. Assignment and reassignment require an active/approved, enabled Distributor in the current owning Branch. Never trust client-provided names, role, approval, or branch fields.
 - Treat `users/{uid}.branchId` as the sole operational Distributor branch. An active Distributor without it is an assignment-required legacy account, not eligible for dispatch; do not infer a branch from current deliveries or historical orders.
@@ -51,6 +57,8 @@ Use this skill for BlueTap product catalogs, provider selection, order creation,
 - Compare Haversine distance to the selected Branch's service radius on the backend. Outside-radius orders require Manager approval rather than automatic rejection; the backend is authoritative for branch, distance, radius, and eligibility decisions.
 - Historical orders store trusted distance and service-radius snapshots. Later Branch radius edits affect new orders only and never rewrite submitted-order history.
 - Request location only after an explicit ordering action such as “Use my current location.” Never continuously track users.
+- Zero-cache GPS: Geolocation requests must disable cached coordinates (`maximumAge: 0` on web, `Location.Accuracy.High` on native) to ensure fresh position capture. Snapshot the GPS `accuracy` in meters on the order document.
+- Default delivery location: Requesters may save their delivery location as their default address. This persists to `users/{uid}` during order creation and prefills future order forms.
 - On web, use browser geolocation behind a shared abstraction. On native Expo, request foreground permission only and use a compatible native location API.
 - If permission is denied or unavailable, explain why location is needed, provide retry guidance, and retain manual map-pin selection when practical. Do not repeatedly prompt automatically.
 - Provider candidates are active Admin-created branches with valid latitude and longitude.

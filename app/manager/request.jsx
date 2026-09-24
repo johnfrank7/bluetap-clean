@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Modal,
   ScrollView,
   StyleSheet,
   Text,
@@ -8,751 +9,1128 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import {
-  collection,
-  onSnapshot,
-  query,
-  where,
-} from 'firebase/firestore';
 
-import { db } from '../../firebase';
-import { getLocalUsers, subscribeLocalUsers } from '../../localUsers';
-import { getProfileUniqueId } from '../../services/uniqueIds';
-import { getModuleSession } from '../../services/authSession';
-import { decideOutsideRadiusOrder, dispatchManagerOrder, getManagerDispatch, getOutsideRadiusOrders } from '../../services/managerOrderApprovals';
+import {
+  decideOutsideRadiusOrder,
+  dispatchManagerOrder,
+  getManagerDispatch,
+  getOutsideRadiusOrders,
+} from '../../services/managerOrderApprovals';
+import { subscribeProducts } from '../../services/products';
 import { haversineDistanceKm } from '../../services/location';
 import { useAdminTheme } from '../../components/AdminTheme';
-import ManagerShell, {
-  MANAGER_COLORS,
-  ManagerPill,
-} from '../../components/ManagerShell';
+import AdminIcon from '../../components/AdminIcon';
+import ManagerShell, { MANAGER_COLORS, ManagerPill } from '../../components/ManagerShell';
 
-const normalizeApplicationStatus = (status) =>
-  (status || 'pending').toString().trim().toLowerCase();
 
-const normalizeRole = (role) => (role || '').toString().trim().toLowerCase();
 
-const getDistributorApplicationStatus = (distributor) =>
-  normalizeApplicationStatus(
-    distributor.distributorStatus ||
-      distributor.status ||
-      distributor.approvalStatus ||
-      distributor.accountStatus ||
-      'pending'
-  );
+const formatAmount = (amount) => `\u20B1${Number(amount || 0).toFixed(2)}`;
 
-const getPendingLocalDistributors = (firestoreDistributors = [], branchId = '') =>
-  getLocalUsers()
-    .filter(
-      (user) =>
-        user.branchId === branchId &&
-        normalizeRole(user.role) === 'distributor' &&
-        getDistributorApplicationStatus(user) === 'pending'
-    )
-    .map((user) => ({ ...user, id: user.uid, isLocal: true }))
-    .filter(
-      (localUser) =>
-        !firestoreDistributors.some(
-          (firestoreUser) =>
-            firestoreUser.uid === localUser.uid ||
-            firestoreUser.email === localUser.email
-        )
-    );
+const EDITABLE_STATUSES = new Set([
+  'awaiting_distributor_assignment',
+  'distributor_assigned',
+  'accepted',
+  'scheduled',
+]);
 
-const getFullName = (user = {}) =>
-  `${user.firstName || ''} ${user.lastName || ''}`.trim() ||
-  user.full_name ||
-  user.fullName ||
-  user.email ||
-  'Unnamed user';
+const orderProducts = (order) =>
+  order.items?.map((item) => `${item.quantity} \u00D7 ${item.productNameSnapshot}`).filter(Boolean).join(', ') || 'Order products';
 
-const getBarangay = (user = {}) =>
-  (user.barangay || user.address || 'Not set').toString().trim() || 'Not set';
+const orderDistance = (order) =>
+  order.distanceKmSnapshot == null ? 'Distance unavailable' : `Approx. ${Number(order.distanceKmSnapshot).toFixed(1)} km`;
 
-const formatAmount = (amount) => `₱${Number(amount || 0).toFixed(2)}`;
-
-function OutsideRadiusApprovalQueue({ styles }) {
+function OutsideRadiusApprovalQueue({ styles, colors, onOrderApproved }) {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [updatingId, setUpdatingId] = useState('');
+
   const load = async () => {
-    setLoading(true); setError('');
-    try { setOrders(await getOutsideRadiusOrders()); }
-    catch (loadFailure) { setError(loadFailure.message); }
-    finally { setLoading(false); }
+    setLoading(true);
+    setError('');
+    try {
+      setOrders(await getOutsideRadiusOrders());
+    } catch (loadFailure) {
+      setError(loadFailure.message);
+    } finally {
+      setLoading(false);
+    }
   };
-  useEffect(() => { load(); }, []);
+
+  useEffect(() => {
+    load();
+  }, []);
+
   const decide = async (order, action) => {
     if (updatingId) return;
-    setUpdatingId(order.id); setError('');
+    setUpdatingId(order.id);
+    setError('');
     try {
       await decideOutsideRadiusOrder(order.id, action);
       setOrders((current) => current.filter((item) => item.id !== order.id));
-    } catch (updateFailure) { setError(updateFailure.message); }
-    finally { setUpdatingId(''); }
+      if (action === 'approve') onOrderApproved?.();
+    } catch (updateFailure) {
+      setError(updateFailure.message);
+    } finally {
+      setUpdatingId('');
+    }
   };
-  return <View style={styles.approvalCard}>
-    <View style={styles.approvalHeader}><View><Text style={styles.approvalEyebrow}>DELIVERY EXCEPTIONS</Text><Text style={styles.approvalTitle}>Outside-radius approvals</Text><Text style={styles.approvalHelper}>Only requests for your assigned branch appear here.</Text></View><TouchableOpacity onPress={load} disabled={loading} style={styles.refreshButton}><Text style={styles.refreshText}>{loading ? 'Loading…' : 'Refresh'}</Text></TouchableOpacity></View>
-    {!!error && <View accessibilityRole="alert" style={styles.approvalError}><Text style={styles.approvalErrorText}>{error}</Text></View>}
-    {loading ? <View style={styles.approvalEmpty}><ActivityIndicator color={styles.primaryColor || MANAGER_COLORS.blue} /></View> : orders.length === 0 ? <View style={styles.approvalEmpty}><Text style={styles.emptyText}>No outside-radius requests are waiting for approval.</Text></View> : orders.map((order) => {
-      const isUpdating = updatingId === order.id;
-      const products = order.items?.map((item) => `${item.quantity} × ${item.productNameSnapshot}`).filter(Boolean).join(', ') || 'Order products';
-      return <View key={order.id} style={styles.approvalOrder}><View style={styles.approvalOrderHeader}><View style={styles.approvalOrderMain}><Text style={styles.approvalRequester}>{order.requesterName || 'Requester'}</Text><Text style={styles.approvalRequestId}>{order.requestId || order.id}</Text></View><ManagerPill tone="cyan">Approval needed</ManagerPill></View><Text style={styles.approvalProducts}>{products}</Text><View style={styles.approvalDetails}><Text style={styles.approvalDetail}>Delivery: {order.address || (order.deliveryLocation ? `${order.deliveryLocation.latitude.toFixed(5)}, ${order.deliveryLocation.longitude.toFixed(5)}` : 'Location provided')}</Text><Text style={styles.approvalDetail}>Approx. {Number(order.distanceKmSnapshot || 0).toFixed(1)} km · Branch radius {order.serviceRadiusKmSnapshot} km</Text><Text style={styles.approvalAmount}>{formatAmount(order.totalAtOrder)}</Text></View><View style={styles.approvalActions}><TouchableOpacity disabled={isUpdating} onPress={() => decide(order, 'approve')} style={[styles.approveDeliveryButton, isUpdating && styles.actionDisabled]}><Text style={styles.approveDeliveryText}>{isUpdating ? 'Saving…' : 'Approve delivery'}</Text></TouchableOpacity><TouchableOpacity disabled={isUpdating} onPress={() => decide(order, 'decline')} style={[styles.declineDeliveryButton, isUpdating && styles.actionDisabled]}><Text style={styles.declineDeliveryText}>Decline</Text></TouchableOpacity><TouchableOpacity disabled style={styles.messagePlaceholder}><Text style={styles.messagePlaceholderText}>Message requester (coming soon)</Text></TouchableOpacity></View></View>;
-    })}
-  </View>;
+
+  return (
+    <View style={styles.card}>
+      <View style={styles.cardHeaderRow}>
+        <View>
+          <Text style={styles.eyebrow}>DELIVERY EXCEPTIONS</Text>
+          <Text style={styles.cardTitle}>Outside-Radius Approvals</Text>
+          <Text style={styles.helperText}>
+            Review delivery requests originating outside your branch\u2019s standard service radius.
+          </Text>
+        </View>
+        <TouchableOpacity onPress={load} disabled={loading} style={styles.refreshButton}>
+          <Text style={styles.refreshText}>{loading ? 'Loading\u2026' : 'Refresh'}</Text>
+        </TouchableOpacity>
+      </View>
+
+      {!!error && (
+        <View accessibilityRole="alert" style={styles.errorBanner}>
+          <Text style={styles.errorBannerText}>{error}</Text>
+        </View>
+      )}
+
+      {loading ? (
+        <View style={styles.emptyContainer}>
+          <ActivityIndicator color={colors.primary} />
+        </View>
+      ) : orders.length === 0 ? (
+        <View style={styles.emptyContainer}>
+          <Text style={styles.emptyText}>No outside-radius requests are waiting for approval.</Text>
+        </View>
+      ) : (
+        orders.map((order) => {
+          const isUpdating = updatingId === order.id;
+          const products =
+            order.items?.map((item) => `${item.quantity} \u00D7 ${item.productNameSnapshot}`).filter(Boolean).join(', ') ||
+            'Order products';
+
+          return (
+            <View key={order.id} style={styles.orderItem}>
+              <View style={styles.orderHeaderRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.requesterName}>{order.requesterName || 'Requester'}</Text>
+                  <Text style={styles.orderIdText}>#{order.requestId || order.id}</Text>
+                </View>
+                <ManagerPill tone="cyan">Approval Needed</ManagerPill>
+              </View>
+
+              <Text style={styles.productsSummary}>{products}</Text>
+
+              <View style={styles.detailsBlock}>
+                <Text style={styles.detailLine}>
+                  Delivery: {order.address || (order.deliveryLocation ? `${order.deliveryLocation.latitude.toFixed(5)}, ${order.deliveryLocation.longitude.toFixed(5)}` : 'Location provided')}
+                </Text>
+                <Text style={styles.detailLine}>
+                  Approx. {Number(order.distanceKmSnapshot || 0).toFixed(1)} km \u00B7 Branch radius {order.serviceRadiusKmSnapshot} km
+                </Text>
+                <Text style={styles.amountText}>{formatAmount(order.totalAtOrder)}</Text>
+              </View>
+
+              <View style={styles.actionRow}>
+                <TouchableOpacity
+                  disabled={isUpdating}
+                  onPress={() => decide(order, 'approve')}
+                  style={[styles.approveButton, isUpdating && styles.actionDisabled]}
+                >
+                  <Text style={styles.approveButtonText}>{isUpdating ? 'Saving\u2026' : 'Approve Delivery'}</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  disabled={isUpdating}
+                  onPress={() => decide(order, 'decline')}
+                  style={[styles.declineButton, isUpdating && styles.actionDisabled]}
+                >
+                  <Text style={styles.declineButtonText}>Decline</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          );
+        })
+      )}
+    </View>
+  );
 }
 
-const orderProducts = (order) => order.items?.map((item) => `${item.quantity} × ${item.productNameSnapshot}`).filter(Boolean).join(', ') || 'Order products';
-const orderDistance = (order) => order.distanceKmSnapshot == null ? 'Distance unavailable' : `Approx. ${Number(order.distanceKmSnapshot).toFixed(1)} km`;
-const targetBranchesFor = (order, branches) => [...(branches || [])].map((branch) => {
-  const distanceKm = order.deliveryLocation ? haversineDistanceKm(order.deliveryLocation, branch) : null;
-  const radius = Number(branch.serviceRadiusKm || 5);
-  return { ...branch, distanceKm, withinCoverage: distanceKm !== null && distanceKm <= radius };
-}).sort((left, right) => (left.distanceKm ?? Infinity) - (right.distanceKm ?? Infinity));
+function EditOrderModal({ visible, order, onClose, onSaveSuccess, colors, styles }) {
+  const [catalogProducts, setCatalogProducts] = useState([]);
+  const [items, setItems] = useState([]);
+  const [notes, setNotes] = useState('');
+  const [container, setContainer] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [editError, setEditError] = useState('');
 
-function DispatchQueue({ styles, placeholderColor }) {
-  const [data, setData] = useState({ orders: [], incomingTransfers: [], sourceDecisionEvents: [], distributors: [], branches: [] });
-  const [loading, setLoading] = useState(true); const [error, setError] = useState(''); const [updatingId, setUpdatingId] = useState('');
-  const [assigningOrderId, setAssigningOrderId] = useState(''); const [transferringOrderId, setTransferringOrderId] = useState('');
-  const [transferReason, setTransferReason] = useState(''); const [decliningOrderId, setDecliningOrderId] = useState(''); const [declineReason, setDeclineReason] = useState('');
-  const load = async () => { setLoading(true); setError(''); try { setData(await getManagerDispatch()); } catch (loadFailure) { setError(loadFailure.message); } finally { setLoading(false); } };
-  useEffect(() => { load(); }, []);
+  const isEditable = order && EDITABLE_STATUSES.has(order.status);
+
+  useEffect(() => {
+    const unsubscribe = subscribeProducts((prods) => {
+      setCatalogProducts(prods || []);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    if (order) {
+      setItems(
+        (order.items || []).map((it) => ({
+          productId: it.productId || it.product_id || it.id || '',
+          productNameSnapshot: it.productNameSnapshot || it.product_name || 'Product',
+          quantity: Number(it.quantity) || 1,
+          unitPrice: Number(it.quantity) > 0 ? (Number(it.totalAtOrder || 0) / Number(it.quantity)) : 0,
+        }))
+      );
+      setNotes(order.notes || order.specialInstructions || '');
+      setContainer(order.container || '');
+      setEditError('');
+    }
+  }, [order]);
+
+  const updateQuantity = (index, delta) => {
+    setItems((curr) =>
+      curr.map((item, idx) => {
+        if (idx !== index) return item;
+        const newQty = Math.max(1, Math.min(100, item.quantity + delta));
+        return { ...item, quantity: newQty };
+      })
+    );
+  };
+
+  const removeItem = (index) => {
+    if (items.length <= 1) {
+      setEditError('An order must have at least one product.');
+      return;
+    }
+    setEditError('');
+    setItems((curr) => curr.filter((_, idx) => idx !== index));
+  };
+
+  const addCatalogProduct = (product) => {
+    setEditError('');
+    setItems((curr) => {
+      const existingIdx = curr.findIndex((it) => it.productId === product.id);
+      if (existingIdx >= 0) {
+        return curr.map((it, idx) => (idx === existingIdx ? { ...it, quantity: it.quantity + 1 } : it));
+      }
+      return [
+        ...curr,
+        {
+          productId: product.id,
+          productNameSnapshot: product.product_name,
+          quantity: 1,
+          unitPrice: Number(product.price) || 0,
+        },
+      ];
+    });
+  };
+
+  const handleSave = async () => {
+    if (!order || !isEditable) return;
+    if (items.length === 0) {
+      setEditError('Provide at least one order item.');
+      return;
+    }
+    setSaving(true);
+    setEditError('');
+    try {
+      await dispatchManagerOrder(order.id, 'edit-order', {
+        items: items.map((it) => ({
+          productId: it.productId,
+          quantity: it.quantity,
+        })),
+        notes,
+        container,
+      });
+      onSaveSuccess?.();
+      onClose();
+    } catch (err) {
+      setEditError(err.message || 'Failed to update order.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!order) return null;
+
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <View style={styles.modalBackdrop}>
+        <View accessibilityViewIsModal style={styles.editModalCard}>
+          <View style={styles.modalHeaderRow}>
+            <View>
+              <Text style={styles.modalTitle}>Order Details & Situational Edit</Text>
+              <Text style={styles.modalSub}>
+                Order #{order.requestId || order.id} \u00B7 {order.requesterName}
+              </Text>
+            </View>
+            <TouchableOpacity onPress={onClose} style={styles.modalCloseBtn}>
+              <Text style={styles.modalCloseText}>\u00D7</Text>
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView style={{ maxHeight: 420 }} showsVerticalScrollIndicator={false}>
+            {!isEditable && (
+              <View style={styles.lockedNotice}>
+                <Text style={styles.lockedNoticeText}>
+                  Order is {order.status?.replace(/_/g, ' ')}. Orders can only be edited before delivery begins.
+                </Text>
+              </View>
+            )}
+
+            <View style={styles.modalSection}>
+              <Text style={styles.modalSectionTitle}>Ordered Items</Text>
+              {items.map((item, index) => (
+                <View key={`${item.productId}-${index}`} style={styles.itemEditRow}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.itemEditName}>{item.productNameSnapshot}</Text>
+                    {item.unitPrice > 0 && (
+                      <Text style={styles.itemEditPrice}>\u20B1{item.unitPrice.toFixed(2)} each</Text>
+                    )}
+                  </View>
+
+                  {isEditable ? (
+                    <View style={styles.qtyControlRow}>
+                      <TouchableOpacity onPress={() => updateQuantity(index, -1)} style={styles.qtyBtn}>
+                        <Text style={styles.qtyBtnText}>-</Text>
+                      </TouchableOpacity>
+                      <Text style={styles.qtyText}>{item.quantity}</Text>
+                      <TouchableOpacity onPress={() => updateQuantity(index, 1)} style={styles.qtyBtn}>
+                        <Text style={styles.qtyBtnText}>+</Text>
+                      </TouchableOpacity>
+                      {items.length > 1 && (
+                        <TouchableOpacity onPress={() => removeItem(index)} style={styles.removeBtn}>
+                          <Text style={styles.removeBtnText}>\u00D7</Text>
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  ) : (
+                    <Text style={styles.qtyText}>Qty: {item.quantity}</Text>
+                  )}
+                </View>
+              ))}
+
+              {isEditable && catalogProducts.length > 0 && (
+                <View style={{ marginTop: 10 }}>
+                  <Text style={styles.subLabel}>Add product from branch catalog:</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 6 }}>
+                    {catalogProducts.map((prod) => (
+                      <TouchableOpacity
+                        key={prod.id}
+                        onPress={() => addCatalogProduct(prod)}
+                        style={styles.addCatalogPill}
+                      >
+                        <Text style={styles.addCatalogPillText}>+ {prod.product_name}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                </View>
+              )}
+            </View>
+
+            <View style={styles.modalSection}>
+              <Text style={styles.modalSectionTitle}>Container & Packaging</Text>
+              {isEditable ? (
+                <TextInput
+                  value={container}
+                  onChangeText={setContainer}
+                  placeholder="e.g. Slim 5-gallon container, Round dispenser"
+                  placeholderTextColor={colors.placeholder}
+                  style={styles.inputField}
+                />
+              ) : (
+                <Text style={styles.readOnlyField}>{container || 'Standard container'}</Text>
+              )}
+            </View>
+
+            <View style={styles.modalSection}>
+              <Text style={styles.modalSectionTitle}>Special Instructions / Notes</Text>
+              {isEditable ? (
+                <TextInput
+                  value={notes}
+                  onChangeText={setNotes}
+                  placeholder="Delivery gate notes, timing instructions..."
+                  placeholderTextColor={colors.placeholder}
+                  multiline
+                  style={[styles.inputField, { minHeight: 60 }]}
+                />
+              ) : (
+                <Text style={styles.readOnlyField}>{notes || 'No special instructions'}</Text>
+              )}
+            </View>
+
+            {!!editError && (
+              <View style={styles.errorBanner}>
+                <Text style={styles.errorBannerText}>{editError}</Text>
+              </View>
+            )}
+          </ScrollView>
+
+          <View style={styles.modalFooterRow}>
+            <TouchableOpacity onPress={onClose} style={styles.cancelBtn}>
+              <Text style={styles.cancelBtnText}>Close</Text>
+            </TouchableOpacity>
+
+            {isEditable && (
+              <TouchableOpacity
+                disabled={saving}
+                onPress={handleSave}
+                style={[styles.saveBtn, saving && styles.actionDisabled]}
+              >
+                <Text style={styles.saveBtnText}>{saving ? 'Recalculating & Saving\u2026' : 'Save Order Changes'}</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+function BranchTransfersQueue({ data, styles, onRefresh, colors }) {
+  const [updatingId, setUpdatingId] = useState('');
+  const [decliningOrderId, setDecliningOrderId] = useState('');
+  const [declineReason, setDeclineReason] = useState('');
+  const [error, setError] = useState('');
+
   const act = async (orderId, action, payload = {}) => {
     if (updatingId) return;
-    setUpdatingId(orderId); setError('');
-    try { await dispatchManagerOrder(orderId, action, payload); setAssigningOrderId(''); setTransferringOrderId(''); setDecliningOrderId(''); setTransferReason(''); setDeclineReason(''); await load(); }
-    catch (actionFailure) { setError(actionFailure.message); }
-    finally { setUpdatingId(''); }
+    setUpdatingId(orderId);
+    setError('');
+    try {
+      await dispatchManagerOrder(orderId, action, payload);
+      setDecliningOrderId('');
+      setDeclineReason('');
+      onRefresh?.();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setUpdatingId('');
+    }
   };
-  return <View style={styles.dispatchCard}>
-    <View style={styles.approvalHeader}><View><Text style={styles.approvalEyebrow}>DISPATCH</Text><Text style={styles.approvalTitle}>Distributor assignments</Text><Text style={styles.approvalHelper}>Dispatch controls belong only to the Manager of the current owning branch.</Text></View><TouchableOpacity onPress={load} disabled={loading} style={styles.refreshButton}><Text style={styles.refreshText}>{loading ? 'Loading…' : 'Refresh'}</Text></TouchableOpacity></View>
-    {!!error && <View accessibilityRole="alert" style={styles.approvalError}><Text style={styles.approvalErrorText}>{error}</Text></View>}
-    {loading ? <View style={styles.approvalEmpty}><ActivityIndicator color={MANAGER_COLORS.blue} /></View> : <>
-      {data.orders.length === 0 ? <View style={styles.approvalEmpty}><Text style={styles.emptyText}>No current orders are waiting for dispatch.</Text></View> : data.orders.map((order) => {
-        const isUpdating = updatingId === order.id; const assigned = !!order.assignedDistributorUid; const transferPending = order.status === 'branch_transfer_pending';
-        return <View key={order.id} style={styles.dispatchOrder}><View style={styles.approvalOrderHeader}><View style={styles.approvalOrderMain}><Text style={styles.approvalRequester}>{order.requesterName || 'Requester'}</Text><Text style={styles.approvalRequestId}>{order.requestId || order.id} · {order.currentBranchName || 'Current branch'}</Text></View><ManagerPill tone={transferPending ? 'cyan' : assigned ? 'green' : 'blue'}>{transferPending ? 'Transfer in progress' : assigned ? 'Distributor assigned' : 'Awaiting assignment'}</ManagerPill></View><Text style={styles.approvalProducts}>{orderProducts(order)}</Text><View style={styles.approvalDetails}><Text style={styles.approvalDetail}>Delivery: {order.address || 'Address provided with the order'}</Text><Text style={styles.approvalDetail}>{orderDistance(order)} · Branch radius {order.serviceRadiusKmSnapshot ?? '—'} km</Text><Text style={styles.approvalDetail}>Coverage: {order.outsideServiceArea ? 'Outside normal area (approved)' : 'Within normal area'}</Text>{assigned && <Text style={styles.assignedDistributor}>Assigned Distributor: {order.assignedDistributorName || 'Assigned'}</Text>}<Text style={styles.approvalAmount}>{formatAmount(order.totalAtOrder)}</Text></View>
-          {!transferPending && <View style={styles.dispatchActions}><TouchableOpacity disabled={isUpdating} onPress={() => { setAssigningOrderId(assigningOrderId === order.id ? '' : order.id); setTransferringOrderId(''); }} style={[styles.approveDeliveryButton, isUpdating && styles.actionDisabled]}><Text style={styles.approveDeliveryText}>{assigned ? 'Reassign Distributor' : 'Assign Distributor'}</Text></TouchableOpacity><TouchableOpacity disabled={isUpdating} onPress={() => { setTransferringOrderId(transferringOrderId === order.id ? '' : order.id); setAssigningOrderId(''); }} style={styles.transferButton}><Text style={styles.transferButtonText}>Transfer Branch</Text></TouchableOpacity><TouchableOpacity disabled style={styles.messagePlaceholder}><Text style={styles.messagePlaceholderText}>Contact branch manager (coming soon)</Text></TouchableOpacity></View>}
-          {assigningOrderId === order.id && <View style={styles.dispatchPicker}><Text style={styles.dispatchPickerLabel}>{assigned ? 'Available Distributor' : 'Assign Distributor'}</Text>{data.distributors.length === 0 ? <Text style={styles.dispatchPickerEmpty}>No eligible, unassigned Distributor is currently available for this branch.</Text> : data.distributors.map((distributor) => <TouchableOpacity key={distributor.uid} disabled={isUpdating} onPress={() => act(order.id, assigned ? 'reassign-distributor' : 'assign-distributor', { distributorUid: distributor.uid })} style={styles.dispatchOption}><Text style={styles.dispatchOptionText}>{distributor.name}</Text><Text style={styles.dispatchOptionHint}>Available · this branch</Text></TouchableOpacity>)}</View>}
-          {transferringOrderId === order.id && <View style={styles.dispatchPicker}><Text style={styles.dispatchPickerLabel}>Transfer coordination note</Text><TextInput value={transferReason} onChangeText={setTransferReason} placeholder="Why should this branch take the order?" placeholderTextColor={placeholderColor} multiline style={styles.transferNoteInput} />{targetBranchesFor(order, data.branches).map((branch) => <TouchableOpacity key={branch.id} disabled={isUpdating} onPress={() => act(order.id, 'request-transfer', { targetBranchId: branch.id, transferReason })} style={styles.transferTarget}><View style={styles.transferTargetMain}><Text style={styles.dispatchOptionText}>{branch.name}</Text><Text style={styles.dispatchOptionHint}>{branch.distanceKm == null ? 'Distance unavailable' : `Approx. ${branch.distanceKm.toFixed(1)} km`} · {branch.serviceRadiusKm} km radius</Text></View><Text style={[styles.coverageText, branch.withinCoverage ? styles.coverageInside : styles.coverageOutside]}>{branch.withinCoverage ? 'Inside coverage' : 'Outside coverage'}</Text></TouchableOpacity>)}</View>}
-        </View>;
-      })}
-      <View style={styles.incomingHeading}><Text style={styles.approvalTitle}>Incoming branch transfers</Text><Text style={styles.approvalHelper}>Only this branch can review these pending transfers.</Text></View>
-      {data.incomingTransfers.length === 0 ? <Text style={styles.emptyText}>No incoming transfer requests.</Text> : data.incomingTransfers.map((order) => { const isUpdating = updatingId === order.id; return <View key={order.id} style={styles.incomingTransfer}><Text style={styles.approvalRequester}>Incoming transfer from {order.transferFromBranchName || 'another branch'}</Text><Text style={styles.approvalRequestId}>{order.requestId || order.id} · {order.requesterName || 'Requester'}</Text><Text style={styles.approvalProducts}>{orderProducts(order)}</Text><Text style={styles.approvalDetail}>{orderDistance(order)} · Requested note: {order.transferReason || 'No note'}</Text><View style={styles.dispatchActions}><TouchableOpacity disabled={isUpdating} onPress={() => act(order.id, 'accept-transfer')} style={[styles.approveDeliveryButton, isUpdating && styles.actionDisabled]}><Text style={styles.approveDeliveryText}>{isUpdating ? 'Saving…' : 'Accept transfer'}</Text></TouchableOpacity><TouchableOpacity disabled={isUpdating} onPress={() => setDecliningOrderId(decliningOrderId === order.id ? '' : order.id)} style={styles.declineDeliveryButton}><Text style={styles.declineDeliveryText}>Decline</Text></TouchableOpacity></View>{decliningOrderId === order.id && <View style={styles.declinePanel}><TextInput value={declineReason} onChangeText={setDeclineReason} placeholder="Optional decline note" placeholderTextColor={placeholderColor} multiline style={styles.transferNoteInput} /><TouchableOpacity disabled={isUpdating} onPress={() => act(order.id, 'decline-transfer', { transferDeclineReason: declineReason })} style={styles.declineConfirmButton}><Text style={styles.declineConfirmText}>Confirm decline</Text></TouchableOpacity></View>}</View>; })}
-      <View style={styles.incomingHeading}><Text style={styles.approvalTitle}>Transfer decisions</Text><Text style={styles.approvalHelper}>Decisions from other branches for transfers your branch initiated.</Text></View>
-      {data.sourceDecisionEvents.length === 0 ? <Text style={styles.emptyText}>No transfer decisions yet.</Text> : data.sourceDecisionEvents.map((event) => { const accepted = event.decision === 'accepted'; const targetName = event.targetBranchName || 'The target branch'; const requestId = event.requestId || 'your order'; return <View key={event.id} style={styles.incomingTransfer}><ManagerPill tone={accepted ? 'green' : 'cyan'}>{accepted ? 'Accepted' : 'Declined'}</ManagerPill><Text style={styles.approvalDetail}>{targetName} {accepted ? 'accepted' : 'declined'} the transfer of Order #{requestId}.</Text>{!accepted && !!event.declineReason && <Text style={styles.dispatchPickerEmpty}>Reason: {event.declineReason}</Text>}</View>; })}
-    </>}
-  </View>;
+
+  const incoming = data.incomingTransfers || [];
+  const decisions = data.sourceDecisionEvents || [];
+
+  return (
+    <View style={styles.card}>
+      <View style={styles.cardHeaderRow}>
+        <View>
+          <Text style={styles.eyebrow}>COORDINATION</Text>
+          <Text style={styles.cardTitle}>Branch Transfer Reviews & Outcomes</Text>
+          <Text style={styles.helperText}>
+            Review inbound order transfer requests and review decisions for outbound transfers.
+          </Text>
+        </View>
+      </View>
+
+      {!!error && (
+        <View accessibilityRole="alert" style={styles.errorBanner}>
+          <Text style={styles.errorBannerText}>{error}</Text>
+        </View>
+      )}
+
+      {/* Incoming Transfers */}
+      <Text style={[styles.subSectionTitle, { marginTop: 10 }]}>Incoming Transfer Requests ({incoming.length})</Text>
+      {incoming.length === 0 ? (
+        <Text style={styles.emptyInlineText}>No incoming transfer requests awaiting review.</Text>
+      ) : (
+        incoming.map((order) => {
+          const isUpdating = updatingId === order.id;
+          const isDeclining = decliningOrderId === order.id;
+
+          return (
+            <View key={order.id} style={styles.transferItem}>
+              <Text style={styles.requesterName}>
+                Transfer from {order.transferFromBranchName || 'another branch'}
+              </Text>
+              <Text style={styles.orderIdText}>
+                #{order.requestId || order.id} \u00B7 {order.requesterName || 'Requester'}
+              </Text>
+              <Text style={styles.productsSummary}>{orderProducts(order)}</Text>
+              <Text style={styles.detailLine}>
+                {orderDistance(order)} \u00B7 Note: {order.transferReason || 'No note provided'}
+              </Text>
+
+              <View style={styles.actionRow}>
+                <TouchableOpacity
+                  disabled={isUpdating}
+                  onPress={() => act(order.id, 'accept-transfer')}
+                  style={[styles.approveButton, isUpdating && styles.actionDisabled]}
+                >
+                  <Text style={styles.approveButtonText}>{isUpdating ? 'Saving\u2026' : 'Accept Transfer'}</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  disabled={isUpdating}
+                  onPress={() => setDecliningOrderId(isDeclining ? '' : order.id)}
+                  style={styles.declineButton}
+                >
+                  <Text style={styles.declineButtonText}>Decline</Text>
+                </TouchableOpacity>
+              </View>
+
+              {isDeclining && (
+                <View style={styles.declineBox}>
+                  <TextInput
+                    value={declineReason}
+                    onChangeText={setDeclineReason}
+                    placeholder="Optional decline explanation"
+                    placeholderTextColor={colors.placeholder}
+                    multiline
+                    style={styles.inputField}
+                  />
+                  <TouchableOpacity
+                    disabled={isUpdating}
+                    onPress={() => act(order.id, 'decline-transfer', { transferDeclineReason: declineReason })}
+                    style={styles.confirmDeclineBtn}
+                  >
+                    <Text style={styles.confirmDeclineText}>Confirm Decline</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
+          );
+        })
+      )}
+
+      {/* Decision Events */}
+      <Text style={[styles.subSectionTitle, { marginTop: 18 }]}>Transfer decisions ({decisions.length})</Text>
+      {decisions.length === 0 ? (
+        <Text style={styles.emptyInlineText}>No transfer decision events recorded yet.</Text>
+      ) : (
+        decisions.map((event) => {
+          const accepted = event.decision === 'accepted';
+          return (
+            <View key={event.id} style={styles.decisionItem}>
+              <ManagerPill tone={accepted ? 'green' : 'red'}>{accepted ? 'Accepted' : 'Declined'}</ManagerPill>
+              <Text style={styles.decisionText}>
+                {event.targetBranchName || 'Target branch'} {accepted ? 'accepted' : 'declined'} the transfer of Order #
+                {event.requestId || 'order'}.
+              </Text>
+              {!accepted && !!event.declineReason && (
+                <Text style={styles.declineReasonText}>Reason: {event.declineReason}</Text>
+              )}
+            </View>
+          );
+        })
+      )}
+    </View>
+  );
+}
+
+function BranchOrdersOverview({ data, styles, onRefresh, colors }) {
+  const [selectedOrder, setSelectedOrder] = useState(null);
+  const [modalVisible, setModalVisible] = useState(false);
+  const [filter, setFilter] = useState('');
+
+  const orders = useMemo(() => {
+    const all = data.orders || [];
+    if (!filter.trim()) return all;
+    const term = filter.trim().toLowerCase();
+    return all.filter(
+      (o) =>
+        (o.requesterName && o.requesterName.toLowerCase().includes(term)) ||
+        (o.requestId && o.requestId.toLowerCase().includes(term)) ||
+        (o.address && o.address.toLowerCase().includes(term))
+    );
+  }, [data.orders, filter]);
+
+  const openOrder = (order) => {
+    setSelectedOrder(order);
+    setModalVisible(true);
+  };
+
+  return (
+    <View style={styles.card}>
+      <View style={styles.cardHeaderRow}>
+        <View>
+          <Text style={styles.eyebrow}>BRANCH MANAGEMENT</Text>
+          <Text style={styles.cardTitle}>Branch Orders & Situational Edits</Text>
+          <Text style={styles.helperText}>
+            View full order details and make pre-delivery adjustments to items, quantities, and instructions.
+          </Text>
+        </View>
+        <TouchableOpacity onPress={onRefresh} style={styles.refreshButton}>
+          <Text style={styles.refreshText}>Refresh</Text>
+        </TouchableOpacity>
+      </View>
+
+      <View style={styles.searchBarWrap}>
+        <TextInput
+          value={filter}
+          onChangeText={setFilter}
+          placeholder="Filter orders by requester, ID, address..."
+          placeholderTextColor={colors.placeholder}
+          style={styles.searchInput}
+        />
+      </View>
+
+      {orders.length === 0 ? (
+        <View style={styles.emptyContainer}>
+          <Text style={styles.emptyText}>No branch orders found.</Text>
+        </View>
+      ) : (
+        orders.map((order) => {
+          const isEditable = EDITABLE_STATUSES.has(order.status);
+          return (
+            <View key={order.id} style={styles.orderItem}>
+              <View style={styles.orderHeaderRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.requesterName}>{order.requesterName || 'Requester'}</Text>
+                  <Text style={styles.orderIdText}>#{order.requestId || order.id}</Text>
+                </View>
+                <ManagerPill tone={isEditable ? 'blue' : 'green'}>{order.status?.replace(/_/g, ' ')}</ManagerPill>
+              </View>
+
+              <Text style={styles.productsSummary}>{orderProducts(order)}</Text>
+              <Text style={styles.detailLine}>Delivery: {order.address || 'Address provided'}</Text>
+              <Text style={styles.amountText}>{formatAmount(order.totalAtOrder)}</Text>
+
+              <View style={styles.actionRow}>
+                <TouchableOpacity onPress={() => openOrder(order)} style={styles.editOrderBtn}>
+                  <Text style={styles.editOrderBtnText}>
+                    {isEditable ? 'Edit Order Details' : 'View Order Details'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          );
+        })
+      )}
+
+      <EditOrderModal
+        visible={modalVisible}
+        order={selectedOrder}
+        onClose={() => setModalVisible(false)}
+        onSaveSuccess={onRefresh}
+        colors={colors}
+        styles={styles}
+      />
+    </View>
+  );
 }
 
 export default function ManagerRequestPage() {
-  const { colors } = useAdminTheme(); const styles = createStyles(colors);
-  const branchId = getModuleSession('manager')?.branchId || '';
-  const [pendingDistributors, setPendingDistributors] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState('');
-  const [search, setSearch] = useState('');
+  const { colors } = useAdminTheme();
+  const styles = createStyles(colors);
+
+  const [dispatchData, setDispatchData] = useState({
+    orders: [],
+    incomingTransfers: [],
+    sourceDecisionEvents: [],
+  });
+
+  const loadDispatch = async () => {
+    try {
+      const res = await getManagerDispatch();
+      setDispatchData(res);
+    } catch (e) {
+      console.log('Dispatch error:', e.message);
+    }
+  };
 
   useEffect(() => {
-    let firestorePending = [];
-
-    const refreshPendingDistributors = (nextFirestorePending = firestorePending) => {
-      firestorePending = nextFirestorePending;
-      setPendingDistributors([
-        ...firestorePending,
-        ...getPendingLocalDistributors(firestorePending, branchId),
-      ]);
-      setLoading(false);
-    };
-
-    refreshPendingDistributors();
-    const unsubscribeLocalUsers = subscribeLocalUsers(() => refreshPendingDistributors());
-
-    const pendingQuery = query(
-      collection(db, 'users'),
-      where('role', '==', 'distributor'),
-      where('branchId', '==', branchId)
-    );
-
-    const unsubscribe = onSnapshot(
-      pendingQuery,
-      (snapshot) => {
-        const firestoreDistributors = snapshot.docs
-          .map((item) => ({
-            id: item.id,
-            uid: item.id,
-            ...item.data(),
-          }))
-          .filter((item) => getDistributorApplicationStatus(item) === 'pending');
-
-        refreshPendingDistributors(firestoreDistributors);
-        setLoadError('');
-      },
-      (error) => {
-        console.log('Pending distributors error:', error.message);
-        setLoadError(error.message);
-        refreshPendingDistributors();
-      }
-    );
-
-    return () => {
-      unsubscribe();
-      unsubscribeLocalUsers();
-    };
-  }, [branchId]);
-
-  const filteredDistributors = useMemo(() => {
-    const normalizedSearch = search.trim().toLowerCase();
-
-    if (!normalizedSearch) return pendingDistributors;
-
-    return pendingDistributors.filter((distributor) =>
-      [
-        getFullName(distributor),
-        getProfileUniqueId(distributor),
-        distributor.phone,
-        distributor.email,
-        getBarangay(distributor),
-      ]
-        .join(' ')
-        .toLowerCase()
-        .includes(normalizedSearch)
-    );
-  }, [pendingDistributors, search]);
+    loadDispatch();
+  }, []);
 
   return (
     <ManagerShell
       active="requests"
-      title="Requests"
-      subtitle="Branch delivery exceptions and dispatch coordination"
-      searchValue={search}
-      onSearchChange={setSearch}
+      title="Requests & Exceptions"
+      subtitle="Delivery approvals, branch transfers, and order adjustments"
     >
-      <OutsideRadiusApprovalQueue styles={styles} />
-      <DispatchQueue styles={styles} placeholderColor={colors.placeholder} />
-      <View style={styles.card}>
-        <View style={styles.cardHeader}>
-          <Text style={styles.cardTitle}>
-            Pending Distributor applications ({pendingDistributors.length})
-          </Text>
-        </View>
+      {/* 1. Outside Radius Approvals */}
+      <OutsideRadiusApprovalQueue styles={styles} colors={colors} onOrderApproved={loadDispatch} />
 
-        <ScrollView horizontal showsHorizontalScrollIndicator contentContainerStyle={styles.tableScroll}>
-        <View style={styles.table}>
-        <View style={[styles.tableRow, styles.tableHeadRow]}>
-          <Text style={[styles.th, styles.nameCol]}>NAME</Text>
-          <Text style={[styles.th, styles.idCol]}>UNIQUE ID</Text>
-          <Text style={[styles.th, styles.contactCol]}>CONTACT</Text>
-          <Text style={[styles.th, styles.emailCol]}>EMAIL</Text>
-          <Text style={[styles.th, styles.barangayCol]}>BARANGAY</Text>
-          <Text style={[styles.th, styles.roleCol]}>ROLE</Text>
-          <Text style={[styles.th, styles.actionsCol]}>ACTIONS</Text>
-        </View>
+      {/* 2. Branch Transfers Queue */}
+      <BranchTransfersQueue data={dispatchData} styles={styles} onRefresh={loadDispatch} colors={colors} />
 
-        {loading ? (
-          <View style={styles.emptyState}>
-            <ActivityIndicator color={colors.primary} size="small" />
-          </View>
-        ) : filteredDistributors.length === 0 ? (
-          <View style={styles.emptyState}>
-            <Text style={styles.emptyText}>No pending distributors.</Text>
-            {!!loadError && <Text style={styles.errorText}>Firestore: {loadError}</Text>}
-          </View>
-        ) : (
-          filteredDistributors.map((distributor) => {
-            const distributorId = distributor.uid || distributor.id;
-
-            return (
-              <View key={distributorId || distributor.email} style={styles.tableRow}>
-                <Text style={[styles.tdName, styles.nameCol]} numberOfLines={1}>
-                  {getFullName(distributor)}
-                </Text>
-                <Text style={[styles.td, styles.idCol]} numberOfLines={1}>
-                  {getProfileUniqueId(distributor) || 'Pending'}
-                </Text>
-                <Text style={[styles.td, styles.contactCol]} numberOfLines={1}>
-                  {distributor.phone || 'Not set'}
-                </Text>
-                <Text style={[styles.tdLink, styles.emailCol]} numberOfLines={1}>
-                  {distributor.email || 'Not set'}
-                </Text>
-                <Text style={[styles.td, styles.barangayCol]} numberOfLines={1}>
-                  {getBarangay(distributor)}
-                </Text>
-                <View style={[styles.roleCell, styles.roleCol]}>
-                  <ManagerPill tone="cyan">Distributor</ManagerPill>
-                </View>
-                <View style={[styles.actionButtons, styles.actionsCol]}><Text style={styles.noActionText}>Managed by Admin</Text></View>
-              </View>
-            );
-          })
-        )}
-        </View>
-        </ScrollView>
-      </View>
-
+      {/* 3. Branch Orders Overview & Situational Order Edit */}
+      <BranchOrdersOverview data={dispatchData} styles={styles} onRefresh={loadDispatch} colors={colors} />
     </ManagerShell>
   );
 }
 
-const createStyles = (colors) => StyleSheet.create({
-  dispatchCard: {
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 18,
-  },
-  dispatchOrder: {
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-    paddingTop: 15,
-    marginTop: 14,
-  },
-  dispatchActions: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginTop: 13,
-  },
-  transferButton: {
-    minHeight: 39,
-    paddingHorizontal: 12,
-    borderRadius: 9,
-    borderWidth: 1,
-    borderColor: colors.primary,
-    backgroundColor: colors.surface,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  transferButtonText: { color: colors.primary, fontSize: 12, fontWeight: '900' },
-  dispatchPicker: {
-    marginTop: 12,
-    padding: 12,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surfaceAlt,
-    gap: 8,
-  },
-  dispatchPickerLabel: { color: colors.textPrimary, fontSize: 12, fontWeight: '900' },
-  dispatchPickerEmpty: { color: colors.textSecondary, fontSize: 12, lineHeight: 17 },
-  dispatchOption: {
-    minHeight: 44,
-    paddingHorizontal: 11,
-    paddingVertical: 8,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: colors.inputBorder,
-    backgroundColor: colors.surface,
-    justifyContent: 'center',
-  },
-  dispatchOptionText: { color: colors.textPrimary, fontSize: 12, fontWeight: '900' },
-  dispatchOptionHint: { color: colors.textSecondary, fontSize: 11, marginTop: 2 },
-  transferNoteInput: {
-    minHeight: 58,
-    borderWidth: 1,
-    borderColor: colors.inputBorder,
-    borderRadius: 8,
-    backgroundColor: colors.input,
-    color: colors.textPrimary,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    fontSize: 12,
-    outlineStyle: 'none',
-  },
-  transferTarget: {
-    minHeight: 54,
-    paddingHorizontal: 11,
-    paddingVertical: 8,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: colors.inputBorder,
-    backgroundColor: colors.surface,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  transferTargetMain: { flex: 1, minWidth: 0 },
-  coverageText: { fontSize: 10, fontWeight: '900', textAlign: 'right' },
-  coverageInside: { color: colors.success },
-  coverageOutside: { color: colors.warning },
-  assignedDistributor: { color: colors.primary, fontSize: 12, fontWeight: '900' },
-  incomingHeading: {
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-    marginTop: 18,
-    paddingTop: 17,
-  },
-  incomingTransfer: {
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-    marginTop: 13,
-    paddingTop: 13,
-  },
-  declinePanel: {
-    marginTop: 10,
-    gap: 8,
-  },
-  declineConfirmButton: {
-    alignSelf: 'flex-start',
-    minHeight: 38,
-    paddingHorizontal: 12,
-    borderRadius: 9,
-    backgroundColor: colors.danger,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  declineConfirmText: { color: '#FFF', fontSize: 12, fontWeight: '900' },
-  approvalCard: {
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 18,
-  },
-  approvalHeader: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    gap: 12,
-    marginBottom: 14,
-  },
-  approvalEyebrow: {
-    color: colors.primary,
-    fontSize: 10,
-    fontWeight: '900',
-    letterSpacing: .8,
-  },
-  approvalTitle: {
-    color: colors.textPrimary,
-    fontSize: 17,
-    fontWeight: '900',
-    marginTop: 3,
-  },
-  approvalHelper: {
-    color: colors.textSecondary,
-    fontSize: 12,
-    lineHeight: 17,
-    marginTop: 4,
-  },
-  refreshButton: {
-    minHeight: 36,
-    paddingHorizontal: 11,
-    borderRadius: 9,
-    backgroundColor: colors.primarySoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  refreshText: {
-    color: colors.primary,
-    fontSize: 12,
-    fontWeight: '900',
-  },
-  approvalError: {
-    backgroundColor: colors.dangerSoft,
-    borderWidth: 1,
-    borderColor: colors.danger,
-    borderRadius: 10,
-    padding: 11,
-    marginBottom: 12,
-  },
-  approvalErrorText: {
-    color: colors.danger,
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  approvalEmpty: {
-    minHeight: 68,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  approvalOrder: {
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-    paddingTop: 15,
-    marginTop: 14,
-  },
-  approvalOrderHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    gap: 12,
-  },
-  approvalOrderMain: { flex: 1, minWidth: 0 },
-  approvalRequester: {
-    color: colors.textPrimary,
-    fontSize: 14,
-    fontWeight: '900',
-  },
-  approvalRequestId: {
-    color: colors.textSecondary,
-    fontSize: 11,
-    marginTop: 3,
-  },
-  approvalProducts: {
-    color: colors.textPrimary,
-    fontSize: 12,
-    fontWeight: '700',
-    marginTop: 10,
-  },
-  approvalDetails: {
-    gap: 4,
-    marginTop: 8,
-  },
-  approvalDetail: {
-    color: colors.textSecondary,
-    fontSize: 12,
-    lineHeight: 17,
-  },
-  approvalAmount: {
-    color: colors.primary,
-    fontSize: 14,
-    fontWeight: '900',
-    marginTop: 2,
-  },
-  approvalActions: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginTop: 13,
-  },
-  approveDeliveryButton: {
-    minHeight: 39,
-    paddingHorizontal: 12,
-    borderRadius: 9,
-    backgroundColor: colors.success,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  approveDeliveryText: { color: '#FFF', fontSize: 12, fontWeight: '900' },
-  declineDeliveryButton: {
-    minHeight: 39,
-    paddingHorizontal: 12,
-    borderRadius: 9,
-    backgroundColor: colors.dangerSoft,
-    borderWidth: 1,
-    borderColor: colors.danger,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  declineDeliveryText: { color: colors.danger, fontSize: 12, fontWeight: '900' },
-  messagePlaceholder: {
-    minHeight: 39,
-    paddingHorizontal: 12,
-    borderRadius: 9,
-    backgroundColor: colors.neutral,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  messagePlaceholderText: { color: colors.muted, fontSize: 12, fontWeight: '800' },
-  card: {
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 16,
-    paddingHorizontal: 20,
-    paddingTop: 20,
-    paddingBottom: 20,
-  },
-  tableScroll: { flexGrow: 1 },
-  table: { minWidth: 980, flexGrow: 1 },
-  cardHeader: {
-    marginBottom: 18,
-  },
-  cardTitle: {
-    color: colors.textPrimary,
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
-  tableRow: {
-    minHeight: 44,
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  tableHeadRow: {
-    minHeight: 38,
-  },
-  th: {
-    color: colors.textSecondary,
-    fontSize: 11,
-    fontWeight: 'bold',
-  },
-  td: {
-    color: colors.textSecondary,
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  tdName: {
-    color: colors.textPrimary,
-    fontSize: 13,
-    fontWeight: 'bold',
-  },
-  tdLink: {
-    color: colors.primary,
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  nameCol: {
-    flex: 1.35,
-  },
-  idCol: {
-    flex: 1,
-  },
-  contactCol: {
-    flex: 1,
-  },
-  emailCol: {
-    flex: 1.65,
-  },
-  barangayCol: {
-    flex: 1,
-  },
-  roleCol: {
-    flex: 0.9,
-  },
-  actionsCol: {
-    flex: 1.15,
-    textAlign: 'right',
-  },
-  roleCell: {
-    alignItems: 'flex-start',
-  },
-  actionButtons: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    gap: 8,
-  },
-  acceptButton: {
-    borderRadius: 999,
-    backgroundColor: '#E3F8EF',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-  },
-  acceptButtonText: {
-    color: colors.success,
-    fontSize: 12,
-    fontWeight: 'bold',
-  },
-  rejectButton: {
-    borderRadius: 999,
-    backgroundColor: '#FFE9E9',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-  },
-  rejectButtonText: {
-    color: colors.danger,
-    fontSize: 12,
-    fontWeight: 'bold',
-  },
-  actionDisabled: {
-    opacity: 0.6,
-  },
-  emptyState: {
-    minHeight: 96,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  emptyText: {
-    color: colors.textSecondary,
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  errorText: {
-    color: colors.danger,
-    fontSize: 12,
-    marginTop: 8,
-  },
-  modalBackground: {
-    flex: 1,
-    backgroundColor: 'rgba(6, 36, 71, 0.46)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-  },
-  modalCard: {
-    width: '90%',
-    maxWidth: 430,
-    borderRadius: 8,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: 22,
-  },
-  modalTitle: {
-    color: colors.textPrimary,
-    fontSize: 18,
-    fontWeight: 'bold',
-  },
-  modalMessage: {
-    color: colors.textSecondary,
-    fontSize: 13,
-    lineHeight: 19,
-    marginTop: 8,
-    marginBottom: 14,
-  },
-  reasonInput: {
-    minHeight: 104,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 8,
-    color: colors.textPrimary,
-    fontSize: 14,
-    lineHeight: 19,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    outlineStyle: 'none',
-  },
-  reasonInputError: {
-    borderColor: colors.danger,
-    backgroundColor: '#FFF7F7',
-  },
-  reasonErrorText: {
-    color: colors.danger,
-    fontSize: 12,
-    marginTop: 7,
-  },
-  modalActions: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    gap: 10,
-    marginTop: 16,
-  },
-  modalCancelButton: {
-    minWidth: 92,
-    height: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: colors.primary,
-    backgroundColor: colors.surface,
-  },
-  modalCancelText: {
-    color: colors.primary,
-    fontSize: 13,
-    fontWeight: 'bold',
-  },
-  modalRejectButton: {
-    minWidth: 122,
-    height: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 20,
-    backgroundColor: '#FFE9E9',
-  },
-  modalRejectText: {
-    color: colors.danger,
-    fontSize: 13,
-    fontWeight: 'bold',
-  },
-  noActionText: {
-    color: colors.textSecondary,
-    fontSize: 12,
-    fontWeight: '700',
-  },
-});
+const createStyles = (colors) =>
+  StyleSheet.create({
+    card: {
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 16,
+      padding: 20,
+      marginBottom: 20,
+    },
+    cardHeaderRow: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      justifyContent: 'space-between',
+      gap: 12,
+      marginBottom: 14,
+    },
+    eyebrow: {
+      color: colors.primary,
+      fontSize: 10,
+      fontWeight: '900',
+      letterSpacing: 0.8,
+    },
+    cardTitle: {
+      color: colors.textPrimary,
+      fontSize: 16,
+      fontWeight: 'bold',
+      marginTop: 2,
+    },
+    helperText: {
+      color: colors.textSecondary,
+      fontSize: 12,
+      lineHeight: 17,
+      marginTop: 4,
+    },
+    subSectionTitle: {
+      color: colors.textPrimary,
+      fontSize: 13,
+      fontWeight: '800',
+      marginBottom: 8,
+    },
+    refreshButton: {
+      minHeight: 36,
+      paddingHorizontal: 12,
+      borderRadius: 8,
+      backgroundColor: colors.primarySoft,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    refreshText: {
+      color: colors.primary,
+      fontSize: 12,
+      fontWeight: '800',
+    },
+    errorBanner: {
+      backgroundColor: colors.dangerSoft,
+      borderWidth: 1,
+      borderColor: colors.danger,
+      borderRadius: 8,
+      padding: 10,
+      marginBottom: 12,
+    },
+    errorBannerText: {
+      color: colors.danger,
+      fontSize: 12,
+      fontWeight: '700',
+    },
+    emptyContainer: {
+      minHeight: 80,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    emptyText: {
+      color: colors.textSecondary,
+      fontSize: 13,
+      fontWeight: '600',
+    },
+    emptyInlineText: {
+      color: colors.textSecondary,
+      fontSize: 12,
+      fontStyle: 'italic',
+      marginBottom: 10,
+    },
+    orderItem: {
+      borderTopWidth: 1,
+      borderTopColor: colors.border,
+      paddingTop: 14,
+      marginTop: 12,
+    },
+    orderHeaderRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'flex-start',
+      gap: 12,
+    },
+    requesterName: {
+      color: colors.textPrimary,
+      fontSize: 14,
+      fontWeight: '800',
+    },
+    orderIdText: {
+      color: colors.textSecondary,
+      fontSize: 11,
+      marginTop: 2,
+    },
+    productsSummary: {
+      color: colors.textPrimary,
+      fontSize: 13,
+      fontWeight: '700',
+      marginTop: 6,
+    },
+    detailsBlock: {
+      gap: 3,
+      marginTop: 6,
+    },
+    detailLine: {
+      color: colors.textSecondary,
+      fontSize: 12,
+      lineHeight: 17,
+    },
+    amountText: {
+      color: colors.primary,
+      fontSize: 14,
+      fontWeight: '900',
+      marginTop: 2,
+    },
+    actionRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 8,
+      marginTop: 10,
+    },
+    approveButton: {
+      minHeight: 36,
+      paddingHorizontal: 14,
+      borderRadius: 8,
+      backgroundColor: colors.success,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    approveButtonText: {
+      color: '#FFFFFF',
+      fontSize: 12,
+      fontWeight: '800',
+    },
+    declineButton: {
+      minHeight: 36,
+      paddingHorizontal: 14,
+      borderRadius: 8,
+      backgroundColor: colors.dangerSoft,
+      borderWidth: 1,
+      borderColor: colors.danger,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    declineButtonText: {
+      color: colors.danger,
+      fontSize: 12,
+      fontWeight: '800',
+    },
+    editOrderBtn: {
+      minHeight: 36,
+      paddingHorizontal: 14,
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: colors.primary,
+      backgroundColor: colors.primarySoft,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    editOrderBtnText: {
+      color: colors.primary,
+      fontSize: 12,
+      fontWeight: '800',
+    },
+    actionDisabled: {
+      opacity: 0.6,
+    },
+    transferItem: {
+      borderTopWidth: 1,
+      borderTopColor: colors.border,
+      paddingTop: 12,
+      marginTop: 10,
+    },
+    declineBox: {
+      marginTop: 8,
+      gap: 6,
+    },
+    confirmDeclineBtn: {
+      alignSelf: 'flex-start',
+      minHeight: 36,
+      paddingHorizontal: 12,
+      borderRadius: 8,
+      backgroundColor: colors.danger,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    confirmDeclineText: {
+      color: '#FFFFFF',
+      fontSize: 12,
+      fontWeight: '800',
+    },
+    decisionItem: {
+      borderTopWidth: 1,
+      borderTopColor: colors.border,
+      paddingTop: 10,
+      marginTop: 8,
+    },
+    decisionText: {
+      color: colors.textPrimary,
+      fontSize: 12,
+      lineHeight: 17,
+      marginTop: 4,
+    },
+    declineReasonText: {
+      color: colors.danger,
+      fontSize: 11,
+      marginTop: 2,
+    },
+    searchBarWrap: {
+      marginBottom: 12,
+    },
+    searchBarWrapCompact: {
+      width: 200,
+    },
+    searchInput: {
+      height: 38,
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 8,
+      backgroundColor: colors.surfaceAlt,
+      paddingHorizontal: 10,
+      color: colors.textPrimary,
+      fontSize: 12,
+      outlineStyle: 'none',
+    },
+    tableScroll: { flexGrow: 1 },
+    table: { minWidth: 980, flexGrow: 1 },
+    tableRow: {
+      minHeight: 44,
+      flexDirection: 'row',
+      alignItems: 'center',
+      borderBottomWidth: 1,
+      borderBottomColor: colors.border,
+    },
+    tableHeadRow: { minHeight: 38 },
+    th: {
+      color: colors.textSecondary,
+      fontSize: 11,
+      fontWeight: 'bold',
+    },
+    td: {
+      color: colors.textSecondary,
+      fontSize: 13,
+      fontWeight: '600',
+    },
+    tdName: {
+      color: colors.textPrimary,
+      fontSize: 13,
+      fontWeight: 'bold',
+    },
+    tdLink: {
+      color: colors.primary,
+      fontSize: 13,
+      fontWeight: '600',
+    },
+    nameCol: { flex: 1.35 },
+    idCol: { flex: 1 },
+    contactCol: { flex: 1 },
+    emailCol: { flex: 1.65 },
+    barangayCol: { flex: 1 },
+    roleCol: { flex: 0.9 },
+    actionsCol: { flex: 1.15, textAlign: 'right' },
+    roleCell: { alignItems: 'flex-start' },
+    actionButtons: { flexDirection: 'row', justifyContent: 'flex-end' },
+    noActionText: {
+      color: colors.textSecondary,
+      fontSize: 12,
+      fontWeight: '700',
+    },
+    errorText: {
+      color: colors.danger,
+      fontSize: 12,
+      marginTop: 8,
+    },
+    modalBackdrop: {
+      flex: 1,
+      backgroundColor: colors.overlay || 'rgba(0,0,0,0.5)',
+      justifyContent: 'center',
+      alignItems: 'center',
+      padding: 16,
+    },
+    editModalCard: {
+      width: '100%',
+      maxWidth: 520,
+      backgroundColor: colors.surface,
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: colors.border,
+      padding: 20,
+    },
+    modalHeaderRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'flex-start',
+      marginBottom: 14,
+    },
+    modalTitle: {
+      color: colors.textPrimary,
+      fontSize: 16,
+      fontWeight: '800',
+    },
+    modalSub: {
+      color: colors.textSecondary,
+      fontSize: 12,
+      marginTop: 2,
+    },
+    modalCloseBtn: {
+      padding: 4,
+    },
+    modalCloseText: {
+      color: colors.textSecondary,
+      fontSize: 22,
+      fontWeight: 'bold',
+    },
+    lockedNotice: {
+      backgroundColor: colors.neutral,
+      padding: 10,
+      borderRadius: 8,
+      marginBottom: 12,
+    },
+    lockedNoticeText: {
+      color: colors.textSecondary,
+      fontSize: 12,
+      fontWeight: '600',
+    },
+    modalSection: {
+      marginBottom: 14,
+    },
+    modalSectionTitle: {
+      color: colors.textPrimary,
+      fontSize: 12,
+      fontWeight: '800',
+      marginBottom: 6,
+    },
+    itemEditRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingVertical: 8,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.border,
+    },
+    itemEditName: {
+      color: colors.textPrimary,
+      fontSize: 13,
+      fontWeight: '700',
+    },
+    itemEditPrice: {
+      color: colors.textSecondary,
+      fontSize: 11,
+      marginTop: 2,
+    },
+    qtyControlRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+    },
+    qtyBtn: {
+      width: 28,
+      height: 28,
+      borderRadius: 6,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surfaceAlt,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    qtyBtnText: {
+      color: colors.textPrimary,
+      fontSize: 14,
+      fontWeight: '800',
+    },
+    qtyText: {
+      color: colors.textPrimary,
+      fontSize: 13,
+      fontWeight: '800',
+      minWidth: 20,
+      textAlign: 'center',
+    },
+    removeBtn: {
+      width: 26,
+      height: 26,
+      borderRadius: 6,
+      backgroundColor: colors.dangerSoft,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginLeft: 4,
+    },
+    removeBtnText: {
+      color: colors.danger,
+      fontSize: 14,
+      fontWeight: 'bold',
+    },
+    subLabel: {
+      color: colors.textSecondary,
+      fontSize: 11,
+      fontWeight: '600',
+    },
+    addCatalogPill: {
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: colors.primary,
+      backgroundColor: colors.primarySoft,
+      marginRight: 6,
+    },
+    addCatalogPillText: {
+      color: colors.primary,
+      fontSize: 11,
+      fontWeight: '700',
+    },
+    inputField: {
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 8,
+      backgroundColor: colors.surfaceAlt,
+      color: colors.textPrimary,
+      paddingHorizontal: 10,
+      paddingVertical: 8,
+      fontSize: 12,
+      outlineStyle: 'none',
+    },
+    readOnlyField: {
+      color: colors.textSecondary,
+      fontSize: 13,
+      fontStyle: 'italic',
+    },
+    modalFooterRow: {
+      flexDirection: 'row',
+      justifyContent: 'flex-end',
+      gap: 10,
+      marginTop: 14,
+      borderTopWidth: 1,
+      borderTopColor: colors.border,
+      paddingTop: 12,
+    },
+    cancelBtn: {
+      minHeight: 38,
+      paddingHorizontal: 16,
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surfaceAlt,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    cancelBtnText: {
+      color: colors.textPrimary,
+      fontSize: 12,
+      fontWeight: '700',
+    },
+    saveBtn: {
+      minHeight: 38,
+      paddingHorizontal: 16,
+      borderRadius: 8,
+      backgroundColor: colors.primary,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    saveBtnText: {
+      color: '#FFFFFF',
+      fontSize: 12,
+      fontWeight: '800',
+    },
+  });

@@ -23,7 +23,7 @@ function fixture(overrides = {}) {
   const collection = (name) => ({
     doc(id = `auto-${++autoId}`) {
       const path = `${name}/${id}`;
-      return { id, path, get: async () => snapshot(path), set: async (data) => records.set(path, data), update: async (data) => records.set(path, { ...records.get(path), ...data }) };
+      return { id, path, get: async () => snapshot(path), set: async (data) => records.set(path, data), update: async (data) => records.set(path, { ...records.get(path), ...data }), delete: async () => records.delete(path) };
     },
     async get() { return { docs: [...records.keys()].filter((path) => path.startsWith(`${name}/`)).map(snapshot) }; },
     where(field, operator, value) {
@@ -34,9 +34,11 @@ function fixture(overrides = {}) {
     collection,
     async runTransaction(run) {
       return run({
+        async get(ref) { return snapshot(ref.path); },
         create(ref, data) { assert.equal(records.has(ref.path), false); records.set(ref.path, data); },
         update(ref, data) { records.set(ref.path, { ...records.get(ref.path), ...data }); },
         set(ref, data) { records.set(ref.path, data); },
+        delete(ref) { records.delete(ref.path); },
       });
     },
   };
@@ -173,4 +175,92 @@ test('Admin deactivates products instead of deleting them', async () => {
 test('Admin cannot assign a product to a missing branch', async () => {
   const result = await call(createAdminProductsHandler(fixture().getAdmin), 'POST', 'admin-token', { product_name: 'Premium', price: 40, branchIds: ['missing'] });
   assert.equal(result.statusCode, 400); assert.equal(result.body.error.reason, 'INVALID_PRODUCT_BRANCH');
+});
+
+test('cannot create a second active order while one is non-terminal', async () => {
+  const f = fixture();
+  const handler = createRequesterOrdersHandler(f.getAdmin);
+  const first = await call(handler, 'POST', 'requester-token', validOrder());
+  assert.equal(first.statusCode, 201);
+
+  const second = await call(handler, 'POST', 'requester-token', validOrder());
+  assert.equal(second.statusCode, 409);
+  assert.equal(second.body.error.reason, 'ACTIVE_ORDER_EXISTS');
+});
+
+test('cancellable active order unlocks ordering after cancellation', async () => {
+  const f = fixture();
+  const handler = createRequesterOrdersHandler(f.getAdmin);
+  const first = await call(handler, 'POST', 'requester-token', validOrder());
+  assert.equal(first.statusCode, 201);
+
+  const cancel = await call(handler, 'PATCH', 'requester-token', { orderId: first.body.order.id });
+  assert.equal(cancel.statusCode, 200);
+
+  const second = await call(handler, 'POST', 'requester-token', validOrder());
+  assert.equal(second.statusCode, 201);
+});
+
+test('terminal delivered order unlocks new order creation', async () => {
+  const f = fixture({
+    'requests/order-delivered': {
+      requesterUid: 'requester-1',
+      status: 'delivered',
+    },
+  });
+  const handler = createRequesterOrdersHandler(f.getAdmin);
+  const result = await call(handler, 'POST', 'requester-token', validOrder());
+  assert.equal(result.statusCode, 201);
+});
+
+test('failed delivery order remains active and blocks new order', async () => {
+  const f = fixture({
+    'requests/order-failed': {
+      requesterUid: 'requester-1',
+      status: 'delivery_failed',
+    },
+  });
+  const handler = createRequesterOrdersHandler(f.getAdmin);
+  const result = await call(handler, 'POST', 'requester-token', validOrder());
+  assert.equal(result.statusCode, 409);
+  assert.equal(result.body.error.reason, 'ACTIVE_ORDER_EXISTS');
+});
+
+test('concurrency test: simultaneous order creations allow at most one order', async () => {
+  const f = fixture();
+  const handler = createRequesterOrdersHandler(f.getAdmin);
+  const [res1, res2] = await Promise.all([
+    call(handler, 'POST', 'requester-token', validOrder()),
+    call(handler, 'POST', 'requester-token', validOrder()),
+  ]);
+  const statuses = [res1.statusCode, res2.statusCode].sort();
+  assert.deepEqual(statuses, [201, 409]);
+  const activeRecords = [...f.records.entries()].filter(([path, data]) => path.startsWith('requests/') && data.requesterUid === 'requester-1');
+  assert.equal(activeRecords.length, 1);
+});
+
+test('default delivery location is saved on first order and returned in catalog profile', async () => {
+  const f = fixture();
+  const orderHandler = createRequesterOrdersHandler(f.getAdmin);
+  const catalogHandler = createRequesterCatalogHandler(f.getAdmin);
+
+  const beforeCatalog = await call(catalogHandler, 'GET', 'requester-token');
+  assert.equal(beforeCatalog.statusCode, 200);
+  assert.equal(beforeCatalog.body.profile.defaultDeliveryLocation, null);
+
+  const orderResult = await call(orderHandler, 'POST', 'requester-token', validOrder({
+    deliveryLocation: { latitude: 10.27, longitude: 123.58, accuracy: 12.5 },
+  }));
+  assert.equal(orderResult.statusCode, 201);
+  assert.equal(orderResult.body.order.deliveryLocation.accuracy, 12.5);
+
+  const user = f.records.get('users/requester-1');
+  assert.ok(user.defaultDeliveryLocation);
+  assert.equal(user.defaultDeliveryLocation.latitude, 10.27);
+  assert.equal(user.defaultDeliveryLocation.longitude, 123.58);
+  assert.equal(user.defaultDeliveryLocation.accuracy, 12.5);
+
+  const afterCatalog = await call(catalogHandler, 'GET', 'requester-token');
+  assert.equal(afterCatalog.statusCode, 200);
+  assert.equal(afterCatalog.body.profile.defaultDeliveryLocation.latitude, 10.27);
 });

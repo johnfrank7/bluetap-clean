@@ -16,6 +16,7 @@ import {
   Pressable,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -29,6 +30,8 @@ import { createPortalStyleSheet, useBlueTapTheme } from '../../components/BlueTa
 import { USER_PORTAL_BOTTOM_CONTENT_INSET, USER_PORTAL_LAYOUT } from '../../constants/userPortalLayout';
 import { BLUETAP_COLORS } from '../../constants/bluetapTheme';
 import {
+  acceptAssignedOrder,
+  declineAssignedOrder,
   normalizeDistributorOrderStatus,
   toDistributorScreenOrder,
   updateAssignedDistributorOrder,
@@ -190,6 +193,7 @@ const PendingRequestCard = memo(function PendingRequestCard({
   index,
   isProcessing,
   onAccept,
+  onDecline,
   onViewDetails,
   request,
 }) {
@@ -258,10 +262,10 @@ const PendingRequestCard = memo(function PendingRequestCard({
             </Text>
 
             <Text style={[styles.compactLabel, styles.compactLabelGap]}>
-              Requested Delivery
+              Scheduled Delivery
             </Text>
             <Text style={styles.compactValue} numberOfLines={1}>
-              {request.deliveryDate || request.delivery_date || 'Not set'}
+              {request.scheduledDateTime || request.deliveryDate || 'Not set'}
             </Text>
 
             <Text style={[styles.compactLabel, styles.compactLabelGap]}>
@@ -291,6 +295,15 @@ const PendingRequestCard = memo(function PendingRequestCard({
         </TouchableOpacity>
 
         <TouchableOpacity
+          activeOpacity={0.8}
+          style={styles.declineActionButton}
+          onPress={() => onDecline(request)}
+          disabled={isProcessing}
+        >
+          <Text style={styles.declineActionText}>Decline</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
           activeOpacity={0.82}
           style={[
             styles.primaryActionButton,
@@ -302,7 +315,7 @@ const PendingRequestCard = memo(function PendingRequestCard({
           {isProcessing ? (
             <ActivityIndicator color="#FFFFFF" size="small" />
           ) : (
-            <Text style={styles.primaryActionText}>Accept Request</Text>
+            <Text style={styles.primaryActionText}>Accept Assignment</Text>
           )}
         </TouchableOpacity>
       </View>
@@ -365,6 +378,46 @@ export default function DistributorRequests() {
   const [scheduleError, setScheduleError] = useState('');
   const [processingRequestId, setProcessingRequestId] = useState('');
   const [successVisible, setSuccessVisible] = useState(false);
+  const [declineTargetRequest, setDeclineTargetRequest] = useState(null);
+  const [declineReason, setDeclineReason] = useState('');
+  const [declining, setDeclining] = useState(false);
+  const [declineError, setDeclineError] = useState('');
+
+  const handleAcceptAssignment = useCallback(async (request) => {
+    if (processingRequestId) return;
+    setProcessingRequestId(request.sourceId);
+    try {
+      await acceptAssignedOrder(request.sourceId);
+      await refresh();
+      showSuccessFeedback();
+    } catch (acceptErr) {
+      console.log('Accept error:', acceptErr);
+    } finally {
+      setProcessingRequestId('');
+    }
+  }, [processingRequestId, refresh, showSuccessFeedback]);
+
+  const handleDeclineRequest = useCallback((request) => {
+    setDeclineTargetRequest(request);
+    setDeclineReason('');
+    setDeclineError('');
+  }, []);
+
+  const confirmDecline = useCallback(async () => {
+    if (!declineTargetRequest || declining) return;
+    setDeclining(true);
+    setDeclineError('');
+    try {
+      await declineAssignedOrder(declineTargetRequest.sourceId, declineReason);
+      await refresh();
+      setDeclineTargetRequest(null);
+      showSuccessFeedback();
+    } catch (err) {
+      setDeclineError(err.message || 'Failed to decline assignment.');
+    } finally {
+      setDeclining(false);
+    }
+  }, [declineTargetRequest, declining, declineReason, refresh, showSuccessFeedback]);
   const { orders, loading, error, refresh } = useAssignedDistributorOrders();
   const selectedDetailsRequest = getDetailsRequestData(detailsRequest);
 
@@ -554,10 +607,11 @@ export default function DistributorRequests() {
         index={index}
         isProcessing={processingRequestId === item.sourceId}
         onViewDetails={setDetailsRequest}
-        onAccept={openScheduleSheet}
+        onAccept={handleAcceptAssignment}
+        onDecline={handleDeclineRequest}
       />
     ),
-    [openScheduleSheet, processingRequestId]
+    [handleAcceptAssignment, handleDeclineRequest, processingRequestId]
   );
 
   const renderDateOption = useCallback(
@@ -797,6 +851,51 @@ export default function DistributorRequests() {
           </Animated.View>
         </View>
       </Modal>
+
+      <Modal
+        visible={!!declineTargetRequest}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setDeclineTargetRequest(null)}
+      >
+        <View style={styles.declineModalBackdrop}>
+          <View style={styles.declineModalCard}>
+            <Text style={styles.declineModalTitle}>Decline Delivery Assignment</Text>
+            <Text style={styles.declineModalSub}>
+              Order #{declineTargetRequest?.id}. The order will return to the branch dispatch queue.
+            </Text>
+            <TextInput
+              value={declineReason}
+              onChangeText={setDeclineReason}
+              placeholder="Reason for declining (optional)..."
+              placeholderTextColor="#95A6B8"
+              multiline
+              style={styles.declineModalInput}
+            />
+            {!!declineError && <Text style={styles.scheduleError}>{declineError}</Text>}
+            <View style={styles.declineModalActions}>
+              <TouchableOpacity
+                disabled={declining}
+                onPress={() => setDeclineTargetRequest(null)}
+                style={styles.sheetCancelButton}
+              >
+                <Text style={styles.sheetCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                disabled={declining}
+                onPress={confirmDecline}
+                style={styles.confirmDeclineBtn}
+              >
+                {declining ? (
+                  <ActivityIndicator color="#FFFFFF" size="small" />
+                ) : (
+                  <Text style={styles.confirmDeclineText}>Confirm Decline</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -804,7 +903,7 @@ export default function DistributorRequests() {
 const styles = createPortalStyleSheet({
   container: {
     flex: 1,
-    backgroundColor: '#F4FAFF',
+    backgroundColor: BLUETAP_COLORS.background,
   },
   phoneWrapper: {
     width: '100%',
@@ -834,12 +933,12 @@ const styles = createPortalStyleSheet({
     marginTop: 4,
   },
   requestCard: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: BLUETAP_COLORS.surface,
     borderRadius: USER_PORTAL_LAYOUT.cardRadius,
     padding: 16,
     marginBottom: 14,
     borderWidth: 1,
-    borderColor: '#D7ECFF',
+    borderColor: BLUETAP_COLORS.border,
     ...createShadow({
       color: '#0D47A1',
       elevation: 6,
@@ -906,6 +1005,80 @@ const styles = createPortalStyleSheet({
     fontSize: 13,
     lineHeight: 18,
     fontWeight: '700',
+  },
+  declineActionButton: {
+    minHeight: 38,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: BLUETAP_COLORS.danger,
+    backgroundColor: BLUETAP_COLORS.dangerSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  declineActionText: {
+    color: BLUETAP_COLORS.danger,
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  declineModalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 16,
+  },
+  declineModalCard: {
+    width: '100%',
+    maxWidth: 420,
+    backgroundColor: BLUETAP_COLORS.surface,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: BLUETAP_COLORS.border,
+    padding: 20,
+  },
+  declineModalTitle: {
+    fontSize: 17,
+    fontWeight: 'bold',
+    color: BLUETAP_COLORS.textPrimary,
+  },
+  declineModalSub: {
+    fontSize: 13,
+    color: BLUETAP_COLORS.textSecondary,
+    lineHeight: 18,
+    marginTop: 4,
+    marginBottom: 12,
+  },
+  declineModalInput: {
+    minHeight: 70,
+    borderWidth: 1,
+    borderColor: BLUETAP_COLORS.border,
+    borderRadius: 8,
+    backgroundColor: BLUETAP_COLORS.background,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    color: BLUETAP_COLORS.textPrimary,
+    fontSize: 13,
+    outlineStyle: 'none',
+  },
+  declineModalActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 8,
+    marginTop: 14,
+  },
+  confirmDeclineBtn: {
+    minHeight: 38,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    backgroundColor: BLUETAP_COLORS.danger,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  confirmDeclineText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: 'bold',
   },
   cardActionsRow: {
     flexDirection: 'row',
