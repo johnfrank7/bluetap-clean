@@ -125,6 +125,49 @@ const setSessions = (activeSession, moduleSessions) => {
 
 export const normalizeRole = (role) => role?.toString().trim().toLowerCase() || '';
 
+export const ensureAuthStateReady = async () => {
+  if (typeof auth?.authStateReady === 'function') {
+    try {
+      await auth.authStateReady();
+    } catch (error) {
+      console.warn('[auth-session]', { stage: 'AUTH_STATE_READY_ERROR', message: error?.message });
+    }
+  }
+};
+
+const ACTIVITY_KEY_PREFIX = 'bluetap_last_activity_';
+
+export const recordUserActivity = (role) => {
+  const normRole = normalizeRole(role);
+  if (!normRole) return;
+  const now = Date.now();
+  try {
+    if (globalThis.localStorage) {
+      globalThis.localStorage.setItem(`${ACTIVITY_KEY_PREFIX}${normRole}`, String(now));
+    }
+  } catch {}
+  if (!globalThis.__bluetapLastActivity) globalThis.__bluetapLastActivity = {};
+  globalThis.__bluetapLastActivity[normRole] = now;
+};
+
+export const getLastActivity = (role) => {
+  const normRole = normalizeRole(role);
+  if (!normRole) return Date.now();
+  try {
+    if (globalThis.localStorage) {
+      const stored = globalThis.localStorage.getItem(`${ACTIVITY_KEY_PREFIX}${normRole}`);
+      if (stored) {
+        const parsed = Number(stored);
+        if (Number.isFinite(parsed) && parsed > 0) return parsed;
+      }
+    }
+  } catch {}
+  if (globalThis.__bluetapLastActivity?.[normRole]) {
+    return globalThis.__bluetapLastActivity[normRole];
+  }
+  return Date.now();
+};
+
 export const getRoleHomePath = (role) => ROLE_HOME_PATHS[normalizeRole(role)] || '/login';
 export const getRoleLoginPath = (role) => normalizeRole(role) === 'admin' ? '/admin/login' : '/login';
 
@@ -320,10 +363,14 @@ const validateRoleAccessOnce = async (expectedRole) => {
     };
   }
 
-  const currentUser = auth.currentUser;
+  let currentUser = auth.currentUser;
 
   if (!currentUser) {
-    clearAllAuthSessions();
+    await ensureAuthStateReady();
+    currentUser = auth.currentUser;
+  }
+
+  if (!currentUser) {
     return {
       status: 'unauthenticated',
       message: 'Unauthorized Access',
@@ -474,13 +521,21 @@ const validateRoleAccessOnce = async (expectedRole) => {
       profile = { ...profile, ...context.manager, branch: context.branch, branchName: context.branch?.name || '' };
     } catch (error) {
       const inactive = ['MANAGER_INACTIVE', 'BRANCH_INACTIVE', 'BRANCH_ACCESS_DENIED'].includes(error.code);
-      return {
-        status: inactive ? 'manager-inactive' : 'unauthorized',
-        message: error.message || 'Manager access is unavailable.',
-        redirectTo: inactive ? `/manager-access-status?reason=${encodeURIComponent(error.code)}` : '/login',
-        shouldSignOut: !inactive,
-        clearRole: expected,
-      };
+      const isTransient = ['service-unavailable', 'network-error', 'NETWORK_ERROR', 'ECONNREFUSED', 'ETIMEDOUT'].includes(error.code)
+        || error.message?.includes?.('fetch')
+        || error.name === 'TypeError';
+
+      if (isTransient && profile.branchId) {
+        console.warn('[role-validation]', { stage: 'MANAGER_CONTEXT_TRANSIENT_FAILURE', message: error.message });
+      } else {
+        return {
+          status: inactive ? 'manager-inactive' : 'unauthorized',
+          message: error.message || 'Manager access is unavailable.',
+          redirectTo: inactive ? `/manager-access-status?reason=${encodeURIComponent(error.code)}` : '/login',
+          shouldSignOut: inactive ? false : !isTransient,
+          clearRole: expected,
+        };
+      }
     }
   }
 

@@ -13,6 +13,8 @@ import BlueTapHeader from '../../components/BlueTapHeader';
 import RequestDetailsModal from '../../components/RequestDetailsModal';
 import SoftStatusBadge from '../../components/SoftStatusBadge';
 import { createShadow } from '../../components/shadowStyles';
+import BlueTapEmptyState from '../../components/BlueTapEmptyState';
+import PortalSwipeContainer, { DISTRIBUTOR_TABS } from '../../components/PortalSwipeContainer';
 import { createPortalStyleSheet, useBlueTapTheme } from '../../components/BlueTapTheme';
 import { USER_PORTAL_BOTTOM_CONTENT_INSET, USER_PORTAL_LAYOUT } from '../../constants/userPortalLayout';
 import { BLUETAP_COLORS } from '../../constants/bluetapTheme';
@@ -168,13 +170,11 @@ export default function DistributorHistory() {
     <SafeAreaView edges={['left', 'right', 'bottom']} style={styles.container}>
       <BlueTapHeader notificationPath="/distributor/d_notification" />
 
-      <View style={styles.phoneWrapper}>
-        <ScrollView
-          contentContainerStyle={styles.scrollContent}
-          showsVerticalScrollIndicator={false}
-        >
-          <Text style={styles.pageTitle}>SCHEDULE</Text>
-          <Text style={styles.subtitle}>Request History</Text>
+      <PortalSwipeContainer tabs={DISTRIBUTOR_TABS} currentRoute="/distributor/d_history">
+        <View style={styles.phoneWrapper}>
+          <View style={styles.fixedHeaderArea}>
+            <Text style={styles.pageTitle}>SCHEDULE</Text>
+            <Text style={styles.subtitle}>Request History</Text>
 
           <View style={styles.scheduleTabs}>
             <TouchableOpacity
@@ -195,10 +195,21 @@ export default function DistributorHistory() {
               </Text>
             </TouchableOpacity>
           </View>
+        </View>
+
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+        >
 
           {loading ? <View style={styles.emptyCard}><ActivityIndicator color={BLUE} /><Text style={styles.emptyText}>Loading assigned history...</Text></View>
             : error ? <View style={styles.emptyCard}><Text style={styles.emptyTitle}>History unavailable.</Text><Text style={styles.emptyText}>{error}</Text><TouchableOpacity onPress={refresh} style={styles.fullWidthActionButton}><Text style={styles.secondaryActionText}>Try Again</Text></TouchableOpacity></View>
-              : historyRequests.length === 0 ? <View style={styles.emptyCard}><Text style={styles.emptyTitle}>No delivery history.</Text><Text style={styles.emptyText}>Completed assigned deliveries will appear here.</Text></View>
+              : historyRequests.length === 0 ? (
+                <BlueTapEmptyState
+                  title="No Delivery History"
+                  description="Completed assigned deliveries will appear here."
+                />
+              )
                 : historyRequests.map((request) => (
             <HistoryRequestCard
               key={request.sourceId}
@@ -208,6 +219,7 @@ export default function DistributorHistory() {
           ))}
         </ScrollView>
       </View>
+    </PortalSwipeContainer>
 
       <RequestDetailsModal
         visible={!!selectedRequest}
@@ -230,10 +242,15 @@ const styles = createPortalStyleSheet({
     alignSelf: 'center',
     flex: 1,
   },
+  fixedHeaderArea: {
+    paddingHorizontal: USER_PORTAL_LAYOUT.gutter,
+    paddingTop: 16,
+    paddingBottom: 4,
+  },
   scrollContent: {
     flexGrow: 1,
     paddingHorizontal: USER_PORTAL_LAYOUT.gutter,
-    paddingTop: 20,
+    paddingTop: 4,
     paddingBottom: USER_PORTAL_BOTTOM_CONTENT_INSET,
   },
   pageTitle: {

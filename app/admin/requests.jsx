@@ -44,9 +44,33 @@ const ISSUE_STATUSES = new Set([
 ]);
 
 const formatAmount = (val) => {
-  if (val === undefined || val === null || val === '') return '\u20B10.00';
+  if (val === undefined || val === null || val === '') return '₱0.00';
   const num = Number(val);
-  return isNaN(num) ? String(val) : `\u20B1${num.toFixed(2)}`;
+  return isNaN(num) || !Number.isFinite(num) ? 'Unavailable' : `₱${num.toFixed(2)}`;
+};
+
+const formatPriceOrUnavailable = (val) => {
+  if (val === undefined || val === null || val === '') return 'Unavailable';
+  const num = Number(val);
+  return isNaN(num) || !Number.isFinite(num) ? 'Unavailable' : `₱${num.toFixed(2)}`;
+};
+
+const normalizeOrderItem = (item = {}) => {
+  const quantity = Number(item.quantity) || 1;
+  const unitPrice = item.unitPriceAtOrder !== undefined && item.unitPriceAtOrder !== null
+    ? Number(item.unitPriceAtOrder)
+    : (item.unitPrice !== undefined && item.unitPrice !== null ? Number(item.unitPrice) : null);
+  const total = item.totalAtOrder !== undefined && item.totalAtOrder !== null
+    ? Number(item.totalAtOrder)
+    : (item.subtotal !== undefined && item.subtotal !== null
+      ? Number(item.subtotal)
+      : (unitPrice !== null ? unitPrice * quantity : null));
+  return {
+    name: item.productNameSnapshot || item.productName || item.name || 'Product',
+    quantity,
+    unitPrice,
+    total,
+  };
 };
 
 const formatDate = (val) => {
@@ -337,7 +361,7 @@ export default function AdminRequestsPage() {
             {filteredOrders.map((order) => {
               const tone = getStatusTone(order.status);
               const itemsList = Array.isArray(order.items) && order.items.length > 0
-                ? order.items.map((i) => `${i.quantity} \u00D7 ${i.productNameSnapshot || i.productName || 'Item'}`).join(', ')
+                ? order.items.map((i) => `${i.quantity} × ${i.productNameSnapshot || i.productName || 'Item'}`).join(', ')
                 : order.productNameSnapshot || 'Water Order';
               const branchDisplay = order.branchNameSnapshot || order.branchName || order.currentBranchId || 'Unassigned';
               const requesterDisplay = order.requesterNameSnapshot || order.requesterName || order.customerName || 'Customer';
@@ -443,7 +467,7 @@ export default function AdminRequestsPage() {
                 onPress={() => setSelectedOrder(null)}
                 style={styles.closeBtn}
               >
-                <Text style={styles.closeBtnText}>\u00D7</Text>
+                <Text style={styles.closeBtnText}>×</Text>
               </TouchableOpacity>
             </View>
 
@@ -498,7 +522,7 @@ export default function AdminRequestsPage() {
                       <Text style={styles.modalValueSecondary}>
                         Lat: {selectedOrder.deliveryLocationSnapshot.latitude}, Lng: {selectedOrder.deliveryLocationSnapshot.longitude}
                         {selectedOrder.deliveryLocationSnapshot.accuracy
-                          ? ` (\u00B1${Number(selectedOrder.deliveryLocationSnapshot.accuracy).toFixed(0)}m accuracy)`
+                          ? ` (±${Number(selectedOrder.deliveryLocationSnapshot.accuracy).toFixed(0)}m accuracy)`
                           : ''}
                       </Text>
                     </View>
@@ -543,21 +567,24 @@ export default function AdminRequestsPage() {
               <View style={styles.modalSection}>
                 <Text style={styles.modalSectionTitle}>Ordered Items & Charges</Text>
                 {Array.isArray(selectedOrder?.items) && selectedOrder.items.length > 0 ? (
-                  selectedOrder.items.map((item, idx) => (
-                    <View key={idx} style={styles.itemRow}>
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.itemName}>
-                          {item.productNameSnapshot || item.productName || 'Product'}
-                        </Text>
-                        <Text style={styles.itemSub}>
-                          {formatAmount(item.unitPrice)} \u00D7 {item.quantity}
+                  selectedOrder.items.map((rawItem, idx) => {
+                    const item = normalizeOrderItem(rawItem);
+                    return (
+                      <View key={idx} style={styles.itemRow}>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.itemName}>
+                            {item.name}
+                          </Text>
+                          <Text style={styles.itemSub}>
+                            {formatPriceOrUnavailable(item.unitPrice)} × {item.quantity}
+                          </Text>
+                        </View>
+                        <Text style={styles.itemTotal}>
+                          {formatPriceOrUnavailable(item.total)}
                         </Text>
                       </View>
-                      <Text style={styles.itemTotal}>
-                        {formatAmount(item.subtotal || (item.unitPrice * item.quantity))}
-                      </Text>
-                    </View>
-                  ))
+                    );
+                  })
                 ) : (
                   <View style={styles.itemRow}>
                     <View style={{ flex: 1 }}>
@@ -616,11 +643,11 @@ export default function AdminRequestsPage() {
                   {selectedOrder.editHistory.map((edit, idx) => (
                     <View key={idx} style={styles.editHistoryItem}>
                       <Text style={styles.editHistoryMeta}>
-                        {formatDate(edit.timestamp)} \u00B7 Edited by Manager ({edit.editedBy || 'Manager'})
+                        {formatDate(edit.timestamp)} · Edited by Manager ({edit.editedBy || 'Manager'})
                       </Text>
                       {edit.previousTotal !== undefined && edit.newTotal !== undefined && (
                         <Text style={styles.editHistoryDetail}>
-                          Total adjusted: {formatAmount(edit.previousTotal)} \u2192 {formatAmount(edit.newTotal)}
+                          Total adjusted: {formatAmount(edit.previousTotal)} → {formatAmount(edit.newTotal)}
                         </Text>
                       )}
                     </View>

@@ -13,6 +13,9 @@ import BlueTapHeader from '../../components/BlueTapHeader';
 import RequestDetailsModal from '../../components/RequestDetailsModal';
 import SoftStatusBadge from '../../components/SoftStatusBadge';
 import { createShadow } from '../../components/shadowStyles';
+import BlueTapEmptyState from '../../components/BlueTapEmptyState';
+import DistributorProfileBanner from '../../components/DistributorProfileBanner';
+import PortalSwipeContainer, { DISTRIBUTOR_TABS } from '../../components/PortalSwipeContainer';
 import { createPortalStyleSheet, useBlueTapTheme } from '../../components/BlueTapTheme';
 import { USER_PORTAL_BOTTOM_CONTENT_INSET, USER_PORTAL_LAYOUT } from '../../constants/userPortalLayout';
 import { BLUETAP_COLORS } from '../../constants/bluetapTheme';
@@ -21,6 +24,7 @@ import {
   toDistributorScreenOrder,
   useAssignedDistributorOrders,
 } from '../../services/distributorOrders';
+import { useDistributorProfile } from '../../services/distributorProfile';
 
 const BLUE = BLUETAP_COLORS.primary;
 const BLUE_LIGHT = BLUETAP_COLORS.primarySoft;
@@ -51,10 +55,13 @@ const getStatusActionLabel = (status) =>
   STATUS_ACTIONS[normalizeStatus(status)] || 'Update Request';
 
 const formatAmountDue = (amount) =>
-  `\u20B1${Number(amount || 0).toFixed(2)}`;
+  `₱${Number(amount || 0).toFixed(2)}`;
 
 const occursToday = (value) => {
-  const date = value?.toDate?.() || (value?.seconds ? new Date(value.seconds * 1000) : value ? new Date(value) : null);
+  if (!value) return false;
+  const date = value instanceof Date
+    ? value
+    : value?.toDate?.() || (value?.seconds ? new Date(value.seconds * 1000) : new Date(value));
   const today = new Date();
   return date && !Number.isNaN(date.getTime())
     && date.getFullYear() === today.getFullYear()
@@ -135,13 +142,26 @@ export default function DistributorDashboard() {
   const router = useRouter();
   const [detailsVisible, setDetailsVisible] = useState(false);
   const { orders, loading, error, refresh } = useAssignedDistributorOrders();
+  const { isComplete, loading: profileLoading } = useDistributorProfile();
   const todayText = formatDashboardDate(new Date());
   const screenOrders = useMemo(() => orders.map(toDistributorScreenOrder), [orders]);
   const activeRequest = screenOrders.find((order) => !['delivered', 'cancelled', 'canceled', 'declined'].includes(normalizeDistributorOrderStatus(order.status)));
   const dashboardSummary = useMemo(() => [
-    { label: 'Pending Requests', value: String(screenOrders.filter((order) => ['distributor assigned', 'pending'].includes(normalizeDistributorOrderStatus(order.status))).length) },
-    { label: 'Scheduled Today', value: String(screenOrders.filter((order) => ['accepted', 'scheduled', 'out for delivery'].includes(normalizeDistributorOrderStatus(order.status)) && occursToday(order.scheduledDateTime)).length) },
-    { label: 'Delivered Today', value: String(screenOrders.filter((order) => normalizeDistributorOrderStatus(order.status) === 'delivered' && occursToday(order.deliveredDateTime)).length) },
+    {
+      label: 'Pending Requests',
+      value: String(screenOrders.filter((order) => ['distributor assigned', 'pending'].includes(normalizeDistributorOrderStatus(order.status))).length),
+      route: '/distributor/d_requests',
+    },
+    {
+      label: 'Scheduled Today',
+      value: String(screenOrders.filter((order) => ['accepted', 'scheduled', 'out for delivery'].includes(normalizeDistributorOrderStatus(order.status)) && occursToday(order.rawScheduledAt || order.scheduledDateTime || order.scheduledAt)).length),
+      route: '/distributor/d_scheduled_requests',
+    },
+    {
+      label: 'Delivered Today',
+      value: String(screenOrders.filter((order) => normalizeDistributorOrderStatus(order.status) === 'delivered' && occursToday(order.rawDeliveredAt || order.deliveredDateTime || order.deliveredAt)).length),
+      route: '/distributor/d_history',
+    },
   ], [screenOrders]);
   const primaryActionLabel = activeRequest
     ? getStatusActionLabel(activeRequest.status)
@@ -182,6 +202,10 @@ export default function DistributorDashboard() {
     : null;
 
   const handleCurrentRequestAction = () => {
+    if (!isComplete) {
+      router.push('/distributor/d_profile');
+      return;
+    }
     if (!activeRequest) return;
 
     if (['pending', 'distributor assigned'].includes(normalizeStatus(activeRequest.status))) {
@@ -198,166 +222,173 @@ export default function DistributorDashboard() {
         notificationPath="/distributor/d_notification"
       />
 
-      <View style={styles.phoneWrapper}>
-        <ScrollView
-          contentContainerStyle={styles.scrollContent}
-          showsVerticalScrollIndicator={false}
-        >
-          <View style={styles.welcomeSection}>
-            <Text style={styles.welcomeText}>WELCOME!</Text>
-            <Text style={styles.greetingText}>
-              Good Morning, Distributor
-            </Text>
-            <Text style={styles.dateText}>{todayText}</Text>
-          </View>
-
-          <View style={styles.summaryRow}>
-            {dashboardSummary.map((item) => (
-              <View key={item.label} style={styles.summaryCard}>
-                <Text style={styles.summaryValue}>{item.value}</Text>
-                <Text style={styles.summaryLabel}>{item.label}</Text>
-              </View>
-            ))}
-          </View>
-
-          <View style={styles.currentRequestSection}>
-            <Text style={styles.sectionTitle}>Current Request</Text>
-
-            {loading ? (
-              <View style={styles.emptyRequestCard}><ActivityIndicator color={BLUE} /><Text style={styles.emptyRequestText}>Loading assigned deliveries...</Text></View>
-            ) : error ? (
-              <View style={styles.emptyRequestCard}><Text style={styles.emptyRequestTitle}>Unable to load deliveries.</Text><Text style={styles.emptyRequestText}>{error}</Text><TouchableOpacity onPress={refresh} style={styles.viewDetailsButton}><Text style={styles.viewDetailsText}>Try Again</Text></TouchableOpacity></View>
-            ) : activeRequest ? (
-              <View style={styles.currentRequestCard}>
-                <View style={styles.requestCardHeader}>
-                  <View style={styles.requestTitleBlock}>
-                    <Text style={styles.requestId}>
-                      Request ID: {activeRequest.requestId}
-                    </Text>
-                  </View>
-                  <SoftStatusBadge status={activeRequest.status} />
-                </View>
-
-                <View style={styles.compactRequestBody}>
-                  <View style={[styles.infoGridRow, styles.infoGridRowDivider]}>
-                    <View style={styles.infoGridColumn}>
-                      <Text style={styles.infoGridLabel}>Customer Name</Text>
-                      <Text
-                        style={styles.infoGridPrimaryValue}
-                        numberOfLines={1}
-                      >
-                        {activeRequest.customerName}
-                      </Text>
-                      <Text style={[styles.infoGridLabel, styles.infoGridLabelGap]}>
-                        Requester ID
-                      </Text>
-                      <Text style={styles.infoGridValue} numberOfLines={1}>
-                        {activeRequest.requesterUniqueId ||
-                          activeRequest.requester_unique_id ||
-                          'Not set'}
-                      </Text>
-                    </View>
-
-                    <View style={styles.infoGridColumn}>
-                      <Text style={styles.infoGridLabel}>Amount Due</Text>
-                      <Text style={styles.infoGridValue} numberOfLines={1}>
-                        {formatAmountDue(activeRequest.total_cost)}
-                      </Text>
-                      <Text style={[styles.infoGridLabel, styles.infoGridLabelGap]}>
-                        Distributor ID
-                      </Text>
-                      <Text style={styles.infoGridValue} numberOfLines={1}>
-                        {activeRequest.distributorUniqueId ||
-                          activeRequest.distributor_unique_id ||
-                          'Not set'}
-                      </Text>
-                    </View>
-                  </View>
-
-                  <View style={styles.infoGridRow}>
-                    <View style={styles.infoGridColumn}>
-                      <Text style={styles.infoGridLabel}>Address</Text>
-                      <Text style={styles.infoGridValue} numberOfLines={2}>
-                        {activeRequest.deliveryAddress}
-                      </Text>
-                    </View>
-
-                    <View style={styles.infoGridColumn}>
-                      <Text style={styles.infoGridLabel}>Product Ordered</Text>
-                      <Text
-                        style={styles.infoGridPrimaryValue}
-                        numberOfLines={2}
-                      >
-                        {activeRequest.productsOrdered}
-                      </Text>
-                      <Text style={styles.infoGridSubValue} numberOfLines={1}>
-                        {activeRequest.quantity} | {activeRequest.containerType}
-                      </Text>
-                    </View>
-                  </View>
-                </View>
-
-                <View style={styles.cardActionsRow}>
-                  <TouchableOpacity
-                    style={styles.viewDetailsButton}
-                    activeOpacity={0.75}
-                    onPress={() => setDetailsVisible(true)}
-                  >
-                    <Text style={styles.viewDetailsText}>View Details</Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={styles.primaryActionButton}
-                    activeOpacity={0.85}
-                    onPress={handleCurrentRequestAction}
-                  >
-                    <Text style={styles.primaryActionText}>
-                      {primaryActionLabel}
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            ) : (
-              <View style={styles.emptyRequestCard}>
-                <Text style={styles.emptyRequestTitle}>No active delivery.</Text>
-                <Text style={styles.emptyRequestText}>
-                  New branch assignments will appear here.
-                </Text>
-              </View>
-            )}
-          </View>
-
-          <View style={styles.quickActionsSection}>
-            <Text style={styles.sectionTitle}>Quick Actions</Text>
-            <View style={styles.quickActionsRow}>
-              <TouchableOpacity
-                style={styles.quickActionButton}
-                activeOpacity={0.85}
-                onPress={() => router.replace('/distributor/d_requests')}
-              >
-                <Text style={styles.quickActionText}>
-                  View Pending Requests
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.quickActionButton, styles.quickActionSecondary]}
-                activeOpacity={0.85}
-                onPress={() => router.replace('/distributor/d_scheduled_requests')}
-              >
-                <Text
-                  style={[
-                    styles.quickActionText,
-                    styles.quickActionSecondaryText,
-                  ]}
-                >
-                  View Delivery Schedule
-                </Text>
-              </TouchableOpacity>
+      <PortalSwipeContainer tabs={DISTRIBUTOR_TABS} currentRoute="/distributor/d_dashboard">
+        <View style={styles.phoneWrapper}>
+          <DistributorProfileBanner isComplete={isComplete} loading={profileLoading} />
+          <ScrollView
+            contentContainerStyle={styles.scrollContent}
+            showsVerticalScrollIndicator={false}
+          >
+            <View style={styles.welcomeSection}>
+              <Text style={styles.welcomeText}>WELCOME!</Text>
+              <Text style={styles.greetingText}>
+                Good Morning, Distributor
+              </Text>
+              <Text style={styles.dateText}>{todayText}</Text>
             </View>
-          </View>
-        </ScrollView>
-      </View>
+
+            <View style={styles.summaryRow}>
+              {dashboardSummary.map((item) => (
+                <TouchableOpacity
+                  key={item.label}
+                  style={styles.summaryCard}
+                  activeOpacity={0.75}
+                  onPress={() => item.route && router.replace(item.route)}
+                >
+                  <Text style={styles.summaryValue}>{item.value}</Text>
+                  <Text style={styles.summaryLabel}>{item.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <View style={styles.currentRequestSection}>
+              <Text style={styles.sectionTitle}>Current Request</Text>
+
+              {loading ? (
+                <View style={styles.emptyRequestCard}><ActivityIndicator color={BLUE} /><Text style={styles.emptyRequestText}>Loading assigned deliveries...</Text></View>
+              ) : error ? (
+                <View style={styles.emptyRequestCard}><Text style={styles.emptyRequestTitle}>Unable to load deliveries.</Text><Text style={styles.emptyRequestText}>{error}</Text><TouchableOpacity onPress={refresh} style={styles.viewDetailsButton}><Text style={styles.viewDetailsText}>Try Again</Text></TouchableOpacity></View>
+              ) : activeRequest ? (
+                <View style={styles.currentRequestCard}>
+                  <View style={styles.requestCardHeader}>
+                    <View style={styles.requestTitleBlock}>
+                      <Text style={styles.requestId}>
+                        Request ID: {activeRequest.requestId}
+                      </Text>
+                    </View>
+                    <SoftStatusBadge status={activeRequest.status} />
+                  </View>
+
+                  <View style={styles.compactRequestBody}>
+                    <View style={[styles.infoGridRow, styles.infoGridRowDivider]}>
+                      <View style={styles.infoGridColumn}>
+                        <Text style={styles.infoGridLabel}>Customer Name</Text>
+                        <Text
+                          style={styles.infoGridPrimaryValue}
+                          numberOfLines={1}
+                        >
+                          {activeRequest.customerName}
+                        </Text>
+                        <Text style={[styles.infoGridLabel, styles.infoGridLabelGap]}>
+                          Requester ID
+                        </Text>
+                        <Text style={styles.infoGridValue} numberOfLines={1}>
+                          {activeRequest.requesterUniqueId ||
+                            activeRequest.requester_unique_id ||
+                            'Not set'}
+                        </Text>
+                      </View>
+
+                      <View style={styles.infoGridColumn}>
+                        <Text style={styles.infoGridLabel}>Amount Due</Text>
+                        <Text style={styles.infoGridValue} numberOfLines={1}>
+                          {formatAmountDue(activeRequest.total_cost)}
+                        </Text>
+                        <Text style={[styles.infoGridLabel, styles.infoGridLabelGap]}>
+                          Distributor ID
+                        </Text>
+                        <Text style={styles.infoGridValue} numberOfLines={1}>
+                          {activeRequest.distributorUniqueId ||
+                            activeRequest.distributor_unique_id ||
+                            'Not set'}
+                        </Text>
+                      </View>
+                    </View>
+
+                    <View style={styles.infoGridRow}>
+                      <View style={styles.infoGridColumn}>
+                        <Text style={styles.infoGridLabel}>Address</Text>
+                        <Text style={styles.infoGridValue} numberOfLines={2}>
+                          {activeRequest.deliveryAddress}
+                        </Text>
+                      </View>
+
+                      <View style={styles.infoGridColumn}>
+                        <Text style={styles.infoGridLabel}>Product Ordered</Text>
+                        <Text
+                          style={styles.infoGridPrimaryValue}
+                          numberOfLines={2}
+                        >
+                          {activeRequest.productsOrdered}
+                        </Text>
+                        <Text style={styles.infoGridSubValue} numberOfLines={1}>
+                          {activeRequest.quantity} | {activeRequest.containerType}
+                        </Text>
+                      </View>
+                    </View>
+                  </View>
+
+                  <View style={styles.cardActionsRow}>
+                    <TouchableOpacity
+                      style={styles.viewDetailsButton}
+                      activeOpacity={0.75}
+                      onPress={() => setDetailsVisible(true)}
+                    >
+                      <Text style={styles.viewDetailsText}>View Details</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={styles.primaryActionButton}
+                      activeOpacity={0.85}
+                      onPress={handleCurrentRequestAction}
+                    >
+                      <Text style={styles.primaryActionText}>
+                        {primaryActionLabel}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ) : (
+                <BlueTapEmptyState
+                  title="No Active Delivery"
+                  description="New branch assignments will appear here once assigned by your branch manager."
+                  compact
+                />
+              )}
+            </View>
+
+            <View style={styles.quickActionsSection}>
+              <Text style={styles.sectionTitle}>Quick Actions</Text>
+              <View style={styles.quickActionsRow}>
+                <TouchableOpacity
+                  style={styles.quickActionButton}
+                  activeOpacity={0.85}
+                  onPress={() => router.replace('/distributor/d_requests')}
+                >
+                  <Text style={styles.quickActionText}>
+                    View Pending Requests
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.quickActionButton, styles.quickActionSecondary]}
+                  activeOpacity={0.85}
+                  onPress={() => router.replace('/distributor/d_scheduled_requests')}
+                >
+                  <Text
+                    style={[
+                      styles.quickActionText,
+                      styles.quickActionSecondaryText,
+                    ]}
+                  >
+                    View Delivery Schedule
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </ScrollView>
+        </View>
+      </PortalSwipeContainer>
 
       <RequestDetailsModal
         visible={detailsVisible}

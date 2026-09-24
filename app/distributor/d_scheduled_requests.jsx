@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Modal,
   ScrollView,
   StyleSheet,
@@ -15,6 +16,9 @@ import BlueTapHeader from '../../components/BlueTapHeader';
 import RequestDetailsModal from '../../components/RequestDetailsModal';
 import SoftStatusBadge from '../../components/SoftStatusBadge';
 import { createShadow } from '../../components/shadowStyles';
+import BlueTapEmptyState from '../../components/BlueTapEmptyState';
+import DistributorProfileBanner from '../../components/DistributorProfileBanner';
+import PortalSwipeContainer, { DISTRIBUTOR_TABS } from '../../components/PortalSwipeContainer';
 import { createPortalStyleSheet, useBlueTapTheme } from '../../components/BlueTapTheme';
 import { USER_PORTAL_BOTTOM_CONTENT_INSET, USER_PORTAL_LAYOUT } from '../../constants/userPortalLayout';
 import { BLUETAP_COLORS } from '../../constants/bluetapTheme';
@@ -26,6 +30,7 @@ import {
   updateAssignedDistributorOrder,
   useAssignedDistributorOrders,
 } from '../../services/distributorOrders';
+import { useDistributorProfile } from '../../services/distributorProfile';
 
 const BLUE = BLUETAP_COLORS.primary;
 const BLUE_LIGHT = BLUETAP_COLORS.primarySoft;
@@ -247,6 +252,7 @@ export default function DistributorScheduledRequests() {
   const [selectedSlotIndex, setSelectedSlotIndex] = useState(0);
   const [rescheduleError, setRescheduleError] = useState('');
 
+  const { isComplete, loading: profileLoading } = useDistributorProfile();
   const { orders, loading, error, refresh } = useAssignedDistributorOrders();
   const scheduledRequests = useMemo(
     () =>
@@ -258,6 +264,17 @@ export default function DistributorScheduledRequests() {
   const selectedDetailsRequest = getDetailsRequestData(selectedRequest);
 
   const advanceDelivery = async (request, action) => {
+    if (!isComplete) {
+      Alert.alert(
+        'Profile Incomplete',
+        'Please complete your distributor profile before updating deliveries.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Complete Profile', onPress: () => router.push('/distributor/d_profile') },
+        ]
+      );
+      return;
+    }
     if (processingRequestId) return;
     setActionError('');
     setProcessingRequestId(request.sourceId);
@@ -273,6 +290,10 @@ export default function DistributorScheduledRequests() {
 
   const submitFailure = async () => {
     if (!failingRequest) return;
+    if (!isComplete) {
+      Alert.alert('Profile Incomplete', 'Please complete your distributor profile before updating deliveries.');
+      return;
+    }
     if (!failureReason.trim()) {
       setFailError('Please explain why the delivery failed (e.g., customer unreachable, address closed).');
       return;
@@ -293,6 +314,10 @@ export default function DistributorScheduledRequests() {
 
   const submitReschedule = async () => {
     if (!reschedulingRequest) return;
+    if (!isComplete) {
+      Alert.alert('Profile Incomplete', 'Please complete your distributor profile before updating deliveries.');
+      return;
+    }
     const slot = TIME_SLOTS[selectedSlotIndex] || TIME_SLOTS[0];
     const target = new Date();
     target.setDate(target.getDate() + selectedDayOffset);
@@ -320,77 +345,105 @@ export default function DistributorScheduledRequests() {
     <SafeAreaView edges={['left', 'right', 'bottom']} style={styles.container}>
       <BlueTapHeader notificationPath="/distributor/d_notification" />
 
-      <View style={styles.phoneWrapper}>
-        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-          <Text style={styles.pageTitle}>SCHEDULE</Text>
-          <Text style={styles.subtitle}>Scheduled Requests</Text>
+      <PortalSwipeContainer tabs={DISTRIBUTOR_TABS} currentRoute="/distributor/d_scheduled_requests">
+        <View style={styles.phoneWrapper}>
+          <DistributorProfileBanner isComplete={isComplete} loading={profileLoading} />
 
-          <View style={styles.scheduleTabs}>
-            <TouchableOpacity
-              style={[styles.scheduleTab, styles.scheduleTabActive]}
-              activeOpacity={0.85}
-              onPress={() => router.replace('/distributor/d_scheduled_requests')}
-            >
-              <Text style={[styles.scheduleTabText, styles.scheduleTabTextActive]}>Scheduled</Text>
-            </TouchableOpacity>
+          <View style={styles.fixedHeaderArea}>
+            <Text style={styles.pageTitle}>SCHEDULE</Text>
+            <Text style={styles.subtitle}>Scheduled Requests</Text>
 
-            <TouchableOpacity
-              style={styles.scheduleTab}
-              activeOpacity={0.85}
-              onPress={() => router.replace('/distributor/d_history')}
-            >
-              <Text style={styles.scheduleTabText}>History</Text>
-            </TouchableOpacity>
-          </View>
+            <View style={styles.scheduleTabs}>
+              <TouchableOpacity
+                style={[styles.scheduleTab, styles.scheduleTabActive]}
+                activeOpacity={0.85}
+                onPress={() => router.replace('/distributor/d_scheduled_requests')}
+              >
+                <Text style={[styles.scheduleTabText, styles.scheduleTabTextActive]}>Scheduled</Text>
+              </TouchableOpacity>
 
-          {!!actionError && (
-            <View style={styles.actionErrorCard}>
-              <Text style={styles.actionErrorText}>{actionError}</Text>
-            </View>
-          )}
-
-          {loading ? (
-            <View style={styles.emptyCard}>
-              <ActivityIndicator color={BLUE} />
-              <Text style={styles.emptyText}>Loading assigned schedule...</Text>
-            </View>
-          ) : error ? (
-            <View style={styles.emptyCard}>
-              <Text style={styles.emptyTitle}>Schedule unavailable.</Text>
-              <Text style={styles.emptyText}>{error}</Text>
-              <TouchableOpacity onPress={refresh} style={styles.secondaryActionButton}>
-                <Text style={styles.secondaryActionText}>Try Again</Text>
+              <TouchableOpacity
+                style={styles.scheduleTab}
+                activeOpacity={0.85}
+                onPress={() => router.replace('/distributor/d_history')}
+              >
+                <Text style={styles.scheduleTabText}>History</Text>
               </TouchableOpacity>
             </View>
-          ) : scheduledRequests.length === 0 ? (
-            <View style={styles.emptyCard}>
-              <Text style={styles.emptyTitle}>No scheduled deliveries.</Text>
-              <Text style={styles.emptyText}>Accepted and upcoming assigned deliveries will appear here.</Text>
-            </View>
-          ) : (
-            scheduledRequests.map((request) => (
-              <ScheduledRequestCard
-                key={request.sourceId}
-                request={request}
-                processing={processingRequestId === request.sourceId}
-                onAdvance={advanceDelivery}
-                onOpenFailModal={(req) => {
-                  setFailingRequest(req);
-                  setFailureReason('');
-                  setFailError('');
-                }}
-                onOpenRescheduleModal={(req) => {
-                  setReschedulingRequest(req);
-                  setSelectedDayOffset(1);
-                  setSelectedSlotIndex(0);
-                  setRescheduleError('');
-                }}
-                onViewDetails={setSelectedRequest}
+          </View>
+
+          <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+            {!!actionError && (
+              <View style={styles.actionErrorCard}>
+                <Text style={styles.actionErrorText}>{actionError}</Text>
+              </View>
+            )}
+
+            {loading ? (
+              <View style={styles.emptyCard}>
+                <ActivityIndicator color={BLUE} />
+                <Text style={styles.emptyText}>Loading assigned schedule...</Text>
+              </View>
+            ) : error ? (
+              <View style={styles.emptyCard}>
+                <Text style={styles.emptyTitle}>Schedule unavailable.</Text>
+                <Text style={styles.emptyText}>{error}</Text>
+                <TouchableOpacity onPress={refresh} style={styles.secondaryActionButton}>
+                  <Text style={styles.secondaryActionText}>Try Again</Text>
+                </TouchableOpacity>
+              </View>
+            ) : scheduledRequests.length === 0 ? (
+              <BlueTapEmptyState
+                title="No Scheduled Deliveries"
+                description="Accepted and upcoming assigned deliveries will appear here."
               />
-            ))
-          )}
-        </ScrollView>
-      </View>
+            ) : (
+              scheduledRequests.map((request) => (
+                <ScheduledRequestCard
+                  key={request.sourceId}
+                  request={request}
+                  processing={processingRequestId === request.sourceId}
+                  onAdvance={advanceDelivery}
+                  onOpenFailModal={(req) => {
+                    if (!isComplete) {
+                      Alert.alert(
+                        'Profile Incomplete',
+                        'Please complete your distributor profile before updating deliveries.',
+                        [
+                          { text: 'Cancel', style: 'cancel' },
+                          { text: 'Complete Profile', onPress: () => router.push('/distributor/d_profile') },
+                        ]
+                      );
+                      return;
+                    }
+                    setFailingRequest(req);
+                    setFailureReason('');
+                    setFailError('');
+                  }}
+                  onOpenRescheduleModal={(req) => {
+                    if (!isComplete) {
+                      Alert.alert(
+                        'Profile Incomplete',
+                        'Please complete your distributor profile before updating deliveries.',
+                        [
+                          { text: 'Cancel', style: 'cancel' },
+                          { text: 'Complete Profile', onPress: () => router.push('/distributor/d_profile') },
+                        ]
+                      );
+                      return;
+                    }
+                    setReschedulingRequest(req);
+                    setSelectedDayOffset(1);
+                    setSelectedSlotIndex(0);
+                    setRescheduleError('');
+                  }}
+                  onViewDetails={setSelectedRequest}
+                />
+              ))
+            )}
+          </ScrollView>
+        </View>
+      </PortalSwipeContainer>
 
       <RequestDetailsModal
         visible={!!selectedRequest}
@@ -529,10 +582,15 @@ const styles = createPortalStyleSheet({
     alignSelf: 'center',
     flex: 1,
   },
+  fixedHeaderArea: {
+    paddingHorizontal: USER_PORTAL_LAYOUT.gutter,
+    paddingTop: 16,
+    paddingBottom: 4,
+  },
   scrollContent: {
     flexGrow: 1,
     paddingHorizontal: USER_PORTAL_LAYOUT.gutter,
-    paddingTop: 20,
+    paddingTop: 4,
     paddingBottom: USER_PORTAL_BOTTOM_CONTENT_INSET,
   },
   pageTitle: {

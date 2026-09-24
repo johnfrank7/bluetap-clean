@@ -32,7 +32,13 @@ export const normalizeUniqueIdRole = (role) =>
 export const getProfileUniqueId = (profile = {}) => {
   const safeProfile = profile || {};
 
-  return (safeProfile.unique_id || safeProfile.uniqueId || '').toString().trim();
+  return (
+    safeProfile.unique_id ||
+    safeProfile.uniqueId ||
+    safeProfile.uid ||
+    safeProfile.id ||
+    ''
+  ).toString().trim();
 };
 
 export const getUniqueIdConfig = (role) =>

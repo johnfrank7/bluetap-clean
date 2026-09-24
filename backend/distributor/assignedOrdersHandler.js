@@ -42,6 +42,15 @@ function responseError(res, error) {
   } });
 }
 
+function isDistributorProfileComplete(profile = {}) {
+  const fullName = String(profile.fullName || `${profile.firstName || ''} ${profile.lastName || ''}`).trim();
+  const phone = String(profile.phone || profile.contactNumber || '').trim();
+  const address = String(profile.completeAddress || profile.address || profile.barangay || '').trim();
+  const branchId = String(profile.branchId || '').trim();
+  const status = String(profile.distributorStatus || profile.approvalStatus || profile.status || '').trim().toLowerCase();
+  return Boolean(fullName && phone && address && branchId && ['active', 'approved'].includes(status));
+}
+
 function createDistributorAssignedOrdersHandler(getAdmin = getFirebaseAdmin) {
   return async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
@@ -69,6 +78,9 @@ function createDistributorAssignedOrdersHandler(getAdmin = getFirebaseAdmin) {
       const action = clean(body.action, 48).toLowerCase();
       if (!orderId || !['accept-assignment', 'decline-assignment', 'schedule-delivery', 'start-delivery', 'fail-delivery', 'reschedule-delivery', 'mark-delivered'].includes(action)) {
         throw new OtpError(400, 'INVALID_DELIVERY_ACTION', 'Choose a valid delivery action.');
+      }
+      if (!isDistributorProfileComplete(distributor.profile)) {
+        throw new OtpError(409, 'PROFILE_INCOMPLETE', 'Complete your profile before handling deliveries.');
       }
       const now = new Date();
       const saved = await updateOrder(db, orderId, async (current, tx) => {
@@ -201,4 +213,4 @@ function createDistributorAssignedOrdersHandler(getAdmin = getFirebaseAdmin) {
   };
 }
 
-module.exports = { createDistributorAssignedOrdersHandler };
+module.exports = { createDistributorAssignedOrdersHandler, isDistributorProfileComplete };

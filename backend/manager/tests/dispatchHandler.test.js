@@ -12,9 +12,9 @@ function fixture() {
     ['users/manager-a', { role: 'manager', managerStatus: 'active', branchId: 'branch-a', fullName: 'Manager A' }],
     ['users/manager-b', { role: 'manager', managerStatus: 'active', branchId: 'branch-b', fullName: 'Manager B' }],
     ['users/manager-c', { role: 'manager', managerStatus: 'active', branchId: 'branch-c', fullName: 'Manager C' }],
-    ['users/distributor-a', { role: 'distributor', approvalStatus: 'active', branchId: 'branch-a', fullName: 'Distributor A' }],
-    ['users/distributor-a2', { role: 'distributor', approvalStatus: 'active', branchId: 'branch-a', fullName: 'Distributor A2' }],
-    ['users/distributor-b', { role: 'distributor', approvalStatus: 'active', branchId: 'branch-b', fullName: 'Distributor B' }],
+    ['users/distributor-a', { role: 'distributor', approvalStatus: 'active', branchId: 'branch-a', fullName: 'Distributor A', phone: '09123456789', completeAddress: 'Barangay Poblacion, Toledo City' }],
+    ['users/distributor-a2', { role: 'distributor', approvalStatus: 'active', branchId: 'branch-a', fullName: 'Distributor A2', phone: '09123456789', completeAddress: 'Barangay Poblacion, Toledo City' }],
+    ['users/distributor-b', { role: 'distributor', approvalStatus: 'active', branchId: 'branch-b', fullName: 'Distributor B', phone: '09123456789', completeAddress: 'Barangay Poblacion, Toledo City' }],
     ['users/distributor-inactive', { role: 'distributor', approvalStatus: 'inactive', branchId: 'branch-a', fullName: 'Inactive Distributor' }],
     ['requests/order-a', { requestId: 'BT-A', requester_id: 'requester-1', requesterNameSnapshot: 'Requester A', requesterUniqueIdSnapshot: 'REQ-001', contactNumberSnapshot: '09123456789', container: 'Exchange container', branchId: 'branch-a', currentBranchId: 'branch-a', initialBranchId: 'branch-a', branchNameSnapshot: 'Branch A', status: 'awaiting_distributor_assignment', deliveryLocation: { latitude: 10.29, longitude: 123.6 }, distanceKmSnapshot: 5.2, serviceRadiusKmSnapshot: 5, items: [{ productId: 'product-1', productNameSnapshot: 'Refill', quantity: 2, totalAtOrder: 70 }], totalAtOrder: 70 }],
     ['requests/order-b', { requestId: 'BT-B', requester_id: 'requester-2', requesterNameSnapshot: 'Requester B', branchId: 'branch-b', currentBranchId: 'branch-b', initialBranchId: 'branch-b', branchNameSnapshot: 'Branch B', status: 'awaiting_distributor_assignment' }],
@@ -287,4 +287,33 @@ test('Distributor failed delivery and reschedule workflow strictly enforces stat
 
   // requesterActiveOrders guard is removed
   assert.equal(f.records.has('requesterActiveOrders/requester-1'), false);
+});
+
+test('Distributor profile completeness blocks mutation actions with 409 PROFILE_INCOMPLETE while GET is allowed', async () => {
+  const f = fixture();
+  // Set distributor-a profile to be incomplete (missing phone and address)
+  f.records.set('users/distributor-a', { role: 'distributor', approvalStatus: 'active', branchId: 'branch-a', fullName: 'Distributor A' });
+  const dispatch = createManagerDispatchHandler(f.getAdmin);
+  const distributor = createDistributorAssignedOrdersHandler(f.getAdmin);
+
+  // Manager assigns order-a to distributor-a
+  await call(dispatch, 'PATCH', 'manager-a-token', { orderId: 'order-a', action: 'assign-distributor', distributorUid: 'distributor-a', scheduledAt: defaultSchedule });
+
+  // GET is permitted even if profile is incomplete
+  const list = await call(distributor, 'GET', 'distributor-a-token');
+  assert.equal(list.statusCode, 200);
+  assert.equal(list.body.orders.length, 1);
+
+  // Mutation actions are blocked with 409 PROFILE_INCOMPLETE
+  const acceptRes = await call(distributor, 'PATCH', 'distributor-a-token', { orderId: 'order-a', action: 'accept-assignment' });
+  assert.equal(acceptRes.statusCode, 409);
+  assert.equal(acceptRes.body.error.reason, 'PROFILE_INCOMPLETE');
+
+  // Complete the profile
+  f.records.set('users/distributor-a', { role: 'distributor', approvalStatus: 'active', branchId: 'branch-a', fullName: 'Distributor A', phone: '09123456789', completeAddress: 'Barangay Poblacion, Toledo City' });
+
+  // Now accept succeeds
+  const acceptSuccess = await call(distributor, 'PATCH', 'distributor-a-token', { orderId: 'order-a', action: 'accept-assignment' });
+  assert.equal(acceptSuccess.statusCode, 200);
+  assert.equal(acceptSuccess.body.order.status, 'accepted');
 });

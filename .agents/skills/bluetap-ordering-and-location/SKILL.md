@@ -30,6 +30,7 @@ Use this skill for BlueTap product catalogs, provider selection, order creation,
 - Store `branchId`, `productId`, `productNameSnapshot`, `branchNameSnapshot`, `unitPriceAtOrder`, quantity, `totalAtOrder`, delivery-location snapshot, distance snapshot, status, and timestamps.
 - Store `initialBranchId` and `currentBranchId` for fulfillment ownership. The initial selection remains historical context; the current Branch alone controls operational assignment and handoff actions.
 - Historical orders must not change when product price, product metadata, or branch metadata changes.
+- Authoritative Analytics and Revenue Snapshots: Both Manager and Admin analytics must aggregate sales and revenue exclusively from delivered orders using line-item price snapshots (`line_total`, `subtotal`, `totalAtOrder`, `unitPriceAtOrder`). Never query live product catalog prices to calculate historical sales. Units sold must reflect verified delivered quantities without fabricating volume conversions.
 - Restrict order/location reads to the Requester owner and only the fulfillment roles assigned to that order or branch.
 
 ## Dispatch, situational edits, and branch transfers

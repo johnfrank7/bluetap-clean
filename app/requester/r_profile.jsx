@@ -220,7 +220,7 @@ export default function ProfilePage() {
   const profileDisplay = useMemo(
     () => ({
       fullName: getFullName(userData),
-      uniqueId: getProfileUniqueId(userData),
+      uniqueId: getProfileUniqueId(userData) || userData?.uid || auth.currentUser?.uid || '',
       phone: userData?.phone || '',
       email: userData?.email || auth.currentUser?.email || '',
       address: userData?.address || '',

@@ -40,6 +40,12 @@ Preserve these invariants:
 - Distributor notifications (`app/distributor/d_notification.jsx`) reuse the card visual system from `app/requester/r_notification.jsx`: clean structured notification cards, delivery date/status badges, real order lifecycle events, empty state handling, and theme token adherence.
 - Notifications derive directly from authenticated order states and branch dispatch events; do not use mock notifications or disconnected static lists.
 
+## Navigation gestures and empty states
+
+- Primary tab navigation in Requester and Distributor portals supports swipe navigation via `PortalSwipeContainer`. Swiping is guarded against accidental vertical scroll triggers (`|dx| > 50` and `|dx| > 2.2 * |dy|`).
+- Empty lists and query results must render `BlueTapEmptyState` with the shared sad water droplet motif, informative headline, contextual explanation, and call-to-action button where appropriate.
+- Headers, view tabs, and primary action controls (e.g. "Add Request" or scheduled delivery tabs) must remain pinned in a fixed container above the `ScrollView` so filters and actions remain instantly operable during scrolling.
+
 ## Deferred messaging scope
 
 - Chat, conversations, unread or read state, typing indicators, and cross-role messaging are explicitly deferred. Only disabled, clearly labelled “coming soon” affordances may reference future messaging.

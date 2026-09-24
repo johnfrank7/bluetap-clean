@@ -6,7 +6,7 @@ const { normalizeUsername } = require('../username/username');
 const { loadRegistrationSecurity, SESSION_ROLES } = require('../registration/registrationSecurity');
 
 const ROLES = new Set(SESSION_ROLES);
-const ACTIONS = new Set(['deactivate', 'reactivate', 'resetPassword', 'updateProfile', 'reassignManager', 'signOutAllSessions', 'updateAccount']);
+const ACTIONS = new Set(['deactivate', 'reactivate', 'resetPassword', 'updateProfile', 'reassignManager', 'signOutAllSessions', 'updateAccount', 'backfillUids']);
 const IDLE_TIMEOUTS = new Set([5, 10, 15, 30, 60, 120]);
 const clean = (value, max = 160) => String(value || '').trim().slice(0, max);
 const emailFor = (value) => { const email = clean(value, 254).toLowerCase(); if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new OtpError(400, 'INVALID_EMAIL', 'Enter a valid email address.'); return email; };
@@ -57,9 +57,69 @@ async function updateAccount({ auth, db, admin, uid, before, body }) {
   const security = await loadRegistrationSecurity(db); return { account: safeAccount(uid, after, new Map(branch ? [[branch.id, branch.name]] : []), await auth.getUser(uid), security.sessionSecurity[effectiveRole]), changed: true };
 }
 
+async function backfillLegacyUids({ auth, db, admin }) {
+  const usersSnapshot = await db.collection('users').get();
+  let backfilled = 0;
+  let alreadyValid = 0;
+  const unmatched = [];
+  const now = new Date();
+
+  for (const userDoc of usersSnapshot.docs) {
+    const data = userDoc.data() || {};
+    if (data.uid && String(data.uid).trim()) {
+      alreadyValid++;
+      continue;
+    }
+
+    let resolvedUid = null;
+    try {
+      if (typeof auth.getUser === 'function') {
+        const authUser = await auth.getUser(userDoc.id);
+        if (authUser?.uid === userDoc.id) {
+          resolvedUid = userDoc.id;
+        }
+      }
+    } catch {}
+
+    if (!resolvedUid && data.email && typeof auth.getUserByEmail === 'function') {
+      try {
+        const authUser = await auth.getUserByEmail(data.email);
+        if (authUser?.uid) {
+          resolvedUid = authUser.uid;
+        }
+      } catch {}
+    }
+
+    if (resolvedUid) {
+      await db.collection('users').doc(userDoc.id).update({
+        uid: resolvedUid,
+        updatedAt: now,
+        updatedBy: admin.uid,
+      });
+      await db.collection('adminAuditLogs').doc().set(
+        auditRecord('LEGACY_UID_BACKFILLED', admin, resolvedUid, data.role || 'unknown', data, { ...data, uid: resolvedUid }, now, data.branchId || null)
+      );
+      backfilled++;
+    } else {
+      unmatched.push({ id: userDoc.id, email: data.email || null, role: data.role || null });
+    }
+  }
+
+  return {
+    total: usersSnapshot.size,
+    backfilled,
+    alreadyValid,
+    unmatched,
+  };
+}
+
 function createAdminAccountsHandler(getAdmin = getFirebaseAdmin) { return async (req, res) => {
   res.setHeader('Cache-Control', 'no-store'); if (!applyCors(req, res)) return; if (req.method === 'OPTIONS') return res.status(204).end(); if (!['GET', 'POST', 'PATCH'].includes(req.method)) return res.status(405).json({ error: { reason: 'method-not-allowed', message: 'Use GET, POST, or PATCH.' } });
   try { const { auth, db } = getAdmin(); const admin = await requireAdmin(req, auth, db); if (req.method === 'GET') return res.status(200).json(await listWorkspace(auth, db)); const body = bodyOf(req);
+    if (body.action === 'backfillUids') {
+      const result = await backfillLegacyUids({ auth, db, admin });
+      return res.status(200).json(result);
+    }
     if (req.method === 'POST') { const role = clean(body.role, 30).toLowerCase(); if (!ROLES.has(role)) throw new OtpError(400, 'INVALID_ROLE', 'Choose requester, distributor, or manager.'); const fullName = clean(body.fullName, 160); if (!fullName) throw new OtpError(400, 'FULL_NAME_REQUIRED', 'Full name is required.'); const email = emailFor(body.email); const password = passwordFor(body.temporaryPassword); if (body.requirePasswordChange === false && role === 'manager') throw new OtpError(400, 'PASSWORD_CHANGE_REQUIRED', 'Managers must change their temporary password on first sign-in.'); const mustChangePassword = body.requirePasswordChange !== false; let username = ''; let usernameNormalized = ''; if (role !== 'manager') { username = clean(body.username, 20); usernameNormalized = normalizeUsername(username); } const branch = ['manager', 'distributor'].includes(role) ? await activeBranch(db, body.branchId) : null; try { await auth.getUserByEmail(email); throw new OtpError(409, 'EMAIL_ALREADY_IN_USE', 'This email is already in use.'); } catch (error) { if (error instanceof OtpError) throw error; if (error.code && error.code !== 'auth/user-not-found') throw error; } if (await emailIsAttached(db, email)) throw new OtpError(409, 'EMAIL_ALREADY_IN_USE', 'This email is already in use.'); if (usernameNormalized && (await db.collection('usernames').doc(usernameNormalized).get()).exists) throw new OtpError(409, 'USERNAME_ALREADY_IN_USE', 'This username is already in use.'); let user = null;
       try { user = await auth.createUser({ email, password, displayName: fullName, emailVerified: false }); if (role === 'manager') await auth.setCustomUserClaims(user.uid, { role: 'manager', manager: true }); const now = new Date(); const profile = { uid: user.uid, email, ...nameChanges(fullName), role, accountSource: 'admin_created', verificationSource: 'admin_created', mustChangePassword, createdAt: now, updatedAt: now, createdBy: admin.uid, emailVerificationRequired: false, emailVerified: false, faceVerification: { required: false, status: 'not_required', verificationSource: 'admin_created' }, registrationCompleted: true, onboardingStatus: 'complete', ...(role === 'manager' ? { branchId: branch.id, branchNameSnapshot: clean(branch.name), managerStatus: 'active' } : role === 'distributor' ? { username, usernameNormalized, branchId: branch.id, branchNameSnapshot: clean(branch.name), ...statusChanges(role, 'active') } : { username, usernameNormalized, ...statusChanges(role, 'active') }) }; await db.runTransaction(async (tx) => { if (usernameNormalized) { const ref = db.collection('usernames').doc(usernameNormalized); const existing = await tx.get(ref); if (existing.exists) throw new OtpError(409, 'USERNAME_ALREADY_IN_USE', 'This username is already in use.'); tx.create(ref, { uid: user.uid, createdAt: now }); } tx.create(db.collection('users').doc(user.uid), profile); tx.set(db.collection('adminAuditLogs').doc(), auditRecord(role === 'manager' ? 'MANAGER_ACCOUNT_CREATED' : 'ADMIN_ACCOUNT_CREATED', admin, user.uid, role, {}, profile, now, branch?.id || null)); if (role === 'manager') tx.set(db.collection('adminAuditLogs').doc(), auditRecord('MANAGER_BRANCH_ASSIGNED', admin, user.uid, role, {}, profile, now, branch.id)); if (role === 'distributor') tx.set(db.collection('adminAuditLogs').doc(), auditRecord('DISTRIBUTOR_BRANCH_ASSIGNED', admin, user.uid, role, {}, profile, now, branch.id, { newBranchId: branch.id, changedByAdminUid: admin.uid, changedAt: now })); }); const security = await loadRegistrationSecurity(db); return res.status(201).json({ account: safeAccount(user.uid, profile, new Map([[branch?.id, branch?.name]]), user, security.sessionSecurity[role]) }); } catch (error) { if (user?.uid) try { await auth.deleteUser(user.uid); } catch {} throw error; }
     }
@@ -68,4 +128,4 @@ function createAdminAccountsHandler(getAdmin = getFirebaseAdmin) { return async 
   } catch (error) { const known = error instanceof OtpError; return res.status(known ? error.status : 500).json({ error: { reason: known ? error.reason : 'ACCOUNT_MANAGEMENT_FAILED', message: known ? error.message : 'Account management is temporarily unavailable.' } }); }
 }; }
 
-module.exports = { createAdminAccountsHandler, emailFor, passwordFor, safeAccount, safeAudit, statusOf, timeoutOverride };
+module.exports = { backfillLegacyUids, createAdminAccountsHandler, emailFor, passwordFor, safeAccount, safeAudit, statusOf, timeoutOverride };

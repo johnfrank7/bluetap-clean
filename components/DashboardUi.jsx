@@ -1,7 +1,8 @@
-import React from 'react';
-import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import React, { useState } from 'react';
+import { Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { BLUETAP_LAYOUT } from '../constants/bluetapTheme';
 import { useAdminTheme } from './AdminTheme';
+import PortalButton from './PortalButton';
 
 const shared = StyleSheet.create({ card:{borderWidth:1,borderRadius:BLUETAP_LAYOUT.radius.lg,padding:20,...BLUETAP_LAYOUT.shadow},badge:{alignSelf:'flex-start',borderRadius:999,paddingHorizontal:10,paddingVertical:5},badgeText:{fontSize:12,fontWeight:'800',textTransform:'capitalize'},statCard:{minHeight:152,flexGrow:1,flexBasis:180},statIcon:{width:30,height:30,borderRadius:9,alignItems:'center',justifyContent:'center'},statLabel:{fontSize:11,fontWeight:'800',letterSpacing:.35,marginTop:13,textTransform:'uppercase'},statValue:{fontWeight:'900',fontSize:28,marginTop:5},statDetail:{fontSize:12,marginTop:3},empty:{minHeight:180,alignItems:'center',justifyContent:'center',padding:24,borderWidth:1,borderStyle:'dashed',borderRadius:12},emptyTitle:{fontWeight:'800',fontSize:15},emptyDetail:{textAlign:'center',lineHeight:19,marginTop:6,maxWidth:320},primary:{minHeight:44,paddingHorizontal:18,alignItems:'center',justifyContent:'center',borderRadius:10},primaryText:{color:'#FFF',fontWeight:'800'},secondary:{minHeight:42,paddingHorizontal:16,alignItems:'center',justifyContent:'center',borderRadius:10,borderWidth:1},secondaryText:{fontWeight:'700'} });
 
@@ -9,7 +10,35 @@ export function SectionCard({ children, style }) { const { colors } = useAdminTh
 export function StatusBadge({ status = 'active' }) { const { colors } = useAdminTheme(); const active = status === 'active' || status === 'enabled'; const neutral = status === 'unavailable' || status === 'pending'; const tone = active ? { backgroundColor:colors.successSoft, color:colors.success } : neutral ? { backgroundColor:colors.neutral, color:colors.textSecondary } : { backgroundColor:colors.dangerSoft, color:colors.danger }; return <View style={[shared.badge, { backgroundColor:tone.backgroundColor }]}><Text style={[shared.badgeText, { color:tone.color }]}>{status}</Text></View>; }
 export function StatCard({ label, value, detail, tone = 'blue' }) { const { colors } = useAdminTheme(); const iconBackground = tone === 'green' ? colors.successSoft : tone === 'navy' ? colors.neutral : colors.primarySoft; return <SectionCard style={shared.statCard}><View style={[shared.statIcon, { backgroundColor:iconBackground }]}><Text style={{color:colors.primary,fontWeight:'900',fontSize:12}}>{label.charAt(0)}</Text></View><Text style={[shared.statLabel,{color:colors.textSecondary}]}>{label}</Text><Text style={[shared.statValue,{color:colors.textPrimary}]}>{value}</Text>{!!detail && <Text style={[shared.statDetail,{color:colors.textSecondary}]}>{detail}</Text>}</SectionCard>; }
 export function EmptyState({ title, detail, style }) { const { colors } = useAdminTheme(); return <View style={[shared.empty,{borderColor:colors.border,backgroundColor:colors.surfaceAlt},style]}><Text style={[shared.emptyTitle,{color:colors.textPrimary}]}>{title}</Text>{!!detail&&<Text style={[shared.emptyDetail,{color:colors.textSecondary}]}>{detail}</Text>}</View>; }
-export function PrimaryButton({ children, style, ...props }) { const { colors } = useAdminTheme(); return <TouchableOpacity activeOpacity={0.85} style={[shared.primary,{backgroundColor:colors.primary},style]} {...props}><Text style={shared.primaryText}>{children}</Text></TouchableOpacity>; }
-export function SecondaryButton({ children, style, textStyle, ...props }) { const { colors } = useAdminTheme(); return <TouchableOpacity activeOpacity={0.85} style={[shared.secondary,{borderColor:colors.inputBorder,backgroundColor:colors.surface},style]} {...props}><Text style={[shared.secondaryText,{color:colors.primary},textStyle]}>{children}</Text></TouchableOpacity>; }
+
+// PrimaryButton and SecondaryButton delegate to PortalButton for consistent web hover and use admin theme colors.
+export function PrimaryButton({ children, style, disabled, ...props }) {
+  const { colors } = useAdminTheme();
+  return (
+    <PortalButton
+      variant="primary"
+      disabled={disabled}
+      style={[{ backgroundColor: colors.primary }, style]}
+      {...props}
+    >
+      {children}
+    </PortalButton>
+  );
+}
+
+export function SecondaryButton({ children, style, textStyle, disabled, ...props }) {
+  const { colors } = useAdminTheme();
+  return (
+    <PortalButton
+      variant="secondary"
+      disabled={disabled}
+      style={[{ borderColor: colors.inputBorder, backgroundColor: colors.surface }, style]}
+      textStyle={[{ color: colors.primary }, textStyle]}
+      {...props}
+    >
+      {children}
+    </PortalButton>
+  );
+}
 
 export const dashboardStyles = StyleSheet.create({ card:shared.card,title:{fontSize:18,fontWeight:'800'},body:{lineHeight:20},label:{fontSize:12,fontWeight:'700',marginBottom:6},input:{minHeight:46,borderWidth:1,borderRadius:10,paddingHorizontal:12,outlineStyle:'none'} });

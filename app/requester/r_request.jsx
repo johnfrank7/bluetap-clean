@@ -19,6 +19,8 @@ import { findLocalUserForAuthRole } from '../../localUsers';
 import RequestDetailsModal from '../../components/RequestDetailsModal';
 import SoftStatusBadge, { normalizeStatus } from '../../components/SoftStatusBadge';
 import { createShadow } from '../../components/shadowStyles';
+import BlueTapEmptyState from '../../components/BlueTapEmptyState';
+import PortalSwipeContainer, { REQUESTER_TABS } from '../../components/PortalSwipeContainer';
 import { createPortalStyleSheet, useBlueTapTheme } from '../../components/BlueTapTheme';
 import { USER_PORTAL_BOTTOM_CONTENT_INSET, USER_PORTAL_LAYOUT } from '../../constants/userPortalLayout';
 import { BLUETAP_COLORS } from '../../constants/bluetapTheme';
@@ -42,7 +44,7 @@ const TEXT_DARK = BLUETAP_COLORS.textPrimary;
 const ACTIVE_TAB = 'active';
 const HISTORY_TAB = 'history';
 
-const formatPrice = (price) => `\u20B1${Number(price || 0).toFixed(2)}`;
+const formatPrice = (price) => `₱${Number(price || 0).toFixed(2)}`;
 
 const timestampToDate = (timestamp) => {
   if (!timestamp) return null;
@@ -433,108 +435,110 @@ export default function RequesterRequests() {
       <SafeAreaView edges={['left', 'right', 'bottom']} style={styles.container}>
         <StatusBar style="light" />
 
-        <View style={styles.phoneWrapper}>
-          <ScrollView
-            contentContainerStyle={styles.scrollContent}
-            showsVerticalScrollIndicator={false}
-          >
-          <Text style={styles.pageTitle}>MY ORDERS</Text>
-          <Text style={styles.subtitle}>View and manage your water orders.</Text>
+        <PortalSwipeContainer tabs={REQUESTER_TABS} currentRoute="/requester/r_request">
+          <View style={styles.phoneWrapper}>
+            <View style={styles.fixedHeaderArea}>
+              <Text style={styles.pageTitle}>MY ORDERS</Text>
+              <Text style={styles.subtitle}>View and manage your water orders.</Text>
 
-          <View style={styles.orderTabs}>
-            <TouchableOpacity
-              style={[
-                styles.orderTab,
-                activeTab === ACTIVE_TAB && styles.orderTabActive,
-              ]}
-              activeOpacity={0.85}
-              onPress={() => setActiveTab(ACTIVE_TAB)}
-            >
-              <Text
-                style={[
-                  styles.orderTabText,
-                  activeTab === ACTIVE_TAB && styles.orderTabTextActive,
-                ]}
-              >
-                Active Orders
-              </Text>
-            </TouchableOpacity>
+              <View style={styles.orderTabs}>
+                <TouchableOpacity
+                  style={[
+                    styles.orderTab,
+                    activeTab === ACTIVE_TAB && styles.orderTabActive,
+                  ]}
+                  activeOpacity={0.85}
+                  onPress={() => setActiveTab(ACTIVE_TAB)}
+                >
+                  <Text
+                    style={[
+                      styles.orderTabText,
+                      activeTab === ACTIVE_TAB && styles.orderTabTextActive,
+                    ]}
+                  >
+                    Active Orders
+                  </Text>
+                </TouchableOpacity>
 
-            <TouchableOpacity
-              style={[
-                styles.orderTab,
-                activeTab === HISTORY_TAB && styles.orderTabActive,
-              ]}
-              activeOpacity={0.85}
-              onPress={() => setActiveTab(HISTORY_TAB)}
+                <TouchableOpacity
+                  style={[
+                    styles.orderTab,
+                    activeTab === HISTORY_TAB && styles.orderTabActive,
+                  ]}
+                  activeOpacity={0.85}
+                  onPress={() => setActiveTab(HISTORY_TAB)}
+                >
+                  <Text
+                    style={[
+                      styles.orderTabText,
+                      activeTab === HISTORY_TAB && styles.orderTabTextActive,
+                    ]}
+                  >
+                    History
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              {isActiveOrdersTab && (
+                <TouchableOpacity
+                  style={styles.addRequestButton}
+                  activeOpacity={0.85}
+                  onPress={() => router.replace('/requester/requestform')}
+                >
+                  <Text style={styles.addRequestText}>Add Request</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+
+            <ScrollView
+              contentContainerStyle={styles.scrollContent}
+              showsVerticalScrollIndicator={false}
             >
-              <Text
-                style={[
-                  styles.orderTabText,
-                  activeTab === HISTORY_TAB && styles.orderTabTextActive,
-                ]}
-              >
-                History
-              </Text>
-            </TouchableOpacity>
+              {ordersLoading ? (
+                <View style={styles.emptyRequestCard}>
+                  <ActivityIndicator color={BLUE} />
+                  <Text style={styles.emptyRequestText}>Loading orders...</Text>
+                </View>
+              ) : ordersError ? (
+                <View style={styles.emptyRequestCard}>
+                  <Text style={styles.emptyRequestTitle}>Orders unavailable</Text>
+                  <Text style={styles.emptyRequestText}>{ordersError}</Text>
+                  <TouchableOpacity style={styles.retryOrdersButton} onPress={retryOrders}>
+                    <Text style={styles.retryOrdersText}>Retry</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : displayedRequests.length === 0 ? (
+                <BlueTapEmptyState
+                  title={isActiveOrdersTab ? 'No Active Orders' : 'No Order History Yet'}
+                  description={
+                    isActiveOrdersTab
+                      ? 'Pending and ongoing water orders will appear here.'
+                      : 'Delivered and cancelled orders will appear here.'
+                  }
+                  actionLabel={isActiveOrdersTab ? 'Add Request' : undefined}
+                  onAction={isActiveOrdersTab ? () => router.replace('/requester/requestform') : undefined}
+                />
+              ) : (
+                displayedRequests.map((request) => (
+                  <RequestCard
+                    key={request.id}
+                    request={request}
+                    isHistory={!isActiveOrdersTab}
+                    isCancelling={cancellingRequestId === request.id}
+                    onCancel={confirmCancelRequest}
+                    onViewDetails={setSelectedRequest}
+                  />
+                ))
+              )}
+            </ScrollView>
+
+            <RequestDetailsModal
+              visible={!!selectedRequest}
+              onClose={() => setSelectedRequest(null)}
+              request={selectedDetailsRequest}
+            />
           </View>
-
-          {isActiveOrdersTab && (
-            <TouchableOpacity
-              style={styles.addRequestButton}
-              activeOpacity={0.85}
-              onPress={() => router.replace('/requester/requestform')}
-            >
-              <Text style={styles.addRequestText}>Add Request</Text>
-            </TouchableOpacity>
-          )}
-
-          {ordersLoading ? (
-            <View style={styles.emptyRequestCard}>
-              <ActivityIndicator color={BLUE} />
-              <Text style={styles.emptyRequestText}>Loading orders...</Text>
-            </View>
-          ) : ordersError ? (
-            <View style={styles.emptyRequestCard}>
-              <Text style={styles.emptyRequestTitle}>Orders unavailable</Text>
-              <Text style={styles.emptyRequestText}>{ordersError}</Text>
-              <TouchableOpacity style={styles.retryOrdersButton} onPress={retryOrders}>
-                <Text style={styles.retryOrdersText}>Retry</Text>
-              </TouchableOpacity>
-            </View>
-          ) : displayedRequests.length === 0 ? (
-            <View style={styles.emptyRequestCard}>
-              <Text style={styles.emptyRequestTitle}>
-                {isActiveOrdersTab
-                  ? 'No active orders.'
-                  : 'No order history yet.'}
-              </Text>
-              <Text style={styles.emptyRequestText}>
-                {isActiveOrdersTab
-                  ? 'Pending and ongoing water orders will appear here.'
-                  : 'Delivered and cancelled orders will appear here.'}
-              </Text>
-            </View>
-          ) : (
-            displayedRequests.map((request) => (
-              <RequestCard
-                key={request.id}
-                request={request}
-                isHistory={!isActiveOrdersTab}
-                isCancelling={cancellingRequestId === request.id}
-                onCancel={confirmCancelRequest}
-                onViewDetails={setSelectedRequest}
-              />
-            ))
-          )}
-          </ScrollView>
-
-          <RequestDetailsModal
-            visible={!!selectedRequest}
-            onClose={() => setSelectedRequest(null)}
-            request={selectedDetailsRequest}
-          />
-        </View>
+        </PortalSwipeContainer>
       </SafeAreaView>
     </LinearGradient>
   );
@@ -557,10 +561,15 @@ const styles = createPortalStyleSheet({
     alignSelf: 'center',
     flex: 1,
   },
+  fixedHeaderArea: {
+    paddingHorizontal: USER_PORTAL_LAYOUT.gutter,
+    paddingTop: 16,
+    paddingBottom: 4,
+  },
   scrollContent: {
     flexGrow: 1,
     paddingHorizontal: USER_PORTAL_LAYOUT.gutter,
-    paddingTop: 20,
+    paddingTop: 4,
     paddingBottom: USER_PORTAL_BOTTOM_CONTENT_INSET,
   },
   pageTitle: {

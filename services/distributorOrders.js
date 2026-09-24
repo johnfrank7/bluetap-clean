@@ -94,8 +94,8 @@ export function toDistributorScreenOrder(order = {}) {
     containerType: order.container || 'Not set',
     totalAmount,
     total_cost: totalAmount,
-    amountDue: `\u20B1${totalAmount.toFixed(2)}`,
-    amountPaid: `\u20B1${totalAmount.toFixed(2)}`,
+    amountDue: `₱${totalAmount.toFixed(2)}`,
+    amountPaid: `₱${totalAmount.toFixed(2)}`,
     deliveryDate,
     scheduledDateTime: formatDistributorOrderDate(order.scheduledAt || order.expectedDeliveryDate, 'Not set'),
     deliveredDateTime: formatDistributorOrderDate(order.deliveredAt || order.updatedAt, 'Not set'),
@@ -113,6 +113,10 @@ export function toDistributorScreenOrder(order = {}) {
     specialInstructions: order.notes || order.specialInstructions || '',
     deliveryLocation: order.deliveryLocation || null,
     scheduledAt: order.scheduledAt || null,
+    deliveredAt: order.deliveredAt || null,
+    rawScheduledAt: order.scheduledAt || order.expectedDeliveryDate || null,
+    rawDeliveredAt: order.deliveredAt || order.updatedAt || null,
+    rawCreatedAt: order.createdAt || null,
   };
 }
 

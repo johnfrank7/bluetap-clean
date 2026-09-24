@@ -4,6 +4,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { BLUETAP_COLORS, BLUETAP_LAYOUT } from '../../constants/bluetapTheme';
 import { createPortalStyleSheet, useBlueTapTheme } from '../../components/BlueTapTheme';
+import SoftStatusBadge from '../../components/SoftStatusBadge';
+import BlueTapEmptyState from '../../components/BlueTapEmptyState';
 import { USER_PORTAL_BOTTOM_CONTENT_INSET, USER_PORTAL_LAYOUT } from '../../constants/userPortalLayout';
 import {
   formatDistributorOrderDate,
@@ -19,6 +21,20 @@ const asDate = (value) =>
 const formatWhen = (value) => {
   const date = asDate(value);
   return date && !Number.isNaN(date.getTime()) ? date.toLocaleString() : 'Time unavailable';
+};
+
+const getNotificationTone = (statusRaw) => {
+  const s = String(statusRaw || '').toLowerCase().replace(/[\s-]+/g, '_');
+  if (['delivered', 'completed'].includes(s)) {
+    return { dot: '#10B981', border: 'rgba(16, 185, 129, 0.3)' }; // green
+  }
+  if (['delivery_failed', 'cancelled', 'canceled', 'declined'].includes(s)) {
+    return { dot: '#EF4444', border: 'rgba(239, 68, 68, 0.3)' }; // red
+  }
+  if (['out_for_delivery', 'scheduled', 'accepted'].includes(s)) {
+    return { dot: '#0284C7', border: 'rgba(2, 132, 199, 0.3)' }; // blue/cyan
+  }
+  return { dot: '#F59E0B', border: 'rgba(245, 158, 11, 0.3)' }; // amber
 };
 
 const messageFor = (order) => {
@@ -69,7 +85,7 @@ export default function DistributorNotification() {
     <SafeAreaView edges={['left', 'right', 'bottom']} style={styles.safe}>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <TouchableOpacity accessibilityRole="button" onPress={() => router.back()} style={styles.back}>
-          <Text style={styles.backText}>\u2039 Back</Text>
+          <Text style={styles.backText}>‹ Back</Text>
         </TouchableOpacity>
 
         <Text style={styles.eyebrow}>NOTIFICATION</Text>
@@ -79,7 +95,7 @@ export default function DistributorNotification() {
         {loading ? (
           <View style={styles.state}>
             <ActivityIndicator color={BLUETAP_COLORS.primary} />
-            <Text style={styles.stateText}>Loading delivery updates\u2026</Text>
+            <Text style={styles.stateText}>Loading delivery updates…</Text>
           </View>
         ) : error ? (
           <View style={styles.state}>
@@ -90,13 +106,12 @@ export default function DistributorNotification() {
             </TouchableOpacity>
           </View>
         ) : events.length === 0 ? (
-          <View style={styles.state}>
-            <Text style={styles.emptyTitle}>No assignment notifications yet</Text>
-            <Text style={styles.stateText}>Updates for deliveries assigned to you will appear here.</Text>
-            <TouchableOpacity onPress={() => router.replace('/distributor/d_requests')} style={styles.button}>
-              <Text style={styles.buttonText}>View Assigned Requests</Text>
-            </TouchableOpacity>
-          </View>
+          <BlueTapEmptyState
+            title="No Assignment Notifications Yet"
+            description="Updates for deliveries assigned to you will appear here."
+            actionLabel="View Assigned Requests"
+            onAction={() => router.replace('/distributor/d_requests')}
+          />
         ) : (
           <View style={styles.list}>
             {events.map((event) => {
@@ -104,18 +119,22 @@ export default function DistributorNotification() {
                 normalizeDistributorOrderStatus(event.status)
               );
               const destination = isPending ? '/distributor/d_requests' : '/distributor/d_scheduled_requests';
+              const tone = getNotificationTone(event.status);
               return (
                 <TouchableOpacity
                   key={event.id}
                   onPress={() => router.push(destination)}
-                  style={styles.card}
+                  style={[styles.card, { borderLeftWidth: 4, borderLeftColor: tone.dot }]}
                 >
-                  <View style={styles.dot} />
+                  <View style={[styles.dot, { backgroundColor: tone.dot }]} />
                   <View style={styles.cardBody}>
+                    <View style={styles.cardHeaderRow}>
+                      <SoftStatusBadge status={event.status} />
+                      <Text style={styles.time}>{formatWhen(event.when)}</Text>
+                    </View>
                     <Text style={styles.message}>{event.message}</Text>
-                    <Text style={styles.time}>{formatWhen(event.when)}</Text>
                   </View>
-                  <Text style={styles.chevron}>\u203A</Text>
+                  <Text style={styles.chevron}>›</Text>
                 </TouchableOpacity>
               );
             })}
@@ -192,6 +211,13 @@ const styles = createPortalStyleSheet({
   cardBody: {
     flex: 1,
     minWidth: 0,
+  },
+  cardHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+    marginBottom: 6,
   },
   message: {
     color: BLUETAP_COLORS.textPrimary,

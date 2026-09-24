@@ -6,15 +6,37 @@ import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from '../../firebase';
 import { BLUETAP_COLORS, BLUETAP_LAYOUT } from '../../constants/bluetapTheme';
 import { createPortalStyleSheet, useBlueTapTheme } from '../../components/BlueTapTheme';
+import SoftStatusBadge from '../../components/SoftStatusBadge';
+import BlueTapEmptyState from '../../components/BlueTapEmptyState';
+import RequestDetailsModal from '../../components/RequestDetailsModal';
 import { USER_PORTAL_BOTTOM_CONTENT_INSET, USER_PORTAL_LAYOUT } from '../../constants/userPortalLayout';
 import { normalizeRequesterOrderStatus, requesterOrderStatusLabel } from '../../constants/requesterOrderStatus';
 import { refreshRequesterRequests, subscribeRequesterRequests } from '../../services/requests';
 
-const asDate = (value) => value instanceof Date ? value : value?.toDate?.() || (value?.seconds ? new Date(value.seconds * 1000) : value ? new Date(value) : null);
+const asDate = (value) =>
+  value instanceof Date
+    ? value
+    : value?.toDate?.() || (value?.seconds ? new Date(value.seconds * 1000) : value ? new Date(value) : null);
+
 const formatWhen = (value) => {
   const date = asDate(value);
   return date && !Number.isNaN(date.getTime()) ? date.toLocaleString() : 'Time unavailable';
 };
+
+const getNotificationTone = (statusRaw) => {
+  const s = String(statusRaw || '').toLowerCase().replace(/[\s-]+/g, '_');
+  if (['delivered', 'completed'].includes(s)) {
+    return { dot: '#10B981', border: 'rgba(16, 185, 129, 0.3)' }; // green
+  }
+  if (['delivery_failed', 'cancelled', 'canceled', 'declined', 'declined_outside_service_area'].includes(s)) {
+    return { dot: '#EF4444', border: 'rgba(239, 68, 68, 0.3)' }; // red
+  }
+  if (['out_for_delivery', 'scheduled', 'accepted'].includes(s)) {
+    return { dot: '#0284C7', border: 'rgba(2, 132, 199, 0.3)' }; // blue/cyan
+  }
+  return { dot: '#F59E0B', border: 'rgba(245, 158, 11, 0.3)' }; // amber
+};
+
 const messageFor = (order) => {
   const id = order.request_id || order.requestId || order.id;
   const provider = order.branchNameSnapshot || order.water_station || 'your provider';
@@ -36,30 +58,244 @@ export default function RequesterNotification() {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [selectedOrder, setSelectedOrder] = useState(null);
+
   useEffect(() => {
     let unsubscribeOrders = () => {};
     const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
       unsubscribeOrders();
       setOrders([]);
       setError('');
-      if (!user?.uid) { setLoading(false); setError('Requester authentication is required.'); return; }
+      if (!user?.uid) {
+        setLoading(false);
+        setError('Requester authentication is required.');
+        return;
+      }
       setLoading(true);
-      unsubscribeOrders = subscribeRequesterRequests(user.uid, (next) => { setOrders(next); setLoading(false); }, (nextError) => { setError(nextError.message); setLoading(false); });
+      unsubscribeOrders = subscribeRequesterRequests(
+        user.uid,
+        (next) => {
+          setOrders(next);
+          setLoading(false);
+        },
+        (nextError) => {
+          setError(nextError.message);
+          setLoading(false);
+        }
+      );
     });
-    return () => { unsubscribeAuth(); unsubscribeOrders(); };
+    return () => {
+      unsubscribeAuth();
+      unsubscribeOrders();
+    };
   }, []);
-  const retry = () => { const uid = auth.currentUser?.uid; if (!uid) return; setError(''); setLoading(true); refreshRequesterRequests(uid); };
-  const events = useMemo(() => orders.map((order) => ({ ...order, when: order.updated_at || order.updatedAt || order.created_at || order.createdAt })), [orders]);
-  return <SafeAreaView edges={['left','right','bottom']} style={styles.safe}>
-    <ScrollView contentContainerStyle={styles.content}>
-      <TouchableOpacity accessibilityRole="button" onPress={() => router.back()} style={styles.back}><Text style={styles.backText}>‹ Back</Text></TouchableOpacity>
-      <Text style={styles.eyebrow}>REQUESTER</Text><Text style={styles.title}>Notifications</Text><Text style={styles.subtitle}>Updates generated from your real BlueTap orders.</Text>
-      {loading ? <View style={styles.state}><ActivityIndicator color={BLUETAP_COLORS.primary}/><Text style={styles.stateText}>Loading updates…</Text></View>
-        : error ? <View style={styles.state}><Text style={styles.error}>Notifications unavailable</Text><Text style={styles.stateText}>{error}</Text><TouchableOpacity onPress={retry} style={styles.button}><Text style={styles.buttonText}>Retry</Text></TouchableOpacity></View>
-        : events.length === 0 ? <View style={styles.state}><Text style={styles.emptyTitle}>No notifications yet</Text><Text style={styles.stateText}>Order status updates will appear here.</Text><TouchableOpacity onPress={() => router.push('/requester/requestform')} style={styles.button}><Text style={styles.buttonText}>Place an order</Text></TouchableOpacity></View>
-        : <View style={styles.list}>{events.map((event) => <TouchableOpacity key={event.id} onPress={() => router.push('/requester/r_request')} style={styles.card}><View style={styles.dot}/><View style={styles.cardBody}><Text style={styles.message}>{messageFor(event)}</Text><Text style={styles.time}>{formatWhen(event.when)}</Text></View><Text style={styles.chevron}>›</Text></TouchableOpacity>)}</View>}
-    </ScrollView>
-  </SafeAreaView>;
+
+  const retry = () => {
+    const uid = auth.currentUser?.uid;
+    if (!uid) return;
+    setError('');
+    setLoading(true);
+    refreshRequesterRequests(uid);
+  };
+
+  const events = useMemo(
+    () =>
+      orders.map((order) => ({
+        ...order,
+        when: order.updated_at || order.updatedAt || order.created_at || order.createdAt,
+      })),
+    [orders]
+  );
+
+  return (
+    <SafeAreaView edges={['left', 'right', 'bottom']} style={styles.safe}>
+      <ScrollView contentContainerStyle={styles.content}>
+        <TouchableOpacity accessibilityRole="button" onPress={() => router.back()} style={styles.back}>
+          <Text style={styles.backText}>‹ Back</Text>
+        </TouchableOpacity>
+        <Text style={styles.eyebrow}>REQUESTER</Text>
+        <Text style={styles.title}>Notifications</Text>
+        <Text style={styles.subtitle}>Updates generated from your real BlueTap orders.</Text>
+
+        {loading ? (
+          <View style={styles.state}>
+            <ActivityIndicator color={BLUETAP_COLORS.primary} />
+            <Text style={styles.stateText}>Loading updates…</Text>
+          </View>
+        ) : error ? (
+          <View style={styles.state}>
+            <Text style={styles.error}>Notifications unavailable</Text>
+            <Text style={styles.stateText}>{error}</Text>
+            <TouchableOpacity onPress={retry} style={styles.button}>
+              <Text style={styles.buttonText}>Retry</Text>
+            </TouchableOpacity>
+          </View>
+        ) : events.length === 0 ? (
+          <BlueTapEmptyState
+            title="No Notifications Yet"
+            description="Order status updates will appear here."
+            actionLabel="Place an Order"
+            onAction={() => router.push('/requester/requestform')}
+          />
+        ) : (
+          <View style={styles.list}>
+            {events.map((event) => {
+              const tone = getNotificationTone(event.status);
+              return (
+                <TouchableOpacity
+                  key={event.id}
+                  onPress={() => {
+                    if (event.id) {
+                      setSelectedOrder(event);
+                    } else {
+                      // Graceful fallback: no order data resolvable
+                      router.push('/requester/r_request');
+                    }
+                  }}
+                  style={[styles.card, { borderLeftWidth: 4, borderLeftColor: tone.dot }]}
+                >
+                  <View style={[styles.dot, { backgroundColor: tone.dot }]} />
+                  <View style={styles.cardBody}>
+                    <View style={styles.cardHeaderRow}>
+                      <SoftStatusBadge status={event.status} />
+                      <Text style={styles.time}>{formatWhen(event.when)}</Text>
+                    </View>
+                    <Text style={styles.message}>{messageFor(event)}</Text>
+                  </View>
+                  <Text style={styles.chevron}>›</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        )}
+      </ScrollView>
+      <RequestDetailsModal
+        visible={selectedOrder !== null}
+        onClose={() => setSelectedOrder(null)}
+        request={selectedOrder}
+      />
+    </SafeAreaView>
+  );
 }
 
-const styles = createPortalStyleSheet({safe:{flex:1,minWidth:0,backgroundColor:BLUETAP_COLORS.background},content:{width:'100%',maxWidth:USER_PORTAL_LAYOUT.maxWidth,minWidth:0,alignSelf:'center',paddingHorizontal:USER_PORTAL_LAYOUT.gutter,paddingTop:20,paddingBottom:USER_PORTAL_BOTTOM_CONTENT_INSET},back:{alignSelf:'flex-start',paddingVertical:8,marginBottom:10},backText:{color:BLUETAP_COLORS.primary,fontWeight:'900'},eyebrow:{color:BLUETAP_COLORS.primary,fontSize:11,fontWeight:'900',letterSpacing:1},title:{color:BLUETAP_COLORS.textPrimary,fontSize:28,fontWeight:'900',marginTop:5},subtitle:{color:BLUETAP_COLORS.textSecondary,fontSize:14,lineHeight:20,marginTop:6,marginBottom:20},list:{gap:10},card:{flexDirection:'row',alignItems:'center',gap:12,backgroundColor:BLUETAP_COLORS.surface,borderWidth:1,borderColor:BLUETAP_COLORS.border,borderRadius:BLUETAP_LAYOUT.radius.lg,padding:16,...BLUETAP_LAYOUT.shadow},dot:{width:10,height:10,borderRadius:5,backgroundColor:BLUETAP_COLORS.primary},cardBody:{flex:1,minWidth:0},message:{color:BLUETAP_COLORS.textPrimary,fontSize:14,lineHeight:20,fontWeight:'700'},time:{color:BLUETAP_COLORS.muted,fontSize:11,marginTop:6},chevron:{color:BLUETAP_COLORS.primary,fontSize:24},state:{minHeight:220,alignItems:'center',justifyContent:'center',backgroundColor:BLUETAP_COLORS.surface,borderWidth:1,borderColor:BLUETAP_COLORS.border,borderRadius:BLUETAP_LAYOUT.radius.lg,padding:24},stateText:{color:BLUETAP_COLORS.textSecondary,fontSize:13,lineHeight:19,textAlign:'center',marginTop:8},emptyTitle:{color:BLUETAP_COLORS.textPrimary,fontSize:17,fontWeight:'900'},error:{color:BLUETAP_COLORS.danger,fontSize:16,fontWeight:'900'},button:{backgroundColor:BLUETAP_COLORS.primary,borderRadius:10,paddingHorizontal:16,paddingVertical:12,marginTop:16},buttonText:{color:'#FFF',fontWeight:'900'}});
+const styles = createPortalStyleSheet({
+  safe: {
+    flex: 1,
+    minWidth: 0,
+    backgroundColor: BLUETAP_COLORS.background,
+  },
+  content: {
+    width: '100%',
+    maxWidth: USER_PORTAL_LAYOUT.maxWidth,
+    minWidth: 0,
+    alignSelf: 'center',
+    paddingHorizontal: USER_PORTAL_LAYOUT.gutter,
+    paddingTop: 20,
+    paddingBottom: USER_PORTAL_BOTTOM_CONTENT_INSET,
+  },
+  back: {
+    alignSelf: 'flex-start',
+    paddingVertical: 8,
+    marginBottom: 10,
+  },
+  backText: {
+    color: BLUETAP_COLORS.primary,
+    fontWeight: '900',
+  },
+  eyebrow: {
+    color: BLUETAP_COLORS.primary,
+    fontSize: 11,
+    fontWeight: '900',
+    letterSpacing: 1,
+  },
+  title: {
+    color: BLUETAP_COLORS.textPrimary,
+    fontSize: 28,
+    fontWeight: '900',
+    marginTop: 5,
+  },
+  subtitle: {
+    color: BLUETAP_COLORS.textSecondary,
+    fontSize: 14,
+    lineHeight: 20,
+    marginTop: 6,
+    marginBottom: 20,
+  },
+  list: {
+    gap: 12,
+  },
+  card: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: BLUETAP_COLORS.surface,
+    borderWidth: 1,
+    borderColor: BLUETAP_COLORS.border,
+    borderRadius: BLUETAP_LAYOUT.radius.lg,
+    padding: 16,
+    ...BLUETAP_LAYOUT.shadow,
+  },
+  cardHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+    marginBottom: 6,
+  },
+  dot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  cardBody: {
+    flex: 1,
+    minWidth: 0,
+  },
+  message: {
+    color: BLUETAP_COLORS.textPrimary,
+    fontSize: 14,
+    lineHeight: 20,
+    fontWeight: '700',
+  },
+  time: {
+    color: BLUETAP_COLORS.muted,
+    fontSize: 11,
+  },
+  chevron: {
+    color: BLUETAP_COLORS.primary,
+    fontSize: 24,
+  },
+  state: {
+    minHeight: 220,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: BLUETAP_COLORS.surface,
+    borderWidth: 1,
+    borderColor: BLUETAP_COLORS.border,
+    borderRadius: BLUETAP_LAYOUT.radius.lg,
+    padding: 24,
+  },
+  stateText: {
+    color: BLUETAP_COLORS.textSecondary,
+    fontSize: 13,
+    lineHeight: 19,
+    textAlign: 'center',
+    marginTop: 8,
+  },
+  error: {
+    color: BLUETAP_COLORS.danger,
+    fontSize: 16,
+    fontWeight: '900',
+  },
+  button: {
+    backgroundColor: BLUETAP_COLORS.primary,
+    borderRadius: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    marginTop: 16,
+  },
+  buttonText: {
+    color: '#FFF',
+    fontWeight: '900',
+  },
+});

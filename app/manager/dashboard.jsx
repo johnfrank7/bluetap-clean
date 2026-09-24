@@ -9,7 +9,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { collection, onSnapshot, query, where } from 'firebase/firestore';
+import { collection, doc, onSnapshot, query, where } from 'firebase/firestore';
 
 import { db } from '../../firebase';
 import { getLocalUsers, subscribeLocalUsers } from '../../localUsers';
@@ -63,7 +63,6 @@ const getRegisteredLocalDistributors = (firestoreDistributors = [], branchId = '
         )
     );
 
-const defaultStations = ['aquabea', 'bluetap'];
 const BLUE_DARK = '#0D47A1';
 const BLUE = '#187BCD';
 const BLUE_MID = '#42A5F5';
@@ -71,15 +70,35 @@ const BLUE_LIGHT = '#E3F2FD';
 const LINE_THICKNESS = 3;
 const BARANGAY_DONUT_LIMIT = 8;
 
-const getRequestQuantity = (request) => {
-  if (Array.isArray(request.items) && request.items.length > 0) {
-    return request.items.reduce(
-      (sum, item) => sum + Number(item.quantity || 0),
-      0
-    );
-  }
+const getDeliveredOrderStats = (requests = []) => {
+  let unitsSold = 0;
+  let snapshotRevenue = 0;
 
-  return Number(request.quantity || 0);
+  requests.forEach((req) => {
+    const status = String(req.status || '').toLowerCase().replace(/[\s-]+/g, '_');
+    if (status !== 'delivered') return;
+
+    if (Array.isArray(req.items) && req.items.length > 0) {
+      req.items.forEach((item) => {
+        const qty = Number(item.quantity || 0);
+        const subtotal = Number(
+          item.line_total ??
+          item.subtotal ??
+          item.totalAtOrder ??
+          (Number(item.unitPriceAtOrder ?? item.product_price ?? item.price ?? 0) * qty)
+        );
+        unitsSold += Number.isFinite(qty) ? qty : 0;
+        snapshotRevenue += Number.isFinite(subtotal) ? subtotal : 0;
+      });
+    } else {
+      const qty = Number(req.quantity || 0);
+      const total = Number(req.totalAtOrder ?? req.total_amount ?? req.totalAmount ?? req.total_cost ?? 0);
+      unitsSold += Number.isFinite(qty) ? qty : 0;
+      snapshotRevenue += Number.isFinite(total) ? total : 0;
+    }
+  });
+
+  return { unitsSold, snapshotRevenue };
 };
 
 const mergeByIdentity = (items) => {
@@ -425,7 +444,7 @@ const TrendPanel = ({
 
   return (
     <PanelSurface progress={panelProgress} style={styles.trendPanel}>
-      <Text style={styles.panelTitle}>Product sales trend (gallons ordered)</Text>
+      <Text style={styles.panelTitle}>Product sales trend (units ordered)</Text>
       <View style={styles.lineChartWrap}>
         <View style={styles.yAxis}>
           {ticks.map((tick, index) => (
@@ -735,51 +754,44 @@ const BarangayPanel = ({ progress, rows }) => {
   );
 };
 
-const StationsPanel = ({ progress, stations }) => {
-  const stationRows = stations.map((station, index) => ({
-    id: station,
-    name: `Station ${String.fromCharCode(65 + index)} - ${station}`,
-    gallons:
-      index === 0 ? '5,200 gal sold' : index === 1 ? '3,230 gal sold' : '0 gal sold',
-    active: index < stations.length,
-  }));
+const StationsPanel = ({ progress, station }) => {
+  const stationName = station?.name || 'Assigned Branch';
+  const unitsSold = station?.unitsSold || 0;
+  const snapshotRevenue = station?.snapshotRevenue || 0;
+  const isActive = station?.status !== 'inactive' && station?.status !== 'disabled';
+  const translateX = progress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [16, 0],
+  });
 
   return (
     <PanelSurface progress={progress} style={styles.stationsPanel}>
-      <Text style={styles.panelTitle}>Stations</Text>
+      <Text style={styles.panelTitle}>Branch Station</Text>
       <View style={styles.stationList}>
-        {stationRows.map((station, index) => {
-          const translateX = progress.interpolate({
-            inputRange: [0, 1],
-            outputRange: [16, 0],
-          });
-
-          return (
-            <Animated.View
-              key={station.id}
-              style={[
-                styles.stationRow,
-                {
-                  opacity: progress,
-                  transform: [{ translateX }],
-                },
-              ]}
-            >
-              <ManagerWaterDrop
-                color={index % 2 === 0 ? BLUE : BLUE_MID}
-                outline={!station.active}
-                size={28}
-              />
-              <View style={styles.stationTextBlock}>
-                <Text style={styles.stationName}>{station.name}</Text>
-                <Text style={styles.stationSales}>{station.gallons}</Text>
-              </View>
-              <ManagerPill tone={station.active ? 'green' : 'red'}>
-                {station.active ? 'Active' : 'Offline'}
-              </ManagerPill>
-            </Animated.View>
-          );
-        })}
+        <Animated.View
+          style={[
+            styles.stationRow,
+            {
+              opacity: progress,
+              transform: [{ translateX }],
+            },
+          ]}
+        >
+          <ManagerWaterDrop
+            color={BLUE}
+            outline={!isActive}
+            size={28}
+          />
+          <View style={styles.stationTextBlock}>
+            <Text style={styles.stationName}>{stationName}</Text>
+            <Text style={styles.stationSales}>
+              {formatManagerNumber(unitsSold)} Units Sold · ₱{Number(snapshotRevenue).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} Revenue
+            </Text>
+          </View>
+          <ManagerPill tone={isActive ? 'green' : 'red'}>
+            {isActive ? 'Active' : 'Offline'}
+          </ManagerPill>
+        </Animated.View>
       </View>
     </PanelSurface>
   );
@@ -792,12 +804,13 @@ export default function ManagerDashboard() {
   const [allUsers, setAllUsers] = useState([]);
   const [search, setSearch] = useState('');
   const [accountsTab, setAccountsTab] = useState('distributors');
+  const [branchData, setBranchData] = useState(null);
   const [dashboardStats, setDashboardStats] = useState({
     registeredUsers: 0,
     registeredDistributors: 0,
     registeredRequesters: 0,
     productSales: 0,
-    stations: defaultStations.length,
+    stations: 1,
   });
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
@@ -884,6 +897,7 @@ export default function ManagerDashboard() {
   useEffect(() => {
     let firestoreUsers = [];
     let firestoreRequests = [];
+    let branchInfo = null;
     let usersReady = false;
     let requestsReady = false;
 
@@ -902,7 +916,6 @@ export default function ManagerDashboard() {
         ...firestoreRequests,
         ...localRequests.filter((item) => !requestIds.has(item.id)),
       ];
-      const stationNames = new Set(defaultStations);
       const registeredRequesters = mergedUsers.filter(
         (user) => normalizeRole(user.role) === 'requester'
       ).length;
@@ -910,27 +923,43 @@ export default function ManagerDashboard() {
         (user) => normalizeRole(user.role) === 'distributor'
       ).length;
 
-      allRequests.forEach((request) => {
-        if (request.water_station) {
-          stationNames.add(String(request.water_station).trim().toLowerCase());
-        }
-      });
+      const { unitsSold, snapshotRevenue } = getDeliveredOrderStats(allRequests);
 
       setAllUsers(mergedUsers);
       setDashboardStats({
         registeredUsers: mergedUsers.length,
         registeredDistributors: registeredDistributorCount,
         registeredRequesters,
-        productSales: allRequests.reduce(
-          (sum, request) => sum + getRequestQuantity(request),
-          0
-        ),
-        stations: stationNames.size,
+        productSales: unitsSold,
+        stations: 1,
+      });
+      setBranchData({
+        name: branchInfo?.name || branchInfo?.branchName || (branchId ? `Branch ${branchId}` : 'Assigned Branch'),
+        status: branchInfo?.status || 'active',
+        unitsSold,
+        snapshotRevenue,
       });
       setStatsReady(true);
     };
 
     const unsubscribeLocalUsers = subscribeLocalUsers(refreshDashboardStats);
+
+    let unsubscribeBranch = () => {};
+    if (branchId) {
+      unsubscribeBranch = onSnapshot(
+        doc(db, 'branches', branchId),
+        (snap) => {
+          if (snap.exists()) {
+            branchInfo = { id: snap.id, ...snap.data() };
+          }
+          refreshDashboardStats();
+        },
+        (error) => {
+          console.log('Dashboard branch metric error:', error.message);
+          refreshDashboardStats();
+        }
+      );
+    }
 
     const unsubscribeUsers = onSnapshot(
       query(collection(db, 'users'), where('branchId', '==', branchId)),
@@ -970,6 +999,7 @@ export default function ManagerDashboard() {
     return () => {
       unsubscribeUsers();
       unsubscribeRequests();
+      unsubscribeBranch();
       unsubscribeLocalUsers();
     };
   }, [branchId]);
@@ -1127,9 +1157,9 @@ export default function ManagerDashboard() {
           reducedMotion={reducedMotion}
         />
         <MetricCard
-          label="PRODUCT SALES (GALLONS)"
+          label="PRODUCT SALES (UNITS)"
           value={dashboardStats.productSales}
-          helper="+22% vs last month"
+          helper="Total units delivered"
           accent={BLUE}
           delay={360}
           enabled={statsReady}
@@ -1138,8 +1168,8 @@ export default function ManagerDashboard() {
         />
         <MetricCard
           label="STATIONS ONLINE"
-          value={`${dashboardStats.stations} / ${dashboardStats.stations}`}
-          helper="All stations active"
+          value="1 / 1"
+          helper="Branch operational"
           accent={BLUE_MID}
           delay={480}
           enabled={statsReady}
@@ -1169,7 +1199,7 @@ export default function ManagerDashboard() {
         />
         <StationsPanel
           progress={stationProgress}
-          stations={Array.from(new Set(defaultStations))}
+          station={branchData}
         />
       </View>
 

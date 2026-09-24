@@ -101,11 +101,11 @@ test('Manager context uses the current token after privileged validation', () =>
   assert.doesNotMatch(managerAccess, /getIdToken\(true\)/);
 });
 
-test('Admin routes use one canonical dashboard and never redirect into Manager analytics', () => {
+test('Admin routes use AdminShell and never redirect into Manager analytics', () => {
   const root = resolve(__dirname, '..', '..', '..');
   const analytics = readFileSync(resolve(root, 'app/admin/analytics.jsx'), 'utf8');
   const authSession = readFileSync(resolve(root, 'services/authSession.js'), 'utf8');
-  assert.match(analytics, /Redirect href="\/admin\/dashboard"/);
+  assert.match(analytics, /AdminShell/);
   assert.doesNotMatch(analytics, /\/manager\/analytics/);
   assert.match(authSession, /admin: '\/admin\/dashboard'/);
 });

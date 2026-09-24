@@ -23,6 +23,8 @@ import RequestDetailsModal from '../../components/RequestDetailsModal';
 import SoftStatusBadge from '../../components/SoftStatusBadge';
 import { createShadow } from '../../components/shadowStyles';
 import ProductCard from '../../components/ProductCard';
+import BlueTapEmptyState from '../../components/BlueTapEmptyState';
+import PortalSwipeContainer, { REQUESTER_TABS } from '../../components/PortalSwipeContainer';
 import { createPortalStyleSheet, useBlueTapTheme } from '../../components/BlueTapTheme';
 import { USER_PORTAL_BOTTOM_CONTENT_INSET, USER_PORTAL_LAYOUT } from '../../constants/userPortalLayout';
 import { BLUETAP_COLORS } from '../../constants/bluetapTheme';
@@ -37,13 +39,13 @@ import {
 const REQUESTER_APP_MAX_WIDTH = USER_PORTAL_LAYOUT.maxWidth;
 const DASHBOARD_HORIZONTAL_PADDING = USER_PORTAL_LAYOUT.gutter;
 const PRODUCT_CARD_WIDTH_RATIO = 0.88;
-const PRODUCT_CAROUSEL_HEIGHT = 290;
+const PRODUCT_CAROUSEL_HEIGHT = 325;
 const BLUE = BLUETAP_COLORS.primary;
 const BLUE_LIGHT = BLUETAP_COLORS.primarySoft;
 const CARD_BORDER = BLUETAP_COLORS.border;
 const TEXT_MUTED = BLUETAP_COLORS.textSecondary;
 const TEXT_DARK = BLUETAP_COLORS.textPrimary;
-const formatPrice = (price) => `\u20B1${Number(price || 0).toFixed(2)}`;
+const formatPrice = (price) => `₱${Number(price || 0).toFixed(2)}`;
 const formatDashboardDate = (date) =>
   new Intl.DateTimeFormat('en-US', {
     weekday: 'long',
@@ -255,6 +257,22 @@ const isUnavailableStock = (stockText) =>
   stockText.toLowerCase().includes('out') ||
   stockText.toLowerCase().includes('unavailable');
 
+function TypewriterGreeting({ text, style }) {
+  const [displayed, setDisplayed] = useState('');
+  useEffect(() => {
+    let i = 0;
+    setDisplayed('');
+    const timer = setInterval(() => {
+      i++;
+      setDisplayed(text.slice(0, i));
+      if (i >= text.length) clearInterval(timer);
+    }, 35);
+    return () => clearInterval(timer);
+  }, [text]);
+
+  return <Text style={style}>{displayed || text}</Text>;
+}
+
 export default function RequesterDashboard() {
   const { colors, isDark } = useBlueTapTheme();
   const router = useRouter(); 
@@ -265,6 +283,7 @@ export default function RequesterDashboard() {
   const [productsLoading, setProductsLoading] = useState(true);
   const [productsError, setProductsError] = useState('');
   const [activeProductIndex, setActiveProductIndex] = useState(0);
+  const [viewAllModalVisible, setViewAllModalVisible] = useState(false);
   const [currentRequests, setCurrentRequests] = useState([]);
   const [currentRequestsLoading, setCurrentRequestsLoading] = useState(true);
   const [currentRequestsError, setCurrentRequestsError] = useState('');
@@ -525,6 +544,7 @@ export default function RequesterDashboard() {
       <SafeAreaView edges={['left', 'right', 'bottom']} style={styles.container}>
         <StatusBar style="light" />
 
+        <PortalSwipeContainer tabs={REQUESTER_TABS} currentRoute="/requester/r_dashboard">
         <View style={styles.phoneWrapper}>
           <ScrollView
             contentContainerStyle={styles.scrollContent}
@@ -533,9 +553,10 @@ export default function RequesterDashboard() {
 
             <View style={styles.welcomeSection}>
               <Text style={styles.welcomeText}>WELCOME!</Text>
-              <Text style={styles.greetingText}>
-                Good Morning, {requesterName}
-              </Text>
+              <TypewriterGreeting
+                text={`Good Morning, ${requesterName}`}
+                style={styles.greetingText}
+              />
               <Text style={styles.dateText}>{todayText}</Text>
             </View>
 
@@ -559,6 +580,8 @@ export default function RequesterDashboard() {
                     ref={productCarouselRef}
                     data={products}
                     loop={products.length > 1}
+                    autoPlay={products.length > 1}
+                    autoPlayInterval={4000}
                     style={[
                       styles.productCarousel,
                       {
@@ -595,6 +618,18 @@ export default function RequesterDashboard() {
                       />
                     ))}
                   </View>
+
+                  <View style={styles.viewAllProductsRow}>
+                    <TouchableOpacity
+                      accessibilityRole="button"
+                      accessibilityLabel="View All Products"
+                      onPress={() => setViewAllModalVisible(true)}
+                      style={styles.viewAllProductsBtn}
+                      activeOpacity={0.8}
+                    >
+                      <Text style={styles.viewAllProductsText}>View All Products ({products.length})</Text>
+                    </TouchableOpacity>
+                  </View>
                 </>
               )}
             </View>
@@ -616,12 +651,13 @@ export default function RequesterDashboard() {
                   </TouchableOpacity>
                 </View>
               ) : currentRequests.length === 0 ? (
-                <View style={styles.emptyRequestCard}>
-                  <Text style={styles.emptyRequestTitle}>No current request.</Text>
-                  <Text style={styles.emptyRequestText}>
-                    Your active orders will appear here once you place a request.
-                  </Text>
-                </View>
+                <BlueTapEmptyState
+                  title="No Current Request"
+                  description="Your active orders will appear here once you place a request."
+                  actionLabel="Place an Order"
+                  onAction={() => router.push('/requester/requestform')}
+                  compact
+                />
               ) : (
                 currentRequests.slice(0, 1).map((request, index) => {
                   const isRequestPending = isPendingRequest(request);
@@ -717,6 +753,7 @@ export default function RequesterDashboard() {
           </ScrollView>
 
         </View>
+        </PortalSwipeContainer>
 
         <Modal visible={!!requestToCancel} transparent animationType="fade">
           <View style={styles.modalBackground}>
@@ -770,6 +807,50 @@ export default function RequesterDashboard() {
               >
                 <Text style={styles.modalPrimaryButtonText}>OK</Text>
               </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+
+        <Modal
+          visible={viewAllModalVisible}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setViewAllModalVisible(false)}
+        >
+          <View style={styles.allProductsModalBackdrop}>
+            <View style={styles.allProductsModalCard}>
+              <View style={styles.allProductsModalHeader}>
+                <View>
+                  <Text style={styles.allProductsModalTitle}>All Products</Text>
+                  <Text style={styles.allProductsModalSubtitle}>Available branch catalog</Text>
+                </View>
+                <TouchableOpacity
+                  accessibilityRole="button"
+                  accessibilityLabel="Close"
+                  onPress={() => setViewAllModalVisible(false)}
+                  style={styles.allProductsCloseBtn}
+                >
+                  <Text style={styles.allProductsCloseText}>×</Text>
+                </TouchableOpacity>
+              </View>
+
+              <ScrollView style={styles.allProductsList} showsVerticalScrollIndicator={false}>
+                {products.map((item) => (
+                  <View key={item.id} style={styles.allProductsItemWrapper}>
+                    <ProductCard
+                      product={item}
+                      compact={false}
+                      onOrder={(prod) => {
+                        setViewAllModalVisible(false);
+                        router.push({
+                          pathname: '/requester/requestform',
+                          params: { productId: prod.id },
+                        });
+                      }}
+                    />
+                  </View>
+                ))}
+              </ScrollView>
             </View>
           </View>
         </Modal>
@@ -833,6 +914,8 @@ const styles = createPortalStyleSheet({
     height: '100%',
     paddingHorizontal: 6,
     paddingVertical: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   productStateCard: {
     minHeight: 146,
@@ -1191,5 +1274,85 @@ const styles = createPortalStyleSheet({
   },
   modalButtonDisabled: {
     opacity: 0.7,
+  },
+  viewAllProductsRow: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 10,
+  },
+  viewAllProductsBtn: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.22)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.45)',
+  },
+  viewAllProductsText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  allProductsModalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.65)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 16,
+  },
+  allProductsModalCard: {
+    width: '100%',
+    maxWidth: 420,
+    maxHeight: '80%',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 20,
+    ...createShadow({
+      color: '#000',
+      elevation: 10,
+      opacity: 0.2,
+      radius: 16,
+      offset: { width: 0, height: 8 },
+    }),
+  },
+  allProductsModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E2E8F0',
+  },
+  allProductsModalTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#0F172A',
+  },
+  allProductsModalSubtitle: {
+    fontSize: 12,
+    color: '#64748B',
+    marginTop: 2,
+  },
+  allProductsCloseBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#F1F5F9',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  allProductsCloseText: {
+    fontSize: 20,
+    color: '#475569',
+    lineHeight: 22,
+    fontWeight: '700',
+  },
+  allProductsList: {
+    paddingBottom: 16,
+    gap: 16,
+  },
+  allProductsItemWrapper: {
+    alignItems: 'center',
   },
 });

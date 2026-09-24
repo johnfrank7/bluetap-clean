@@ -79,6 +79,12 @@ export default function ManagerProfilePage() {
 
         <View style={styles.detailGrid}>
           <View style={styles.detailBox}>
+            <Text style={styles.detailLabel}>Unique ID</Text>
+            <Text style={styles.detailValue} numberOfLines={1}>
+              {clean(workspaceManager?.uid || session?.uid, loading ? '—' : 'Not set')}
+            </Text>
+          </View>
+          <View style={styles.detailBox}>
             <Text style={styles.detailLabel}>Email</Text>
             <Text style={styles.detailValue} numberOfLines={1}>
               {managerEmail || (loading ? '—' : 'Not set')}

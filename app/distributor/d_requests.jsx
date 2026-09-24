@@ -8,6 +8,7 @@ import React, {
 } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Animated,
   Easing,
   FlatList,
@@ -26,6 +27,9 @@ import BlueTapHeader from '../../components/BlueTapHeader';
 import RequestDetailsModal from '../../components/RequestDetailsModal';
 import SoftStatusBadge from '../../components/SoftStatusBadge';
 import { createShadow } from '../../components/shadowStyles';
+import BlueTapEmptyState from '../../components/BlueTapEmptyState';
+import DistributorProfileBanner from '../../components/DistributorProfileBanner';
+import PortalSwipeContainer, { DISTRIBUTOR_TABS } from '../../components/PortalSwipeContainer';
 import { createPortalStyleSheet, useBlueTapTheme } from '../../components/BlueTapTheme';
 import { USER_PORTAL_BOTTOM_CONTENT_INSET, USER_PORTAL_LAYOUT } from '../../constants/userPortalLayout';
 import { BLUETAP_COLORS } from '../../constants/bluetapTheme';
@@ -37,6 +41,7 @@ import {
   updateAssignedDistributorOrder,
   useAssignedDistributorOrders,
 } from '../../services/distributorOrders';
+import { useDistributorProfile } from '../../services/distributorProfile';
 
 const BLUE = BLUETAP_COLORS.primary;
 const BLUE_LIGHT = BLUETAP_COLORS.primarySoft;
@@ -382,8 +387,20 @@ export default function DistributorRequests() {
   const [declineReason, setDeclineReason] = useState('');
   const [declining, setDeclining] = useState(false);
   const [declineError, setDeclineError] = useState('');
+  const { isComplete, loading: profileLoading } = useDistributorProfile();
 
   const handleAcceptAssignment = useCallback(async (request) => {
+    if (!isComplete) {
+      Alert.alert(
+        'Profile Incomplete',
+        'Please complete your distributor profile before accepting deliveries.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Complete Profile', onPress: () => router.push('/distributor/d_profile') },
+        ]
+      );
+      return;
+    }
     if (processingRequestId) return;
     setProcessingRequestId(request.sourceId);
     try {
@@ -395,13 +412,24 @@ export default function DistributorRequests() {
     } finally {
       setProcessingRequestId('');
     }
-  }, [processingRequestId, refresh, showSuccessFeedback]);
+  }, [isComplete, processingRequestId, refresh, router, showSuccessFeedback]);
 
   const handleDeclineRequest = useCallback((request) => {
+    if (!isComplete) {
+      Alert.alert(
+        'Profile Incomplete',
+        'Please complete your distributor profile before managing deliveries.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Complete Profile', onPress: () => router.push('/distributor/d_profile') },
+        ]
+      );
+      return;
+    }
     setDeclineTargetRequest(request);
     setDeclineReason('');
     setDeclineError('');
-  }, []);
+  }, [isComplete, router]);
 
   const confirmDecline = useCallback(async () => {
     if (!declineTargetRequest || declining) return;
@@ -665,23 +693,46 @@ export default function DistributorRequests() {
     <SafeAreaView edges={['left', 'right', 'bottom']} style={styles.container}>
       <BlueTapHeader notificationPath="/distributor/d_notification" />
 
-      <View style={styles.phoneWrapper}>
-        <FlatList
-          data={pendingRequests}
-          keyExtractor={keyExtractor}
-          renderItem={renderRequest}
-          showsVerticalScrollIndicator={false}
-          contentContainerStyle={styles.listContent}
-          ListHeaderComponent={
-            <View style={styles.pageHeader}>
-              <Text style={styles.pageTitle}>REQUESTS</Text>
-              <Text style={styles.subtitle}>Pending Requests</Text>
-            </View>
-          }
-          ListEmptyComponent={loading ? <View style={styles.emptyCard}><ActivityIndicator color={BLUE} /><Text style={styles.emptyText}>Loading assigned requests...</Text></View> : error ? <View style={styles.emptyCard}><Text style={styles.emptyTitle}>Requests unavailable.</Text><Text style={styles.emptyText}>{error}</Text><TouchableOpacity onPress={refresh} style={styles.secondaryActionButton}><Text style={styles.secondaryActionText}>Try Again</Text></TouchableOpacity></View> : <View style={styles.emptyCard}><Text style={styles.emptyTitle}>No pending requests.</Text><Text style={styles.emptyText}>New branch assignments will appear here when they are ready to schedule.</Text></View>}
-          extraData={`${processingRequestId}:${loading}:${error}`}
-        />
-      </View>
+      <PortalSwipeContainer tabs={DISTRIBUTOR_TABS} currentRoute="/distributor/d_requests">
+        <View style={styles.phoneWrapper}>
+          <DistributorProfileBanner isComplete={isComplete} loading={profileLoading} />
+          <FlatList
+            data={pendingRequests}
+            keyExtractor={keyExtractor}
+            renderItem={renderRequest}
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={styles.listContent}
+            ListHeaderComponent={
+              <View style={styles.pageHeader}>
+                <Text style={styles.pageTitle}>REQUESTS</Text>
+                <Text style={styles.subtitle}>Pending Requests</Text>
+              </View>
+            }
+            ListEmptyComponent={
+              loading ? (
+                <View style={styles.emptyCard}>
+                  <ActivityIndicator color={BLUE} />
+                  <Text style={styles.emptyText}>Loading assigned requests...</Text>
+                </View>
+              ) : error ? (
+                <View style={styles.emptyCard}>
+                  <Text style={styles.emptyTitle}>Requests unavailable.</Text>
+                  <Text style={styles.emptyText}>{error}</Text>
+                  <TouchableOpacity onPress={refresh} style={styles.secondaryActionButton}>
+                    <Text style={styles.secondaryActionText}>Try Again</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <BlueTapEmptyState
+                  title="No Pending Requests"
+                  description="New branch assignments will appear here when they are ready to schedule."
+                />
+              )
+            }
+            extraData={`${processingRequestId}:${loading}:${error}:${isComplete}`}
+          />
+        </View>
+      </PortalSwipeContainer>
 
       {successVisible && (
         <Animated.View

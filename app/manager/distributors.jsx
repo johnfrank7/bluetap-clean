@@ -61,7 +61,7 @@ const getFullName = (user = {}) =>
 const getBarangay = (user = {}) =>
   (user.barangay || user.address || 'Not set').toString().trim() || 'Not set';
 
-const formatAmount = (amount) => `\u20B1${Number(amount || 0).toFixed(2)}`;
+const formatAmount = (amount) => `₱${Number(amount || 0).toFixed(2)}`;
 
 const getJoinedLabel = (user = {}) => {
   const value = user.createdAt || user.created_at || user.joinedAt || user.joined;
@@ -77,7 +77,7 @@ const getJoinedLabel = (user = {}) => {
 };
 
 const orderProducts = (order) =>
-  order.items?.map((item) => `${item.quantity} \u00D7 ${item.productNameSnapshot}`).filter(Boolean).join(', ') || 'Order products';
+  order.items?.map((item) => `${item.quantity} × ${item.productNameSnapshot}`).filter(Boolean).join(', ') || 'Order products';
 
 const orderDistance = (order) =>
   order.distanceKmSnapshot == null ? 'Distance unavailable' : `Approx. ${Number(order.distanceKmSnapshot).toFixed(1)} km`;
@@ -209,7 +209,7 @@ function DistributorDispatchQueue({ styles, colors }) {
           </Text>
         </View>
         <TouchableOpacity onPress={load} disabled={loading} style={styles.refreshButton}>
-          <Text style={styles.refreshText}>{loading ? 'Loading\u2026' : 'Refresh'}</Text>
+          <Text style={styles.refreshText}>{loading ? 'Loading…' : 'Refresh'}</Text>
         </TouchableOpacity>
       </View>
 
@@ -240,7 +240,7 @@ function DistributorDispatchQueue({ styles, colors }) {
                 <View style={styles.approvalOrderMain}>
                   <Text style={styles.approvalRequester}>{order.requesterName || 'Requester'}</Text>
                   <Text style={styles.approvalRequestId}>
-                    #{order.requestId || order.id} \u00B7 {order.currentBranchName || 'Current branch'}
+                    #{order.requestId || order.id} · {order.currentBranchName || 'Current branch'}
                   </Text>
                 </View>
                 <ManagerPill tone={assigned ? 'green' : 'blue'}>
@@ -253,12 +253,12 @@ function DistributorDispatchQueue({ styles, colors }) {
               <View style={styles.approvalDetails}>
                 <Text style={styles.approvalDetail}>Delivery: {order.address || 'Address provided with order'}</Text>
                 <Text style={styles.approvalDetail}>
-                  {orderDistance(order)} \u00B7 Radius {order.serviceRadiusKmSnapshot ?? '\u2014'} km
+                  {orderDistance(order)} · Radius {order.serviceRadiusKmSnapshot ?? '—'} km
                 </Text>
                 {assigned && (
                   <Text style={styles.assignedDistributorText}>
                     Assigned: {order.assignedDistributorName || 'Distributor assigned'}
-                    {order.scheduledAt ? ` \u00B7 Scheduled: ${new Date(order.scheduledAt).toLocaleString()}` : ''}
+                    {order.scheduledAt ? ` · Scheduled: ${new Date(order.scheduledAt).toLocaleString()}` : ''}
                   </Text>
                 )}
                 {order.status === 'delivery_failed' && !!order.failureReason && (
@@ -313,7 +313,7 @@ function DistributorDispatchQueue({ styles, colors }) {
                               <Text style={[styles.distributorName, isSelected && styles.distributorNameSelected]}>
                                 {distributor.name}
                               </Text>
-                              <Text style={styles.distributorSub}>Eligible \u00B7 This Branch</Text>
+                              <Text style={styles.distributorSub}>Eligible · This Branch</Text>
                             </View>
                           </TouchableOpacity>
                         );
@@ -366,7 +366,7 @@ function DistributorDispatchQueue({ styles, colors }) {
                     style={[styles.confirmAssignmentButton, (isUpdating || !selectedDistributorUid) && styles.actionDisabled]}
                   >
                     <Text style={styles.confirmAssignmentText}>
-                      {isUpdating ? 'Saving\u2026' : 'Confirm Assignment & Schedule'}
+                      {isUpdating ? 'Saving…' : 'Confirm Assignment & Schedule'}
                     </Text>
                   </TouchableOpacity>
                 </View>
@@ -395,7 +395,7 @@ function DistributorDispatchQueue({ styles, colors }) {
                       <View style={{ flex: 1 }}>
                         <Text style={styles.distributorName}>{branch.name}</Text>
                         <Text style={styles.distributorSub}>
-                          {branch.distanceKm == null ? 'Distance unavailable' : `Approx. ${branch.distanceKm.toFixed(1)} km`} \u00B7 {branch.serviceRadiusKm} km radius
+                          {branch.distanceKm == null ? 'Distance unavailable' : `Approx. ${branch.distanceKm.toFixed(1)} km`} · {branch.serviceRadiusKm} km radius
                         </Text>
                       </View>
                       <Text style={[styles.coverageText, branch.withinCoverage ? styles.coverageInside : styles.coverageOutside]}>

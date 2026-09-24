@@ -24,7 +24,7 @@ import ManagerShell, { MANAGER_COLORS, ManagerPill } from '../../components/Mana
 
 
 
-const formatAmount = (amount) => `\u20B1${Number(amount || 0).toFixed(2)}`;
+const formatAmount = (amount) => `₱${Number(amount || 0).toFixed(2)}`;
 
 const EDITABLE_STATUSES = new Set([
   'awaiting_distributor_assignment',
@@ -34,7 +34,7 @@ const EDITABLE_STATUSES = new Set([
 ]);
 
 const orderProducts = (order) =>
-  order.items?.map((item) => `${item.quantity} \u00D7 ${item.productNameSnapshot}`).filter(Boolean).join(', ') || 'Order products';
+  order.items?.map((item) => `${item.quantity} × ${item.productNameSnapshot}`).filter(Boolean).join(', ') || 'Order products';
 
 const orderDistance = (order) =>
   order.distanceKmSnapshot == null ? 'Distance unavailable' : `Approx. ${Number(order.distanceKmSnapshot).toFixed(1)} km`;
@@ -83,11 +83,11 @@ function OutsideRadiusApprovalQueue({ styles, colors, onOrderApproved }) {
           <Text style={styles.eyebrow}>DELIVERY EXCEPTIONS</Text>
           <Text style={styles.cardTitle}>Outside-Radius Approvals</Text>
           <Text style={styles.helperText}>
-            Review delivery requests originating outside your branch\u2019s standard service radius.
+            Review delivery requests originating outside your branch's standard service radius.
           </Text>
         </View>
         <TouchableOpacity onPress={load} disabled={loading} style={styles.refreshButton}>
-          <Text style={styles.refreshText}>{loading ? 'Loading\u2026' : 'Refresh'}</Text>
+          <Text style={styles.refreshText}>{loading ? 'Loading…' : 'Refresh'}</Text>
         </TouchableOpacity>
       </View>
 
@@ -109,7 +109,7 @@ function OutsideRadiusApprovalQueue({ styles, colors, onOrderApproved }) {
         orders.map((order) => {
           const isUpdating = updatingId === order.id;
           const products =
-            order.items?.map((item) => `${item.quantity} \u00D7 ${item.productNameSnapshot}`).filter(Boolean).join(', ') ||
+            order.items?.map((item) => `${item.quantity} × ${item.productNameSnapshot}`).filter(Boolean).join(', ') ||
             'Order products';
 
           return (
@@ -129,7 +129,7 @@ function OutsideRadiusApprovalQueue({ styles, colors, onOrderApproved }) {
                   Delivery: {order.address || (order.deliveryLocation ? `${order.deliveryLocation.latitude.toFixed(5)}, ${order.deliveryLocation.longitude.toFixed(5)}` : 'Location provided')}
                 </Text>
                 <Text style={styles.detailLine}>
-                  Approx. {Number(order.distanceKmSnapshot || 0).toFixed(1)} km \u00B7 Branch radius {order.serviceRadiusKmSnapshot} km
+                  Approx. {Number(order.distanceKmSnapshot || 0).toFixed(1)} km · Branch radius {order.serviceRadiusKmSnapshot} km
                 </Text>
                 <Text style={styles.amountText}>{formatAmount(order.totalAtOrder)}</Text>
               </View>
@@ -140,7 +140,7 @@ function OutsideRadiusApprovalQueue({ styles, colors, onOrderApproved }) {
                   onPress={() => decide(order, 'approve')}
                   style={[styles.approveButton, isUpdating && styles.actionDisabled]}
                 >
-                  <Text style={styles.approveButtonText}>{isUpdating ? 'Saving\u2026' : 'Approve Delivery'}</Text>
+                  <Text style={styles.approveButtonText}>{isUpdating ? 'Saving…' : 'Approve Delivery'}</Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity
@@ -266,11 +266,11 @@ function EditOrderModal({ visible, order, onClose, onSaveSuccess, colors, styles
             <View>
               <Text style={styles.modalTitle}>Order Details & Situational Edit</Text>
               <Text style={styles.modalSub}>
-                Order #{order.requestId || order.id} \u00B7 {order.requesterName}
+                Order #{order.requestId || order.id} · {order.requesterName}
               </Text>
             </View>
             <TouchableOpacity onPress={onClose} style={styles.modalCloseBtn}>
-              <Text style={styles.modalCloseText}>\u00D7</Text>
+              <Text style={styles.modalCloseText}>×</Text>
             </TouchableOpacity>
           </View>
 
@@ -290,7 +290,7 @@ function EditOrderModal({ visible, order, onClose, onSaveSuccess, colors, styles
                   <View style={{ flex: 1 }}>
                     <Text style={styles.itemEditName}>{item.productNameSnapshot}</Text>
                     {item.unitPrice > 0 && (
-                      <Text style={styles.itemEditPrice}>\u20B1{item.unitPrice.toFixed(2)} each</Text>
+                      <Text style={styles.itemEditPrice}>₱{item.unitPrice.toFixed(2)} each</Text>
                     )}
                   </View>
 
@@ -305,7 +305,7 @@ function EditOrderModal({ visible, order, onClose, onSaveSuccess, colors, styles
                       </TouchableOpacity>
                       {items.length > 1 && (
                         <TouchableOpacity onPress={() => removeItem(index)} style={styles.removeBtn}>
-                          <Text style={styles.removeBtnText}>\u00D7</Text>
+                          <Text style={styles.removeBtnText}>×</Text>
                         </TouchableOpacity>
                       )}
                     </View>
@@ -382,7 +382,7 @@ function EditOrderModal({ visible, order, onClose, onSaveSuccess, colors, styles
                 onPress={handleSave}
                 style={[styles.saveBtn, saving && styles.actionDisabled]}
               >
-                <Text style={styles.saveBtnText}>{saving ? 'Recalculating & Saving\u2026' : 'Save Order Changes'}</Text>
+                <Text style={styles.saveBtnText}>{saving ? 'Recalculating & Saving…' : 'Save Order Changes'}</Text>
               </TouchableOpacity>
             )}
           </View>
@@ -450,11 +450,11 @@ function BranchTransfersQueue({ data, styles, onRefresh, colors }) {
                 Transfer from {order.transferFromBranchName || 'another branch'}
               </Text>
               <Text style={styles.orderIdText}>
-                #{order.requestId || order.id} \u00B7 {order.requesterName || 'Requester'}
+                #{order.requestId || order.id} · {order.requesterName || 'Requester'}
               </Text>
               <Text style={styles.productsSummary}>{orderProducts(order)}</Text>
               <Text style={styles.detailLine}>
-                {orderDistance(order)} \u00B7 Note: {order.transferReason || 'No note provided'}
+                {orderDistance(order)} · Note: {order.transferReason || 'No note provided'}
               </Text>
 
               <View style={styles.actionRow}>
@@ -463,7 +463,7 @@ function BranchTransfersQueue({ data, styles, onRefresh, colors }) {
                   onPress={() => act(order.id, 'accept-transfer')}
                   style={[styles.approveButton, isUpdating && styles.actionDisabled]}
                 >
-                  <Text style={styles.approveButtonText}>{isUpdating ? 'Saving\u2026' : 'Accept Transfer'}</Text>
+                  <Text style={styles.approveButtonText}>{isUpdating ? 'Saving…' : 'Accept Transfer'}</Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity
