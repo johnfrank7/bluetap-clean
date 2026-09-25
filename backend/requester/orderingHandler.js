@@ -60,7 +60,7 @@ const profileSummary = (profile = {}) => {
     contactNumber,
     address,
     email: clean(profile.email, 240).toLowerCase(),
-    uniqueId: clean(profile.unique_id || profile.uniqueId || profile.uid, 80),
+    uniqueId: clean(profile.publicUid || profile.displayUid || profile.unique_id || profile.uniqueId, 80),
     complete: Boolean(fullName && contactNumber && address),
     defaultDeliveryLocation: profile.defaultDeliveryLocation || null,
   };

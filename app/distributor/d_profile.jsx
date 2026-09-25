@@ -92,7 +92,7 @@ const getWaterStation = (profile) => {
 
 const getDistributorId = (profile) => {
   const safeProfile = getProfileObject(profile);
-  return getProfileUniqueId(safeProfile) || '';
+  return getProfileUniqueId(safeProfile) || 'Not assigned';
 };
 
 const getRoleLabel = (role) => {

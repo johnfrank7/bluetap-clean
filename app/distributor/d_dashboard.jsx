@@ -26,6 +26,7 @@ import {
 } from '../../services/distributorOrders';
 import { useDistributorProfile } from '../../services/distributorProfile';
 import { useLiveGreeting } from '../../services/liveTime';
+import { formatDisplayUniqueId, getProfileUniqueId } from '../../services/uniqueIds';
 
 const BLUE = BLUETAP_COLORS.primary;
 const BLUE_LIGHT = BLUETAP_COLORS.primarySoft;
@@ -183,10 +184,28 @@ function DistributorDashboardContent() {
   const liveGreeting = useLiveGreeting();
   const [detailsVisible, setDetailsVisible] = useState(false);
   const { orders, loading, error, refresh } = useAssignedDistributorOrders();
-  const { isComplete, loading: profileLoading } = useDistributorProfile();
+  const { isComplete, loading: profileLoading, profile: distributorProfile } = useDistributorProfile();
   const todayText = formatDashboardDate(new Date());
   const screenOrders = useMemo(() => (Array.isArray(orders) ? orders : []).filter(Boolean).map(toDistributorScreenOrder), [orders]);
   const activeRequest = screenOrders.find((order) => order && !['delivered', 'cancelled', 'canceled', 'declined'].includes(normalizeDistributorOrderStatus(order.status)));
+  const activeRequesterUniqueId = useMemo(() => {
+    return formatDisplayUniqueId(
+      activeRequest?.requesterUniqueId ||
+      activeRequest?.requester_unique_id ||
+      activeRequest?.requesterId,
+      'Not assigned'
+    );
+  }, [activeRequest?.requesterUniqueId, activeRequest?.requester_unique_id, activeRequest?.requesterId]);
+
+  const activeDistributorUniqueId = useMemo(() => {
+    return formatDisplayUniqueId(
+      activeRequest?.distributorUniqueId ||
+      activeRequest?.distributor_unique_id ||
+      getProfileUniqueId(distributorProfile),
+      'Not assigned'
+    );
+  }, [activeRequest?.distributorUniqueId, activeRequest?.distributor_unique_id, distributorProfile]);
+
   const dashboardSummary = useMemo(() => [
     {
       label: 'Pending Requests',
@@ -223,17 +242,11 @@ function DistributorDashboardContent() {
           activeRequest.payment_method ||
           'Not set',
         requesterName: activeRequest.customerName || activeRequest.requester_name || 'Not set',
-        requesterUniqueId:
-          activeRequest.requesterUniqueId ||
-          activeRequest.requester_unique_id ||
-          '',
+        requesterUniqueId: activeRequesterUniqueId,
         customerName: activeRequest.customerName || activeRequest.requester_name || 'Not set',
         distributorName:
           activeRequest.distributorName || activeRequest.distributor_name || '',
-        distributorUniqueId:
-          activeRequest.distributorUniqueId ||
-          activeRequest.distributor_unique_id ||
-          '',
+        distributorUniqueId: activeDistributorUniqueId,
         contactNumber: activeRequest.contactNumber || activeRequest.contact_number || 'Not set',
         deliveryAddress:
           activeRequest.deliveryAddress || activeRequest.address || 'Not set',
@@ -324,9 +337,7 @@ function DistributorDashboardContent() {
                           Requester ID
                         </Text>
                         <Text style={styles.infoGridValue} numberOfLines={1}>
-                          {activeRequest.requesterUniqueId ||
-                            activeRequest.requester_unique_id ||
-                            'Not set'}
+                          {activeRequesterUniqueId}
                         </Text>
                       </View>
 
@@ -339,9 +350,7 @@ function DistributorDashboardContent() {
                           Distributor ID
                         </Text>
                         <Text style={styles.infoGridValue} numberOfLines={1}>
-                          {activeRequest.distributorUniqueId ||
-                            activeRequest.distributor_unique_id ||
-                            'Not set'}
+                          {activeDistributorUniqueId}
                         </Text>
                       </View>
                     </View>

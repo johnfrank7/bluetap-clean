@@ -1,6 +1,7 @@
 import React from 'react';
 import { auth } from '../firebase';
 import { getApiUrl } from './apiClient';
+import { formatDisplayUniqueId, isPublicOrFormattedUniqueId } from './uniqueIds';
 
 export async function getAssignedDistributorOrders() {
   const token = await auth.currentUser?.getIdToken();
@@ -86,7 +87,16 @@ export function toDistributorScreenOrder(order = {}) {
   const status = safeString(order.status, 'distributor_assigned');
   const requestId = safeString(order.requestId || order.id || order.request_id, 'Not set');
   const requesterName = safeString(order.requesterName || order.customerName || order.requester_name, 'Not set');
-  const requesterId = safeString(order.requesterUniqueId || order.requester_unique_id || order.requesterId, '');
+  const rawRequesterUid = order.requesterUniqueId || order.requesterUniqueIdSnapshot || order.requester_unique_id || order.requesterPublicUid || order.requesterId;
+  const formattedRequesterId = isPublicOrFormattedUniqueId(rawRequesterUid)
+    ? formatDisplayUniqueId(rawRequesterUid)
+    : 'Not assigned';
+
+  const rawDistributorUid = order.assignedDistributorUniqueIdSnapshot || order.distributorUniqueId || order.distributor_unique_id || order.distributorPublicUid;
+  const formattedDistributorId = isPublicOrFormattedUniqueId(rawDistributorUid)
+    ? formatDisplayUniqueId(rawDistributorUid)
+    : '';
+
   const mappedItems = items.map((item, index) => ({
     id: safeString(item.id || item.product_id || `${order.id || requestId}-${index}`),
     productName: safeString(item.productNameSnapshot || item.product_name || item.name, 'Product'),
@@ -106,8 +116,9 @@ export function toDistributorScreenOrder(order = {}) {
     requester: requesterName,
     customerName: requesterName,
     requesterName,
-    requesterId,
-    requesterUniqueId: requesterId,
+    requesterUid: safeString(order.requesterUid || order.requester_id, ''),
+    requesterId: formattedRequesterId,
+    requesterUniqueId: formattedRequesterId,
     contact: safeString(order.contactNumber || order.contact_number || order.phone, 'Not set'),
     contactNumber: safeString(order.contactNumber || order.contact_number || order.phone, 'Not set'),
     address: resolvedAddress,
@@ -127,10 +138,11 @@ export function toDistributorScreenOrder(order = {}) {
     orderDate: formatDistributorOrderDate(order.createdAt, 'Not set'),
     waterStation: safeString(order.currentBranchName || order.branchNameSnapshot || order.waterStation || order.water_station, 'Not set'),
     paymentMethod: safeString(order.paymentMethod || order.payment_method, 'Not set'),
+    distributorUid: safeString(order.assignedDistributorUid || order.distributor_id, ''),
     distributor: safeString(order.assignedDistributorName || order.distributor_name, ''),
     distributorName: safeString(order.assignedDistributorName || order.distributor_name, ''),
-    distributorId: safeString(order.assignedDistributorUid || order.distributor_id, ''),
-    distributorUniqueId: safeString(order.distributorUniqueId || order.distributor_unique_id, ''),
+    distributorId: formattedDistributorId || 'Not assigned',
+    distributorUniqueId: formattedDistributorId,
     items: mappedItems,
     grandTotalAmount: totalAmount,
     failureReason: safeString(order.failureReason, ''),

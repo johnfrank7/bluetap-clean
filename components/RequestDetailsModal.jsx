@@ -11,6 +11,7 @@ import SoftStatusBadge from './SoftStatusBadge';
 import LocationMap from './LocationMap';
 import { createShadow } from './shadowStyles';
 import { createPortalStyleSheet, useBlueTapTheme } from './BlueTapTheme';
+import { formatDisplayUniqueId } from '../services/uniqueIds';
 
 const BLUE = '#187BCD';
 const BLUE_LIGHT = '#E3F2FD';
@@ -56,13 +57,17 @@ export default function RequestDetailsModal({
   onEdit,
 }) {
   useBlueTapTheme();
-  const requesterUniqueId =
-    request?.requesterUniqueId || request?.requester_unique_id || '';
+  const requesterUniqueId = formatDisplayUniqueId(
+    request?.requesterUniqueId || request?.requester_unique_id || request?.requesterId,
+    'Not assigned'
+  );
   const distributorName =
     request?.distributorName || request?.distributor_name || '';
-  const distributorUniqueId =
-    request?.distributorUniqueId || request?.distributor_unique_id || '';
-  const hasDistributorInfo = !!(distributorName || distributorUniqueId);
+  const distributorUniqueId = formatDisplayUniqueId(
+    request?.distributorUniqueId || request?.distributor_unique_id || request?.distributorId,
+    distributorName ? 'Not assigned' : ''
+  );
+  const hasDistributorInfo = !!(distributorName || (distributorUniqueId && distributorUniqueId !== 'Not assigned'));
   const products = Array.isArray(request?.items)
     ? request.items.map(normalizeProduct)
     : [];

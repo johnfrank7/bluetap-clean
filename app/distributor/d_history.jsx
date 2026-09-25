@@ -23,6 +23,7 @@ import {
   toDistributorScreenOrder,
   useAssignedDistributorOrders,
 } from '../../services/distributorOrders';
+import { formatDisplayUniqueId } from '../../services/uniqueIds';
 
 const BLUE = BLUETAP_COLORS.primary;
 const BLUE_LIGHT = BLUETAP_COLORS.primarySoft;
@@ -59,11 +60,20 @@ const getDetailsRequestData = (request) => {
     waterStation: 'Not set',
     paymentMethod: 'Not set',
     requesterName: request.requester,
-    requesterUniqueId: request.requesterId || request.requester_unique_id || '',
+    requesterUniqueId: formatDisplayUniqueId(
+      request.requesterId ||
+        request.requester_unique_id ||
+        request.requesterUniqueId,
+      'Not assigned'
+    ),
     customerName: request.requester,
     distributorName: request.distributor || request.distributor_name || '',
-    distributorUniqueId:
-      request.distributorId || request.distributor_unique_id || '',
+    distributorUniqueId: formatDisplayUniqueId(
+      request.distributorId ||
+        request.distributor_unique_id ||
+        request.distributorUniqueId,
+      ''
+    ),
     contactNumber: request.contact,
     deliveryAddress: request.address,
     items: [
@@ -98,7 +108,12 @@ const HistoryRequestCard = ({ request, onViewDetails }) => {
             Requester ID
           </Text>
           <Text style={styles.compactValue} numberOfLines={1}>
-            {request.requesterId || request.requester_unique_id || 'Not set'}
+            {formatDisplayUniqueId(
+              request.requesterId ||
+                request.requester_unique_id ||
+                request.requesterUniqueId,
+              'Not assigned'
+            )}
           </Text>
 
           <Text style={[styles.compactLabel, styles.compactLabelGap]}>
@@ -119,7 +134,12 @@ const HistoryRequestCard = ({ request, onViewDetails }) => {
             Distributor ID
           </Text>
           <Text style={styles.compactValue} numberOfLines={1}>
-            {request.distributorId || request.distributor_unique_id || 'Not set'}
+            {formatDisplayUniqueId(
+              request.distributorId ||
+                request.distributor_unique_id ||
+                request.distributorUniqueId,
+              'Not assigned'
+            )}
           </Text>
 
           <Text style={[styles.compactLabel, styles.compactLabelGap]}>

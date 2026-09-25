@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { createAdminAccountsHandler, emailFor, passwordFor, safeAccount, safeAudit, statusOf } = require('../accountManagementHandler');
+const { backfillLegacyUids, createAdminAccountsHandler, emailFor, passwordFor, safeAccount, safeAudit, statusOf } = require('../accountManagementHandler');
 
 test('manual account input normalizes email and applies the shared password policy', () => {
   assert.equal(emailFor('  Person@Gmail.com '), 'person@gmail.com');
@@ -45,7 +45,7 @@ function managementFixture() {
   const snapshot = (path) => ({ id: path.split('/').pop(), exists: records.has(path), data: () => records.get(path) });
   const allDocs = (name) => [...records.keys()].filter((path) => path.startsWith(`${name}/`)).map(snapshot);
   const collection = (name) => ({
-    doc(id = `auto-${++autoId}`) { const path = `${name}/${id}`; return { id, path, get: async () => snapshot(path) }; },
+    doc(id = `auto-${++autoId}`) { const path = `${name}/${id}`; return { id, path, get: async () => snapshot(path), update: async (data) => { records.set(path, { ...records.get(path), ...data }); }, set: async (data) => { records.set(path, data); } }; },
     where(field, _op, value) { return { limit() { return this; }, get: async () => ({ docs: allDocs(name).filter((doc) => doc.data()?.[field] === value) }) }; },
     orderBy() { return { limit() { return this; }, get: async () => ({ docs: allDocs(name) }) }; },
     get: async () => ({ docs: allDocs(name) }),
@@ -155,4 +155,47 @@ test('Admin-created active Distributor requires and receives an authoritative ac
   const created = await call(handler, 'POST', 'admin-token', { role: 'distributor', fullName: 'New Driver', email: 'new@example.test', username: 'new_driver', temporaryPassword: 'SafePassword2026', branchId: 'north' });
   assert.equal(created.statusCode, 201); assert.equal(created.body.account.status, 'active'); assert.equal(created.body.account.branchId, 'north');
   const profile = fixture.records.get(`users/${created.body.account.uid}`); assert.equal(profile.distributorStatus, 'active'); assert.equal(profile.branchId, 'north');
+});
+
+test('backfillLegacyUids is idempotent, converts legacy hyphenated UIDs, and does not overwrite existing public UIDs', async () => {
+  const fixture = managementFixture();
+  const { auth, db } = fixture.getAdmin();
+
+  // Add a legacy user with hyphenated unique_id
+  fixture.records.set('users/legacy-1', {
+    role: 'requester',
+    email: 'legacy@example.test',
+    unique_id: 'REQ-000007',
+  });
+  // Add a user that already has a publicUid
+  fixture.records.set('users/existing-1', {
+    uid: 'existing-1',
+    role: 'distributor',
+    email: 'existing@example.test',
+    publicUid: 'Dis042',
+  });
+
+  await backfillLegacyUids({
+    auth,
+    db,
+    admin: { uid: 'admin-1', email: 'admin@example.test' },
+  });
+
+  // Verify legacy-1 received formatted Req007
+  const legacyUser = fixture.records.get('users/legacy-1');
+  assert.equal(legacyUser.publicUid, 'Req007');
+  assert.equal(legacyUser.displayUid, 'Req007');
+
+  // Verify existing-1 was preserved
+  const existingUser = fixture.records.get('users/existing-1');
+  assert.equal(existingUser.publicUid, 'Dis042');
+
+  // Rerun backfill - should be idempotent and not change anything
+  await backfillLegacyUids({
+    auth,
+    db,
+    admin: { uid: 'admin-1', email: 'admin@example.test' },
+  });
+  assert.equal(fixture.records.get('users/legacy-1').publicUid, 'Req007');
+  assert.equal(fixture.records.get('users/existing-1').publicUid, 'Dis042');
 });

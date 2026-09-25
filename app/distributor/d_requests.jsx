@@ -43,6 +43,7 @@ import {
   useAssignedDistributorOrders,
 } from '../../services/distributorOrders';
 import { useDistributorProfile } from '../../services/distributorProfile';
+import { formatDisplayUniqueId } from '../../services/uniqueIds';
 
 const BLUE = BLUETAP_COLORS.primary;
 const BLUE_LIGHT = BLUETAP_COLORS.primarySoft;
@@ -176,10 +177,10 @@ const getDetailsRequestData = (request) => {
     waterStation: request.waterStation || request.water_station,
     paymentMethod: request.paymentMethod || request.payment_method,
     requesterName: request.requester || request.requester_name,
-    requesterUniqueId: request.requesterId || request.requester_unique_id || '',
+    requesterUniqueId: formatDisplayUniqueId(request.requesterId || request.requester_unique_id || request.requesterUniqueId, 'Not assigned'),
     customerName: request.requester || request.requester_name,
     distributorName,
-    distributorUniqueId,
+    distributorUniqueId: formatDisplayUniqueId(distributorUniqueId, ''),
     contactNumber: request.contact || request.contact_number,
     deliveryAddress: request.address || request.deliveryAddress,
     items: [
@@ -250,7 +251,7 @@ const PendingRequestCard = memo(function PendingRequestCard({
               Requester ID
             </Text>
             <Text style={styles.compactValue} numberOfLines={1}>
-              {request.requesterId || request.requester_unique_id || 'Not set'}
+              {formatDisplayUniqueId(request.requesterId || request.requester_unique_id || request.requesterUniqueId, 'Not assigned')}
             </Text>
 
             <Text style={[styles.compactLabel, styles.compactLabelGap]}>
@@ -390,6 +391,40 @@ export default function DistributorRequests() {
   const [declining, setDeclining] = useState(false);
   const [declineError, setDeclineError] = useState('');
   const { isComplete, loading: profileLoading } = useDistributorProfile();
+  const { orders, loading, error, refresh } = useAssignedDistributorOrders();
+
+  const showSuccessFeedback = useCallback(() => {
+    if (successTimer.current) clearTimeout(successTimer.current);
+
+    setSuccessVisible(true);
+    Animated.timing(toastAnim, {
+      toValue: 1,
+      duration: 180,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: USE_NATIVE_DRIVER,
+    }).start();
+
+    successTimer.current = setTimeout(() => {
+      Animated.timing(toastAnim, {
+        toValue: 0,
+        duration: 180,
+        easing: Easing.in(Easing.cubic),
+        useNativeDriver: USE_NATIVE_DRIVER,
+      }).start(({ finished }) => {
+        if (finished) setSuccessVisible(false);
+      });
+    }, 2200);
+  }, [toastAnim]);
+
+  const selectedDetailsRequest = getDetailsRequestData(detailsRequest);
+
+  const pendingRequests = useMemo(
+    () =>
+      orders
+        .map(toDistributorScreenOrder)
+        .filter((request) => ASSIGNMENT_STATUSES.has(normalizeDistributorOrderStatus(request.status))),
+    [orders]
+  );
 
   const handleAcceptAssignment = useCallback(async (request) => {
     if (!isComplete) {
@@ -452,16 +487,6 @@ export default function DistributorRequests() {
       setDeclining(false);
     }
   }, [declineTargetRequest, declining, declineReason, refresh, showSuccessFeedback]);
-  const { orders, loading, error, refresh } = useAssignedDistributorOrders();
-  const selectedDetailsRequest = getDetailsRequestData(detailsRequest);
-
-  const pendingRequests = useMemo(
-    () =>
-      orders
-        .map(toDistributorScreenOrder)
-        .filter((request) => ASSIGNMENT_STATUSES.has(normalizeDistributorOrderStatus(request.status))),
-    [orders]
-  );
 
   const customDateOptions = useMemo(() => {
     const today = getStartOfDay(new Date());
@@ -496,29 +521,6 @@ export default function DistributorRequests() {
       setCustomTime(getNextAvailableTimeSlot(customDate));
     }
   }, [customDate, customTime, selectedSchedule]);
-
-  const showSuccessFeedback = useCallback(() => {
-    if (successTimer.current) clearTimeout(successTimer.current);
-
-    setSuccessVisible(true);
-    Animated.timing(toastAnim, {
-      toValue: 1,
-      duration: 180,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: USE_NATIVE_DRIVER,
-    }).start();
-
-    successTimer.current = setTimeout(() => {
-      Animated.timing(toastAnim, {
-        toValue: 0,
-        duration: 180,
-        easing: Easing.in(Easing.cubic),
-        useNativeDriver: USE_NATIVE_DRIVER,
-      }).start(({ finished }) => {
-        if (finished) setSuccessVisible(false);
-      });
-    }, 2200);
-  }, [toastAnim]);
 
   const closeScheduleSheet = useCallback(
     (force = false) => {

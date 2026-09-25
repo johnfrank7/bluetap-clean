@@ -100,8 +100,9 @@ async function backfillLegacyUids({ auth, db, admin }) {
     let publicUidAssigned = false;
     if (!assignedPublicUid && data.role) {
       if (data.unique_id) {
-        const parsedNum = parsePublicUidNumber(data.role, data.unique_id) || parseInt(String(data.unique_id).replace(/\D/g, ''), 10);
-        if (Number.isFinite(parsedNum) && parsedNum > 0) {
+        const isRawUid = /^[a-zA-Z0-9]{20,}$/.test(String(data.unique_id).trim());
+        const parsedNum = parsePublicUidNumber(data.role, data.unique_id) || (!isRawUid ? parseInt(String(data.unique_id).replace(/\D/g, ''), 10) : 0);
+        if (Number.isFinite(parsedNum) && parsedNum > 0 && parsedNum < 1000000) {
           assignedPublicUid = formatPublicUid(data.role, parsedNum);
         }
       }

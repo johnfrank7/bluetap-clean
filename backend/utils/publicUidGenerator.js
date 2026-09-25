@@ -16,10 +16,15 @@ function parsePublicUidNumber(role, publicUid) {
   const normRole = String(role || '').trim().toLowerCase();
   const prefix = ROLE_PREFIXES[normRole] || '';
   const str = String(publicUid || '').trim();
-  if (!prefix || !str.startsWith(prefix)) return 0;
-  const numPart = str.slice(prefix.length);
-  const parsed = parseInt(numPart, 10);
-  return Number.isFinite(parsed) ? parsed : 0;
+  if (!prefix || !str) return 0;
+  if (/^[a-zA-Z0-9]{20,}$/.test(str)) return 0;
+  const regex = new RegExp(`^${prefix}-?(\\d+)$`, 'i');
+  const match = str.match(regex);
+  if (match) {
+    const parsed = parseInt(match[1], 10);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  return 0;
 }
 
 async function generateNextPublicUid(tx, db, role) {

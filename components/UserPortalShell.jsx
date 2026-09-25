@@ -19,6 +19,7 @@ export default function UserPortalShell({ header = null, navigation }) {
           screenOptions={{
             headerShown: false,
             animation: 'none',
+            contentStyle: { backgroundColor: colors.background },
           }}
         />
       </View>

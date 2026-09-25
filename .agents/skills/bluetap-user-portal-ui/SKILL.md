@@ -17,7 +17,7 @@ Preserve these invariants:
 2. **Every Full Requester / Distributor Portal Screen Must Have the Portal Shell**:
    - **Header Shell**: Every primary portal screen (including notifications) must render the standard portal header with BlueTap logo icon, bold "BlueTap" wordmark, compact theme toggle (moon/sun), and contextual header actions (such as notifications or back button).
    - **Floating Bottom Navigation**: Detached rounded pill navigation bar must be present on primary screens. Its outer positioning wrapper is strictly transparent, pointer-safe, and visually unpainted.
-   - **Light Theme Standards**: Light theme must reflect BlueTap's blue brand identity with clean light backgrounds, crisp card separation, readable high-contrast typography, and semantic status accents.
+   - **Light Theme Standards**: Light theme must reflect BlueTap's blue brand identity with clean light backgrounds, crisp card separation, readable high-contrast typography, and semantic status accents. Distributor light mode must use the same current BlueTap palette/shell family as Requester and may not regress to legacy generic white page surfaces.
    - **Dark Theme Standards**: Dark theme uses layered deep navy and blue-black surfaces, never pure black as the main background, strictly adhering to shared theme tokens.
    - **Swipe Navigation**: Primary portal tabs must support horizontal swipe transitions via `PortalSwipeContainer` (with vertical scroll suppression and navigation debouncing), wrapping every main tab including Profile.
    - **Notifications System**: Both Requester and Distributor notifications must reuse the shared structured notification card system, derived from real order lifecycle events with robust multi-format timestamp parsing.

@@ -32,6 +32,7 @@ import {
   useAssignedDistributorOrders,
 } from '../../services/distributorOrders';
 import { useDistributorProfile } from '../../services/distributorProfile';
+import { formatDisplayUniqueId } from '../../services/uniqueIds';
 
 const BLUE = BLUETAP_COLORS.primary;
 const BLUE_LIGHT = BLUETAP_COLORS.primarySoft;
@@ -83,10 +84,10 @@ const getDetailsRequestData = (request) => {
     waterStation: 'Not set',
     paymentMethod: 'Not set',
     requesterName: request.requester,
-    requesterUniqueId: request.requesterId || request.requester_unique_id || '',
+    requesterUniqueId: formatDisplayUniqueId(request.requesterId || request.requester_unique_id || request.requesterUniqueId, 'Not assigned'),
     customerName: request.requester,
     distributorName: request.distributor || request.distributor_name || '',
-    distributorUniqueId: request.distributorId || request.distributor_unique_id || '',
+    distributorUniqueId: formatDisplayUniqueId(request.distributorId || request.distributor_unique_id || request.distributorUniqueId, ''),
     contactNumber: request.contact,
     deliveryAddress: request.address,
     items: [
@@ -131,7 +132,7 @@ const ScheduledRequestCard = ({
 
           <Text style={[styles.compactLabel, styles.compactLabelGap]}>Requester ID</Text>
           <Text style={styles.compactValue} numberOfLines={1}>
-            {request.requesterId || request.requester_unique_id || 'Not set'}
+            {formatDisplayUniqueId(request.requesterId || request.requester_unique_id || request.requesterUniqueId, 'Not assigned')}
           </Text>
 
           <Text style={[styles.compactLabel, styles.compactLabelGap]}>Contact Number</Text>
@@ -656,7 +657,7 @@ const styles = createPortalStyleSheet({
     backgroundColor: BLUETAP_COLORS.surface,
     ...createShadow({
       color: '#0D47A1',
-      offsetY: 3,
+      offset: { width: 0, height: 3 },
       opacity: 0.08,
       radius: 8,
     }),

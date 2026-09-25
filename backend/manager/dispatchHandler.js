@@ -45,7 +45,13 @@ function safeBranch(id, data = {}) {
 }
 
 function safeDistributor(uid, data = {}) {
-  return { uid, name: fullName(data), branchId: clean(data.branchId, 128) };
+  const uniqueId = clean(data.publicUid || data.displayUid || data.unique_id, 80);
+  return {
+    uid,
+    name: fullName(data),
+    branchId: clean(data.branchId, 128),
+    uniqueId: uniqueId && !/^[a-zA-Z0-9]{20,}$/.test(uniqueId) ? uniqueId : '',
+  };
 }
 
 function safeOrder(id, data = {}, branchNames = new Map()) {
@@ -54,7 +60,7 @@ function safeOrder(id, data = {}, branchNames = new Map()) {
     id,
     requestId: clean(data.requestId || data.request_id, 80),
     requesterName: clean(data.requesterNameSnapshot || data.requester_name, 160),
-    requesterUniqueId: clean(data.requesterUniqueIdSnapshot || data.requester_unique_id, 80),
+    requesterUniqueId: clean(data.requesterUniqueIdSnapshot || data.requester_unique_id || data.requesterPublicUid, 80),
     contactNumber: clean(data.contactNumberSnapshot || data.contact_number, 40),
     address: clean(data.addressSnapshot || data.address, 300),
     container: clean(data.container, 80),
@@ -86,6 +92,8 @@ function safeOrder(id, data = {}, branchNames = new Map()) {
     outsideServiceArea: data.outsideServiceArea === true,
     assignedDistributorUid: clean(data.assignedDistributorUid || data.distributor_id, 128),
     assignedDistributorName: clean(data.assignedDistributorNameSnapshot || data.distributor_name, 160),
+    assignedDistributorUniqueId: clean(data.assignedDistributorUniqueIdSnapshot || data.distributorUniqueId || data.distributor_unique_id, 80),
+    distributorUniqueId: clean(data.assignedDistributorUniqueIdSnapshot || data.distributorUniqueId || data.distributor_unique_id, 80),
     assignedAt: data.assignedAt || null,
     transferFromBranchId: clean(data.transferFromBranchId, 128),
     transferToBranchId: clean(data.transferToBranchId, 128),
@@ -338,13 +346,18 @@ function createManagerDispatchHandler(getAdmin = getFirebaseAdmin) {
             throw new OtpError(409, 'ORDER_NOT_ASSIGNABLE', 'This order is not ready for that Distributor action.');
           }
           const event = assigning ? 'DISTRIBUTOR_ASSIGNED' : 'DISTRIBUTOR_REASSIGNED';
+          const rawDistributorUid = clean(target.data?.publicUid || target.data?.displayUid || target.data?.unique_id, 80);
+          const targetDistributorUniqueId = rawDistributorUid && !/^[a-zA-Z0-9]{20,}$/.test(rawDistributorUid) ? rawDistributorUid : '';
           const entry = assigning
-            ? { event, distributorUid: target.uid, distributorNameSnapshot: fullName(target.data), assignedByManagerUid: manager.decoded.uid, assignedAt: now, scheduledAt }
-            : { event, previousDistributorUid: assignedUid, previousDistributorNameSnapshot: clean(current.assignedDistributorNameSnapshot || current.distributor_name, 160), distributorUid: target.uid, distributorNameSnapshot: fullName(target.data), assignedByManagerUid: manager.decoded.uid, assignedAt: now, scheduledAt };
+            ? { event, distributorUid: target.uid, distributorNameSnapshot: fullName(target.data), distributorUniqueIdSnapshot: targetDistributorUniqueId, assignedByManagerUid: manager.decoded.uid, assignedAt: now, scheduledAt }
+            : { event, previousDistributorUid: assignedUid, previousDistributorNameSnapshot: clean(current.assignedDistributorNameSnapshot || current.distributor_name, 160), distributorUid: target.uid, distributorNameSnapshot: fullName(target.data), distributorUniqueIdSnapshot: targetDistributorUniqueId, assignedByManagerUid: manager.decoded.uid, assignedAt: now, scheduledAt };
           return updateWithEvent(current, event, manager.decoded.uid, managerBranchId, now, {
             status: DISTRIBUTOR_ASSIGNED,
             assignedDistributorUid: target.uid,
             assignedDistributorNameSnapshot: fullName(target.data),
+            assignedDistributorUniqueIdSnapshot: targetDistributorUniqueId,
+            distributorUniqueId: targetDistributorUniqueId,
+            distributor_unique_id: targetDistributorUniqueId,
             assignedAt: now,
             assignedByManagerUid: manager.decoded.uid,
             distributor_id: target.uid,

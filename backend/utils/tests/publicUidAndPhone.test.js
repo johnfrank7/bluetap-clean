@@ -44,7 +44,13 @@ test('parsePublicUidNumber parses number from formatted string', () => {
   assert.equal(parsePublicUidNumber('requester', 'Req001'), 1);
   assert.equal(parsePublicUidNumber('distributor', 'Dis042'), 42);
   assert.equal(parsePublicUidNumber('manager', 'Mgr999'), 999);
+  assert.equal(parsePublicUidNumber('requester', 'REQ-000001'), 1);
+  assert.equal(parsePublicUidNumber('distributor', 'DIS-000005'), 5);
+  assert.equal(parsePublicUidNumber('manager', 'MGR-000010'), 10);
+  assert.equal(parsePublicUidNumber('admin', 'ADM-000002'), 2);
   assert.equal(parsePublicUidNumber('requester', 'invalid'), 0);
+  assert.equal(parsePublicUidNumber('requester', 'Not set'), 0);
+  assert.equal(parsePublicUidNumber('requester', 'aBcdEf1234567890XyZ12345'), 0);
 });
 
 test('generateNextPublicUid atomically increments role counter', async () => {
