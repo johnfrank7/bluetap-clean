@@ -3,6 +3,7 @@ import {
   isActiveRequesterOrderStatus,
   normalizeRequesterOrderStatus,
 } from '../constants/requesterOrderStatus';
+import { parseTimestamp } from './notificationTimestamp';
 
 export const REQUESTS_COLLECTION = 'requests';
 
@@ -48,12 +49,8 @@ const normalizeItems = (data = {}) => {
 };
 
 const timestampToMillis = (timestamp) => {
-  if (!timestamp) return 0;
-  if (timestamp instanceof Date) return timestamp.getTime();
-  if (typeof timestamp === 'string') return new Date(timestamp).getTime() || 0;
-  if (typeof timestamp.toMillis === 'function') return timestamp.toMillis();
-  if (timestamp.seconds) return timestamp.seconds * 1000;
-  return 0;
+  const d = parseTimestamp(timestamp);
+  return d ? d.getTime() : 0;
 };
 
 const normalizeRequest = (id, data = {}) => {
@@ -102,8 +99,21 @@ const normalizeRequest = (id, data = {}) => {
     total_cost: totalCost,
     status: data.status || 'Pending',
     created_at: data.created_at || data.createdAt || null,
+    createdAt: data.createdAt || data.created_at || null,
     updated_at: data.updated_at || data.updatedAt || null,
+    updatedAt: data.updatedAt || data.updated_at || null,
     canceled_at: data.canceled_at || data.cancelledAt || data.cancelled_at || null,
+    cancelledAt: data.cancelledAt || data.canceled_at || data.cancelled_at || null,
+    deliveredAt: data.deliveredAt || data.delivered_at || null,
+    delivered_at: data.delivered_at || data.deliveredAt || null,
+    scheduledAt: data.scheduledAt || data.scheduled_at || null,
+    scheduled_at: data.scheduled_at || data.scheduledAt || null,
+    acceptedAt: data.acceptedAt || data.accepted_at || null,
+    accepted_at: data.accepted_at || data.acceptedAt || null,
+    assignedAt: data.assignedAt || data.assigned_at || null,
+    assigned_at: data.assigned_at || data.assignedAt || null,
+    deliveryFailedAt: data.deliveryFailedAt || data.delivery_failed_at || null,
+    delivery_failed_at: data.delivery_failed_at || data.deliveryFailedAt || null,
     isLocal: !!data.isLocal,
   };
 };

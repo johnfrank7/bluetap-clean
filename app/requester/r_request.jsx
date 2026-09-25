@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -396,6 +397,10 @@ export default function RequesterRequests() {
         )
       );
       setToast({ visible: true, message: 'Order request cancelled successfully.', type: 'info' });
+      const requesterId = auth.currentUser?.uid;
+      if (requesterId) {
+        refreshRequesterRequests(requesterId);
+      }
     } catch (error) {
       if (error.savedLocal) {
         setRequests((currentRequests) =>
@@ -417,6 +422,13 @@ export default function RequesterRequests() {
   };
 
   const confirmCancelRequest = (request) => {
+    if (Platform.OS === 'web') {
+      const confirmed = typeof window !== 'undefined' ? window.confirm('Are you sure you want to cancel this pending request?') : true;
+      if (confirmed) {
+        cancelPendingRequest(request);
+      }
+      return;
+    }
     Alert.alert(
       'Cancel Request',
       'Are you sure you want to cancel this pending request?',
@@ -552,6 +564,11 @@ export default function RequesterRequests() {
               visible={!!selectedRequest}
               onClose={() => setSelectedRequest(null)}
               request={selectedDetailsRequest}
+              onCancel={selectedRequest && isPendingRequest(selectedRequest) ? () => {
+                const reqToCancel = selectedRequest;
+                setSelectedRequest(null);
+                confirmCancelRequest(reqToCancel);
+              } : undefined}
             />
           </View>
         </PortalSwipeContainer>

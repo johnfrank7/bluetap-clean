@@ -25,6 +25,7 @@ import { ensureUserUniqueId, getProfileUniqueId } from '../../services/uniqueIds
 import { formatPhilippinePhone, normalizePhilippinePhone } from '../../services/phoneUtils';
 import { createShadow } from '../../components/shadowStyles';
 import { createPortalStyleSheet, useBlueTapTheme } from '../../components/BlueTapTheme';
+import PortalSwipeContainer, { REQUESTER_TABS } from '../../components/PortalSwipeContainer';
 import TopToastFeedback from '../../components/TopToastFeedback';
 import { USER_PORTAL_BOTTOM_CONTENT_INSET, USER_PORTAL_LAYOUT } from '../../constants/userPortalLayout';
 import { BLUETAP_COLORS } from '../../constants/bluetapTheme';
@@ -223,7 +224,7 @@ export default function ProfilePage() {
   const profileDisplay = useMemo(
     () => ({
       fullName: getFullName(userData),
-      uniqueId: getProfileUniqueId(userData) || userData?.uid || auth.currentUser?.uid || '',
+      uniqueId: getProfileUniqueId(userData) || 'Not assigned',
       phone: formatPhilippinePhone(userData?.phone) || userData?.phone || '',
       email: userData?.email || auth.currentUser?.email || '',
       address: userData?.address || '',
@@ -346,6 +347,7 @@ export default function ProfilePage() {
         />
         <StatusBar style="light" />
 
+        <PortalSwipeContainer tabs={REQUESTER_TABS} currentRoute="/requester/r_profile">
         <View style={styles.phoneWrapper}>
           <ScrollView
             contentContainerStyle={styles.scrollContent}
@@ -498,8 +500,8 @@ export default function ProfilePage() {
           </View>
 
           </ScrollView>
-
         </View>
+        </PortalSwipeContainer>
       </SafeAreaView>
     </LinearGradient>
   );

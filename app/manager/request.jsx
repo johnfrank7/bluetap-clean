@@ -34,6 +34,21 @@ const EDITABLE_STATUSES = new Set([
   'scheduled',
 ]);
 
+const TIME_SLOT_OPTIONS = [
+  { label: '09:00 AM', hours: 9, minutes: 0 },
+  { label: '11:00 AM', hours: 11, minutes: 0 },
+  { label: '01:00 PM', hours: 13, minutes: 0 },
+  { label: '03:00 PM', hours: 15, minutes: 0 },
+  { label: '05:00 PM', hours: 17, minutes: 0 },
+];
+
+function buildScheduleDate(dayOffset, slot) {
+  const target = new Date();
+  target.setDate(target.getDate() + dayOffset);
+  target.setHours(slot.hours, slot.minutes, 0, 0);
+  return target;
+}
+
 const orderProducts = (order) =>
   order.items?.map((item) => `${item.quantity} × ${item.productNameSnapshot}`).filter(Boolean).join(', ') || 'Order products';
 
@@ -166,13 +181,20 @@ function OutsideRadiusApprovalQueue({ styles, colors, onOrderApproved, onShowToa
   );
 }
 
-function EditOrderModal({ visible, order, onClose, onSaveSuccess, colors, styles }) {
+function EditOrderModal({ visible, order, distributors = [], onClose, onSaveSuccess, colors, styles, onShowToast }) {
   const [catalogProducts, setCatalogProducts] = useState([]);
   const [items, setItems] = useState([]);
   const [notes, setNotes] = useState('');
   const [container, setContainer] = useState('');
   const [saving, setSaving] = useState(false);
   const [editError, setEditError] = useState('');
+
+  // Distributor assignment state
+  const [selectedDistributorUid, setSelectedDistributorUid] = useState('');
+  const [selectedDayOffset, setSelectedDayOffset] = useState(0);
+  const [selectedSlotIndex, setSelectedSlotIndex] = useState(0);
+  const [assigning, setAssigning] = useState(false);
+  const [assignError, setAssignError] = useState('');
 
   const isEditable = order && EDITABLE_STATUSES.has(order.status);
 
@@ -196,8 +218,52 @@ function EditOrderModal({ visible, order, onClose, onSaveSuccess, colors, styles
       setNotes(order.notes || order.specialInstructions || '');
       setContainer(order.container || '');
       setEditError('');
+      setSelectedDistributorUid(order.assignedDistributorUid || order.distributor_id || (distributors[0]?.uid || ''));
+      setSelectedDayOffset(0);
+      setSelectedSlotIndex(0);
+      setAssignError('');
     }
-  }, [order]);
+  }, [order, distributors]);
+
+  const handleAssignDistributor = async () => {
+    if (!selectedDistributorUid) {
+      setAssignError('Please select a distributor.');
+      return;
+    }
+    const slot = TIME_SLOT_OPTIONS[selectedSlotIndex] || TIME_SLOT_OPTIONS[0];
+    const scheduledAt = buildScheduleDate(selectedDayOffset, slot);
+
+    if (scheduledAt.getTime() < Date.now() - 5 * 60 * 1000) {
+      setAssignError('Please select a current or future delivery time slot.');
+      return;
+    }
+
+    setAssigning(true);
+    setAssignError('');
+    const isReassign = !!(order.assignedDistributorUid || order.distributor_id);
+    try {
+      await dispatchManagerOrder(
+        order.id,
+        isReassign ? 'reassign-distributor' : 'assign-distributor',
+        {
+          distributorUid: selectedDistributorUid,
+          scheduledAt: scheduledAt.toISOString(),
+        }
+      );
+      onShowToast?.(
+        isReassign ? 'Distributor reassigned successfully.' : 'Distributor assigned and delivery scheduled.',
+        'success'
+      );
+      onSaveSuccess?.();
+      onClose();
+    } catch (err) {
+      const msg = err.message || 'Failed to assign distributor.';
+      setAssignError(msg);
+      onShowToast?.(msg, 'error');
+    } finally {
+      setAssigning(false);
+    }
+  };
 
   const updateQuantity = (index, delta) => {
     setItems((curr) =>
@@ -371,6 +437,87 @@ function EditOrderModal({ visible, order, onClose, onSaveSuccess, colors, styles
               )}
             </View>
 
+            {/* Distributor & Delivery Schedule Section */}
+            <View style={styles.modalSection}>
+              <Text style={styles.modalSectionTitle}>Distributor & Delivery Schedule</Text>
+              <Text style={styles.scheduleCurrentSub}>
+                Current Assigned: {order.assignedDistributorNameSnapshot || order.assignedDistributorName || order.distributor_name || 'Not assigned'}
+                {order.scheduledAt ? ` · Scheduled: ${new Date(order.scheduledAt).toLocaleString()}` : ''}
+              </Text>
+
+              <Text style={[styles.subLabel, { marginTop: 8 }]}>Select Distributor:</Text>
+              {distributors.length === 0 ? (
+                <Text style={styles.panelEmptyText}>No eligible distributors found for this branch.</Text>
+              ) : (
+                <View style={styles.distributorList}>
+                  {distributors.map((distributor) => {
+                    const isSelected = selectedDistributorUid === distributor.uid;
+                    return (
+                      <TouchableOpacity
+                        key={distributor.uid}
+                        onPress={() => setSelectedDistributorUid(distributor.uid)}
+                        style={[styles.distributorOption, isSelected && styles.distributorOptionSelected]}
+                      >
+                        <View style={[styles.radioCircle, isSelected && styles.radioCircleSelected]}>
+                          {isSelected && <View style={styles.radioDot} />}
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Text style={[styles.distributorName, isSelected && styles.distributorNameSelected]}>
+                            {distributor.name}
+                          </Text>
+                          <Text style={styles.distributorSub}>Eligible · This Branch</Text>
+                        </View>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              )}
+
+              <Text style={[styles.subLabel, { marginTop: 10 }]}>Delivery Date:</Text>
+              <View style={styles.pillGroup}>
+                {['Today', 'Tomorrow', 'In 2 Days'].map((label, index) => (
+                  <TouchableOpacity
+                    key={label}
+                    onPress={() => setSelectedDayOffset(index)}
+                    style={[styles.schedulePill, selectedDayOffset === index && styles.schedulePillActive]}
+                  >
+                    <Text style={[styles.schedulePillText, selectedDayOffset === index && styles.schedulePillTextActive]}>
+                      {label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              <Text style={[styles.subLabel, { marginTop: 8 }]}>Time Slot:</Text>
+              <View style={styles.pillGroup}>
+                {TIME_SLOT_OPTIONS.map((slot, index) => (
+                  <TouchableOpacity
+                    key={slot.label}
+                    onPress={() => setSelectedSlotIndex(index)}
+                    style={[styles.schedulePill, selectedSlotIndex === index && styles.schedulePillActive]}
+                  >
+                    <Text style={[styles.schedulePillText, selectedSlotIndex === index && styles.schedulePillTextActive]}>
+                      {slot.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              {!!assignError && (
+                <Text style={styles.scheduleErrorText}>{assignError}</Text>
+              )}
+
+              <TouchableOpacity
+                disabled={assigning || !selectedDistributorUid}
+                onPress={handleAssignDistributor}
+                style={[styles.confirmAssignmentButton, (assigning || !selectedDistributorUid) && styles.actionDisabled]}
+              >
+                <Text style={styles.confirmAssignmentText}>
+                  {assigning ? 'Saving…' : (order.assignedDistributorUid || order.distributor_id) ? 'Reassign Distributor & Schedule' : 'Assign Distributor & Schedule'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+
             {!!editError && (
               <View style={styles.errorBanner}>
                 <Text style={styles.errorBannerText}>{editError}</Text>
@@ -537,9 +684,84 @@ function BranchTransfersQueue({ data, styles, onRefresh, colors, onShowToast }) 
   );
 }
 
-function BranchOrdersOverview({ data, styles, onRefresh, colors, onShowToast }) {
-  const [selectedOrder, setSelectedOrder] = useState(null);
-  const [modalVisible, setModalVisible] = useState(false);
+function ReceivedRequestsQueue({ data, styles, onRefresh, colors, onOpenOrder }) {
+  const RECEIVED_STATUSES = useMemo(
+    () => new Set(['awaiting_distributor_assignment', 'pending', 'distributor_assigned', 'accepted', 'scheduled']),
+    []
+  );
+
+  const receivedOrders = useMemo(() => {
+    return (data.orders || []).filter((order) => RECEIVED_STATUSES.has(order.status));
+  }, [data.orders, RECEIVED_STATUSES]);
+
+  return (
+    <View style={styles.card}>
+      <View style={styles.cardHeaderRow}>
+        <View>
+          <Text style={styles.eyebrow}>RECEIVED REQUESTS</Text>
+          <Text style={styles.cardTitle}>Incoming & Active Branch Orders</Text>
+          <Text style={styles.helperText}>
+            Review customer orders awaiting action, assign distributors, and schedule branch delivery.
+          </Text>
+        </View>
+        <TouchableOpacity onPress={onRefresh} style={styles.refreshButton}>
+          <Text style={styles.refreshText}>Refresh</Text>
+        </TouchableOpacity>
+      </View>
+
+      {receivedOrders.length === 0 ? (
+        <View style={styles.emptyContainer}>
+          <Text style={styles.emptyText}>No active or received orders requiring branch action.</Text>
+        </View>
+      ) : (
+        receivedOrders.map((order) => {
+          const isAssigned = !!(order.assignedDistributorUid || order.distributor_id);
+          const tone =
+            order.status === 'awaiting_distributor_assignment'
+              ? 'amber'
+              : order.status === 'accepted'
+              ? 'cyan'
+              : order.status === 'scheduled'
+              ? 'green'
+              : 'blue';
+
+          return (
+            <View key={order.id} style={styles.orderItem}>
+              <View style={styles.orderHeaderRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.requesterName}>{order.requesterName || 'Requester'}</Text>
+                  <Text style={styles.orderIdText}>#{order.requestId || order.id}</Text>
+                </View>
+                <ManagerPill tone={tone}>{order.status?.replace(/_/g, ' ')}</ManagerPill>
+              </View>
+
+              <Text style={styles.productsSummary}>{orderProducts(order)}</Text>
+
+              <View style={styles.detailsBlock}>
+                <Text style={styles.detailLine}>Delivery: {order.address || 'Address provided'}</Text>
+                <Text style={styles.detailLine}>
+                  Distributor: {order.assignedDistributorNameSnapshot || order.assignedDistributorName || order.distributor_name || 'Not assigned'}
+                  {order.scheduledAt ? ` · Scheduled: ${new Date(order.scheduledAt).toLocaleString()}` : ''}
+                </Text>
+                <Text style={styles.amountText}>{formatAmount(order.totalAtOrder)}</Text>
+              </View>
+
+              <View style={styles.actionRow}>
+                <TouchableOpacity onPress={() => onOpenOrder(order)} style={styles.editOrderBtn}>
+                  <Text style={styles.editOrderBtnText}>
+                    {isAssigned ? 'Reassign / Edit Order' : 'Assign Distributor & Schedule'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          );
+        })
+      )}
+    </View>
+  );
+}
+
+function BranchOrdersOverview({ data, styles, onRefresh, colors, onOpenOrder }) {
   const [filter, setFilter] = useState('');
 
   const orders = useMemo(() => {
@@ -553,11 +775,6 @@ function BranchOrdersOverview({ data, styles, onRefresh, colors, onShowToast }) 
         (o.address && o.address.toLowerCase().includes(term))
     );
   }, [data.orders, filter]);
-
-  const openOrder = (order) => {
-    setSelectedOrder(order);
-    setModalVisible(true);
-  };
 
   return (
     <View style={styles.card}>
@@ -606,7 +823,7 @@ function BranchOrdersOverview({ data, styles, onRefresh, colors, onShowToast }) 
               <Text style={styles.amountText}>{formatAmount(order.totalAtOrder)}</Text>
 
               <View style={styles.actionRow}>
-                <TouchableOpacity onPress={() => openOrder(order)} style={styles.editOrderBtn}>
+                <TouchableOpacity onPress={() => onOpenOrder(order)} style={styles.editOrderBtn}>
                   <Text style={styles.editOrderBtnText}>
                     {isEditable ? 'Edit Order Details' : 'View Order Details'}
                   </Text>
@@ -616,18 +833,6 @@ function BranchOrdersOverview({ data, styles, onRefresh, colors, onShowToast }) 
           );
         })
       )}
-
-      <EditOrderModal
-        visible={modalVisible}
-        order={selectedOrder}
-        onClose={() => setModalVisible(false)}
-        onSaveSuccess={() => {
-          onRefresh?.();
-          onShowToast?.('Order details updated successfully.', 'success');
-        }}
-        colors={colors}
-        styles={styles}
-      />
     </View>
   );
 }
@@ -636,11 +841,14 @@ export default function ManagerRequestPage() {
   const { colors } = useAdminTheme();
   const styles = createStyles(colors);
   const [toast, setToast] = useState({ visible: false, message: '', type: 'success' });
+  const [selectedOrder, setSelectedOrder] = useState(null);
+  const [modalVisible, setModalVisible] = useState(false);
 
   const [dispatchData, setDispatchData] = useState({
     orders: [],
     incomingTransfers: [],
     sourceDecisionEvents: [],
+    distributors: [],
   });
 
   const loadDispatch = async () => {
@@ -660,6 +868,11 @@ export default function ManagerRequestPage() {
     setToast({ visible: true, message, type });
   };
 
+  const handleOpenOrder = (order) => {
+    setSelectedOrder(order);
+    setModalVisible(true);
+  };
+
   return (
     <ManagerShell
       active="requests"
@@ -672,14 +885,37 @@ export default function ManagerRequestPage() {
         type={toast.type}
         onDismiss={() => setToast((t) => ({ ...t, visible: false }))}
       />
-      {/* 1. Outside Radius Approvals */}
+      {/* 1. Received Requests */}
+      <ReceivedRequestsQueue
+        data={dispatchData}
+        styles={styles}
+        colors={colors}
+        onRefresh={loadDispatch}
+        onOpenOrder={handleOpenOrder}
+      />
+
+      {/* 2. Outside Radius Approvals */}
       <OutsideRadiusApprovalQueue styles={styles} colors={colors} onOrderApproved={loadDispatch} onShowToast={showToast} />
 
-      {/* 2. Branch Transfers Queue */}
+      {/* 3. Branch Transfers Queue */}
       <BranchTransfersQueue data={dispatchData} styles={styles} onRefresh={loadDispatch} colors={colors} onShowToast={showToast} />
 
-      {/* 3. Branch Orders Overview & Situational Order Edit */}
-      <BranchOrdersOverview data={dispatchData} styles={styles} onRefresh={loadDispatch} colors={colors} onShowToast={showToast} />
+      {/* 4. Branch Orders Overview & Situational Order Edit */}
+      <BranchOrdersOverview data={dispatchData} styles={styles} onRefresh={loadDispatch} colors={colors} onOpenOrder={handleOpenOrder} />
+
+      {/* Shared Order Details, Items Edit, and Distributor Assignment Modal */}
+      <EditOrderModal
+        visible={modalVisible}
+        order={selectedOrder}
+        distributors={dispatchData.distributors || []}
+        onClose={() => setModalVisible(false)}
+        onSaveSuccess={() => {
+          loadDispatch();
+        }}
+        colors={colors}
+        styles={styles}
+        onShowToast={showToast}
+      />
     </ManagerShell>
   );
 }
@@ -1158,6 +1394,116 @@ const createStyles = (colors) =>
     saveBtnText: {
       color: '#FFFFFF',
       fontSize: 12,
+      fontWeight: '800',
+    },
+    scheduleCurrentSub: {
+      color: colors.textSecondary,
+      fontSize: 12,
+      marginBottom: 8,
+    },
+    distributorList: {
+      gap: 6,
+      marginTop: 4,
+      maxHeight: 180,
+    },
+    distributorOption: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      padding: 10,
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surfaceAlt,
+    },
+    distributorOptionSelected: {
+      borderColor: colors.primary,
+      backgroundColor: colors.primarySoft,
+    },
+    radioCircle: {
+      width: 18,
+      height: 18,
+      borderRadius: 9,
+      borderWidth: 2,
+      borderColor: colors.textSecondary,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    radioCircleSelected: {
+      borderColor: colors.primary,
+    },
+    radioDot: {
+      width: 8,
+      height: 8,
+      borderRadius: 4,
+      backgroundColor: colors.primary,
+    },
+    distributorName: {
+      color: colors.textPrimary,
+      fontSize: 13,
+      fontWeight: '700',
+    },
+    distributorNameSelected: {
+      color: colors.primary,
+    },
+    distributorSub: {
+      color: colors.textSecondary,
+      fontSize: 11,
+      marginTop: 1,
+    },
+    panelEmptyText: {
+      color: colors.textSecondary,
+      fontSize: 12,
+      fontStyle: 'italic',
+      marginVertical: 4,
+    },
+    pillGroup: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 6,
+      marginTop: 4,
+      marginBottom: 8,
+    },
+    schedulePill: {
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surfaceAlt,
+    },
+    schedulePillActive: {
+      borderColor: colors.primary,
+      backgroundColor: colors.primarySoft,
+    },
+    schedulePillText: {
+      color: colors.textSecondary,
+      fontSize: 12,
+      fontWeight: '600',
+    },
+    schedulePillTextActive: {
+      color: colors.primary,
+      fontWeight: '800',
+    },
+    scheduleErrorText: {
+      color: colors.danger,
+      fontSize: 12,
+      fontWeight: '700',
+      marginTop: 4,
+      marginBottom: 6,
+    },
+    confirmAssignmentButton: {
+      minHeight: 38,
+      paddingHorizontal: 16,
+      borderRadius: 8,
+      backgroundColor: colors.primary,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginTop: 8,
+    },
+    confirmAssignmentText: {
+      color: '#FFFFFF',
+      fontSize: 13,
       fontWeight: '800',
     },
   });

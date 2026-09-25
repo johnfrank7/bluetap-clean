@@ -51,6 +51,7 @@ export default function RequestDetailsModal({
   visible,
   onClose,
   request,
+  onCancel,
 }) {
   useBlueTapTheme();
   const requesterUniqueId =
@@ -230,6 +231,16 @@ export default function RequestDetailsModal({
                   {formatAmount(request?.grandTotalAmount ?? request?.totalAmount)}
                 </Text>
               </View>
+
+              {typeof onCancel === 'function' && (
+                <TouchableOpacity
+                  activeOpacity={0.85}
+                  style={styles.modalCancelButton}
+                  onPress={onCancel}
+                >
+                  <Text style={styles.modalCancelText}>Cancel Request</Text>
+                </TouchableOpacity>
+              )}
             </View>
           </ScrollView>
         </View>
@@ -434,5 +445,20 @@ const styles = createPortalStyleSheet({
     color: BLUE,
     fontSize: 15,
     fontWeight: 'bold',
+  },
+  modalCancelButton: {
+    backgroundColor: '#FEE2E2',
+    borderWidth: 1,
+    borderColor: '#FCA5A5',
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 14,
+  },
+  modalCancelText: {
+    color: '#DC2626',
+    fontSize: 14,
+    fontWeight: '700',
   },
 });

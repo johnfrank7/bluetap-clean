@@ -11,6 +11,18 @@ Requester and Distributor share one responsive portal shell. Keep role-specific 
 
 Preserve these invariants:
 
+## Requester / Distributor Portal Shell Invariants
+
+1. **Requester is the Reference Layout**: The Requester portal shell is the visual and structural layout reference for Distributor. Distributor screens must match the polish, header hierarchy, and styling conventions of Requester.
+2. **Every Full Requester / Distributor Portal Screen Must Have the Portal Shell**:
+   - **Header Shell**: Every primary portal screen (including notifications) must render the standard portal header with BlueTap logo icon, bold "BlueTap" wordmark, compact theme toggle (moon/sun), and contextual header actions (such as notifications or back button).
+   - **Floating Bottom Navigation**: Detached rounded pill navigation bar must be present on primary screens. Its outer positioning wrapper is strictly transparent, pointer-safe, and visually unpainted.
+   - **Light Theme Standards**: Light theme must reflect BlueTap's blue brand identity with clean light backgrounds, crisp card separation, readable high-contrast typography, and semantic status accents.
+   - **Dark Theme Standards**: Dark theme uses layered deep navy and blue-black surfaces, never pure black as the main background, strictly adhering to shared theme tokens.
+   - **Swipe Navigation**: Primary portal tabs must support horizontal swipe transitions via `PortalSwipeContainer` (with vertical scroll suppression and navigation debouncing), wrapping every main tab including Profile.
+   - **Notifications System**: Both Requester and Distributor notifications must reuse the shared structured notification card system, derived from real order lifecycle events with robust multi-format timestamp parsing.
+
+
 - Header, page content, and floating navigation use the same centered max-width and mobile gutters.
 - The floating bottom navigation remains a detached rounded pill. Its outer positioning wrapper is transparent, pointer-safe, and visually unpainted.
 - Scroll pages reserve bottom content space for nav height, bottom offset, safe-area inset, and a small visual margin.

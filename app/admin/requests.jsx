@@ -761,11 +761,15 @@ export default function AdminRequestsPage() {
             <View style={styles.modalFooter}>
               <TouchableOpacity
                 accessibilityRole="button"
-                accessibilityLabel="Close modal"
-                onPress={() => setSelectedOrder(null)}
-                style={styles.modalCloseButton}
+                accessibilityLabel="Override Distributor Assignment"
+                onPress={() => openOverride(selectedOrder)}
+                disabled={['delivered', 'cancelled', 'canceled', 'declined'].includes((selectedOrder?.status || '').toLowerCase())}
+                style={[
+                  styles.overrideActionButton,
+                  ['delivered', 'cancelled', 'canceled', 'declined'].includes((selectedOrder?.status || '').toLowerCase()) && styles.actionDisabled,
+                ]}
               >
-                <Text style={styles.modalCloseButtonText}>Close</Text>
+                <Text style={styles.overrideActionButtonText}>Override Distributor Assignment</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -1384,6 +1388,24 @@ const createStyles = (colors) =>
       fontWeight: '800',
       color: colors.textPrimary,
       fontSize: 13,
+    },
+    overrideActionButton: {
+      paddingHorizontal: 16,
+      paddingVertical: 10,
+      borderRadius: 8,
+      backgroundColor: colors.primary,
+      borderWidth: 1,
+      borderColor: colors.primary,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    overrideActionButtonText: {
+      fontWeight: '800',
+      color: '#FFFFFF',
+      fontSize: 13,
+    },
+    actionDisabled: {
+      opacity: 0.5,
     },
   });
 

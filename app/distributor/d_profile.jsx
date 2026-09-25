@@ -22,6 +22,7 @@ import { normalizeRole, signOutAndClearSessions } from '../../services/authSessi
 import { ensureUserUniqueId, getProfileUniqueId } from '../../services/uniqueIds';
 import { formatPhilippinePhone, normalizePhilippinePhone } from '../../services/phoneUtils';
 import BlueTapHeader from '../../components/BlueTapHeader';
+import PortalSwipeContainer, { DISTRIBUTOR_TABS } from '../../components/PortalSwipeContainer';
 import { createShadow } from '../../components/shadowStyles';
 import { createPortalStyleSheet, useBlueTapTheme } from '../../components/BlueTapTheme';
 import TopToastFeedback from '../../components/TopToastFeedback';
@@ -91,17 +92,7 @@ const getWaterStation = (profile) => {
 
 const getDistributorId = (profile) => {
   const safeProfile = getProfileObject(profile);
-
-  return (
-    getProfileUniqueId(safeProfile) ||
-    safeProfile.distributor_id ||
-    safeProfile.distributorId ||
-    safeProfile.uid ||
-    safeProfile.id ||
-    ''
-  )
-    .toString()
-    .trim();
+  return getProfileUniqueId(safeProfile) || '';
 };
 
 const getRoleLabel = (role) => {
@@ -332,7 +323,7 @@ export default function DistributorProfilePage() {
       // (requires that Admin has assigned branchId). Fall back to the legacy
       // waterStation profile field for older accounts, then 'Not Assigned'.
       waterStation: resolvedBranchName || getWaterStation(userData) || 'Not Assigned',
-      distributorId: getDistributorId(userData) || 'Not set',
+      distributorId: getDistributorId(userData) || 'Not assigned',
       role: getRoleLabel(userData?.role || 'distributor'),
     }),
     [userData, resolvedBranchName]
@@ -463,6 +454,7 @@ export default function DistributorProfilePage() {
     <SafeAreaView edges={['left', 'right', 'bottom']} style={styles.container}>
       <BlueTapHeader notificationPath="/distributor/d_notification" />
 
+      <PortalSwipeContainer tabs={DISTRIBUTOR_TABS} currentRoute="/distributor/d_profile">
       <View style={styles.phoneWrapper}>
         <ScrollView
           contentContainerStyle={styles.scrollContent}
@@ -639,6 +631,7 @@ export default function DistributorProfilePage() {
 
         </ScrollView>
       </View>
+      </PortalSwipeContainer>
 
       <TopToastFeedback
         visible={toast.visible}

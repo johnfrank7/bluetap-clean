@@ -183,7 +183,7 @@ export default function ManagerShell({
       const q1 = query(
         collection(db, 'requests'),
         where('branchId', '==', managerBranchId),
-        where('status', 'in', ['pending', 'outside_radius_pending_approval', 'awaiting_distributor_assignment'])
+        where('status', 'in', ['pending', 'outside_radius_pending_approval', 'awaiting_distributor_assignment', 'delivery_failed'])
       );
       unsub1 = onSnapshot(
         q1,

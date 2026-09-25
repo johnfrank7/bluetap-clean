@@ -12,15 +12,11 @@ import RequestDetailsModal from '../../components/RequestDetailsModal';
 import { USER_PORTAL_BOTTOM_CONTENT_INSET, USER_PORTAL_LAYOUT } from '../../constants/userPortalLayout';
 import { normalizeRequesterOrderStatus, requesterOrderStatusLabel } from '../../constants/requesterOrderStatus';
 import { refreshRequesterRequests, subscribeRequesterRequests } from '../../services/requests';
+import { formatNotificationTime, getOrderLifecycleTimestamp } from '../../services/notificationTimestamp';
 
-const asDate = (value) =>
-  value instanceof Date
-    ? value
-    : value?.toDate?.() || (value?.seconds ? new Date(value.seconds * 1000) : value ? new Date(value) : null);
-
-const formatWhen = (value) => {
-  const date = asDate(value);
-  return date && !Number.isNaN(date.getTime()) ? date.toLocaleString() : 'Time unavailable';
+const formatWhen = (order) => {
+  const ts = getOrderLifecycleTimestamp(order);
+  return formatNotificationTime(ts);
 };
 
 const getNotificationTone = (statusRaw) => {
@@ -102,7 +98,7 @@ export default function RequesterNotification() {
     () =>
       orders.map((order) => ({
         ...order,
-        when: order.updated_at || order.updatedAt || order.created_at || order.createdAt,
+        when: formatWhen(order),
       })),
     [orders]
   );
@@ -158,7 +154,7 @@ export default function RequesterNotification() {
                   <View style={styles.cardBody}>
                     <View style={styles.cardHeaderRow}>
                       <SoftStatusBadge status={event.status} />
-                      <Text style={styles.time}>{formatWhen(event.when)}</Text>
+                      <Text style={styles.time}>{event.when}</Text>
                     </View>
                     <Text style={styles.message}>{messageFor(event)}</Text>
                   </View>

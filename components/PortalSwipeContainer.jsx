@@ -29,25 +29,33 @@ export default function PortalSwipeContainer({
     return tabs.findIndex((tab) => currentRoute.startsWith(tab) || tab === currentRoute);
   }, [tabs, currentRoute]);
 
+  const isNavigatingRef = useRef(false);
+
+  React.useEffect(() => {
+    isNavigatingRef.current = false;
+  }, [currentRoute, currentIndex]);
+
   const panResponder = useRef(
     PanResponder.create({
       onMoveShouldSetPanResponderCapture: () => false,
       onMoveShouldSetPanResponder: (evt, gestureState) => {
         if (!enabled) return false;
         const { dx, dy } = gestureState;
-        // Horizontal swipe must dominate vertical swipe
-        return Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 2.2;
+        // Horizontal swipe must dominate vertical swipe to prevent conflict with scrolling
+        return Math.abs(dx) > 35 && Math.abs(dx) > Math.abs(dy) * 1.8;
       },
       onPanResponderRelease: (evt, gestureState) => {
-        if (!enabled || currentIndex === -1) return;
+        if (!enabled || currentIndex === -1 || isNavigatingRef.current) return;
         const { dx, dy } = gestureState;
-        if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 2) {
+        if (Math.abs(dx) > 45 && Math.abs(dx) > Math.abs(dy) * 1.5) {
           if (dx < 0 && currentIndex < tabs.length - 1) {
-            // Swipe left -> next tab
-            router.push(tabs[currentIndex + 1]);
+            // Swipe left -> advance to next tab
+            isNavigatingRef.current = true;
+            router.replace(tabs[currentIndex + 1]);
           } else if (dx > 0 && currentIndex > 0) {
-            // Swipe right -> previous tab
-            router.push(tabs[currentIndex - 1]);
+            // Swipe right -> return to previous tab
+            isNavigatingRef.current = true;
+            router.replace(tabs[currentIndex - 1]);
           }
         }
       },

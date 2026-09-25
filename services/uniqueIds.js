@@ -36,18 +36,32 @@ const PUBLIC_PREFIXES = {
 export const normalizeUniqueIdRole = (role) =>
   role?.toString().trim().toLowerCase() || '';
 
+export const isPublicOrFormattedUniqueId = (id) => {
+  if (!id || typeof id !== 'string') return false;
+  const str = id.trim();
+  if (/^(Req|Dis|Mgr|Adm|Acc)\d+$/i.test(str)) return true;
+  if (/^(REQ|DIS|MGR|ADM|ACC)-\d+$/i.test(str)) return true;
+  // If it's a short alphanumeric identifier (less than 15 chars) and doesn't look like a Firebase Auth UID
+  if (str.length < 15 && !/^[a-zA-Z0-9]{20,}$/.test(str)) return true;
+  return false;
+};
+
 export const getProfileUniqueId = (profile = {}) => {
   const safeProfile = profile || {};
 
-  return (
+  const candidate = (
     safeProfile.publicUid ||
     safeProfile.displayUid ||
     safeProfile.unique_id ||
     safeProfile.uniqueId ||
-    safeProfile.uid ||
-    safeProfile.id ||
     ''
   ).toString().trim();
+
+  if (candidate && isPublicOrFormattedUniqueId(candidate)) {
+    return candidate;
+  }
+
+  return '';
 };
 
 export const getUniqueIdConfig = (role) =>
