@@ -52,9 +52,12 @@ Preserve these invariants:
 - Distributor notifications (`app/distributor/d_notification.jsx`) reuse the card visual system from `app/requester/r_notification.jsx`: clean structured notification cards, delivery date/status badges, real order lifecycle events, empty state handling, and theme token adherence.
 - Notifications derive directly from authenticated order states and branch dispatch events; do not use mock notifications or disconnected static lists.
 
-## Navigation gestures and empty states
+## Navigation gestures, carousels, and empty states
 
 - Primary tab navigation in Requester and Distributor portals supports swipe navigation via `PortalSwipeContainer`. Swiping is guarded against accidental vertical scroll triggers (`|dx| > 50` and `|dx| > 2.2 * |dy|`).
+- Nested horizontal swipe widgets (e.g. `Carousel` and pagination indicators) must be wrapped in `<PortalSwipeIgnore>` from `components/PortalSwipeContainer.jsx` to suppress portal tab navigation while interacting with carousel items.
+- Breaking circular dependencies: `UserPortalFrame` is isolated in `components/UserPortalFrame.jsx` so that `BlueTapHeader` and `UserPortalShell` do not import each other cyclically, avoiding runtime TDZ initialization crashes (`ReferenceError: Cannot access 'X' before initialization`).
+- Real-time greetings: Dashboards use `useLiveGreeting` from `services/liveTime.js` to update local time-of-day greetings ("Good Morning", "Good Afternoon", "Good Evening") dynamically without triggering full page reloads or relying on third-party APIs.
 - Empty lists and query results must render `BlueTapEmptyState` with the shared sad water droplet motif, informative headline, contextual explanation, and call-to-action button where appropriate.
 - Headers, view tabs, and primary action controls (e.g. "Add Request" or scheduled delivery tabs) must remain pinned in a fixed container above the `ScrollView` so filters and actions remain instantly operable during scrolling. The pinned header area must use an opaque background surface (`colors.background` in dark mode, `colors.primary` or `colors.surface` in light mode) and proper vertical spacing so scrollable order cards never visibly clip or show through beneath the header controls.
 - Tab toggles (such as Active Orders / History in `r_request.jsx` and delivery tabs in `d_scheduled_requests.jsx`) must provide distinct active, hover, and pressed visual states via `Pressable` for consistent web and touch feedback.

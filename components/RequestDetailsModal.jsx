@@ -8,6 +8,7 @@ import {
   View,
 } from 'react-native';
 import SoftStatusBadge from './SoftStatusBadge';
+import LocationMap from './LocationMap';
 import { createShadow } from './shadowStyles';
 import { createPortalStyleSheet, useBlueTapTheme } from './BlueTapTheme';
 
@@ -52,6 +53,7 @@ export default function RequestDetailsModal({
   onClose,
   request,
   onCancel,
+  onEdit,
 }) {
   useBlueTapTheme();
   const requesterUniqueId =
@@ -81,6 +83,19 @@ export default function RequestDetailsModal({
       { label: 'Quantity', value: request?.quantity },
       { label: 'Total Amount', value: formatAmount(request?.totalAmount) },
     ],
+    ...(request?.deliveryFeeAtOrder !== undefined || request?.subtotalAtOrder !== undefined
+      ? [
+          [
+            { label: 'Items Subtotal', value: formatAmount(request?.subtotalAtOrder ?? request?.subtotal) },
+            {
+              label: request?.distanceKmAtOrder || request?.distanceKm
+                ? `Delivery Fee (${Number(request?.distanceKmAtOrder || request?.distanceKm).toFixed(1)} km)`
+                : 'Delivery Fee',
+              value: formatAmount(request?.deliveryFeeAtOrder ?? request?.deliveryFee ?? 0),
+            },
+          ],
+        ]
+      : []),
     [
       { label: 'Water Station', value: request?.waterStation },
       { label: 'Payment Method', value: request?.paymentMethod },
@@ -181,6 +196,32 @@ export default function RequestDetailsModal({
               </View>
             </View>
 
+            {request?.deliveryLocation?.latitude && request?.deliveryLocation?.longitude ? (
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>Delivery Location Map</Text>
+                <View style={styles.mapContainer}>
+                  <LocationMap
+                    location={request.deliveryLocation}
+                    branches={
+                      request.branchLocation?.latitude
+                        ? [
+                            {
+                              id: request.branchId || 'station',
+                              name: request.waterStation || 'Water Station',
+                              location: request.branchLocation,
+                            },
+                          ]
+                        : []
+                    }
+                    selectedBranchId={request.branchId || 'station'}
+                    readOnly={true}
+                    height={170}
+                    themed={true}
+                  />
+                </View>
+              </View>
+            ) : null}
+
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>Ordered Products</Text>
 
@@ -231,6 +272,16 @@ export default function RequestDetailsModal({
                   {formatAmount(request?.grandTotalAmount ?? request?.totalAmount)}
                 </Text>
               </View>
+
+              {typeof onEdit === 'function' && (
+                <TouchableOpacity
+                  activeOpacity={0.85}
+                  style={styles.modalEditButton}
+                  onPress={onEdit}
+                >
+                  <Text style={styles.modalEditText}>Edit Order</Text>
+                </TouchableOpacity>
+              )}
 
               {typeof onCancel === 'function' && (
                 <TouchableOpacity
@@ -460,5 +511,26 @@ const styles = createPortalStyleSheet({
     color: '#DC2626',
     fontSize: 14,
     fontWeight: '700',
+  },
+  modalEditButton: {
+    backgroundColor: '#E0F2FE',
+    borderWidth: 1,
+    borderColor: '#7DD3FC',
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 14,
+  },
+  modalEditText: {
+    color: '#0284C7',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  mapContainer: {
+    borderRadius: 16,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: CARD_BORDER,
   },
 });

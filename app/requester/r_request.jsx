@@ -19,6 +19,7 @@ import { useRouter } from 'expo-router';
 import { auth } from '../../firebase';
 import { findLocalUserForAuthRole } from '../../localUsers';
 import RequestDetailsModal from '../../components/RequestDetailsModal';
+import RequesterEditOrderModal from '../../components/RequesterEditOrderModal';
 import SoftStatusBadge, { normalizeStatus } from '../../components/SoftStatusBadge';
 import { createShadow } from '../../components/shadowStyles';
 import BlueTapEmptyState from '../../components/BlueTapEmptyState';
@@ -223,9 +224,11 @@ const RequestCard = ({
   isHistory,
   isCancelling,
   onCancel,
+  onEdit,
   onViewDetails,
 }) => {
   const canCancel = !isHistory && isPendingRequest(request);
+  const canEdit = !isHistory && isPendingRequest(request) && typeof onEdit === 'function';
 
   return (
     <View style={styles.requestCard}>
@@ -298,6 +301,16 @@ const RequestCard = ({
           <Text style={styles.secondaryActionText}>View Details</Text>
         </TouchableOpacity>
 
+        {canEdit && (
+          <TouchableOpacity
+            activeOpacity={0.8}
+            style={styles.editActionButton}
+            onPress={() => onEdit(request)}
+          >
+            <Text style={styles.editActionText}>Edit Order</Text>
+          </TouchableOpacity>
+        )}
+
         {canCancel && (
           <TouchableOpacity
             activeOpacity={0.85}
@@ -323,6 +336,7 @@ export default function RequesterRequests() {
   const router = useRouter();
   const [requests, setRequests] = useState([]);
   const [selectedRequest, setSelectedRequest] = useState(null);
+  const [editingRequest, setEditingRequest] = useState(null);
   const [activeTab, setActiveTab] = useState(ACTIVE_TAB);
   const [cancellingRequestId, setCancellingRequestId] = useState('');
   const [toast, setToast] = useState({ visible: false, message: '', type: 'info' });
@@ -554,6 +568,7 @@ export default function RequesterRequests() {
                     isHistory={!isActiveOrdersTab}
                     isCancelling={cancellingRequestId === request.id}
                     onCancel={confirmCancelRequest}
+                    onEdit={setEditingRequest}
                     onViewDetails={setSelectedRequest}
                   />
                 ))
@@ -564,11 +579,26 @@ export default function RequesterRequests() {
               visible={!!selectedRequest}
               onClose={() => setSelectedRequest(null)}
               request={selectedDetailsRequest}
+              onEdit={selectedRequest && isPendingRequest(selectedRequest) ? () => {
+                const reqToEdit = selectedRequest;
+                setSelectedRequest(null);
+                setEditingRequest(reqToEdit);
+              } : undefined}
               onCancel={selectedRequest && isPendingRequest(selectedRequest) ? () => {
                 const reqToCancel = selectedRequest;
                 setSelectedRequest(null);
                 confirmCancelRequest(reqToCancel);
               } : undefined}
+            />
+
+            <RequesterEditOrderModal
+              visible={!!editingRequest}
+              onClose={() => setEditingRequest(null)}
+              order={editingRequest}
+              onSaved={() => {
+                setEditingRequest(null);
+                setToast({ visible: true, message: 'Order updated successfully.', type: 'success' });
+              }}
             />
           </View>
         </PortalSwipeContainer>
@@ -782,6 +812,21 @@ const styles = createPortalStyleSheet({
     color: '#2563EB',
     fontSize: 13,
     fontWeight: '600',
+  },
+  editActionButton: {
+    flex: 1,
+    minHeight: 44,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#E0F2FE',
+    borderWidth: 1.5,
+    borderColor: '#7DD3FC',
+  },
+  editActionText: {
+    color: '#0284C7',
+    fontSize: 13,
+    fontWeight: '700',
   },
   cancelActionButton: {
     flex: 1,

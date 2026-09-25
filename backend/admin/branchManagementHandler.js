@@ -22,6 +22,9 @@ const safeBranch = (id, data = {}) => ({
   active: data.status === 'inactive' ? false : data.active !== false,
   latitude: finiteCoordinate(data.latitude, -90, 90), longitude: finiteCoordinate(data.longitude, -180, 180),
   serviceRadiusKm: data.serviceRadiusKm !== null && data.serviceRadiusKm !== undefined && data.serviceRadiusKm !== '' && Number.isFinite(Number(data.serviceRadiusKm)) ? Number(data.serviceRadiusKm) : DEFAULT_SERVICE_RADIUS_KM,
+  baseDeliveryFee: data.baseDeliveryFee !== null && data.baseDeliveryFee !== undefined && data.baseDeliveryFee !== '' && Number.isFinite(Number(data.baseDeliveryFee)) ? Number(data.baseDeliveryFee) : 0,
+  includedRadiusKm: data.includedRadiusKm !== null && data.includedRadiusKm !== undefined && data.includedRadiusKm !== '' && Number.isFinite(Number(data.includedRadiusKm)) ? Number(data.includedRadiusKm) : (Number(data.serviceRadiusKm) || DEFAULT_SERVICE_RADIUS_KM),
+  outsideRadiusFeePerKm: data.outsideRadiusFeePerKm !== null && data.outsideRadiusFeePerKm !== undefined && data.outsideRadiusFeePerKm !== '' && Number.isFinite(Number(data.outsideRadiusFeePerKm)) ? Number(data.outsideRadiusFeePerKm) : 10,
   createdAt: data.createdAt || null, createdBy: data.createdBy || '', updatedAt: data.updatedAt || null, updatedBy: data.updatedBy || '',
 });
 const safeManager = (id, data = {}) => ({
@@ -77,6 +80,27 @@ function branchInput(body, { partial = false } = {}) {
       throw new OtpError(400, 'INVALID_SERVICE_RADIUS', 'Service radius must be between 0 and 500 km.');
     }
     result.serviceRadiusKm = radius;
+  }
+  if (!partial || Object.prototype.hasOwnProperty.call(body, 'baseDeliveryFee')) {
+    const fee = body.baseDeliveryFee === '' || body.baseDeliveryFee == null ? 0 : Number(body.baseDeliveryFee);
+    if (!Number.isFinite(fee) || fee < 0 || fee > 10000) {
+      throw new OtpError(400, 'INVALID_DELIVERY_FEE', 'Base delivery fee must be a valid non-negative number.');
+    }
+    result.baseDeliveryFee = fee;
+  }
+  if (!partial || Object.prototype.hasOwnProperty.call(body, 'includedRadiusKm')) {
+    const included = body.includedRadiusKm === '' || body.includedRadiusKm == null ? (result.serviceRadiusKm || DEFAULT_SERVICE_RADIUS_KM) : Number(body.includedRadiusKm);
+    if (!Number.isFinite(included) || included <= 0 || included > 500) {
+      throw new OtpError(400, 'INVALID_INCLUDED_RADIUS', 'Included radius must be between 0 and 500 km.');
+    }
+    result.includedRadiusKm = included;
+  }
+  if (!partial || Object.prototype.hasOwnProperty.call(body, 'outsideRadiusFeePerKm')) {
+    const perKm = body.outsideRadiusFeePerKm === '' || body.outsideRadiusFeePerKm == null ? 10 : Number(body.outsideRadiusFeePerKm);
+    if (!Number.isFinite(perKm) || perKm < 0 || perKm > 10000) {
+      throw new OtpError(400, 'INVALID_OUTSIDE_RADIUS_FEE', 'Outside radius fee per km must be a valid non-negative number.');
+    }
+    result.outsideRadiusFeePerKm = perKm;
   }
   return result;
 }

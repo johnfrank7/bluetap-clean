@@ -30,6 +30,21 @@ const distanceKm = (from, to) => {
   const bounded = Math.min(1, Math.max(0, a));
   return Math.round(earthRadiusKm * 2 * Math.atan2(Math.sqrt(bounded), Math.sqrt(1 - bounded)) * 10) / 10;
 };
+const calculateDeliveryFee = (distKm, branch = {}) => {
+  const baseFee = typeof branch.baseDeliveryFee === 'number' ? branch.baseDeliveryFee : 0;
+  const includedRadius = typeof branch.includedRadiusKm === 'number'
+    ? branch.includedRadiusKm
+    : (typeof branch.serviceRadiusKm === 'number' ? branch.serviceRadiusKm : DEFAULT_SERVICE_RADIUS_KM);
+  const outsideRate = typeof branch.outsideRadiusFeePerKm === 'number' ? branch.outsideRadiusFeePerKm : 10;
+
+  if (!Number.isFinite(distKm) || distKm <= includedRadius) {
+    return Math.round(baseFee * 100) / 100;
+  }
+
+  const excessKm = distKm - includedRadius;
+  const extraFee = excessKm * outsideRate;
+  return Math.round((baseFee + extraFee) * 100) / 100;
+};
 const fullNameFor = (profile = {}) => clean(profile.fullName || `${profile.firstName || ''} ${profile.lastName || ''}`, 160);
 const profileAddressFor = (profile = {}) => clean(
   profile.completeAddress || [profile.address, profile.barangay, profile.city].filter(Boolean).join(', '),
@@ -152,11 +167,18 @@ async function buildTrustedOrder(db, requester, body) {
     };
   }));
   const quantity = items.reduce((sum, item) => sum + item.quantity, 0);
-  const totalAtOrder = Math.round(items.reduce((sum, item) => sum + item.totalAtOrder, 0) * 100) / 100;
+  const subtotalAtOrder = Math.round(items.reduce((sum, item) => sum + item.totalAtOrder, 0) * 100) / 100;
   const deliveryLocation = { latitude, longitude, ...(accuracy !== null ? { accuracy } : {}) };
   const distanceKmSnapshot = distanceKm(deliveryLocation, branch);
   const serviceRadiusKmSnapshot = serviceRadiusKm(branch);
   const outsideServiceArea = distanceKmSnapshot > serviceRadiusKmSnapshot;
+  const deliveryFeeAtOrder = calculateDeliveryFee(distanceKmSnapshot, branch);
+  const totalAtOrder = Math.round((subtotalAtOrder + deliveryFeeAtOrder) * 100) / 100;
+  const deliveryFeePolicy = {
+    baseDeliveryFee: typeof branch.baseDeliveryFee === 'number' ? branch.baseDeliveryFee : 0,
+    includedRadiusKm: typeof branch.includedRadiusKm === 'number' ? branch.includedRadiusKm : serviceRadiusKmSnapshot,
+    outsideRadiusFeePerKm: typeof branch.outsideRadiusFeePerKm === 'number' ? branch.outsideRadiusFeePerKm : 10,
+  };
   return {
     requesterUid: requester.decoded.uid,
     requester_id: requester.decoded.uid,
@@ -177,6 +199,7 @@ async function buildTrustedOrder(db, requester, body) {
     water_station: branch.name,
     deliveryLocation,
     distanceKmSnapshot,
+    distanceKmAtOrder: distanceKmSnapshot,
     serviceRadiusKmSnapshot,
     outsideServiceArea,
     items,
@@ -187,6 +210,9 @@ async function buildTrustedOrder(db, requester, body) {
     unitPriceAtOrder: items[0]?.unitPriceAtOrder || 0,
     product_price: items[0]?.unitPriceAtOrder || 0,
     quantity,
+    subtotalAtOrder,
+    deliveryFeeAtOrder,
+    deliveryFeePolicy,
     totalAtOrder,
     total_cost: totalAtOrder,
     container: clean(body.container, 80),
@@ -218,7 +244,75 @@ function createRequesterOrdersHandler(getAdmin = getFirebaseAdmin) {
         const snapshot = orderId ? await ref.get() : null;
         const current = snapshot?.data();
         if (!snapshot?.exists || (current.requesterUid || current.requester_id) !== requester.decoded.uid) throw new OtpError(404, 'ORDER_NOT_FOUND', 'Order not found.');
-        if (!['pending', 'outside_radius_pending_approval'].includes(String(current.status).toLowerCase())) throw new OtpError(409, 'ORDER_NOT_CANCELLABLE', 'Only pending orders can be cancelled.');
+        const isPending = ['pending', 'outside_radius_pending_approval'].includes(String(current.status).toLowerCase());
+
+        if (body.action === 'edit-order') {
+          if (!isPending) {
+            throw new OtpError(409, 'ORDER_NOT_EDITABLE', 'Only pending orders can be edited.');
+          }
+
+          const submittedItems = requestItems(body);
+          const branchId = current.branchId || current.currentBranchId;
+          const items = await Promise.all(submittedItems.map(async (item) => {
+            const productSnap = await db.collection('products').doc(item.productId).get();
+            if (!productSnap.exists) throw new OtpError(404, 'PRODUCT_NOT_FOUND', 'A selected product no longer exists.');
+            const product = safeProduct(productSnap.id, productSnap.data());
+            if (!product.active || product.price === null || !productAvailableAtBranch(product, branchId)) {
+              throw new OtpError(409, 'PRODUCT_UNAVAILABLE', `${product.product_name || 'A selected product'} is not available.`);
+            }
+            const lineTotal = Math.round(product.price * item.quantity * 100) / 100;
+            return {
+              productId: product.id,
+              productNameSnapshot: product.product_name,
+              unitPriceAtOrder: product.price,
+              quantity: item.quantity,
+              totalAtOrder: lineTotal,
+              containerTypeSnapshot: product.containerType || '',
+              sizeSnapshot: product.size || '',
+            };
+          }));
+
+          const subtotalAtOrder = Math.round(items.reduce((sum, item) => sum + item.totalAtOrder, 0) * 100) / 100;
+          const deliveryFeeAtOrder = typeof current.deliveryFeeAtOrder === 'number' ? current.deliveryFeeAtOrder : 0;
+          const totalAtOrder = Math.round((subtotalAtOrder + deliveryFeeAtOrder) * 100) / 100;
+          const quantity = items.reduce((sum, item) => sum + item.quantity, 0);
+          const now = new Date();
+
+          const updates = {
+            items,
+            productId: items[0]?.productId || '',
+            product_id: items[0]?.productId || '',
+            productNameSnapshot: items.map((item) => item.productNameSnapshot).join(', '),
+            product_name: items.map((item) => item.productNameSnapshot).join(', '),
+            unitPriceAtOrder: items[0]?.unitPriceAtOrder || 0,
+            product_price: items[0]?.unitPriceAtOrder || 0,
+            quantity,
+            subtotalAtOrder,
+            totalAtOrder,
+            total_cost: totalAtOrder,
+            container: body.container ? clean(body.container, 80) : (current.container || ''),
+            notes: body.notes !== undefined ? clean(body.notes, 500) : (current.notes || ''),
+            specialInstructions: body.notes !== undefined ? clean(body.notes, 500) : (current.specialInstructions || ''),
+            updatedAt: now,
+            updated_at: now,
+            editHistory: [
+              ...(Array.isArray(current.editHistory) ? current.editHistory : []),
+              {
+                editedBy: requester.decoded.uid,
+                role: 'requester',
+                editedAt: now,
+                previousSubtotal: current.subtotalAtOrder || current.totalAtOrder,
+                newSubtotal: subtotalAtOrder,
+                newTotal: totalAtOrder,
+              },
+            ],
+          };
+
+          await ref.update(updates);
+          return res.status(200).json({ order: safeOrder(orderId, { ...current, ...updates }) });
+        }
+
+        if (!isPending) throw new OtpError(409, 'ORDER_NOT_CANCELLABLE', 'Only pending orders can be cancelled.');
         const now = new Date();
         await ref.update({ status: 'Cancelled', updatedAt: now, updated_at: now, cancelledAt: now });
         const guardRef = db.collection('requesterActiveOrders').doc(requester.decoded.uid);
@@ -312,4 +406,4 @@ function createRequesterOrdersHandler(getAdmin = getFirebaseAdmin) {
   };
 }
 
-module.exports = { createRequesterCatalogHandler, createRequesterOrdersHandler, distanceKm, productAvailableAtBranch, serviceRadiusKm };
+module.exports = { calculateDeliveryFee, createRequesterCatalogHandler, createRequesterOrdersHandler, distanceKm, productAvailableAtBranch, serviceRadiusKm };

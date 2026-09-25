@@ -24,12 +24,13 @@ import SoftStatusBadge from '../../components/SoftStatusBadge';
 import { createShadow } from '../../components/shadowStyles';
 import ProductCard from '../../components/ProductCard';
 import BlueTapEmptyState from '../../components/BlueTapEmptyState';
-import PortalSwipeContainer, { REQUESTER_TABS } from '../../components/PortalSwipeContainer';
+import PortalSwipeContainer, { PortalSwipeIgnore, REQUESTER_TABS } from '../../components/PortalSwipeContainer';
 import { createPortalStyleSheet, useBlueTapTheme } from '../../components/BlueTapTheme';
 import { USER_PORTAL_BOTTOM_CONTENT_INSET, USER_PORTAL_LAYOUT } from '../../constants/userPortalLayout';
 import { BLUETAP_COLORS } from '../../constants/bluetapTheme';
 import { normalizeRequesterOrderStatus } from '../../constants/requesterOrderStatus';
 import { getActiveProducts } from '../../services/requesterOrdering';
+import { useLiveGreeting } from '../../services/liveTime';
 import {
   cancelRequest,
   refreshRequesterRequests,
@@ -278,6 +279,7 @@ export default function RequesterDashboard() {
   const router = useRouter(); 
   const productCarouselRef = useRef(null);
   const { width: windowWidth } = useWindowDimensions();
+  const liveGreeting = useLiveGreeting();
   const todayText = formatDashboardDate(new Date());
   const [products, setProducts] = useState([]);
   const [productsLoading, setProductsLoading] = useState(true);
@@ -554,7 +556,7 @@ export default function RequesterDashboard() {
             <View style={styles.welcomeSection}>
               <Text style={[styles.welcomeText, isDark && { color: colors.textPrimary }]}>WELCOME!</Text>
               <TypewriterGreeting
-                text={`Good Morning, ${requesterName}`}
+                text={`${liveGreeting}, ${requesterName}`}
                 style={[styles.greetingText, isDark && { color: colors.textPrimary }]}
               />
               <Text style={[styles.dateText, isDark && { color: colors.muted }]}>{todayText}</Text>
@@ -576,7 +578,8 @@ export default function RequesterDashboard() {
                 </View>
               ) : (
                 <>
-                  <Carousel
+                  <PortalSwipeIgnore>
+                    <Carousel
                     ref={productCarouselRef}
                     data={products}
                     loop={products.length > 1}
@@ -618,6 +621,7 @@ export default function RequesterDashboard() {
                       />
                     ))}
                   </View>
+                </PortalSwipeIgnore>
 
                   <View style={styles.viewAllProductsRow}>
                     <TouchableOpacity

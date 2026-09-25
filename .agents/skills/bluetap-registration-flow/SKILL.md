@@ -10,6 +10,11 @@ Keep the flow: Account → Personal → Identity → Credentials → Verify.
 - Face verification and Email OTP are independently configurable, but at least one must remain enabled. Enforce this invariant on the backend, not only in the client.
 - Registration controls are presented within the unified Admin **Security Settings** page; the existing `/admin/registration-security` route may remain for compatibility.
 - A disabled verification method is `not_required`; never represent it as successfully verified.
+- When Face Verification is disabled (`faceVerificationRequired === false` in the session's security policy snapshot):
+  - Step 3 (Identity) is bypassed or marked not required.
+  - `completeRegistration` and `retryRegistrationFinalization` do not require `finalFaceImage` or pending face enrollment tokens.
+  - Submitting a valid Email OTP finalizes account creation and returns the authentication token without throwing `face-capture-required` or `face-verification-required`.
+  - When Face Verification is enabled, the presence of `finalFaceImage` and verified face session state remains strictly enforced before account creation.
 - `registrationSession` is authoritative for an in-progress signup. Snapshot the active security policy into the session so later Admin changes affect new sessions without changing existing flows mid-registration.
 - Enforce device and IP account limits server-side with transactions. Only finalized accounts consume permanent limits, and release temporary reservations after handled finalization failures.
 - Enforce username uniqueness server-side and require Terms acceptance.

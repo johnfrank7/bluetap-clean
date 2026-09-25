@@ -1,4 +1,4 @@
-import { cancelRequesterOrder, createRequesterOrder, getRequesterOrders } from './requesterOrdering';
+import { cancelRequesterOrder, createRequesterOrder, getRequesterOrders, updateRequesterOrder } from './requesterOrdering';
 import {
   isActiveRequesterOrderStatus,
   normalizeRequesterOrderStatus,
@@ -396,4 +396,15 @@ export const cancelRequest = async (request) => {
 
   const cancelled = await cancelRequesterOrder(requestId);
   return primeRequesterRequest({ ...cancelled, id: requestId });
+};
+
+export const updateRequest = async (request, payload) => {
+  const requestId = typeof request === 'string' ? request : request?.id;
+
+  if (!requestId) {
+    throw new Error('Request is missing an ID.');
+  }
+
+  const updated = await updateRequesterOrder(requestId, payload);
+  return primeRequesterRequest({ ...updated, id: requestId });
 };

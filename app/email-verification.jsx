@@ -56,7 +56,7 @@ const getOtpError = (error) => {
     return 'Unable to send verification email. Please try again.';
   }
   if (reason === 'no-active-code') return 'Please request a new verification code.';
-  if (['registration-expired', 'invalid-registration', 'account-exists', 'username-taken'].includes(reason)) return error.message;
+  if (['registration-expired', 'invalid-registration', 'account-exists', 'username-taken', 'face-capture-required'].includes(reason)) return error.message;
   if (['face-service-preparing', 'FACE_SERVICE_PREPARING'].includes(reason)) {
     return 'Face verification service is preparing. Please try again in a moment.';
   }

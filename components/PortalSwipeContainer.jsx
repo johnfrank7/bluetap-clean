@@ -16,6 +16,26 @@ export const DISTRIBUTOR_TABS = [
   '/distributor/d_profile',
 ];
 
+const isIgnoredTarget = (target) => {
+  if (!target || typeof target.closest !== 'function') return false;
+  return Boolean(
+    target.closest('[data-portal-swipe-ignore="true"]') ||
+    target.closest('[data-portal-swipe-ignore]')
+  );
+};
+
+export function PortalSwipeIgnore({ children, style, ...rest }) {
+  return (
+    <View
+      dataSet={{ portalSwipeIgnore: 'true' }}
+      style={style}
+      {...rest}
+    >
+      {children}
+    </View>
+  );
+}
+
 export default function PortalSwipeContainer({
   children,
   tabs = [],
@@ -40,12 +60,16 @@ export default function PortalSwipeContainer({
       onMoveShouldSetPanResponderCapture: () => false,
       onMoveShouldSetPanResponder: (evt, gestureState) => {
         if (!enabled) return false;
+        const target = evt?.nativeEvent?.target;
+        if (target && isIgnoredTarget(target)) return false;
         const { dx, dy } = gestureState;
         // Horizontal swipe must dominate vertical swipe to prevent conflict with scrolling
         return Math.abs(dx) > 35 && Math.abs(dx) > Math.abs(dy) * 1.8;
       },
       onPanResponderRelease: (evt, gestureState) => {
         if (!enabled || currentIndex === -1 || isNavigatingRef.current) return;
+        const target = evt?.nativeEvent?.target;
+        if (target && isIgnoredTarget(target)) return;
         const { dx, dy } = gestureState;
         if (Math.abs(dx) > 45 && Math.abs(dx) > Math.abs(dy) * 1.5) {
           if (dx < 0 && currentIndex < tabs.length - 1) {

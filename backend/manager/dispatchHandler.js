@@ -62,12 +62,20 @@ function safeOrder(id, data = {}, branchNames = new Map()) {
     deliveryLocation: data.deliveryLocation && safeNumber(data.deliveryLocation.latitude) !== null && safeNumber(data.deliveryLocation.longitude) !== null
       ? { latitude: safeNumber(data.deliveryLocation.latitude), longitude: safeNumber(data.deliveryLocation.longitude) }
       : null,
-    items: Array.isArray(data.items) ? data.items.map((item) => ({ productNameSnapshot: clean(item.productNameSnapshot || item.product_name, 160), quantity: Number(item.quantity) || 0, totalAtOrder: safeNumber(item.totalAtOrder ?? item.line_total) || 0 })) : [],
+    items: Array.isArray(data.items) ? data.items.map((item) => ({
+      productId: clean(item.productId || item.product_id || item.id, 128),
+      productNameSnapshot: clean(item.productNameSnapshot || item.product_name || item.name, 160),
+      quantity: Number(item.quantity) || 0,
+      unitPriceAtOrder: safeNumber(item.unitPriceAtOrder ?? item.unitPrice ?? item.product_price ?? item.price) || 0,
+      totalAtOrder: safeNumber(item.totalAtOrder ?? item.line_total) || 0,
+    })) : [],
     totalAtOrder: safeNumber(data.totalAtOrder ?? data.total_cost) || 0,
+    subtotalAtOrder: safeNumber(data.subtotalAtOrder ?? data.subtotal) || 0,
+    deliveryFeeAtOrder: safeNumber(data.deliveryFeeAtOrder ?? data.deliveryFee) || 0,
     expectedDeliveryDate: clean(data.expectedDeliveryDate || data.delivery_date, 80),
     scheduledAt: data.scheduledAt || data.scheduled_at || null,
     deliveredAt: data.deliveredAt || data.delivered_at || null,
-    status: clean(data.status, 80),
+    status: clean(data.status, 80).toLowerCase(),
     branchId,
     currentBranchId: branchId,
     currentBranchName: branchNames.get(branchId) || clean(data.branchNameSnapshot || data.currentBranchNameSnapshot, 160),

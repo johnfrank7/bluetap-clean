@@ -49,6 +49,7 @@ export const getProductsForBranch = async (branchId, options) => {
   return products.filter((product) => !product.branchIds?.length || product.branchIds.includes(branchId));
 };
 export const createRequesterOrder = async (payload) => (await requesterRequest('/api/requester/orders', { method: 'POST', body: payload })).order;
+export const updateRequesterOrder = async (orderId, updates = {}) => (await requesterRequest('/api/requester/orders', { method: 'PATCH', body: { orderId, action: 'edit-order', ...updates } })).order;
 export const cancelRequesterOrder = async (orderId) => (await requesterRequest('/api/requester/orders', { method: 'PATCH', body: { orderId } })).order;
 export const getRequesterOrders = async () => (await requesterRequest('/api/requester/orders')).orders || [];
 

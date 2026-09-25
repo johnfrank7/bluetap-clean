@@ -4,7 +4,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { USER_PORTAL_LAYOUT } from '../constants/userPortalLayout';
-import { UserPortalFrame } from './UserPortalShell';
+import { UserPortalFrame } from './UserPortalFrame';
 import { useBlueTapTheme } from './BlueTapTheme';
 import ThemeIconButton from './ThemeIconButton';
 

@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { createRequesterCatalogHandler, createRequesterOrdersHandler, distanceKm, productAvailableAtBranch } = require('../orderingHandler');
+const { calculateDeliveryFee, createRequesterCatalogHandler, createRequesterOrdersHandler, distanceKm, productAvailableAtBranch } = require('../orderingHandler');
 const { createAdminProductsHandler } = require('../../admin/productManagementHandler');
 
 function fixture(overrides = {}) {
@@ -263,4 +263,72 @@ test('default delivery location is saved on first order and returned in catalog 
   const afterCatalog = await call(catalogHandler, 'GET', 'requester-token');
   assert.equal(afterCatalog.statusCode, 200);
   assert.equal(afterCatalog.body.profile.defaultDeliveryLocation.latitude, 10.27);
+});
+
+test('calculateDeliveryFee handles inside, boundary, and outside radius', () => {
+  const branch = { baseDeliveryFee: 20, includedRadiusKm: 5, outsideRadiusFeePerKm: 10 };
+  assert.equal(calculateDeliveryFee(3, branch), 20);
+  assert.equal(calculateDeliveryFee(5, branch), 20);
+  assert.equal(calculateDeliveryFee(7, branch), 40);
+  assert.equal(calculateDeliveryFee(10.5, branch), 75);
+});
+
+test('order stores fee snapshots and recalculates server total', async () => {
+  const f = fixture({
+    'branches/central': {
+      name: 'BlueTap Central', address: 'Main Street', barangay: 'Poblacion', city: 'Toledo City',
+      latitude: 10.267, longitude: 123.584, serviceRadiusKm: 5, status: 'active',
+      baseDeliveryFee: 25, includedRadiusKm: 5, outsideRadiusFeePerKm: 15,
+    },
+  });
+  const orderHandler = createRequesterOrdersHandler(f.getAdmin);
+  const result = await call(orderHandler, 'POST', 'requester-token', validOrder({
+    items: [{ productId: 'refill', quantity: 2 }],
+  }));
+  assert.equal(result.statusCode, 201);
+  const order = result.body.order;
+  assert.equal(order.subtotalAtOrder, 70); // 2 * 35
+  assert.equal(order.deliveryFeeAtOrder, 25);
+  assert.equal(order.totalAtOrder, 95);
+  assert.ok(order.deliveryFeePolicy);
+  assert.equal(order.deliveryFeePolicy.baseDeliveryFee, 25);
+});
+
+test('requester can edit pending order quantities and recalculates total', async () => {
+  const f = fixture();
+  const orderHandler = createRequesterOrdersHandler(f.getAdmin);
+  const created = await call(orderHandler, 'POST', 'requester-token', validOrder({
+    items: [{ productId: 'refill', quantity: 1 }],
+  }));
+  assert.equal(created.statusCode, 201);
+  const orderId = created.body.order.id;
+
+  const edited = await call(orderHandler, 'PATCH', 'requester-token', {
+    orderId,
+    action: 'edit-order',
+    items: [{ productId: 'refill', quantity: 3 }],
+    notes: 'Please ring the doorbell',
+  });
+  assert.equal(edited.statusCode, 200);
+  assert.equal(edited.body.order.quantity, 3);
+  assert.equal(edited.body.order.subtotalAtOrder, 105); // 3 * 35
+  assert.equal(edited.body.order.notes, 'Please ring the doorbell');
+});
+
+test('requester cannot edit order once locked or cancelled', async () => {
+  const f = fixture();
+  const orderHandler = createRequesterOrdersHandler(f.getAdmin);
+  const created = await call(orderHandler, 'POST', 'requester-token', validOrder());
+  const orderId = created.body.order.id;
+
+  const cancelled = await call(orderHandler, 'PATCH', 'requester-token', { orderId });
+  assert.equal(cancelled.statusCode, 200);
+
+  const editAttempt = await call(orderHandler, 'PATCH', 'requester-token', {
+    orderId,
+    action: 'edit-order',
+    items: [{ productId: 'refill', quantity: 2 }],
+  });
+  assert.equal(editAttempt.statusCode, 409);
+  assert.equal(editAttempt.body.error.reason, 'ORDER_NOT_EDITABLE');
 });

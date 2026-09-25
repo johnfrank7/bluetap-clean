@@ -208,12 +208,17 @@ function EditOrderModal({ visible, order, distributors = [], onClose, onSaveSucc
   useEffect(() => {
     if (order) {
       setItems(
-        (order.items || []).map((it) => ({
-          productId: it.productId || it.product_id || it.id || '',
-          productNameSnapshot: it.productNameSnapshot || it.product_name || 'Product',
-          quantity: Number(it.quantity) || 1,
-          unitPrice: Number(it.quantity) > 0 ? (Number(it.totalAtOrder || 0) / Number(it.quantity)) : 0,
-        }))
+        (order.items || []).map((it) => {
+          const found = catalogProducts.find(
+            (p) => p.product_name && it.productNameSnapshot && p.product_name.toLowerCase() === it.productNameSnapshot.toLowerCase()
+          );
+          return {
+            productId: it.productId || it.product_id || it.id || found?.id || '',
+            productNameSnapshot: it.productNameSnapshot || it.product_name || 'Product',
+            quantity: Number(it.quantity) || 1,
+            unitPrice: Number(it.quantity) > 0 ? (Number(it.totalAtOrder || 0) / Number(it.quantity)) : 0,
+          };
+        })
       );
       setNotes(order.notes || order.specialInstructions || '');
       setContainer(order.container || '');
@@ -223,7 +228,7 @@ function EditOrderModal({ visible, order, distributors = [], onClose, onSaveSucc
       setSelectedSlotIndex(0);
       setAssignError('');
     }
-  }, [order, distributors]);
+  }, [order, distributors, catalogProducts]);
 
   const handleAssignDistributor = async () => {
     if (!selectedDistributorUid) {
@@ -691,15 +696,15 @@ function ReceivedRequestsQueue({ data, styles, onRefresh, colors, onOpenOrder })
   );
 
   const receivedOrders = useMemo(() => {
-    return (data.orders || []).filter((order) => RECEIVED_STATUSES.has(order.status));
+    return (data.orders || []).filter((order) => RECEIVED_STATUSES.has((order.status || '').toLowerCase()));
   }, [data.orders, RECEIVED_STATUSES]);
 
   return (
     <View style={styles.card}>
       <View style={styles.cardHeaderRow}>
         <View>
-          <Text style={styles.eyebrow}>RECEIVED REQUESTS</Text>
-          <Text style={styles.cardTitle}>Incoming & Active Branch Orders</Text>
+          <Text style={styles.eyebrow}>UPCOMING / NORMAL ORDERS</Text>
+          <Text style={styles.cardTitle}>Upcoming & Active Branch Orders</Text>
           <Text style={styles.helperText}>
             Review customer orders awaiting action, assign distributors, and schedule branch delivery.
           </Text>
@@ -739,6 +744,10 @@ function ReceivedRequestsQueue({ data, styles, onRefresh, colors, onOpenOrder })
 
               <View style={styles.detailsBlock}>
                 <Text style={styles.detailLine}>Delivery: {order.address || 'Address provided'}</Text>
+                <Text style={styles.detailLine}>Distance: {orderDistance(order)}</Text>
+                {order.deliveryFeeAtOrder ? (
+                  <Text style={styles.detailLine}>Delivery Fee: {formatAmount(order.deliveryFeeAtOrder)}</Text>
+                ) : null}
                 <Text style={styles.detailLine}>
                   Distributor: {order.assignedDistributorNameSnapshot || order.assignedDistributorName || order.distributor_name || 'Not assigned'}
                   {order.scheduledAt ? ` · Scheduled: ${new Date(order.scheduledAt).toLocaleString()}` : ''}

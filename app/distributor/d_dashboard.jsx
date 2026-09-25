@@ -25,6 +25,7 @@ import {
   useAssignedDistributorOrders,
 } from '../../services/distributorOrders';
 import { useDistributorProfile } from '../../services/distributorProfile';
+import { useLiveGreeting } from '../../services/liveTime';
 
 const BLUE = BLUETAP_COLORS.primary;
 const BLUE_LIGHT = BLUETAP_COLORS.primarySoft;
@@ -179,6 +180,7 @@ class DistributorErrorBoundary extends React.Component {
 function DistributorDashboardContent() {
   useBlueTapTheme();
   const router = useRouter();
+  const liveGreeting = useLiveGreeting();
   const [detailsVisible, setDetailsVisible] = useState(false);
   const { orders, loading, error, refresh } = useAssignedDistributorOrders();
   const { isComplete, loading: profileLoading } = useDistributorProfile();
@@ -271,7 +273,7 @@ function DistributorDashboardContent() {
             <View style={styles.welcomeSection}>
               <Text style={styles.welcomeText}>WELCOME!</Text>
               <Text style={styles.greetingText}>
-                Good Morning, Distributor
+                {liveGreeting}, Distributor
               </Text>
               <Text style={styles.dateText}>{todayText}</Text>
             </View>

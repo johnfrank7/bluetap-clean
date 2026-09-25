@@ -4,14 +4,9 @@ import { Stack } from 'expo-router';
 
 import { USER_PORTAL_LAYOUT } from '../constants/userPortalLayout';
 import { useBlueTapTheme } from './BlueTapTheme';
+import { UserPortalFrame } from './UserPortalFrame';
 
-export function UserPortalFrame({ children, style, ...props }) {
-  return (
-    <View {...props} style={[styles.frame, style]}>
-      {children}
-    </View>
-  );
-}
+export { UserPortalFrame };
 
 export default function UserPortalShell({ header = null, navigation }) {
   const { colors } = useBlueTapTheme();
