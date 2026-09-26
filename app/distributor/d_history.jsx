@@ -10,6 +10,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import BlueTapHeader from '../../components/BlueTapHeader';
+import DistributorPortalBackground from '../../components/DistributorPortalBackground';
 import RequestDetailsModal from '../../components/RequestDetailsModal';
 import SoftStatusBadge from '../../components/SoftStatusBadge';
 import { createShadow } from '../../components/shadowStyles';
@@ -177,7 +178,7 @@ const HistoryRequestCard = ({ request, onViewDetails }) => {
 };
 
 export default function DistributorHistory() {
-  useBlueTapTheme();
+  const { colors, isDark } = useBlueTapTheme();
   const router = useRouter();
   const [selectedRequest, setSelectedRequest] = useState(null);
   const { orders, loading, error, refresh } = useAssignedDistributorOrders();
@@ -187,12 +188,13 @@ export default function DistributorHistory() {
   const selectedDetailsRequest = getDetailsRequestData(selectedRequest);
 
   return (
+    <DistributorPortalBackground>
     <SafeAreaView edges={['left', 'right', 'bottom']} style={styles.container}>
       <BlueTapHeader notificationPath="/distributor/d_notification" />
 
       <PortalSwipeContainer tabs={DISTRIBUTOR_TABS} currentRoute="/distributor/d_history">
         <View style={styles.phoneWrapper}>
-          <View style={styles.fixedHeaderArea}>
+          <View style={[styles.fixedHeaderArea, { backgroundColor: isDark ? colors.background : colors.primary }]}>
             <Text style={styles.pageTitle}>SCHEDULE</Text>
             <Text style={styles.subtitle}>Request History</Text>
 
@@ -247,13 +249,14 @@ export default function DistributorHistory() {
         request={selectedDetailsRequest}
       />
     </SafeAreaView>
+    </DistributorPortalBackground>
   );
 }
 
 const styles = createPortalStyleSheet({
   container: {
     flex: 1,
-    backgroundColor: BLUETAP_COLORS.background,
+    backgroundColor: 'transparent',
   },
   phoneWrapper: {
     width: '100%',
@@ -263,7 +266,6 @@ const styles = createPortalStyleSheet({
     flex: 1,
   },
   fixedHeaderArea: {
-    backgroundColor: BLUETAP_COLORS.background,
     zIndex: 10,
     paddingHorizontal: USER_PORTAL_LAYOUT.gutter,
     paddingTop: 16,
@@ -278,12 +280,12 @@ const styles = createPortalStyleSheet({
   pageTitle: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: TEXT_DARK,
+    color: BLUETAP_COLORS.white,
     letterSpacing: 0,
   },
   subtitle: {
     fontSize: 14,
-    color: TEXT_MUTED,
+    color: BLUETAP_COLORS.white,
     fontWeight: '600',
     marginTop: 4,
     marginBottom: 14,

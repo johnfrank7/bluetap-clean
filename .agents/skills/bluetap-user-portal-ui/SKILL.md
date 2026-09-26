@@ -14,6 +14,8 @@ Preserve these invariants:
 ## Requester / Distributor Portal Shell Invariants
 
 1. **Requester is the Reference Layout**: The Requester portal shell is the visual and structural layout reference for Distributor. Distributor screens must match the polish, header hierarchy, and styling conventions of Requester.
+   - Requester is the canonical visual source for portal light and dark theming. Verify the actual rendered full-height container hierarchy before diagnosing a page background. A correct parent token does not establish the visible color when a child View, ScrollView, SafeAreaView, Stack card, or content wrapper paints over it.
+   - Requester gradient/background treatment is the canonical portal canvas reference. Distributor must reuse the same light/dark full-page visual effect, not merely the same flat background token.
 2. **Every Full Requester / Distributor Portal Screen Must Have the Portal Shell**:
    - **Header Shell**: Every primary portal screen (including notifications) must render the standard portal header with BlueTap logo icon, bold "BlueTap" wordmark, compact theme toggle (moon/sun), and contextual header actions (such as notifications or back button).
    - **Floating Bottom Navigation**: Detached rounded pill navigation bar must be present on primary screens. Its outer positioning wrapper is strictly transparent, pointer-safe, and visually unpainted.

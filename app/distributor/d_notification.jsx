@@ -8,6 +8,7 @@ import SoftStatusBadge from '../../components/SoftStatusBadge';
 import BlueTapEmptyState from '../../components/BlueTapEmptyState';
 import { USER_PORTAL_BOTTOM_CONTENT_INSET, USER_PORTAL_LAYOUT } from '../../constants/userPortalLayout';
 import BlueTapHeader from '../../components/BlueTapHeader';
+import DistributorPortalBackground from '../../components/DistributorPortalBackground';
 import {
   formatDistributorOrderDate,
   normalizeDistributorOrderStatus,
@@ -79,6 +80,7 @@ export default function DistributorNotification() {
   );
 
   return (
+    <DistributorPortalBackground>
     <SafeAreaView edges={['left', 'right', 'bottom']} style={styles.safe}>
       <BlueTapHeader notificationPath="/distributor/d_notification" />
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
@@ -140,6 +142,7 @@ export default function DistributorNotification() {
         )}
       </ScrollView>
     </SafeAreaView>
+    </DistributorPortalBackground>
   );
 }
 
@@ -147,7 +150,7 @@ const styles = createPortalStyleSheet({
   safe: {
     flex: 1,
     minWidth: 0,
-    backgroundColor: BLUETAP_COLORS.background,
+    backgroundColor: 'transparent',
   },
   content: {
     width: '100%',
@@ -164,23 +167,23 @@ const styles = createPortalStyleSheet({
     marginBottom: 10,
   },
   backText: {
-    color: BLUETAP_COLORS.primary,
+    color: BLUETAP_COLORS.white,
     fontWeight: '900',
   },
   eyebrow: {
-    color: BLUETAP_COLORS.primary,
+    color: BLUETAP_COLORS.white,
     fontSize: 11,
     fontWeight: '900',
     letterSpacing: 1,
   },
   title: {
-    color: BLUETAP_COLORS.textPrimary,
+    color: BLUETAP_COLORS.white,
     fontSize: 28,
     fontWeight: '900',
     marginTop: 5,
   },
   subtitle: {
-    color: BLUETAP_COLORS.textSecondary,
+    color: BLUETAP_COLORS.white,
     fontSize: 14,
     lineHeight: 20,
     marginTop: 6,

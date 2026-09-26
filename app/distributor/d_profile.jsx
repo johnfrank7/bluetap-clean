@@ -22,6 +22,7 @@ import { normalizeRole, signOutAndClearSessions } from '../../services/authSessi
 import { ensureUserUniqueId, getProfileUniqueId } from '../../services/uniqueIds';
 import { formatPhilippinePhone, normalizePhilippinePhone } from '../../services/phoneUtils';
 import BlueTapHeader from '../../components/BlueTapHeader';
+import DistributorPortalBackground from '../../components/DistributorPortalBackground';
 import PortalSwipeContainer, { DISTRIBUTOR_TABS } from '../../components/PortalSwipeContainer';
 import { createShadow } from '../../components/shadowStyles';
 import { createPortalStyleSheet, useBlueTapTheme } from '../../components/BlueTapTheme';
@@ -451,6 +452,7 @@ export default function DistributorProfilePage() {
   };
 
   return (
+    <DistributorPortalBackground>
     <SafeAreaView edges={['left', 'right', 'bottom']} style={styles.container}>
       <BlueTapHeader notificationPath="/distributor/d_notification" />
 
@@ -640,13 +642,14 @@ export default function DistributorProfilePage() {
         onDismiss={() => setToast((t) => ({ ...t, visible: false }))}
       />
     </SafeAreaView>
+    </DistributorPortalBackground>
   );
 }
 
 const styles = createPortalStyleSheet({
   container: {
     flex: 1,
-    backgroundColor: BLUETAP_COLORS.background,
+    backgroundColor: 'transparent',
   },
   phoneWrapper: {
     width: '100%',
@@ -663,7 +666,7 @@ const styles = createPortalStyleSheet({
   profileTitle: {
     fontSize: 26,
     fontWeight: 'bold',
-    color: TEXT_DARK,
+    color: BLUETAP_COLORS.white,
     letterSpacing: 0,
   },
   infoSection: {

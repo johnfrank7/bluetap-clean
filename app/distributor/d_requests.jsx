@@ -24,6 +24,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import BlueTapHeader from '../../components/BlueTapHeader';
+import DistributorPortalBackground from '../../components/DistributorPortalBackground';
 import RequestDetailsModal from '../../components/RequestDetailsModal';
 import SoftStatusBadge from '../../components/SoftStatusBadge';
 import { createShadow } from '../../components/shadowStyles';
@@ -700,6 +701,7 @@ export default function DistributorRequests() {
   const dateKeyExtractor = useCallback((item) => getDateKey(item), []);
 
   return (
+    <DistributorPortalBackground>
     <SafeAreaView edges={['left', 'right', 'bottom']} style={styles.container}>
       <BlueTapHeader notificationPath="/distributor/d_notification" />
 
@@ -942,13 +944,14 @@ export default function DistributorRequests() {
         </View>
       </Modal>
     </SafeAreaView>
+    </DistributorPortalBackground>
   );
 }
 
 const styles = createPortalStyleSheet({
   container: {
     flex: 1,
-    backgroundColor: BLUETAP_COLORS.background,
+    backgroundColor: 'transparent',
   },
   phoneWrapper: {
     width: '100%',
@@ -968,12 +971,12 @@ const styles = createPortalStyleSheet({
   pageTitle: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: TEXT_DARK,
+    color: BLUETAP_COLORS.white,
     letterSpacing: 0,
   },
   subtitle: {
     fontSize: 14,
-    color: TEXT_MUTED,
+    color: BLUETAP_COLORS.white,
     fontWeight: '600',
     marginTop: 4,
   },

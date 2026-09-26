@@ -10,6 +10,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import BlueTapHeader from '../../components/BlueTapHeader';
+import DistributorPortalBackground from '../../components/DistributorPortalBackground';
 import RequestDetailsModal from '../../components/RequestDetailsModal';
 import SoftStatusBadge from '../../components/SoftStatusBadge';
 import { createShadow } from '../../components/shadowStyles';
@@ -271,6 +272,7 @@ function DistributorDashboardContent() {
   };
 
   return (
+    <DistributorPortalBackground>
     <SafeAreaView edges={['left', 'right', 'bottom']} style={styles.container}>
       <BlueTapHeader
         notificationPath="/distributor/d_notification"
@@ -446,6 +448,7 @@ function DistributorDashboardContent() {
         request={detailsRequestData}
       />
     </SafeAreaView>
+    </DistributorPortalBackground>
   );
 }
 
@@ -460,7 +463,7 @@ export default function DistributorDashboard() {
 const styles = createPortalStyleSheet({
   container: {
     flex: 1,
-    backgroundColor: BLUETAP_COLORS.background,
+    backgroundColor: 'transparent',
   },
   phoneWrapper: {
     width: '100%',
@@ -479,19 +482,19 @@ const styles = createPortalStyleSheet({
     marginTop: 12,
   },
   welcomeText: {
-    color: TEXT_DARK,
+    color: BLUETAP_COLORS.white,
     fontSize: 26,
     fontWeight: 'bold',
     letterSpacing: 0,
   },
   greetingText: {
-    color: TEXT_DARK,
+    color: BLUETAP_COLORS.white,
     fontSize: 16,
     fontWeight: '700',
     marginTop: 4,
   },
   dateText: {
-    color: TEXT_MUTED,
+    color: BLUETAP_COLORS.white,
     fontSize: 13,
     marginTop: 4,
   },
@@ -535,7 +538,7 @@ const styles = createPortalStyleSheet({
     marginTop: 24,
   },
   sectionTitle: {
-    color: TEXT_DARK,
+    color: BLUETAP_COLORS.white,
     fontSize: 16,
     fontWeight: 'bold',
     marginBottom: 10,
