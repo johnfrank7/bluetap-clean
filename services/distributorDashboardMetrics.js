@@ -4,6 +4,14 @@ const normalizeDashboardStatus = (status) => String(status || '')
   .replace(/[_-]+/g, ' ')
   .replace(/\s+/g, ' ');
 
+const CURRENT_DISTRIBUTOR_STATUSES = new Set([
+  'distributor assigned', 'pending', 'accepted', 'scheduled', 'out for delivery', 'delivery failed',
+]);
+
+const getCurrentDistributorRequests = (orders = []) => orders.filter((order) =>
+  CURRENT_DISTRIBUTOR_STATUSES.has(normalizeDashboardStatus(order?.status))
+);
+
 const dateFrom = (value) => {
   if (!value) return null;
   if (value instanceof Date) return value;
@@ -37,4 +45,4 @@ const getDistributorDashboardCounts = (orders = [], now = new Date()) => ({
   ).length,
 });
 
-module.exports = { getDistributorDashboardCounts, normalizeDashboardStatus, occursOnDay };
+module.exports = { CURRENT_DISTRIBUTOR_STATUSES, getCurrentDistributorRequests, getDistributorDashboardCounts, normalizeDashboardStatus, occursOnDay };

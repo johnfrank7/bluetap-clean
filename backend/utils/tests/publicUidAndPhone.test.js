@@ -35,7 +35,7 @@ test('Philippine phone display formatter formats as 09XX XXX XXXX', () => {
 test('formatPublicUid formats roles with 3-digit padding', () => {
   assert.equal(formatPublicUid('requester', 1), 'Req001');
   assert.equal(formatPublicUid('distributor', 2), 'Dis002');
-  assert.equal(formatPublicUid('manager', 10), 'Mgr010');
+  assert.equal(formatPublicUid('manager', 10), 'Man010');
   assert.equal(formatPublicUid('admin', 100), 'Adm100');
   assert.equal(formatPublicUid('requester', 1000), 'Req1000');
 });
@@ -44,6 +44,7 @@ test('parsePublicUidNumber parses number from formatted string', () => {
   assert.equal(parsePublicUidNumber('requester', 'Req001'), 1);
   assert.equal(parsePublicUidNumber('distributor', 'Dis042'), 42);
   assert.equal(parsePublicUidNumber('manager', 'Mgr999'), 999);
+  assert.equal(parsePublicUidNumber('manager', 'Man999'), 999);
   assert.equal(parsePublicUidNumber('requester', 'REQ-000001'), 1);
   assert.equal(parsePublicUidNumber('distributor', 'DIS-000005'), 5);
   assert.equal(parsePublicUidNumber('manager', 'MGR-000010'), 10);
@@ -84,11 +85,10 @@ test('generateNextPublicUid atomically increments role counter', async () => {
   assert.equal(uid3, 'Dis001');
 
   const uid4 = await generateNextPublicUid(createTx(), db, 'manager');
-  assert.equal(uid4, 'Mgr001');
+  assert.equal(uid4, 'Man001');
 
   // Verify counter doc in store
   assert.equal(store.get('accountCounters/requester').lastNumber, 2);
   assert.equal(store.get('accountCounters/distributor').lastNumber, 1);
   assert.equal(store.get('accountCounters/manager').lastNumber, 1);
 });
-

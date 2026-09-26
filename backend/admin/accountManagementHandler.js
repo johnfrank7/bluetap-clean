@@ -31,7 +31,7 @@ function safeAuditMetadata(data = {}) { return { role: clean(data.role, 30), sta
 function safeAudit(id, data = {}) { return { id, action: clean(data.action, 80), actorUid: clean(data.actorUid || data.adminUid, 128), targetUid: clean(data.targetUid || data.managerUid, 128), role: clean(data.role || data.after?.role, 30), branchId: clean(data.branchId, 80), previousBranchId: clean(data.previousBranchId, 80), newBranchId: clean(data.newBranchId, 80), previousStatus: clean(data.previousStatus || data.before?.distributorStatus || data.before?.status || data.before?.managerStatus, 30), newStatus: clean(data.newStatus || data.after?.distributorStatus || data.after?.status || data.after?.managerStatus, 30), rejectionReason: clean(data.rejectionReason, 240), before: data.before && safeAuditMetadata(data.before), after: data.after && safeAuditMetadata(data.after), createdAt: data.createdAt || data.timestamp || null }; }
 async function activeBranch(db, branchId) { const id = clean(branchId, 80); const snapshot = id && await db.collection('branches').doc(id).get(); if (!snapshot?.exists) throw new OtpError(404, 'BRANCH_NOT_FOUND', 'The selected branch does not exist.'); if (snapshot.data()?.status !== 'active') throw new OtpError(409, 'BRANCH_INACTIVE', 'The selected branch is inactive.'); return { id, ...snapshot.data() }; }
 async function emailIsAttached(db, email, exceptUid = '') { return (await db.collection('users').where('email', '==', email).limit(2).get()).docs?.find((doc) => doc.id !== exceptUid) || null; }
-async function listWorkspace(auth, db) { const [users, branches, createdAudits, timestampAudits, authPage, security] = await Promise.all([db.collection('users').get(), db.collection('branches').get(), db.collection('adminAuditLogs').orderBy('createdAt', 'desc').limit(100).get(), db.collection('adminAuditLogs').orderBy('timestamp', 'desc').limit(100).get(), typeof auth.listUsers === 'function' ? auth.listUsers(1000) : { users: [] }, loadRegistrationSecurity(db)]); const branchNames = new Map(branches.docs.map((doc) => [doc.id, clean(doc.data()?.name)])); const authUsers = new Map((authPage.users || []).map((user) => [user.uid, user])); const accounts = users.docs.filter((doc) => ROLES.has(doc.data()?.role)).map((doc) => safeAccount(doc.id, doc.data(), branchNames, authUsers.get(doc.id), security.sessionSecurity[doc.data()?.role])).sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || ''))); const auditById = new Map([...createdAudits.docs, ...timestampAudits.docs].map((doc) => [doc.id, safeAudit(doc.id, doc.data())])); return { accounts, activity: [...auditById.values()].sort((left, right) => String(right.createdAt || '').localeCompare(String(left.createdAt || ''))).slice(0, 100) }; }
+async function listWorkspace(auth, db) { const [users, branches, createdAudits, timestampAudits, authPage, security] = await Promise.all([db.collection('users').get(), db.collection('branches').get(), db.collection('adminAuditLogs').orderBy('createdAt', 'desc').limit(100).get(), db.collection('adminAuditLogs').orderBy('timestamp', 'desc').limit(100).get(), typeof auth.listUsers === 'function' ? auth.listUsers(1000) : { users: [] }, loadRegistrationSecurity(db)]); const branchNames = new Map(branches.docs.map((doc) => [doc.id, clean(doc.data()?.name)])); const authUsers = new Map((authPage.users || []).map((user) => [user.uid, user])); const accounts = users.docs.filter((doc) => ROLES.has(doc.data()?.role) && doc.data()?.registrationCompleted !== false).map((doc) => safeAccount(doc.id, doc.data(), branchNames, authUsers.get(doc.id), security.sessionSecurity[doc.data()?.role])).sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || ''))); const auditById = new Map([...createdAudits.docs, ...timestampAudits.docs].map((doc) => [doc.id, safeAudit(doc.id, doc.data())])); return { accounts, activity: [...auditById.values()].sort((left, right) => String(right.createdAt || '').localeCompare(String(left.createdAt || ''))).slice(0, 100) }; }
 function statusChanges(role, status) { if (role === 'manager') return { managerStatus: status }; if (role === 'distributor') return { distributorStatus: status, approvalStatus: status, status: status[0].toUpperCase() + status.slice(1) }; return { accountStatus: status, status: status[0].toUpperCase() + status.slice(1) }; }
 function nameChanges(fullName) { const [firstName, ...rest] = fullName.split(/\s+/); return { fullName, firstName, lastName: rest.join(' ') }; }
 function timeoutOverride(value) { if (value === null || value === undefined || value === '') return null; const parsed = Number(value); if (!Number.isInteger(parsed) || !IDLE_TIMEOUTS.has(parsed)) throw new OtpError(400, 'INVALID_SESSION_TIMEOUT_OVERRIDE', 'Choose a supported idle timeout or use the role default.'); return parsed; }
@@ -69,6 +69,10 @@ async function backfillLegacyUids({ auth, db, admin }) {
 
   for (const userDoc of usersSnapshot.docs) {
     const data = userDoc.data() || {};
+    if (data.registrationCompleted === false) {
+      unmatched.push({ id: userDoc.id, email: data.email || null, role: data.role || null, reason: 'incomplete-registration' });
+      continue;
+    }
     let resolvedUid = null;
     let needsAuthUidBackfill = !data.uid || !String(data.uid).trim();
 
@@ -98,6 +102,13 @@ async function backfillLegacyUids({ auth, db, admin }) {
     // Check if publicUid needs backfilling
     let assignedPublicUid = data.publicUid || data.displayUid || null;
     let publicUidAssigned = false;
+    if (data.role === 'manager' && assignedPublicUid) {
+      const managerNumber = parsePublicUidNumber('manager', assignedPublicUid);
+      if (managerNumber > 0) {
+        const migrated = formatPublicUid('manager', managerNumber);
+        if (migrated !== assignedPublicUid) { assignedPublicUid = migrated; publicUidAssigned = true; }
+      }
+    }
     if (!assignedPublicUid && data.role) {
       if (data.unique_id) {
         const isRawUid = /^[a-zA-Z0-9]{20,}$/.test(String(data.unique_id).trim());

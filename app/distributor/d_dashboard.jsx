@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   View,
@@ -16,19 +16,18 @@ import SoftStatusBadge from '../../components/SoftStatusBadge';
 import { createShadow } from '../../components/shadowStyles';
 import BlueTapEmptyState from '../../components/BlueTapEmptyState';
 import DistributorProfileBanner from '../../components/DistributorProfileBanner';
-import PortalSwipeContainer, { DISTRIBUTOR_TABS } from '../../components/PortalSwipeContainer';
+import PortalSwipeContainer, { DISTRIBUTOR_TABS, PortalSwipeIgnore } from '../../components/PortalSwipeContainer';
 import { createPortalStyleSheet, useBlueTapTheme } from '../../components/BlueTapTheme';
 import { USER_PORTAL_BOTTOM_CONTENT_INSET, USER_PORTAL_LAYOUT } from '../../constants/userPortalLayout';
 import { BLUETAP_COLORS } from '../../constants/bluetapTheme';
 import {
-  normalizeDistributorOrderStatus,
   toDistributorScreenOrder,
   useAssignedDistributorOrders,
 } from '../../services/distributorOrders';
 import { useDistributorProfile } from '../../services/distributorProfile';
 import { useLiveGreeting } from '../../services/liveTime';
 import { formatDisplayUniqueId, getProfileUniqueId } from '../../services/uniqueIds';
-const { getDistributorDashboardCounts } = require('../../services/distributorDashboardMetrics');
+const { getCurrentDistributorRequests, getDistributorDashboardCounts } = require('../../services/distributorDashboardMetrics');
 
 const BLUE = BLUETAP_COLORS.primary;
 const BLUE_LIGHT = BLUETAP_COLORS.primarySoft;
@@ -129,6 +128,21 @@ const getDistributorTotalAmount = (request) => {
   );
 };
 
+function CurrentRequestCard({ request, distributorProfile, onDetails, onAction }) {
+  const requesterUid = formatDisplayUniqueId(request.requesterUniqueId || request.requester_unique_id || request.requesterId, 'Not assigned');
+  const distributorUid = formatDisplayUniqueId(request.distributorUniqueId || request.distributor_unique_id || getProfileUniqueId(distributorProfile), 'Not assigned');
+  const actionLabel = getStatusActionLabel(request.status);
+  const hasAction = ['distributor assigned', 'pending', 'accepted', 'scheduled', 'out for delivery'].includes(normalizeStatus(request.status));
+  return <View style={styles.currentRequestCard}>
+    <View style={styles.requestCardHeader}><View style={styles.requestTitleBlock}><Text style={styles.requestId}>Request ID: {request.requestId}</Text></View><SoftStatusBadge status={request.status} /></View>
+    <View style={styles.compactRequestBody}>
+      <View style={[styles.infoGridRow, styles.infoGridRowDivider]}><View style={styles.infoGridColumn}><Text style={styles.infoGridLabel}>Customer Name</Text><Text style={styles.infoGridPrimaryValue} numberOfLines={1}>{request.customerName}</Text><Text style={[styles.infoGridLabel, styles.infoGridLabelGap]}>Requester ID</Text><Text style={styles.infoGridValue} numberOfLines={1}>{requesterUid}</Text></View><View style={styles.infoGridColumn}><Text style={styles.infoGridLabel}>Amount Due</Text><Text style={styles.infoGridValue} numberOfLines={1}>{formatAmountDue(request.total_cost)}</Text><Text style={[styles.infoGridLabel, styles.infoGridLabelGap]}>Distributor ID</Text><Text style={styles.infoGridValue} numberOfLines={1}>{distributorUid}</Text></View></View>
+      <View style={styles.infoGridRow}><View style={styles.infoGridColumn}><Text style={styles.infoGridLabel}>Address</Text><Text style={styles.infoGridValue} numberOfLines={2}>{request.deliveryAddress}</Text><Text style={[styles.infoGridLabel, styles.infoGridLabelGap]}>Scheduled delivery</Text><Text style={styles.infoGridValue} numberOfLines={1}>{request.scheduledDateTime || request.deliveryDate || 'Not set'}</Text></View><View style={styles.infoGridColumn}><Text style={styles.infoGridLabel}>Product Ordered</Text><Text style={styles.infoGridPrimaryValue} numberOfLines={2}>{request.productsOrdered}</Text><Text style={styles.infoGridSubValue} numberOfLines={1}>{request.quantity} | {request.containerType}</Text></View></View>
+    </View>
+    <View style={styles.cardActionsRow}><TouchableOpacity style={styles.viewDetailsButton} activeOpacity={0.75} onPress={onDetails}><Text style={styles.viewDetailsText}>View Details</Text></TouchableOpacity>{hasAction && <TouchableOpacity style={styles.primaryActionButton} activeOpacity={0.85} onPress={onAction}><Text style={styles.primaryActionText}>{actionLabel}</Text></TouchableOpacity>}</View>
+  </View>;
+}
+
 class DistributorErrorBoundary extends React.Component {
   constructor(props) {
     super(props);
@@ -165,11 +179,14 @@ function DistributorDashboardContent() {
   const router = useRouter();
   const liveGreeting = useLiveGreeting();
   const [detailsVisible, setDetailsVisible] = useState(false);
+  const [activeRequestIndex, setActiveRequestIndex] = useState(0);
   const { orders, loading, error, refresh } = useAssignedDistributorOrders();
   const { isComplete, loading: profileLoading, profile: distributorProfile } = useDistributorProfile();
   const todayText = formatDashboardDate(new Date());
   const screenOrders = useMemo(() => (Array.isArray(orders) ? orders : []).filter(Boolean).map(toDistributorScreenOrder), [orders]);
-  const activeRequest = screenOrders.find((order) => order && !['delivered', 'cancelled', 'canceled', 'declined'].includes(normalizeDistributorOrderStatus(order.status)));
+  const activeRequests = useMemo(() => getCurrentDistributorRequests(screenOrders), [screenOrders]);
+  useEffect(() => { setActiveRequestIndex((index) => Math.max(0, Math.min(index, activeRequests.length - 1))); }, [activeRequests.length]);
+  const activeRequest = activeRequests[activeRequestIndex] || null;
   const activeRequesterUniqueId = useMemo(() => {
     return formatDisplayUniqueId(
       activeRequest?.requesterUniqueId ||
@@ -212,9 +229,6 @@ function DistributorDashboardContent() {
       tint: colors.successSoft,
     },
   ], [colors, dashboardCounts]);
-  const primaryActionLabel = activeRequest
-    ? getStatusActionLabel(activeRequest.status)
-    : '';
   const detailsRequestData = activeRequest
     ? {
         requestId: activeRequest.requestId,
@@ -244,14 +258,14 @@ function DistributorDashboardContent() {
       }
     : null;
 
-  const handleCurrentRequestAction = () => {
+  const handleCurrentRequestAction = (request = activeRequest) => {
     if (!isComplete) {
       router.push('/distributor/d_profile');
       return;
     }
-    if (!activeRequest) return;
+    if (!request) return;
 
-    if (['pending', 'distributor assigned'].includes(normalizeStatus(activeRequest.status))) {
+    if (['pending', 'distributor assigned'].includes(normalizeStatus(request.status))) {
       router.replace('/distributor/d_requests');
       return;
     }
@@ -299,98 +313,19 @@ function DistributorDashboardContent() {
             </View>
 
             <View style={styles.currentRequestSection}>
-              <Text style={styles.sectionTitle}>Current Request</Text>
+              <Text style={styles.sectionTitle}>{activeRequests.length > 1 ? 'Current Requests' : 'Current Request'}</Text>
 
               {loading ? (
                 <View style={styles.emptyRequestCard}><ActivityIndicator color={BLUE} /><Text style={styles.emptyRequestText}>Loading assigned deliveries...</Text></View>
-              ) : error ? (
+              ) : error && screenOrders.length === 0 ? (
                 <View style={styles.emptyRequestCard}><Text style={styles.emptyRequestTitle}>Unable to load deliveries.</Text><Text style={styles.emptyRequestText}>{error}</Text><TouchableOpacity onPress={refresh} style={styles.viewDetailsButton}><Text style={styles.viewDetailsText}>Try Again</Text></TouchableOpacity></View>
               ) : activeRequest ? (
-                <View style={styles.currentRequestCard}>
-                  <View style={styles.requestCardHeader}>
-                    <View style={styles.requestTitleBlock}>
-                      <Text style={styles.requestId}>
-                        Request ID: {activeRequest.requestId}
-                      </Text>
-                    </View>
-                    <SoftStatusBadge status={activeRequest.status} />
-                  </View>
-
-                  <View style={styles.compactRequestBody}>
-                    <View style={[styles.infoGridRow, styles.infoGridRowDivider]}>
-                      <View style={styles.infoGridColumn}>
-                        <Text style={styles.infoGridLabel}>Customer Name</Text>
-                        <Text
-                          style={styles.infoGridPrimaryValue}
-                          numberOfLines={1}
-                        >
-                          {activeRequest.customerName}
-                        </Text>
-                        <Text style={[styles.infoGridLabel, styles.infoGridLabelGap]}>
-                          Requester ID
-                        </Text>
-                        <Text style={styles.infoGridValue} numberOfLines={1}>
-                          {activeRequesterUniqueId}
-                        </Text>
-                      </View>
-
-                      <View style={styles.infoGridColumn}>
-                        <Text style={styles.infoGridLabel}>Amount Due</Text>
-                        <Text style={styles.infoGridValue} numberOfLines={1}>
-                          {formatAmountDue(activeRequest.total_cost)}
-                        </Text>
-                        <Text style={[styles.infoGridLabel, styles.infoGridLabelGap]}>
-                          Distributor ID
-                        </Text>
-                        <Text style={styles.infoGridValue} numberOfLines={1}>
-                          {activeDistributorUniqueId}
-                        </Text>
-                      </View>
-                    </View>
-
-                    <View style={styles.infoGridRow}>
-                      <View style={styles.infoGridColumn}>
-                        <Text style={styles.infoGridLabel}>Address</Text>
-                        <Text style={styles.infoGridValue} numberOfLines={2}>
-                          {activeRequest.deliveryAddress}
-                        </Text>
-                      </View>
-
-                      <View style={styles.infoGridColumn}>
-                        <Text style={styles.infoGridLabel}>Product Ordered</Text>
-                        <Text
-                          style={styles.infoGridPrimaryValue}
-                          numberOfLines={2}
-                        >
-                          {activeRequest.productsOrdered}
-                        </Text>
-                        <Text style={styles.infoGridSubValue} numberOfLines={1}>
-                          {activeRequest.quantity} | {activeRequest.containerType}
-                        </Text>
-                      </View>
-                    </View>
-                  </View>
-
-                  <View style={styles.cardActionsRow}>
-                    <TouchableOpacity
-                      style={styles.viewDetailsButton}
-                      activeOpacity={0.75}
-                      onPress={() => setDetailsVisible(true)}
-                    >
-                      <Text style={styles.viewDetailsText}>View Details</Text>
-                    </TouchableOpacity>
-
-                    <TouchableOpacity
-                      style={styles.primaryActionButton}
-                      activeOpacity={0.85}
-                      onPress={handleCurrentRequestAction}
-                    >
-                      <Text style={styles.primaryActionText}>
-                        {primaryActionLabel}
-                      </Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
+                <PortalSwipeIgnore>
+                  <ScrollView horizontal pagingEnabled showsHorizontalScrollIndicator={false} snapToInterval={312} decelerationRate="fast" contentContainerStyle={styles.currentRequestsCarousel} onMomentumScrollEnd={(event) => setActiveRequestIndex(Math.round(event.nativeEvent.contentOffset.x / 312))}>
+                    {activeRequests.map((request, index) => <View key={request.sourceId || request.requestId || index} style={styles.currentRequestSlide}><CurrentRequestCard request={request} distributorProfile={distributorProfile} onDetails={() => { setActiveRequestIndex(index); setDetailsVisible(true); }} onAction={() => { setActiveRequestIndex(index); handleCurrentRequestAction(request); }} /></View>)}
+                  </ScrollView>
+                  {activeRequests.length > 1 && <View style={styles.carouselIndicators}>{activeRequests.map((request, index) => <View key={`${request.sourceId || request.requestId}-${index}`} style={[styles.carouselIndicator, index === activeRequestIndex && styles.carouselIndicatorActive]} />)}</View>}
+                </PortalSwipeIgnore>
               ) : (
                 <BlueTapEmptyState
                   title="No Active Delivery"
@@ -555,6 +490,30 @@ const styles = createPortalStyleSheet({
       radius: 10,
       offset: { width: 0, height: 5 },
     }),
+  },
+  currentRequestsCarousel: {
+    gap: 12,
+    paddingRight: 20,
+  },
+  currentRequestSlide: {
+    width: 300,
+    maxWidth: '100%',
+  },
+  carouselIndicators: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 6,
+    marginTop: 10,
+  },
+  carouselIndicator: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: BLUETAP_COLORS.border,
+  },
+  carouselIndicatorActive: {
+    width: 18,
+    backgroundColor: BLUE,
   },
   requestCardHeader: {
     flexDirection: 'row',

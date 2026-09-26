@@ -1,7 +1,16 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { getDistributorDashboardCounts } = require('../../../services/distributorDashboardMetrics');
+const { getCurrentDistributorRequests, getDistributorDashboardCounts } = require('../../../services/distributorDashboardMetrics');
+
+test('Current Requests keeps every active assignment and removes terminal orders after realtime updates', () => {
+  const active = getCurrentDistributorRequests([
+    { id: 'assigned', status: 'distributor_assigned' }, { id: 'accepted', status: 'accepted' },
+    { id: 'failed', status: 'delivery_failed' }, { id: 'delivered', status: 'delivered' }, { id: 'cancelled', status: 'cancelled' },
+  ]);
+  assert.deepEqual(active.map((order) => order.id), ['assigned', 'accepted', 'failed']);
+  assert.deepEqual(getCurrentDistributorRequests([{ id: 'assigned', status: 'delivered' }]), []);
+});
 
 const today = new Date('2026-09-26T12:00:00+08:00');
 

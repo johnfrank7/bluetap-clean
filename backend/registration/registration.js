@@ -160,8 +160,12 @@ function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, render 
         branchId: existing?.branchId || null, branchNameSnapshot: existing?.branchNameSnapshot || null,
       } : {};
       const publicPrefix = profile.role === 'requester' ? 'Req' : 'Dis';
-      const number = Number(counts[profile.role] || 0) + 1;
-      const publicUid = existing?.publicUid || existing?.displayUid || `${publicPrefix}${String(number).padStart(3, '0')}`;
+      const recoveredPublicUid = !existing && typeof session?.profileRecovery?.publicUid === 'string' &&
+        new RegExp(`^${publicPrefix}\\d+$`, 'i').test(session.profileRecovery.publicUid)
+        ? session.profileRecovery.publicUid : '';
+      const recoveredNumber = recoveredPublicUid ? Number(recoveredPublicUid.slice(publicPrefix.length)) : 0;
+      const number = recoveredNumber || Number(counts[profile.role] || 0) + 1;
+      const publicUid = existing?.publicUid || existing?.displayUid || recoveredPublicUid || `${publicPrefix}${String(number).padStart(3, '0')}`;
       const recoveryProfile = {
         ...profile, uid: user.uid, email: user.email,
         publicUid,
@@ -198,13 +202,15 @@ function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, render 
       }
       const prefix = profile.role === 'requester' ? 'REQ' : 'DIS';
       const pending = profile.role === 'distributor';
-      tx.set(counter, { [profile.role]: number }, { merge: true });
-      tx.set(db.collection('accountCounters').doc(profile.role), {
-        role: profile.role,
-        lastNumber: number,
-        count: number,
-        updatedAt: new Date(now()),
-      }, { merge: true });
+      if (!recoveredPublicUid) {
+        tx.set(counter, { [profile.role]: number }, { merge: true });
+        tx.set(db.collection('accountCounters').doc(profile.role), {
+          role: profile.role,
+          lastNumber: number,
+          count: number,
+          updatedAt: new Date(now()),
+        }, { merge: true });
+      }
       tx.set(ref, {
         ...profile, uid: user.uid, email: user.email,
         publicUid,
@@ -271,6 +277,20 @@ function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, render 
     await db.runTransaction(async (tx) => {
       tx.update(db.collection('users').doc(user.uid), { onboardingStatus: 'face_enrollment_pending', registrationCompleted: false, updatedAt: new Date(now()) });
       tx.update(db.collection('registrationSessions').doc(registrationSessionId), { faceEnrollmentPending: true });
+    });
+  }
+  async function discardCreatedIncompleteRegistration(user, registrationSessionId) {
+    const profileRef = db.collection('users').doc(user.uid);
+    const sessionRef = db.collection('registrationSessions').doc(registrationSessionId);
+    await db.runTransaction(async (tx) => {
+      const profile = await tx.get(profileRef);
+      const session = await tx.get(sessionRef);
+      if (profile.exists && profile.data()?.registrationCompleted === false && session.data()?.userUid === user.uid) tx.delete(profileRef);
+      if (session.exists && session.data()?.userUid === user.uid && session.data()?.completed !== true) {
+        tx.update(sessionRef, { userUid: null, faceEnrollmentPending: false,
+          profileRecovery: { ...(session.data()?.profileRecovery || {}), uid: null, registrationCompleted: false, onboardingStatus: 'finalization_pending' },
+          finalization: { status: 'pending', uid: null, startedAt: new Date(now()) } });
+      }
     });
   }
   async function finalizeWithoutFace(user, registrationSessionId) {
@@ -370,7 +390,10 @@ function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, render 
       logFinalization('face-finalized', registrationSessionId, { created });
     } catch (error) {
       try { await registrationLimits.release(registrationSessionId, user.uid); } catch { /* retain original error */ }
-      if (requiresFace(session)) await markEnrollmentPending(user, registrationSessionId);
+      if (created) {
+        try { await auth.deleteUser(user.uid); } catch { logFinalization('auth-rollback-failed', registrationSessionId, { rollbackFailed: true }); }
+        try { await discardCreatedIncompleteRegistration(user, registrationSessionId); } catch { logFinalization('profile-rollback-failed', registrationSessionId, { rollbackFailed: true }); }
+      } else if (requiresFace(session)) await markEnrollmentPending(user, registrationSessionId);
       logFinalization('face-finalization-pending', registrationSessionId, { created });
       throw error;
     }

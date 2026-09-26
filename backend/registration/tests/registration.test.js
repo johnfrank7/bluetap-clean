@@ -308,32 +308,33 @@ test('profile write failure rolls back only the newly created Auth account', asy
   assert.equal(f.records.get('registrationLimits/device_device-hash').reservedCount, 0);
 });
 
-test('final face enrollment failure leaves no permanent username claim', async () => {
+test('final face enrollment failure leaves no Auth account or operational profile', async () => {
   const f = fixture();
   const result = await f.service.request('new@example.test', 'test-ip');
   f.failEnrollment();
   await assert.rejects(f.service.complete(result.challenge, f.sent[0].code, form));
-  const profile = f.records.get('users/new-user');
   const session = f.records.get('registrationSessions/' + f.sessionId);
-  assert.equal(profile.registrationCompleted, false);
-  assert.equal(profile.onboardingStatus, 'face_enrollment_pending');
+  assert.equal(f.users.size, 0);
+  assert.equal(f.records.has('users/new-user'), false);
   assert.equal(session.completed, false);
-  assert.equal(session.faceEnrollmentPending, true);
+  assert.equal(session.userUid, null);
   assert.equal(f.records.get('registrationLimits/device_device-hash').finalizedCount, 0);
   assert.equal(f.records.get('registrationLimits/device_device-hash').reservedCount, 0);
   assert.equal(f.records.has('usernames/test_user'), false);
 });
 
-test('a pending face-enrollment finalization can safely retry without another account or username claim', async () => {
+test('a failed face finalization retry recreates one account and reuses its reserved public UID', async () => {
   const f = fixture();
   const first = await f.service.request('new@example.test', 'test-ip');
   f.failEnrollment();
   await assert.rejects(f.service.complete(first.challenge, f.sent[0].code, form));
   f.restoreEnrollment();
   const completed = await f.service.retryFinalization(first.challenge, form, finalFaceImage);
-  assert.equal(f.creates, 1);
+  assert.equal(f.creates, 2);
+  assert.equal(f.users.size, 1);
   assert.equal(f.sent.length, 1);
   assert.equal(f.records.get('usernames/test_user').uid, 'new-user');
+  assert.equal(f.records.get('users/new-user').publicUid, 'Req001');
   assert.equal(f.records.get('registrationSessions/' + f.sessionId).completed, true);
   assert.equal(completed.finalized, true);
 });

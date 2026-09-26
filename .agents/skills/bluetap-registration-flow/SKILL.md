@@ -22,6 +22,8 @@ Keep the flow: Account → Personal → Identity → Credentials → Verify.
 - Firestore transaction helpers must perform every required read before their first write. Prepare username ownership and account-limit mutations first, then apply their writes in the finalization transaction.
 - Never log OTP secrets or plaintext values.
 - Firebase Auth, profile, username registry, and face-enrollment finalization must be idempotent. Roll back partial finalization safely.
+- A failed public finalization must remove any Auth identity and incomplete `users/{uid}` profile created solely by that attempt. A retry may retain its session-bound Public UID reservation, but must never create a second visible account.
+- Completed account lists must exclude profiles where `registrationCompleted === false`; legacy incomplete records require an Admin-only review or repair path and are never silently deleted.
 - Do not mark registration successful until every required record is complete.
 - Password recovery OTPs are separate from signup verification: use a `PASSWORD_RESET` purpose and never reuse signup OTP records or registration sessions.
 

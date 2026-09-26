@@ -1,7 +1,7 @@
 const ROLE_PREFIXES = {
   requester: 'Req',
   distributor: 'Dis',
-  manager: 'Mgr',
+  manager: 'Man',
   admin: 'Adm',
 };
 
@@ -18,7 +18,8 @@ function parsePublicUidNumber(role, publicUid) {
   const str = String(publicUid || '').trim();
   if (!prefix || !str) return 0;
   if (/^[a-zA-Z0-9]{20,}$/.test(str)) return 0;
-  const regex = new RegExp(`^${prefix}-?(\\d+)$`, 'i');
+  const allowedPrefix = normRole === 'manager' ? '(?:Man|Mgr)' : prefix;
+  const regex = new RegExp(`^${allowedPrefix}-?(\\d+)$`, 'i');
   const match = str.match(regex);
   if (match) {
     const parsed = parseInt(match[1], 10);

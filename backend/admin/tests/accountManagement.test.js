@@ -174,6 +174,9 @@ test('backfillLegacyUids is idempotent, converts legacy hyphenated UIDs, and doe
     email: 'existing@example.test',
     publicUid: 'Dis042',
   });
+  fixture.records.set('users/legacy-manager', {
+    uid: 'legacy-manager', role: 'manager', email: 'manager@example.test', publicUid: 'Mgr009', managerStatus: 'active', branchId: 'north',
+  });
 
   await backfillLegacyUids({
     auth,
@@ -189,6 +192,7 @@ test('backfillLegacyUids is idempotent, converts legacy hyphenated UIDs, and doe
   // Verify existing-1 was preserved
   const existingUser = fixture.records.get('users/existing-1');
   assert.equal(existingUser.publicUid, 'Dis042');
+  assert.equal(fixture.records.get('users/legacy-manager').publicUid, 'Man009');
 
   // Rerun backfill - should be idempotent and not change anything
   await backfillLegacyUids({
@@ -198,4 +202,5 @@ test('backfillLegacyUids is idempotent, converts legacy hyphenated UIDs, and doe
   });
   assert.equal(fixture.records.get('users/legacy-1').publicUid, 'Req007');
   assert.equal(fixture.records.get('users/existing-1').publicUid, 'Dis042');
+  assert.equal(fixture.records.get('users/legacy-manager').publicUid, 'Man009');
 });

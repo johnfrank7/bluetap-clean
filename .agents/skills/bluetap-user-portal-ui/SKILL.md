@@ -75,6 +75,7 @@ Preserve these invariants:
 
 - Primary tab navigation in Requester and Distributor portals supports swipe navigation via `PortalSwipeContainer`. Swiping is guarded against accidental vertical scroll triggers (`|dx| > 50` and `|dx| > 2.2 * |dy|`).
 - Nested horizontal swipe widgets (e.g. `Carousel` and pagination indicators) must be wrapped in `<PortalSwipeIgnore>` from `components/PortalSwipeContainer.jsx` to suppress portal tab navigation while interacting with carousel items.
+- Distributor Dashboard Current Requests must support multiple simultaneous active assignments through a lightweight horizontal carousel fed by the shared realtime assignment source. Nested request-card swipes must own the gesture and must not trigger parent portal navigation.
 - Breaking circular dependencies: `UserPortalFrame` is isolated in `components/UserPortalFrame.jsx` so that `BlueTapHeader` and `UserPortalShell` do not import each other cyclically, avoiding runtime TDZ initialization crashes (`ReferenceError: Cannot access 'X' before initialization`).
 - Real-time greetings: Dashboards use `useLiveGreeting` from `services/liveTime.js` to update local time-of-day greetings ("Good Morning", "Good Afternoon", "Good Evening") dynamically without triggering full page reloads or relying on third-party APIs.
 - Empty lists and query results must render `BlueTapEmptyState` with the shared sad water droplet motif, informative headline, contextual explanation, and call-to-action button where appropriate.
