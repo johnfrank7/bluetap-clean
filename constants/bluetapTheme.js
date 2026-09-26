@@ -10,7 +10,7 @@ export const BLUETAP_COLORS = Object.freeze({
   muted: '#64748B',
   surface: '#FFFFFF', surfaceAlt: '#F8FCFF', border: '#D7ECFF',
   textPrimary: '#12304A', textSecondary: '#64748B',
-  success: '#167347', warning: '#A96800', danger: '#B52F2F', dangerSoft: '#FCE9E8', disabled: '#A8BBCB',
+  success: '#167347', successSoft: '#E3F7EC', warning: '#A96800', warningSoft: '#FFF7E5', danger: '#B52F2F', dangerSoft: '#FCE9E8', disabled: '#A8BBCB',
   white: '#FFFFFF',
 });
 
