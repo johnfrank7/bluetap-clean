@@ -599,6 +599,8 @@ const styles = createPortalStyleSheet({
     flex: 1,
   },
   fixedHeaderArea: {
+    backgroundColor: BLUETAP_COLORS.background,
+    zIndex: 10,
     paddingHorizontal: USER_PORTAL_LAYOUT.gutter,
     paddingTop: 16,
     paddingBottom: 4,
@@ -612,20 +614,21 @@ const styles = createPortalStyleSheet({
   pageTitle: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: BLUE,
+    color: TEXT_DARK,
     letterSpacing: 0,
   },
   subtitle: {
     fontSize: 14,
-    color: BLUE,
+    color: TEXT_MUTED,
     fontWeight: '600',
     marginTop: 4,
     marginBottom: 14,
   },
   scheduleTabs: {
     flexDirection: 'row',
-    borderWidth: 1.5,
-    borderColor: BLUE,
+    borderWidth: 1,
+    borderColor: CARD_BORDER,
+    backgroundColor: BLUETAP_COLORS.surfaceAlt,
     borderRadius: 13,
     overflow: 'hidden',
     marginBottom: 16,
@@ -635,7 +638,7 @@ const styles = createPortalStyleSheet({
     minHeight: 40,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: BLUETAP_COLORS.surface,
+    backgroundColor: 'transparent',
   },
   scheduleTabActive: {
     backgroundColor: BLUE,
@@ -643,7 +646,7 @@ const styles = createPortalStyleSheet({
   scheduleTabText: {
     fontSize: 13,
     fontWeight: 'bold',
-    color: BLUE,
+    color: TEXT_MUTED,
   },
   scheduleTabTextActive: {
     color: '#FFFFFF',

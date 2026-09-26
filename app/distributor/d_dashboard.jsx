@@ -479,13 +479,13 @@ const styles = createPortalStyleSheet({
     marginTop: 12,
   },
   welcomeText: {
-    color: BLUE,
+    color: TEXT_DARK,
     fontSize: 26,
     fontWeight: 'bold',
     letterSpacing: 0,
   },
   greetingText: {
-    color: BLUE,
+    color: TEXT_DARK,
     fontSize: 16,
     fontWeight: '700',
     marginTop: 4,
@@ -510,6 +510,13 @@ const styles = createPortalStyleSheet({
     paddingHorizontal: 8,
     paddingVertical: 12,
     justifyContent: 'space-between',
+    ...createShadow({
+      color: '#0D47A1',
+      elevation: 2,
+      opacity: 0.05,
+      radius: 4,
+      offset: { width: 0, height: 2 },
+    }),
   },
   summaryValue: {
     color: BLUE,
@@ -518,7 +525,7 @@ const styles = createPortalStyleSheet({
     textAlign: 'center',
   },
   summaryLabel: {
-    color: BLUE,
+    color: TEXT_MUTED,
     fontSize: 11,
     lineHeight: 14,
     fontWeight: '600',
@@ -528,7 +535,7 @@ const styles = createPortalStyleSheet({
     marginTop: 24,
   },
   sectionTitle: {
-    color: BLUE,
+    color: TEXT_DARK,
     fontSize: 16,
     fontWeight: 'bold',
     marginBottom: 10,
@@ -589,7 +596,7 @@ const styles = createPortalStyleSheet({
     marginTop: 8,
   },
   infoGridPrimaryValue: {
-    color: BLUE,
+    color: TEXT_DARK,
     fontSize: 14,
     fontWeight: 'bold',
     lineHeight: 18,
@@ -617,13 +624,13 @@ const styles = createPortalStyleSheet({
     height: 44,
     backgroundColor: BLUETAP_COLORS.surface,
     borderWidth: 1.5,
-    borderColor: '#2563EB',
+    borderColor: BLUE,
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },
   viewDetailsText: {
-    color: '#2563EB',
+    color: BLUE,
     fontSize: 13,
     fontWeight: '600',
   },
@@ -662,7 +669,7 @@ const styles = createPortalStyleSheet({
     }),
   },
   emptyRequestTitle: {
-    color: BLUE,
+    color: TEXT_DARK,
     fontSize: 15,
     fontWeight: 'bold',
   },
@@ -725,7 +732,7 @@ const styles = createPortalStyleSheet({
     justifyContent: 'space-between',
   },
   modalTitle: {
-    color: BLUE,
+    color: TEXT_DARK,
     fontSize: 18,
     fontWeight: 'bold',
   },

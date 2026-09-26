@@ -663,7 +663,7 @@ const styles = createPortalStyleSheet({
   profileTitle: {
     fontSize: 26,
     fontWeight: 'bold',
-    color: BLUE,
+    color: TEXT_DARK,
     letterSpacing: 0,
   },
   infoSection: {
@@ -690,7 +690,7 @@ const styles = createPortalStyleSheet({
   infoTitle: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: BLUE,
+    color: TEXT_DARK,
   },
   editIcon: {
     width: 20,
@@ -713,14 +713,14 @@ const styles = createPortalStyleSheet({
     marginTop: 8,
   },
   profileError: {
-    backgroundColor: '#FFF5F5',
-    borderColor: '#F2B8B5',
+    backgroundColor: BLUETAP_COLORS.dangerSoft,
+    borderColor: BLUETAP_COLORS.danger,
     borderRadius: 12,
     borderWidth: 1,
     marginTop: 14,
     padding: 12,
   },
-  profileErrorText: { color: '#B3261E', fontSize: 12, fontWeight: '700', lineHeight: 18 },
+  profileErrorText: { color: BLUETAP_COLORS.danger, fontSize: 12, fontWeight: '700', lineHeight: 18 },
   profileRetryText: { color: BLUE, fontSize: 12, fontWeight: '800', marginTop: 8 },
   profileField: {
     marginTop: 14,
@@ -740,14 +740,14 @@ const styles = createPortalStyleSheet({
   input: {
     minHeight: 42,
     borderWidth: 1,
-    borderColor: '#BBDEFB',
+    borderColor: CARD_BORDER,
     borderRadius: 12,
     paddingHorizontal: 12,
     paddingVertical: 9,
     color: TEXT_DARK,
     fontSize: 15,
     fontWeight: 'bold',
-    backgroundColor: '#F7FBFF',
+    backgroundColor: BLUETAP_COLORS.surfaceAlt,
   },
   multilineInput: {
     minHeight: 78,
@@ -798,7 +798,7 @@ const styles = createPortalStyleSheet({
   },
   helpCard: {
     marginTop: 22,
-    backgroundColor: BLUETAP_COLORS.surface,
+    backgroundColor: BLUETAP_COLORS.surfaceAlt,
     borderRadius: USER_PORTAL_LAYOUT.cardRadius,
     borderWidth: 1,
     borderColor: CARD_BORDER,
@@ -821,12 +821,12 @@ const styles = createPortalStyleSheet({
     flex: 1,
   },
   helpTitle: {
-    color: BLUE,
+    color: TEXT_DARK,
     fontSize: 19,
     fontWeight: 'bold',
   },
   helpSubtitle: {
-    color: TEXT_DARK,
+    color: TEXT_MUTED,
     fontSize: 13,
     lineHeight: 17,
     marginTop: 6,

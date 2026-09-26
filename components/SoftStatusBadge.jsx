@@ -4,6 +4,7 @@ import {
   normalizeRequesterOrderStatus,
   requesterOrderStatusLabel,
 } from '../constants/requesterOrderStatus';
+import { useBlueTapTheme } from './BlueTapTheme';
 
 const BLUE = '#2563EB';
 
@@ -68,6 +69,16 @@ const STATUS_META = {
     color: '#7C3AED',
     label: 'Out for Delivery',
   },
+  'delivery failed': {
+    backgroundColor: '#FEF2F2',
+    color: '#EF4444',
+    label: 'Delivery Failed',
+  },
+  'delivery failed rescheduling': {
+    backgroundColor: '#FEF2F2',
+    color: '#EF4444',
+    label: 'Delivery Failed (rescheduling)',
+  },
   delivered: {
     backgroundColor: '#ECFDF5',
     color: '#059669',
@@ -95,6 +106,28 @@ const STATUS_META = {
   },
 };
 
+const DARK_STATUS_META = {
+  pending: { backgroundColor: '#38280B', color: '#FBBF24', label: 'Pending' },
+  'outside radius pending approval': { backgroundColor: '#38280B', color: '#FBBF24', label: 'Waiting for branch approval' },
+  'awaiting distributor assignment': { backgroundColor: '#133554', color: '#60A5FA', label: 'Waiting for distributor assignment' },
+  'distributor assigned': { backgroundColor: '#0F392B', color: '#34D399', label: 'Distributor assigned' },
+  assigned: { backgroundColor: '#0F392B', color: '#34D399', label: 'Distributor assigned' },
+  'branch transfer pending': { backgroundColor: '#2E1A47', color: '#C084FC', label: 'Branch transfer in progress' },
+  approved: { backgroundColor: '#0F392B', color: '#34D399', label: 'Approved' },
+  'declined outside service area': { backgroundColor: '#3B181A', color: '#F87171', label: 'Declined: outside service area' },
+  accepted: { backgroundColor: '#133554', color: '#60A5FA', label: 'Accepted' },
+  scheduled: { backgroundColor: '#38280B', color: '#FBBF24', label: 'Scheduled' },
+  processing: { backgroundColor: '#38280B', color: '#FBBF24', label: 'Processing' },
+  'out for delivery': { backgroundColor: '#2E1A47', color: '#C084FC', label: 'Out for Delivery' },
+  'delivery failed': { backgroundColor: '#3B181A', color: '#F87171', label: 'Delivery Failed' },
+  'delivery failed rescheduling': { backgroundColor: '#3B181A', color: '#F87171', label: 'Delivery Failed (rescheduling)' },
+  delivered: { backgroundColor: '#0F392B', color: '#34D399', label: 'Delivered' },
+  cancelled: { backgroundColor: '#3B181A', color: '#F87171', label: 'Cancelled' },
+  canceled: { backgroundColor: '#3B181A', color: '#F87171', label: 'Cancelled' },
+  rejected: { backgroundColor: '#26333D', color: '#9CA3AF', label: 'Rejected' },
+  declined: { backgroundColor: '#3B181A', color: '#F87171', label: 'Declined' },
+};
+
 export const normalizeStatus = normalizeRequesterOrderStatus;
 
 export const getSoftStatusMeta = (status) => {
@@ -111,7 +144,9 @@ export const getSoftStatusMeta = (status) => {
 };
 
 export default function SoftStatusBadge({ status, label, style }) {
-  const meta = getSoftStatusMeta(status);
+  const { isDark } = useBlueTapTheme();
+  const normalizedStatus = normalizeStatus(status || 'Pending');
+  const meta = (isDark ? DARK_STATUS_META[normalizedStatus] : null) || getSoftStatusMeta(status);
 
   return (
     <View style={[styles.badge, { backgroundColor: meta.backgroundColor }, style]}>

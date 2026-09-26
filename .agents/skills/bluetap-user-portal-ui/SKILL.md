@@ -44,8 +44,25 @@ Preserve these invariants:
 - The floating navigation outer wrapper is always transparent and visually unpainted.
 - Light-mode floating navigation uses the shared light surface with BlueTap blue icons.
 - Dark-mode floating navigation uses the landing-page dark elevated surface with theme-aware icons and border.
-- Never create role-specific hardcoded palettes for Requester or Distributor.
 - All user-portal theme colors come from shared semantic tokens, including backgrounds, headers, cards, inputs, tabs, buttons, text, borders, and navigation. Never use hardcoded colors such as `#F4FAFF` or `#FFFFFF` in distributor screens (`d_dashboard.jsx`, `d_history.jsx`, `d_notification.jsx`, `d_profile.jsx`, `d_requests.jsx`, `d_scheduled_requests.jsx`); use `BLUETAP_COLORS.background`, `BLUETAP_COLORS.surface`, and shared theme tokens.
+
+## Visual Hierarchy and Light/Dark Theme Discipline
+
+1. **Canonical Layered Hierarchy**:
+   - **Blue Brand / Header**: BlueTap Blue (`BLUETAP_COLORS.primary` / `#187BCD`).
+   - **Page Background**: Soft blue-tinted background (`BLUETAP_COLORS.background` / `#F4FAFF` in light mode, deep blue-black navy in dark mode).
+   - **Card Surfaces**: Crisp white/light surface (`BLUETAP_COLORS.surface` / `#FFFFFF` in light mode, elevated navy surface in dark mode) paired with pale-blue borders (`BLUETAP_COLORS.border` / `#D7ECFF`) and soft blue shadows (`#0D47A1`, elevation 6, opacity 0.12).
+   - **Primary Text**: Dark Navy (`BLUETAP_COLORS.textPrimary` / `TEXT_DARK` / `#12304A`) for page titles, section headers, important metrics, card headers, and primary data values. Avoid all-blue text washes.
+   - **Secondary Text**: Slate (`BLUETAP_COLORS.textSecondary` / `TEXT_MUTED` / `#64748B`) for metadata labels, helper text, subtitles, and descriptions.
+   - **Interactive Actions**: BlueTap Blue (`BLUETAP_COLORS.primary` / `BLUE` / `#187BCD`) reserved for primary action buttons, active tab pills, and key interactive accents.
+2. **Contrast and Dark Mode Discipline**:
+   - Text contrast must be maintained across both light and dark themes. Titles and values must use `TEXT_DARK` (`BLUETAP_COLORS.textPrimary`), which inverts to bright readable off-white (`#F5FAFF`) in dark mode, and `TEXT_MUTED` (`BLUETAP_COLORS.textSecondary`), which inverts to readable slate (`#9FB4C8`).
+   - Never hardcode `#187BCD` or other blue shades directly onto text styles that should be primary or secondary content, as this degrades readability on dark navy card backgrounds.
+3. **Pinned Header Area Bleed Prevention**:
+   - Any fixed or pinned header container (e.g. `fixedHeaderArea`) positioned above a `ScrollView` must declare `backgroundColor: BLUETAP_COLORS.background` and `zIndex: 10`. This prevents scrolled list cards from visibly bleeding or showing through beneath the header controls during scrolling.
+4. **SoftStatusBadge Semantic & Dark-Mode Mapping**:
+   - `SoftStatusBadge` must cover all order lifecycle statuses, including `'delivery failed'` and `'delivery failed rescheduling'`, with semantic danger styling (`#FEF2F2` / `#EF4444`).
+   - Badges must provide explicit dark-mode mappings (`DARK_STATUS_META` or theme-aware colors) to ensure high-contrast text and border rendering against dark navy card surfaces.
 
 ## Notifications and order events
 
