@@ -8,7 +8,6 @@ import {
   View,
 } from 'react-native';
 import SoftStatusBadge from './SoftStatusBadge';
-import LocationMap from './LocationMap';
 import { createShadow } from './shadowStyles';
 import { createPortalStyleSheet, useBlueTapTheme } from './BlueTapTheme';
 import { formatDisplayUniqueId } from '../services/uniqueIds';
@@ -18,6 +17,7 @@ const BLUE_LIGHT = '#E3F2FD';
 const CARD_BORDER = '#D7ECFF';
 const TEXT_MUTED = '#6F8EA8';
 const TEXT_DARK = '#20384D';
+const LazyLocationMap = React.lazy(() => import('./LocationMap'));
 
 const formatAmount = (amount) => {
   if (amount === undefined || amount === null || amount === '') {
@@ -205,24 +205,26 @@ export default function RequestDetailsModal({
               <View style={styles.section}>
                 <Text style={styles.sectionTitle}>Delivery Location Map</Text>
                 <View style={styles.mapContainer}>
-                  <LocationMap
-                    location={request.deliveryLocation}
-                    branches={
-                      request.branchLocation?.latitude
-                        ? [
-                            {
-                              id: request.branchId || 'station',
-                              name: request.waterStation || 'Water Station',
-                              location: request.branchLocation,
-                            },
-                          ]
-                        : []
-                    }
-                    selectedBranchId={request.branchId || 'station'}
-                    readOnly={true}
-                    height={170}
-                    themed={true}
-                  />
+                  <React.Suspense fallback={<View style={styles.mapLoading}><Text style={styles.mapLoadingText}>Loading delivery map…</Text></View>}>
+                    <LazyLocationMap
+                      location={request.deliveryLocation}
+                      branches={
+                        request.branchLocation?.latitude
+                          ? [
+                              {
+                                id: request.branchId || 'station',
+                                name: request.waterStation || 'Water Station',
+                                location: request.branchLocation,
+                              },
+                            ]
+                          : []
+                      }
+                      selectedBranchId={request.branchId || 'station'}
+                      readOnly={true}
+                      height={170}
+                      themed={true}
+                    />
+                  </React.Suspense>
                 </View>
               </View>
             ) : null}
@@ -537,5 +539,16 @@ const styles = createPortalStyleSheet({
     overflow: 'hidden',
     borderWidth: 1,
     borderColor: CARD_BORDER,
+  },
+  mapLoading: {
+    height: 170,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F7FBFF',
+  },
+  mapLoadingText: {
+    color: TEXT_MUTED,
+    fontSize: 12,
+    fontWeight: '600',
   },
 });

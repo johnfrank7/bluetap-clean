@@ -7,9 +7,6 @@ import {
   Text,
   View,
 } from 'react-native';
-import { collection, onSnapshot, query, where } from 'firebase/firestore';
-
-import { db } from '../../firebase';
 import { getLocalUsers, subscribeLocalUsers } from '../../localUsers';
 import { getLocalRequests } from '../../services/requests';
 import { getModuleSession } from '../../services/authSession';
@@ -19,6 +16,7 @@ import ManagerShell, {
   ManagerPill,
   ManagerWaterDrop,
 } from '../../components/ManagerShell';
+import { useManagerRealtimeData } from '../../components/ManagerRealtimeData';
 import {
   formatManagerNumber,
   useAnimatedNumber,
@@ -768,6 +766,7 @@ const StationsPanel = ({ progress, rows }) => (
 export default function ManagerAnalyticsPage() {
   const { colors } = useAdminTheme(); styles = createStyles(colors);
   const branchId = getModuleSession('manager')?.branchId || '';
+  const { users: realtimeUsers, requests: realtimeRequests } = useManagerRealtimeData();
   const [search, setSearch] = useState('');
   const [users, setUsers] = useState([]);
   const [requests, setRequests] = useState([]);
@@ -791,18 +790,15 @@ export default function ManagerAnalyticsPage() {
   const hasAnimated = useRef(false);
 
   useEffect(() => {
-    let firestoreUsers = [];
-    let firestoreRequests = [];
-
     const refreshAnalytics = () => {
       const mergedUsers = mergeByIdentity([
-        ...firestoreUsers,
+        ...realtimeUsers,
         ...getLocalUsers().filter((user) => user.branchId === branchId),
       ]);
       const localRequests = getLocalRequests().filter((request) => request.branchId === branchId);
-      const requestIds = new Set(firestoreRequests.map((item) => item.id));
+      const requestIds = new Set(realtimeRequests.map((item) => item.id));
       const allRequests = [
-        ...firestoreRequests,
+        ...realtimeRequests,
         ...localRequests.filter((item) => !requestIds.has(item.id)),
       ];
 
@@ -816,44 +812,8 @@ export default function ManagerAnalyticsPage() {
 
     refreshAnalytics();
     const unsubscribeLocalUsers = subscribeLocalUsers(refreshAnalytics);
-
-    const unsubscribeUsers = onSnapshot(
-      query(collection(db, 'users'), where('branchId', '==', branchId)),
-      (snapshot) => {
-        firestoreUsers = snapshot.docs.map((item) => ({
-          id: item.id,
-          uid: item.id,
-          ...item.data(),
-        }));
-        refreshAnalytics();
-      },
-      (error) => {
-        console.log('Analytics users error:', error.message);
-        refreshAnalytics();
-      }
-    );
-
-    const unsubscribeRequests = onSnapshot(
-      query(collection(db, 'requests'), where('branchId', '==', branchId)),
-      (snapshot) => {
-        firestoreRequests = snapshot.docs.map((item) => ({
-          id: item.id,
-          ...item.data(),
-        }));
-        refreshAnalytics();
-      },
-      (error) => {
-        console.log('Analytics requests error:', error.message);
-        refreshAnalytics();
-      }
-    );
-
-    return () => {
-      unsubscribeUsers();
-      unsubscribeRequests();
-      unsubscribeLocalUsers();
-    };
-  }, [branchId]);
+    return unsubscribeLocalUsers;
+  }, [branchId, realtimeRequests, realtimeUsers]);
 
   useEffect(() => {
     if (!dataReady || hasAnimated.current) return;

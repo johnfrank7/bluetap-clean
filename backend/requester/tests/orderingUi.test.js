@@ -35,6 +35,19 @@ const distributorHistory = read('app/distributor/d_history.jsx');
 const distributorNotifications = read('app/distributor/d_notification.jsx');
 const distributorOrders = read('services/distributorOrders.js');
 const managerRequests = read('app/manager/request.jsx');
+const roleDataProviders = read('components/RoleDataProviders.jsx');
+const managerRealtime = read('components/ManagerRealtimeData.jsx');
+const managerDashboard = read('app/manager/dashboard.jsx');
+const managerAnalytics = read('app/manager/analytics.jsx');
+const managerDistributors = read('app/manager/distributors.jsx');
+const roleGate = read('components/RoleGate.jsx');
+const requestDetailsModal = read('components/RequestDetailsModal.jsx');
+const uniqueIds = read('services/uniqueIds.js');
+const login = read('app/login.jsx');
+const signup = read('app/signup.jsx');
+const passwordChange = read('app/required-password-change.jsx');
+const privilegedLogin = read('components/PrivilegedLogin.jsx');
+const adminManagers = read('app/admin/managers.jsx');
 
 test('new request is structured into delivery, provider, product, details, and review sections', () => {
   for (const label of ['Delivery location', 'Select provider branch', 'Select products', 'Order details', 'Review request']) assert.match(form, new RegExp(label));
@@ -95,7 +108,10 @@ test('Requester order surfaces share API-backed UID ownership, canonical lifecyc
   assert.match(requesterRequestService, /getRequesterOrders\(\)/);
   assert.match(requesterRequestService, /requesterUid/);
   assert.match(requesterRequestService, /primeRequesterRequest/);
-  assert.doesNotMatch(requesterRequestService, /onSnapshot/);
+  assert.match(requesterRequestService, /onSnapshot/);
+  assert.match(requesterRequestService, /where\('requester_id', '==', requesterId\)/);
+  assert.match(requesterRequestService, /entry\.unsubscribe/);
+  assert.match(layout, /RequesterDataProvider/);
   assert.match(requesterRequests, /user\.uid/);
   assert.match(requesterRequests, /ordersLoading/);
   assert.match(requesterRequests, /ordersError/);
@@ -105,6 +121,9 @@ test('Requester order surfaces share API-backed UID ownership, canonical lifecyc
   assert.match(notifications, /requesterOrderStatusLabel/);
 });
 test('profile renders missing values as Not provided', () => assert.match(profile, /Not provided/));
+test('Requester profile cache is bound to the active Firebase account before first render', () => {
+  assert.match(profile, /cachedRequesterProfileUid === auth\.currentUser\?\.uid/);
+});
 test('dashboard supports both a current order card and a no-current-request state', () => {
   assert.match(dashboard, /Current Request/); assert.match(dashboard, /No current request/i);
 });
@@ -166,7 +185,52 @@ test('Distributor pages retain their distinct committed layouts while using the 
   assert.match(distributorRequests, /schedule-delivery/);
   assert.match(distributorScheduled, /start-delivery|mark-delivered/);
   assert.doesNotMatch(distributorRequests, /setScheduledRequests|new Promise\(\(resolve\)/);
-  assert.doesNotMatch(distributorOrders, /onSnapshot|firebase\/firestore/);
+  assert.match(distributorOrders, /onSnapshot|firebase\/firestore/);
+  assert.match(distributorOrders, /where\('assignedDistributorUid', '==', uid\)/);
+  assert.match(distributorOrders, /where\('branchId', '==', normalizedBranchId\)/);
+  assert.match(distributorLayout, /DistributorDataProvider/);
+});
+
+test('role layouts keep deduplicated realtime data warm and manager pages consume one branch provider', () => {
+  assert.match(roleDataProviders, /subscribeRequesterRequests/);
+  assert.match(roleDataProviders, /useAssignedDistributorOrders/);
+  assert.match(managerRealtime, /ManagerRealtimeDataProvider/);
+  assert.match(managerRealtime, /where\('branchId', '==', branchId\)/);
+  assert.match(managerRealtime, /where\('transferToBranchId', '==', branchId\)/);
+  for (const screen of [managerDashboard, managerAnalytics, managerDistributors]) {
+    assert.match(screen, /useManagerRealtimeData/);
+    assert.doesNotMatch(screen, /onSnapshot/);
+  }
+});
+
+test('role changes revalidate securely and product UI never creates or exposes raw Firebase UID identifiers', () => {
+  assert.match(roleGate, /onSnapshot/);
+  assert.match(roleGate, /invalidatePrivilegedValidationCache/);
+  assert.doesNotMatch(uniqueIds, /firebase\/firestore|accountCounters|counters\/unique_ids|runTransaction/);
+  assert.doesNotMatch(login, /LOGIN_AUTH_UID|LOGIN_PROFILE_UID|authenticatedUid|profileUid/);
+  assert.match(profile, /label="UID"/);
+  assert.match(profile, /getProfileUniqueId/);
+  assert.doesNotMatch(adminManagers, /<Info label="UID" value=\{account\.uid\}/);
+});
+
+test('password fields use the shared accessible eye control and Terms remain silently enforced', () => {
+  for (const screen of [login, signup, passwordChange, privilegedLogin, adminManagers]) {
+    assert.match(screen, /PasswordVisibilityButton/);
+    assert.doesNotMatch(screen, />\{[^}]+\? 'Hide' : 'Show'\}<\/Text>/);
+  }
+  assert.doesNotMatch(signup, /Terms acceptance is required to continue/);
+  assert.match(signup, /!termsAccepted/);
+});
+
+test('distributor dashboard metrics are live, actionable, semantic, and map code is deferred until details open', () => {
+  assert.match(distributorDashboard, /colors\.warning/);
+  assert.match(distributorDashboard, /colors\.primary/);
+  assert.match(distributorDashboard, /colors\.success/);
+  assert.match(distributorDashboard, /Pending Requests/);
+  assert.match(distributorDashboard, /Scheduled Today/);
+  assert.match(distributorDashboard, /Delivered Today/);
+  assert.match(requestDetailsModal, /React\.lazy\(\(\) => import\('\.\/LocationMap'\)\)/);
+  assert.match(requestDetailsModal, /React\.Suspense/);
 });
 
 test('Manager dispatch presents durable source-branch transfer decisions without a chat surface', () => {

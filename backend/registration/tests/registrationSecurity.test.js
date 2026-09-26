@@ -8,13 +8,12 @@ const { createRegistrationSessionHandler } = require('../registrationSessionHand
 const { getClientIp } = require('../../utils/request');
 const { createSessionPolicyHandler } = require('../../auth/sessionPolicyHandler');
 
-test('registration security accepts three valid verification combinations and rejects both off', () => {
-  for (const [faceVerificationEnabled, emailOtpEnabled] of [[true, true], [true, false], [false, true]]) {
+test('registration security accepts all four verification combinations', () => {
+  for (const [faceVerificationEnabled, emailOtpEnabled] of [[true, true], [true, false], [false, true], [false, false]]) {
     const value = validateRegistrationSecurity({ faceVerificationEnabled, emailOtpEnabled, maxAccountsPerDevice: 3, maxAccountsPerIp: 3 });
     assert.equal(value.faceVerificationEnabled, faceVerificationEnabled);
     assert.equal(value.emailOtpEnabled, emailOtpEnabled);
   }
-  assert.throws(() => validateRegistrationSecurity({ faceVerificationEnabled: false, emailOtpEnabled: false, maxAccountsPerDevice: 3, maxAccountsPerIp: 3 }), (error) => error.reason === 'VERIFICATION_METHOD_REQUIRED');
 });
 
 test('missing and malformed policies fail closed to secure defaults', () => {
@@ -134,7 +133,7 @@ test('only Firebase-authenticated trusted admin can change registration security
   assert.equal(missingProfileRoleResponse.statusCode, 403);
 });
 
-test('admin endpoint rejects both verification methods disabled without persisting or auditing', async () => {
+test('admin endpoint persists and audits both optional verification methods disabled', async () => {
   const f = adminFixture('admin', { admin: true });
   const res = response();
   await f.handler({ method: 'PATCH', headers: { authorization: 'Bearer valid' }, body: {
@@ -143,11 +142,10 @@ test('admin endpoint rejects both verification methods disabled without persisti
     maxAccountsPerDevice: 3,
     maxAccountsPerIp: 3,
   } }, res);
-  assert.equal(res.statusCode, 400);
-  assert.equal(res.body.error.reason, 'VERIFICATION_METHOD_REQUIRED');
-  assert.equal(res.body.error.message, 'At least one registration verification method must remain enabled.');
-  assert.equal(f.records.has('systemConfig/registrationSecurity'), false);
-  assert.equal([...f.records.values()].some((value) => value.action === 'REGISTRATION_SECURITY_UPDATED'), false);
+  assert.equal(res.statusCode, 200);
+  assert.equal(f.records.get('systemConfig/registrationSecurity').faceVerificationEnabled, false);
+  assert.equal(f.records.get('systemConfig/registrationSecurity').emailOtpEnabled, false);
+  assert.equal([...f.records.values()].some((value) => value.action === 'REGISTRATION_SECURITY_UPDATED'), true);
 });
 
 test('public registration policy exposes only the step requirements', async () => {

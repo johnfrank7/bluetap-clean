@@ -10,6 +10,7 @@ import { BLUETAP_LOGIN_GRADIENT } from '../constants/bluetapTheme';
 import { cacheValidatedPrivilegedAccess, clearAllAuthSessions, saveRoleSession } from '../services/authSession';
 import { loginWithUsername } from '../services/usernameAuth';
 import { warmLoginBackend } from '../services/apiWarmup';
+import PasswordVisibilityButton from './PasswordVisibilityButton';
 
 const { hasTrustedRole } = require('../services/privilegedAccess');
 const {
@@ -249,9 +250,7 @@ export default function PrivilegedLogin() {
     <Text style={styles.label}>Password</Text>
     <View style={styles.passwordField}>
       <TextInput value={password} onChangeText={setPassword} secureTextEntry={!showPassword} autoCapitalize="none" style={styles.passwordInput} onSubmitEditing={submit} />
-      <TouchableOpacity accessibilityRole="button" accessibilityLabel={showPassword ? 'Hide password' : 'Show password'} onPress={() => setShowPassword((visible) => !visible)} style={styles.visibilityButton}>
-        <Text style={styles.visibilityText}>{showPassword ? 'Hide' : 'Show'}</Text>
-      </TouchableOpacity>
+      <PasswordVisibilityButton visible={showPassword} onPress={() => setShowPassword((visible) => !visible)} />
     </View>
     {params.passwordChanged === 'true' && !error && <Text style={styles.success}>Password changed successfully. Sign in with your new password.</Text>}
     {!!error && <Text accessibilityRole="alert" style={styles.error}>{error}</Text>}
@@ -270,8 +269,6 @@ const styles = StyleSheet.create({
   input: { minHeight: 49, borderWidth: 1, borderColor: '#BDD5E6', backgroundColor: '#FAFCFE', borderRadius: 10, paddingHorizontal: 13, color: '#17324D' },
   passwordField: { minHeight: 49, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#BDD5E6', backgroundColor: '#FAFCFE', borderRadius: 10 },
   passwordInput: { flex: 1, minWidth: 0, minHeight: 47, paddingHorizontal: 13, color: '#17324D' },
-  visibilityButton: { minWidth: 60, minHeight: 47, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 10 },
-  visibilityText: { color: '#187BCD', fontSize: 13, fontWeight: '800' },
   success: { color: '#167347', backgroundColor: '#E3F7EC', borderRadius: 8, padding: 10, marginTop: 14, textAlign: 'center' },
   error: { color: '#A72C25', backgroundColor: '#FFF1F0', borderRadius: 8, padding: 10, marginTop: 14, textAlign: 'center' },
   button: { minHeight: 50, borderRadius: 10, backgroundColor: '#187BCD', alignItems: 'center', justifyContent: 'center', marginTop: 20 },

@@ -6,6 +6,7 @@ import { onAuthStateChanged, signInWithEmailAndPassword } from 'firebase/auth';
 import { auth } from '../firebase';
 import { clearAllAuthSessions, getPostAuthenticationDestination, getRoleLoginPath, saveRoleSession, signOutAndClearSessions } from '../services/authSession';
 import { completeRequiredPasswordChange } from '../services/requiredPasswordChange';
+import PasswordVisibilityButton from '../components/PasswordVisibilityButton';
 
 export default function RequiredPasswordChangePage() {
   const router = useRouter();
@@ -62,10 +63,10 @@ export default function RequiredPasswordChangePage() {
     <Text style={styles.title}>Create a new password</Text>
     <Text style={styles.help}>Your temporary password must be replaced before you can access BlueTap.</Text>
     <Text style={styles.label}>New password</Text>
-    <View style={styles.passwordField}><TextInput secureTextEntry={!showPassword} autoCapitalize="none" value={password} onChangeText={setPassword} style={styles.passwordInput} placeholder="Enter a new password" /><TouchableOpacity accessibilityRole="button" accessibilityLabel={showPassword ? 'Hide new password' : 'Show new password'} onPress={() => setShowPassword((visible) => !visible)} style={styles.visibilityButton}><Text style={styles.visibilityText}>{showPassword ? 'Hide' : 'Show'}</Text></TouchableOpacity></View>
+    <View style={styles.passwordField}><TextInput secureTextEntry={!showPassword} autoCapitalize="none" value={password} onChangeText={setPassword} style={styles.passwordInput} placeholder="Enter a new password" /><PasswordVisibilityButton visible={showPassword} onPress={() => setShowPassword((visible) => !visible)} label="new password" /></View>
     <Text style={styles.hint}>Use at least 12 characters with uppercase, lowercase, and a number.</Text>
     <Text style={styles.label}>Confirm new password</Text>
-    <View style={styles.passwordField}><TextInput secureTextEntry={!showConfirmation} autoCapitalize="none" value={confirmPassword} onChangeText={setConfirmPassword} style={styles.passwordInput} placeholder="Re-enter the new password" /><TouchableOpacity accessibilityRole="button" accessibilityLabel={showConfirmation ? 'Hide password confirmation' : 'Show password confirmation'} onPress={() => setShowConfirmation((visible) => !visible)} style={styles.visibilityButton}><Text style={styles.visibilityText}>{showConfirmation ? 'Hide' : 'Show'}</Text></TouchableOpacity></View>
+    <View style={styles.passwordField}><TextInput secureTextEntry={!showConfirmation} autoCapitalize="none" value={confirmPassword} onChangeText={setConfirmPassword} style={styles.passwordInput} placeholder="Re-enter the new password" /><PasswordVisibilityButton visible={showConfirmation} onPress={() => setShowConfirmation((visible) => !visible)} label="password confirmation" /></View>
     {!!error && <Text style={styles.error}>{error}</Text>}
     <TouchableOpacity disabled={saving} onPress={submit} style={[styles.button, saving && styles.disabled]}><Text style={styles.buttonText}>{saving ? 'Changing password...' : 'Change password'}</Text></TouchableOpacity>
     <TouchableOpacity disabled={saving} onPress={async () => { await signOutAndClearSessions(); router.replace('/login'); }} style={styles.signOut}><Text style={styles.signOutText}>Sign out</Text></TouchableOpacity>
@@ -81,8 +82,6 @@ const styles = StyleSheet.create({
   label: { color: '#294C66', fontSize: 13, fontWeight: '800', marginTop: 12, marginBottom: 6 },
   passwordField: { minHeight: 48, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#B8D3E6', borderRadius: 10, backgroundColor: '#FAFCFE' },
   passwordInput: { flex: 1, minWidth: 0, minHeight: 46, paddingHorizontal: 13, color: '#17324D' },
-  visibilityButton: { minWidth: 60, minHeight: 46, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 10 },
-  visibilityText: { color: '#187BCD', fontSize: 13, fontWeight: '800' },
   hint: { color: '#6A8498', fontSize: 12, lineHeight: 17, marginTop: 6 },
   error: { color: '#B52F2F', backgroundColor: '#FCE9E8', borderRadius: 8, padding: 10, marginTop: 14 },
   button: { minHeight: 48, backgroundColor: '#187BCD', borderRadius: 10, alignItems: 'center', justifyContent: 'center', marginTop: 20 },

@@ -9,9 +9,6 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { collection, doc, onSnapshot, query, where } from 'firebase/firestore';
-
-import { db } from '../../firebase';
 import { getLocalUsers, subscribeLocalUsers } from '../../localUsers';
 import { getLocalRequests } from '../../services/requests';
 import { getProfileUniqueId } from '../../services/uniqueIds';
@@ -22,6 +19,7 @@ import ManagerShell, {
   ManagerPill,
   ManagerWaterDrop,
 } from '../../components/ManagerShell';
+import { useManagerRealtimeData } from '../../components/ManagerRealtimeData';
 import {
   formatManagerNumber,
   useAnimatedNumber,
@@ -800,6 +798,7 @@ const StationsPanel = ({ progress, station }) => {
 export default function ManagerDashboard() {
   const { colors } = useAdminTheme(); styles = createStyles(colors);
   const branchId = getModuleSession('manager')?.branchId || '';
+  const { users: realtimeUsers, requests: realtimeRequests, branch: realtimeBranch, loading: realtimeLoading, error: realtimeError } = useManagerRealtimeData();
   const [registeredDistributors, setRegisteredDistributors] = useState([]);
   const [allUsers, setAllUsers] = useState([]);
   const [search, setSearch] = useState('');
@@ -833,87 +832,35 @@ export default function ManagerDashboard() {
   const hasAnimated = useRef(false);
 
   useEffect(() => {
-    let firestoreRegistered = [];
-    let hasResolvedFirestore = false;
-
-    const refreshRegisteredDistributors = (
-      nextFirestoreRegistered = firestoreRegistered,
-      options = {}
-    ) => {
-      firestoreRegistered = nextFirestoreRegistered;
-
-      if (!hasResolvedFirestore && !options.allowBeforeFirestore) {
-        return;
-      }
-
+    const refreshRegisteredDistributors = () => {
+      const firestoreRegistered = realtimeUsers.filter(
+        (item) => normalizeRole(item.role) === 'distributor' &&
+          ['approved', 'active'].includes(getDistributorApplicationStatus(item))
+      );
       setRegisteredDistributors([
         ...firestoreRegistered,
         ...getRegisteredLocalDistributors(firestoreRegistered, branchId),
       ]);
-      setLoading(false);
+      setLoading(realtimeLoading);
+      setLoadError(realtimeError);
     };
 
-    const unsubscribeLocalUsers = subscribeLocalUsers(() =>
-      refreshRegisteredDistributors()
-    );
+    refreshRegisteredDistributors();
+    const unsubscribeLocalUsers = subscribeLocalUsers(refreshRegisteredDistributors);
 
-    const registeredQuery = query(
-      collection(db, 'users'),
-      where('role', '==', 'distributor'),
-      where('branchId', '==', branchId)
-    );
-
-    const unsubscribe = onSnapshot(
-      registeredQuery,
-      (snapshot) => {
-        const firestoreDistributors = snapshot.docs
-          .map((item) => ({
-            id: item.id,
-            uid: item.id,
-            ...item.data(),
-          }))
-          .filter((item) => ['approved', 'active'].includes(getDistributorApplicationStatus(item)));
-
-        hasResolvedFirestore = true;
-        refreshRegisteredDistributors(firestoreDistributors);
-        setLoadError('');
-      },
-      (error) => {
-        console.log('Registered distributors error:', error.message);
-        setLoadError(error.message);
-        hasResolvedFirestore = true;
-        refreshRegisteredDistributors(firestoreRegistered, {
-          allowBeforeFirestore: true,
-        });
-      }
-    );
-
-    return () => {
-      unsubscribe();
-      unsubscribeLocalUsers();
-    };
-  }, [branchId]);
+    return unsubscribeLocalUsers;
+  }, [branchId, realtimeError, realtimeLoading, realtimeUsers]);
 
   useEffect(() => {
-    let firestoreUsers = [];
-    let firestoreRequests = [];
-    let branchInfo = null;
-    let usersReady = false;
-    let requestsReady = false;
-
     const refreshDashboardStats = () => {
-      if (!usersReady || !requestsReady) {
-        return;
-      }
-
       const mergedUsers = mergeByIdentity([
-        ...firestoreUsers,
+        ...realtimeUsers,
         ...getLocalUsers().filter((user) => user.branchId === branchId),
       ]);
       const localRequests = getLocalRequests().filter((request) => request.branchId === branchId);
-      const requestIds = new Set(firestoreRequests.map((item) => item.id));
+      const requestIds = new Set(realtimeRequests.map((item) => item.id));
       const allRequests = [
-        ...firestoreRequests,
+        ...realtimeRequests,
         ...localRequests.filter((item) => !requestIds.has(item.id)),
       ];
       const registeredRequesters = mergedUsers.filter(
@@ -934,75 +881,18 @@ export default function ManagerDashboard() {
         stations: 1,
       });
       setBranchData({
-        name: branchInfo?.name || branchInfo?.branchName || (branchId ? `Branch ${branchId}` : 'Assigned Branch'),
-        status: branchInfo?.status || 'active',
+        name: realtimeBranch?.name || realtimeBranch?.branchName || (branchId ? `Branch ${branchId}` : 'Assigned Branch'),
+        status: realtimeBranch?.status || 'active',
         unitsSold,
         snapshotRevenue,
       });
       setStatsReady(true);
     };
 
+    refreshDashboardStats();
     const unsubscribeLocalUsers = subscribeLocalUsers(refreshDashboardStats);
-
-    let unsubscribeBranch = () => {};
-    if (branchId) {
-      unsubscribeBranch = onSnapshot(
-        doc(db, 'branches', branchId),
-        (snap) => {
-          if (snap.exists()) {
-            branchInfo = { id: snap.id, ...snap.data() };
-          }
-          refreshDashboardStats();
-        },
-        (error) => {
-          console.log('Dashboard branch metric error:', error.message);
-          refreshDashboardStats();
-        }
-      );
-    }
-
-    const unsubscribeUsers = onSnapshot(
-      query(collection(db, 'users'), where('branchId', '==', branchId)),
-      (snapshot) => {
-        firestoreUsers = snapshot.docs.map((item) => ({
-          id: item.id,
-          uid: item.id,
-          ...item.data(),
-        }));
-        usersReady = true;
-        refreshDashboardStats();
-      },
-      (error) => {
-        console.log('Dashboard users metric error:', error.message);
-        usersReady = true;
-        refreshDashboardStats();
-      }
-    );
-
-    const unsubscribeRequests = onSnapshot(
-      query(collection(db, 'requests'), where('branchId', '==', branchId)),
-      (snapshot) => {
-        firestoreRequests = snapshot.docs.map((item) => ({
-          id: item.id,
-          ...item.data(),
-        }));
-        requestsReady = true;
-        refreshDashboardStats();
-      },
-      (error) => {
-        console.log('Dashboard requests metric error:', error.message);
-        requestsReady = true;
-        refreshDashboardStats();
-      }
-    );
-
-    return () => {
-      unsubscribeUsers();
-      unsubscribeRequests();
-      unsubscribeBranch();
-      unsubscribeLocalUsers();
-    };
-  }, [branchId]);
+    return unsubscribeLocalUsers;
+  }, [branchId, realtimeBranch, realtimeRequests, realtimeUsers]);
 
   const filteredDistributors = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase();

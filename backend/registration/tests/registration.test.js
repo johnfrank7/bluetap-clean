@@ -25,14 +25,25 @@ function fixture() {
     runTransaction: (callback) => {
       const task = queue.then(async () => {
         const writes = [];
+        let writeStarted = false;
         const result = await callback({
-          get: async (ref) => snapshot(ref.key),
+          get: async (ref) => {
+            if (writeStarted) throw new Error('Firestore transactions require all reads before all writes.');
+            return snapshot(ref.key);
+          },
           set: (ref, data, options) => {
+            writeStarted = true;
             if (failProfile && ref.key.startsWith('users/')) throw new Error('Profile write unavailable');
             writes.push([ref.key, options?.merge ? { ...records.get(ref.key), ...data } : data]);
           },
-          update: (ref, data) => writes.push([ref.key, { ...records.get(ref.key), ...data }]),
-          delete: (ref) => writes.push([ref.key, undefined]),
+          update: (ref, data) => {
+            writeStarted = true;
+            writes.push([ref.key, { ...records.get(ref.key), ...data }]);
+          },
+          delete: (ref) => {
+            writeStarted = true;
+            writes.push([ref.key, undefined]);
+          },
         });
         for (const [key, data] of writes) data === undefined ? records.delete(key) : records.set(key, data);
         return result;
@@ -204,10 +215,17 @@ test('OTP-only policy never calls face service and stores face as not required',
   assert.equal(f.records.get('users/new-user').faceVerification.status, 'not_required');
 });
 
-test('tampered policy with both verification methods off is rejected', async () => {
+test('base registration succeeds when both optional verification methods are disabled', async () => {
   const f = fixture();
   f.setSessionProfile(form, { faceRequired: false, otpRequired: false });
-  await assert.rejects(f.service.request('new@example.test', 'test-ip'), reason('VERIFICATION_METHOD_REQUIRED'));
+  const session = f.records.get('registrationSessions/' + f.sessionId);
+  session.faceVerification = { required: false, status: 'not_required', duplicateCheck: 'not_required' };
+  const result = await f.service.request('new@example.test', 'test-ip');
+  assert.equal(result.otpRequired, false);
+  const completed = await f.service.completeWithoutOtp(result.challenge, form);
+  assert.equal(completed.finalized, true);
+  assert.equal(f.records.get('users/new-user').faceVerification.status, 'not_required');
+  assert.equal(f.records.get('users/new-user').emailOtpVerification.status, 'not_required');
 });
 
 test('pairwise-only verification cannot request OTP', async () => {

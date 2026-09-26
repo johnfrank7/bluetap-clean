@@ -1,4 +1,6 @@
 import { cancelRequesterOrder, createRequesterOrder, getRequesterOrders, updateRequesterOrder } from './requesterOrdering';
+import { collection, onSnapshot, query, where } from 'firebase/firestore';
+import { db } from '../firebase';
 import {
   isActiveRequesterOrderStatus,
   normalizeRequesterOrderStatus,
@@ -227,7 +229,6 @@ const subscribeLocalRequests = (listener) => {
   };
 };
 
-const REQUEST_SUBSCRIPTION_IDLE_MS = 15000;
 const requesterRequestSubscriptions = new Map();
 
 const getRequestSignature = (requests) =>
@@ -246,6 +247,7 @@ const getRequesterRequestEntry = (requesterId) => {
       cachedSignature: '',
       subscribers: new Set(),
       refreshPromise: null,
+      unsubscribe: null,
       stopTimer: null,
     });
   }
@@ -277,17 +279,17 @@ const emitRequesterRequests = (requesterId, entry, force = false) => {
 };
 
 const stopRequesterRequestSubscription = (requesterId, entry) => {
+  if (typeof entry.unsubscribe === 'function') {
+    entry.unsubscribe();
+    entry.unsubscribe = null;
+  }
   entry.stopTimer = null;
 };
 
 const scheduleRequesterRequestStop = (requesterId, entry) => {
-  if (entry.subscribers.size > 0 || entry.stopTimer) return;
-
-  entry.stopTimer = setTimeout(() => {
-    if (entry.subscribers.size === 0) {
-      stopRequesterRequestSubscription(requesterId, entry);
-    }
-  }, REQUEST_SUBSCRIPTION_IDLE_MS);
+  if (entry.subscribers.size > 0) return;
+  stopRequesterRequestSubscription(requesterId, entry);
+  requesterRequestSubscriptions.delete(requesterId);
 };
 
 const startRequesterRequestSubscription = (requesterId, entry) => {
@@ -296,21 +298,25 @@ const startRequesterRequestSubscription = (requesterId, entry) => {
     entry.stopTimer = null;
   }
 
-  if (entry.refreshPromise) return;
+  if (entry.unsubscribe) return;
 
-  entry.refreshPromise = getRequesterOrders()
-    .then((orders) => {
-      entry.serverRequests = (Array.isArray(orders) ? orders : [])
-        .map((order) => normalizeRequest(order.id || order.requestId || order.request_id, order))
-        .filter((order) => (order.requesterUid || order.requester_id) === requesterId);
+  const requesterOrdersQuery = query(
+    collection(db, REQUESTS_COLLECTION),
+    where('requester_id', '==', requesterId)
+  );
+
+  entry.unsubscribe = onSnapshot(
+    requesterOrdersQuery,
+    (snapshot) => {
+      entry.serverRequests = snapshot.docs.map((orderDocument) =>
+        normalizeRequest(orderDocument.id, orderDocument.data())
+      );
       emitRequesterRequests(requesterId, entry, true);
-    })
-    .catch((error) => {
+    },
+    (error) => {
       entry.subscribers.forEach(({ onError }) => onError?.(error));
-    })
-    .finally(() => {
-      entry.refreshPromise = null;
-    });
+    }
+  );
 };
 
 export const subscribeRequesterRequests = (requesterId, listener, onError) => {
@@ -351,8 +357,34 @@ export const refreshRequesterRequests = async (requesterId) => {
 
   const entry = getRequesterRequestEntry(normalizedRequesterId);
   startRequesterRequestSubscription(normalizedRequesterId, entry);
+  if (!entry.refreshPromise) {
+    entry.refreshPromise = getRequesterOrders()
+      .then((orders) => {
+        entry.serverRequests = (Array.isArray(orders) ? orders : [])
+          .map((order) => normalizeRequest(order.id || order.requestId || order.request_id, order))
+          .filter((order) => (order.requesterUid || order.requester_id) === normalizedRequesterId);
+        emitRequesterRequests(normalizedRequesterId, entry, true);
+      })
+      .finally(() => {
+        entry.refreshPromise = null;
+      });
+  }
   await entry.refreshPromise;
   return entry.cachedRequests || [];
+};
+
+export const clearRequesterRequestCache = (requesterId) => {
+  const normalizedRequesterId = (requesterId || '').toString().trim();
+  const entries = normalizedRequesterId
+    ? [[normalizedRequesterId, requesterRequestSubscriptions.get(normalizedRequesterId)]]
+    : [...requesterRequestSubscriptions.entries()];
+
+  entries.forEach(([id, entry]) => {
+    if (!entry) return;
+    if (entry.stopTimer) clearTimeout(entry.stopTimer);
+    stopRequesterRequestSubscription(id, entry);
+    requesterRequestSubscriptions.delete(id);
+  });
 };
 
 const primeRequesterRequest = (order) => {

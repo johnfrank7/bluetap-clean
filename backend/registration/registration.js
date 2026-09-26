@@ -96,9 +96,6 @@ function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, render 
   const requiresOtp = (session) => session?.securityPolicySnapshot?.emailOtpRequired !== false;
   async function verifiedSession(registrationSessionId, profile) {
     const { data } = await readRegistrationSession(db, registrationSessionId, now);
-    if (!requiresFace(data) && !requiresOtp(data)) {
-      throw new OtpError(403, 'VERIFICATION_METHOD_REQUIRED', 'Registration policy requires at least one verification method.');
-    }
     if (requiresFace(data) && !hasEligibleFaceStep(data.faceVerification)) {
       throw new OtpError(403, data.faceVerification?.duplicateCheck === 'flagged' ? 'face-review-required' : 'face-verification-required', data.faceVerification?.duplicateCheck === 'flagged' ? 'Verification needs review.' : 'Complete identity verification before continuing.');
     }
@@ -224,16 +221,18 @@ function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, render 
         finalization: { status: 'pending', uid: user.uid, startedAt: new Date(now()) }, profileRecovery: recoveryProfile });
     });
   }
-  async function claimFinalUsername(tx, profile, user) {
+  async function prepareFinalUsernameClaim(tx, profile, user) {
     const usernameRef = db.collection('usernames').doc(profile.usernameNormalized);
     const reservationRef = db.collection('usernameReservations').doc(profile.usernameNormalized);
     const claimed = await tx.get(usernameRef);
     if (claimed.exists && claimed.data()?.uid !== user.uid) {
       throw new OtpError(409, 'username-taken', 'This username is already taken.');
     }
-    tx.set(usernameRef, { uid: user.uid, createdAt: new Date(now()) }, { merge: true });
-    // This delete is safe even after a reservation expiry or an idempotent retry.
-    tx.delete(reservationRef);
+    return () => {
+      tx.set(usernameRef, { uid: user.uid, createdAt: new Date(now()) }, { merge: true });
+      // This delete is safe even after a reservation expiry or an idempotent retry.
+      tx.delete(reservationRef);
+    };
   }
   async function finalizeFaceEnrollment(user, registrationSessionId) {
     const ready = await render('/ready');
@@ -251,8 +250,10 @@ function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, render 
       const profile = (await tx.get(profileRef)).data();
       const session = (await tx.get(sessionRef)).data();
       if (!profile || !session || session.userUid !== user.uid || session.completed || !isRegistrationFaceVerified(session.faceVerification)) throw new OtpError(409, 'registration-session-invalid', 'Registration finalization could not be completed.');
-      await claimFinalUsername(tx, profile, user);
-      await registrationLimits.apply(tx, sessionRef, session, user.uid, true);
+      const claimUsername = await prepareFinalUsernameClaim(tx, profile, user);
+      const commitLimits = await registrationLimits.prepareApply(tx, sessionRef, session, user.uid, true);
+      claimUsername();
+      commitLimits();
       const face = session.faceVerification;
       const finalizedFaceVerification = {
         status: 'verified', verifiedAt: face.verifiedAt || new Date(now()), verificationId: user.uid, verificationReference: user.uid,
@@ -281,8 +282,10 @@ function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, render 
       if (!profile || !session || requiresFace(session) || session.userUid !== user.uid || session.completed) {
         throw new OtpError(409, 'registration-session-invalid', 'Registration finalization could not be completed.');
       }
-      await claimFinalUsername(tx, profile, user);
-      await registrationLimits.apply(tx, sessionRef, session, user.uid, true);
+      const claimUsername = await prepareFinalUsernameClaim(tx, profile, user);
+      const commitLimits = await registrationLimits.prepareApply(tx, sessionRef, session, user.uid, true);
+      claimUsername();
+      commitLimits();
       tx.update(profileRef, { onboardingStatus: 'complete', registrationCompleted: true, updatedAt: new Date(now()) });
       tx.update(sessionRef, { completed: true, completedAt: new Date(now()), expiresAt: new Date(now()), faceEnrollmentPending: false,
         finalization: { status: 'completed', uid: user.uid, completedAt: new Date(now()) },

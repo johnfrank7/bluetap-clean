@@ -19,7 +19,7 @@ import { auth, db } from '../../firebase';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { findLocalUserForAuthRole, saveLocalUser } from '../../localUsers';
 import { normalizeRole, signOutAndClearSessions } from '../../services/authSession';
-import { ensureUserUniqueId, getProfileUniqueId } from '../../services/uniqueIds';
+import { getProfileUniqueId } from '../../services/uniqueIds';
 import { formatPhilippinePhone, normalizePhilippinePhone } from '../../services/phoneUtils';
 import BlueTapHeader from '../../components/BlueTapHeader';
 import DistributorPortalBackground from '../../components/DistributorPortalBackground';
@@ -259,7 +259,6 @@ export default function DistributorProfilePage() {
             return;
           }
 
-          profile = await ensureUserUniqueId(user, profile);
           saveLocalUser(profile);
 
           if (isMounted) {

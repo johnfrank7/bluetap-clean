@@ -14,13 +14,11 @@ import {
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { collection, onSnapshot, query, where } from 'firebase/firestore';
-
-import { db } from '../firebase';
 import { BLUETAP_COLORS } from '../constants/bluetapTheme';
 import { useAdminTheme } from './AdminTheme';
 import AdminIcon from './AdminIcon';
 import { getModuleSession, signOutAndClearSessions } from '../services/authSession';
+import { useManagerRealtimeData } from './ManagerRealtimeData';
 
 export const MANAGER_COLORS = {
   navy: BLUETAP_COLORS.primary,
@@ -157,65 +155,17 @@ export default function ManagerShell({
   const { width } = useWindowDimensions();
   const compact = width < 900;
   const managerSession = getModuleSession('manager');
+  const { requests, incomingTransfers } = useManagerRealtimeData();
   const [collapsed, setCollapsed] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [confirmLogout, setConfirmLogout] = useState(false);
-  const [actionableRequestsCount, setActionableRequestsCount] = useState(0);
+  const actionableStatuses = new Set(['pending', 'outside_radius_pending_approval', 'awaiting_distributor_assignment', 'delivery_failed']);
+  const actionableRequestsCount = requests.filter((request) =>
+    actionableStatuses.has(String(request.status || '').trim().toLowerCase().replace(/[\s-]+/g, '_'))
+  ).length + incomingTransfers.length;
 
   const sidebarWidth = useRef(new Animated.Value(DESKTOP_WIDTH)).current;
   const drawerProgress = useRef(new Animated.Value(0)).current;
-
-  // Branch-scoped actionable requests subscription
-  const managerBranchId = managerSession?.branchId || managerSession?.branch?.id || '';
-
-  useEffect(() => {
-    if (!managerBranchId) {
-      setActionableRequestsCount(0);
-      return;
-    }
-
-    let count1 = 0;
-    let count2 = 0;
-    let unsub1 = null;
-    let unsub2 = null;
-
-    try {
-      const q1 = query(
-        collection(db, 'requests'),
-        where('branchId', '==', managerBranchId),
-        where('status', 'in', ['pending', 'outside_radius_pending_approval', 'awaiting_distributor_assignment', 'delivery_failed'])
-      );
-      unsub1 = onSnapshot(
-        q1,
-        (snap) => {
-          count1 = snap.size;
-          setActionableRequestsCount(count1 + count2);
-        },
-        () => {}
-      );
-
-      const q2 = query(
-        collection(db, 'requests'),
-        where('transferToBranchId', '==', managerBranchId),
-        where('status', '==', 'branch_transfer_pending')
-      );
-      unsub2 = onSnapshot(
-        q2,
-        (snap) => {
-          count2 = snap.size;
-          setActionableRequestsCount(count1 + count2);
-        },
-        () => {}
-      );
-    } catch (err) {
-      console.log('Manager requests badge error:', err?.message);
-    }
-
-    return () => {
-      if (typeof unsub1 === 'function') unsub1();
-      if (typeof unsub2 === 'function') unsub2();
-    };
-  }, [managerBranchId]);
 
   useEffect(() => {
     Animated.timing(sidebarWidth, {

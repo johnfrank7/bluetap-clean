@@ -21,7 +21,7 @@ import { auth, db } from '../../firebase';
 import { doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
 import { findLocalUserForAuthRole, saveLocalUser } from '../../localUsers';
 import { normalizeRole, signOutAndClearSessions } from '../../services/authSession';
-import { ensureUserUniqueId, getProfileUniqueId } from '../../services/uniqueIds';
+import { getProfileUniqueId } from '../../services/uniqueIds';
 import { formatPhilippinePhone, normalizePhilippinePhone } from '../../services/phoneUtils';
 import { createShadow } from '../../components/shadowStyles';
 import { createPortalStyleSheet, useBlueTapTheme } from '../../components/BlueTapTheme';
@@ -118,13 +118,16 @@ export default function ProfilePage() {
   const { colors, isDark } = useBlueTapTheme();
   const router = useRouter();
   const editFadeAnim = useRef(new Animated.Value(0)).current;
-  const [loading, setLoading] = useState(!cachedRequesterProfile);
-  const [userData, setUserData] = useState(cachedRequesterProfile);
+  const initialProfile = cachedRequesterProfileUid === auth.currentUser?.uid
+    ? cachedRequesterProfile
+    : null;
+  const [loading, setLoading] = useState(!initialProfile);
+  const [userData, setUserData] = useState(initialProfile);
   const [editingProfile, setEditingProfile] = useState(false);
   const [savingProfile, setSavingProfile] = useState(false);
   const [toast, setToast] = useState({ visible: false, message: '', type: 'success' });
   const [profileDraft, setProfileDraft] = useState(() =>
-    buildProfileDraft(cachedRequesterProfile || {})
+    buildProfileDraft(initialProfile || {})
   );
 
   useEffect(() => {
@@ -189,8 +192,6 @@ export default function ProfilePage() {
             },
             user
           );
-          nextProfile = await ensureUserUniqueId(user, nextProfile);
-
           cacheProfile(nextProfile);
 
           if (isMounted) {

@@ -28,6 +28,7 @@ import {
 import { useDistributorProfile } from '../../services/distributorProfile';
 import { useLiveGreeting } from '../../services/liveTime';
 import { formatDisplayUniqueId, getProfileUniqueId } from '../../services/uniqueIds';
+const { getDistributorDashboardCounts } = require('../../services/distributorDashboardMetrics');
 
 const BLUE = BLUETAP_COLORS.primary;
 const BLUE_LIGHT = BLUETAP_COLORS.primarySoft;
@@ -59,26 +60,6 @@ const getStatusActionLabel = (status) =>
 
 const formatAmountDue = (amount) =>
   `₱${Number(amount || 0).toFixed(2)}`;
-
-const occursToday = (value) => {
-  if (!value) return false;
-  try {
-    const date = value instanceof Date
-      ? value
-      : value?.toDate?.() || (value?.seconds ? new Date(value.seconds * 1000) : new Date(value));
-    const today = new Date();
-    return Boolean(
-      date &&
-      typeof date.getTime === 'function' &&
-      !Number.isNaN(date.getTime()) &&
-      date.getFullYear() === today.getFullYear() &&
-      date.getMonth() === today.getMonth() &&
-      date.getDate() === today.getDate()
-    );
-  } catch {
-    return false;
-  }
-};
 
 const getNumericQuantity = (quantity) => {
   const match = String(quantity || '').match(/\d+(\.\d+)?/);
@@ -180,7 +161,7 @@ class DistributorErrorBoundary extends React.Component {
 }
 
 function DistributorDashboardContent() {
-  useBlueTapTheme();
+  const { colors } = useBlueTapTheme();
   const router = useRouter();
   const liveGreeting = useLiveGreeting();
   const [detailsVisible, setDetailsVisible] = useState(false);
@@ -206,24 +187,31 @@ function DistributorDashboardContent() {
       'Not assigned'
     );
   }, [activeRequest?.distributorUniqueId, activeRequest?.distributor_unique_id, distributorProfile]);
+  const dashboardCounts = useMemo(() => getDistributorDashboardCounts(screenOrders), [screenOrders]);
 
   const dashboardSummary = useMemo(() => [
     {
       label: 'Pending Requests',
-      value: String(screenOrders.filter((order) => ['distributor assigned', 'pending'].includes(normalizeDistributorOrderStatus(order.status))).length),
+      value: String(dashboardCounts.pending),
       route: '/distributor/d_requests',
+      accent: colors.warning,
+      tint: colors.warningSoft,
     },
     {
       label: 'Scheduled Today',
-      value: String(screenOrders.filter((order) => ['accepted', 'scheduled', 'out for delivery'].includes(normalizeDistributorOrderStatus(order.status)) && occursToday(order.rawScheduledAt || order.scheduledDateTime || order.scheduledAt)).length),
+      value: String(dashboardCounts.scheduledToday),
       route: '/distributor/d_scheduled_requests',
+      accent: colors.primary,
+      tint: colors.primarySoft,
     },
     {
       label: 'Delivered Today',
-      value: String(screenOrders.filter((order) => normalizeDistributorOrderStatus(order.status) === 'delivered' && occursToday(order.rawDeliveredAt || order.deliveredDateTime || order.deliveredAt)).length),
+      value: String(dashboardCounts.deliveredToday),
       route: '/distributor/d_history',
+      accent: colors.success,
+      tint: colors.successSoft,
     },
-  ], [screenOrders]);
+  ], [colors, dashboardCounts]);
   const primaryActionLabel = activeRequest
     ? getStatusActionLabel(activeRequest.status)
     : '';
@@ -297,11 +285,14 @@ function DistributorDashboardContent() {
               {dashboardSummary.map((item) => (
                 <TouchableOpacity
                   key={item.label}
-                  style={styles.summaryCard}
+                  style={[styles.summaryCard, { backgroundColor: item.tint, borderColor: item.accent }]}
                   activeOpacity={0.75}
                   onPress={() => item.route && router.replace(item.route)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${item.label}: ${item.value}`}
                 >
-                  <Text style={styles.summaryValue}>{item.value}</Text>
+                  <View style={[styles.summaryAccent, { backgroundColor: item.accent }]} />
+                  <Text style={[styles.summaryValue, { color: item.accent }]}>{item.value}</Text>
                   <Text style={styles.summaryLabel}>{item.label}</Text>
                 </TouchableOpacity>
               ))}
@@ -513,6 +504,7 @@ const styles = createPortalStyleSheet({
     paddingHorizontal: 8,
     paddingVertical: 12,
     justifyContent: 'space-between',
+    overflow: 'hidden',
     ...createShadow({
       color: '#0D47A1',
       elevation: 2,
@@ -520,6 +512,13 @@ const styles = createPortalStyleSheet({
       radius: 4,
       offset: { width: 0, height: 2 },
     }),
+  },
+  summaryAccent: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 4,
   },
   summaryValue: {
     color: BLUE,

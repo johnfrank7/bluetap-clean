@@ -24,3 +24,4 @@ This repository is BlueTap. Before substantial work, inspect the relevant skill 
 | Requester or Distributor portal UI | `bluetap-user-portal-ui` |
 | Agent switching, interrupted work, or a dirty tree | `bluetap-agent-handoff` |
 | Multi-file edits, disk validation, and parser stability | `bluetap-edit-stability` |
+| Realtime role data, caches, listeners, and cleanup | `bluetap-realtime-data` |

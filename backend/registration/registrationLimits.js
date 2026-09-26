@@ -48,6 +48,27 @@ async function checkFinalizedRegistrationLimits({ db, deviceHash, ipHash, policy
 }
 
 function createRegistrationLimitService({ db, now = Date.now }) {
+  async function prepareApply(tx, sessionRef, session, userUid, commit) {
+    if (session?.registrationLimitReservation?.uid !== userUid || session.registrationLimitReservation.status !== 'reserved') {
+      throw new OtpError(409, 'registration-session-invalid', 'Registration account limits were not reserved.');
+    }
+    const refs = refsFor(db, session);
+    const snapshots = await Promise.all(refs.map((ref) => tx.get(ref)));
+    return () => {
+      refs.forEach((ref, index) => {
+        const data = snapshots[index].data() || {};
+        tx.set(ref, {
+          reservedCount: Math.max(0, count(data, 'reservedCount') - 1),
+          finalizedCount: count(data, 'finalizedCount') + (commit ? 1 : 0),
+          updatedAt: new Date(now()),
+        }, { merge: true });
+      });
+      tx.update(sessionRef, {
+        registrationLimitReservation: { uid: userUid, status: commit ? 'committed' : 'released', updatedAt: new Date(now()) },
+      });
+    };
+  }
+
   async function reserve(registrationSessionId, userUid) {
     await db.runTransaction(async (tx) => {
       const sessionRef = db.collection('registrationSessions').doc(registrationSessionId);
@@ -70,22 +91,8 @@ function createRegistrationLimitService({ db, now = Date.now }) {
   }
 
   async function apply(tx, sessionRef, session, userUid, commit) {
-    if (session?.registrationLimitReservation?.uid !== userUid || session.registrationLimitReservation.status !== 'reserved') {
-      throw new OtpError(409, 'registration-session-invalid', 'Registration account limits were not reserved.');
-    }
-    const refs = refsFor(db, session);
-    const snapshots = await Promise.all(refs.map((ref) => tx.get(ref)));
-    refs.forEach((ref, index) => {
-      const data = snapshots[index].data() || {};
-      tx.set(ref, {
-        reservedCount: Math.max(0, count(data, 'reservedCount') - 1),
-        finalizedCount: count(data, 'finalizedCount') + (commit ? 1 : 0),
-        updatedAt: new Date(now()),
-      }, { merge: true });
-    });
-    tx.update(sessionRef, {
-      registrationLimitReservation: { uid: userUid, status: commit ? 'committed' : 'released', updatedAt: new Date(now()) },
-    });
+    const commitApply = await prepareApply(tx, sessionRef, session, userUid, commit);
+    commitApply();
   }
 
   async function release(registrationSessionId, userUid) {
@@ -97,7 +104,7 @@ function createRegistrationLimitService({ db, now = Date.now }) {
     });
   }
 
-  return { apply, refsFor: (session) => refsFor(db, session), release, reserve };
+  return { apply, prepareApply, refsFor: (session) => refsFor(db, session), release, reserve };
 }
 
 module.exports = {

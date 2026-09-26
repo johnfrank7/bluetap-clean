@@ -31,10 +31,17 @@ function createRegistrationHandler(action) {
       return res.status(200).json(result);
     } catch (error) {
       const known = error instanceof OtpError;
+      const reason = known ? error.reason : error?.code || 'SERVICE_UNAVAILABLE';
       if (action === 'request') console.error('[registration-otp]', JSON.stringify({
         requestId,
         stage: 'OTP_REQUEST_FAILED',
-        reason: known ? error.reason : 'SERVICE_UNAVAILABLE',
+        reason,
+      }));
+      else console.error('[registration-finalization]', JSON.stringify({
+        requestId,
+        stage: 'REGISTRATION_COMPLETION_FAILED',
+        reason: String(reason).slice(0, 80),
+        authUserMayExist: ['registration-finalization-failed', 'registration-session-invalid'].includes(reason),
       }));
       if (known && error.details.retryAfterSeconds) res.setHeader('Retry-After', String(error.details.retryAfterSeconds));
       const duplicate = error.code === 'auth/email-already-exists';

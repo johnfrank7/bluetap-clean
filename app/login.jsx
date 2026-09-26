@@ -32,6 +32,7 @@ import { restartIncompleteRegistration } from '../services/profileRecovery';
 import { completePasswordRecovery, requestPasswordRecovery, verifyPasswordRecovery } from '../services/passwordRecovery';
 import { clearPendingRegistration } from '../services/emailVerification';
 import { warmFaceServiceForSignup, warmLoginBackend } from '../services/apiWarmup';
+import PasswordVisibilityButton from '../components/PasswordVisibilityButton';
 
 const { createHiddenAdminEntryTracker } = require('../services/hiddenAdminEntry');
 const { getPublicLoginErrorMessage } = require('../services/publicLoginErrors');
@@ -116,6 +117,8 @@ export default function LoginPage() {
   const [recoveryCode, setRecoveryCode] = React.useState('');
   const [recoveryPassword, setRecoveryPassword] = React.useState('');
   const [recoveryPasswordConfirm, setRecoveryPasswordConfirm] = React.useState('');
+  const [showRecoveryPassword, setShowRecoveryPassword] = React.useState(false);
+  const [showRecoveryConfirmation, setShowRecoveryConfirmation] = React.useState(false);
   const [notification, setNotification] = React.useState(null);
   const [keyboardBottomInset, setKeyboardBottomInset] = React.useState(0);
   const isLoginSuccessVisible = notification?.title === 'Successfully logged in';
@@ -334,24 +337,17 @@ export default function LoginPage() {
 
       const user = userCredential.user;
       authenticatedUser = user;
-      console.info('[public-login]', { stage: 'LOGIN_AUTH_UID', uid: user.uid });
       console.info('[public-login]', { stage: 'LOGIN_AUTH_COMPLETED', durationMs: Date.now() - startedAt });
 
       const responseProfile = loginResult.profile;
       console.info('[public-login]', {
-        stage: 'LOGIN_PROFILE_UID',
-        uid: responseProfile?.uid || '',
-      });
-      console.info('[public-login]', {
         stage: 'LOGIN_PROFILE_ROLE',
-        uid: responseProfile?.uid || '',
         role: normalizeRole(responseProfile?.role),
       });
       if (!responseProfile || responseProfile.uid !== user.uid) {
         console.warn('[public-login]', {
           stage: 'USERNAME_UID_MISMATCH',
-          authenticatedUid: user.uid,
-          profileUid: responseProfile?.uid || '',
+          profilePresent: Boolean(responseProfile),
         });
         throw Object.assign(new Error('Account mapping invalid'), { code: 'ACCOUNT_MAPPING_INVALID' });
       }
@@ -586,14 +582,12 @@ export default function LoginPage() {
                         returnKeyType="done"
                         onSubmitEditing={handleLogin}
                       />
-                      <TouchableOpacity
-                        accessibilityRole="button"
-                        accessibilityLabel={showPassword ? 'Hide password' : 'Show password'}
+                      <PasswordVisibilityButton
+                        visible={showPassword}
                         onPress={() => setShowPassword((visible) => !visible)}
                         style={styles.passwordVisibility}
-                      >
-                        <Text style={styles.passwordVisibilityText}>{showPassword ? 'Hide' : 'Show'}</Text>
-                      </TouchableOpacity>
+                        color="#FFFFFF"
+                      />
                     </View>
                   </View>
                 </View>
@@ -676,7 +670,7 @@ export default function LoginPage() {
               <Text style={styles.resetHelperText}>{recoveryStep === 'email' ? 'Enter the email linked to your BlueTap account.' : recoveryStep === 'verify' ? `We sent a verification code to ${recoveryMaskedEmail}.` : recoveryStep === 'password' ? 'Choose a new password with uppercase, lowercase, and a number.' : 'Your password was changed. Sign in with your new password.'}</Text>
               {recoveryStep === 'email' ? <TextInput style={[styles.resetInput, !!resetEmailError && styles.resetInputError]} placeholder="Email address" placeholderTextColor="#90A4AE" keyboardType="email-address" autoCapitalize="none" value={resetEmail} onChangeText={setResetEmail} /> : null}
               {recoveryStep === 'verify' ? <TextInput style={[styles.resetInput, !!resetEmailError && styles.resetInputError]} placeholder="6-digit code" placeholderTextColor="#90A4AE" keyboardType="number-pad" maxLength={6} value={recoveryCode} onChangeText={(value) => setRecoveryCode(value.replace(/\D/g, ''))} /> : null}
-              {recoveryStep === 'password' ? <><TextInput style={[styles.resetInput, !!resetEmailError && styles.resetInputError]} placeholder="New password" placeholderTextColor="#90A4AE" secureTextEntry value={recoveryPassword} onChangeText={setRecoveryPassword} /><TextInput style={styles.resetInput} placeholder="Confirm new password" placeholderTextColor="#90A4AE" secureTextEntry value={recoveryPasswordConfirm} onChangeText={setRecoveryPasswordConfirm} /></> : null}
+              {recoveryStep === 'password' ? <><View style={[styles.resetPasswordField, !!resetEmailError && styles.resetInputError]}><TextInput style={styles.resetPasswordInput} placeholder="New password" placeholderTextColor="#90A4AE" secureTextEntry={!showRecoveryPassword} value={recoveryPassword} onChangeText={setRecoveryPassword} /><PasswordVisibilityButton visible={showRecoveryPassword} onPress={() => setShowRecoveryPassword((value) => !value)} label="new password" /></View><View style={styles.resetPasswordField}><TextInput style={styles.resetPasswordInput} placeholder="Confirm new password" placeholderTextColor="#90A4AE" secureTextEntry={!showRecoveryConfirmation} value={recoveryPasswordConfirm} onChangeText={setRecoveryPasswordConfirm} /><PasswordVisibilityButton visible={showRecoveryConfirmation} onPress={() => setShowRecoveryConfirmation((value) => !value)} label="password confirmation" /></View></> : null}
               {!!resetEmailError && <Text style={styles.resetErrorText}>{resetEmailError}</Text>}
               {recoveryStep !== 'done' ? <TouchableOpacity style={[styles.modalButton, resetLoading && styles.buttonDisabled]} onPress={recoveryStep === 'email' ? handlePasswordReset : recoveryStep === 'verify' ? verifyRecoveryCode : completeRecovery} disabled={resetLoading}><Text style={styles.modalButtonText}>{resetLoading ? 'Please wait…' : recoveryStep === 'email' ? 'Send verification code' : recoveryStep === 'verify' ? 'Verify code' : 'Save new password'}</Text></TouchableOpacity> : <TouchableOpacity style={styles.modalButton} onPress={closeForgotPassword}><Text style={styles.modalButtonText}>Back to sign in</Text></TouchableOpacity>}
               {recoveryStep === 'verify' ? <TouchableOpacity style={styles.modalCancel} onPress={handlePasswordReset} disabled={resetLoading}><Text style={styles.modalCancelText}>Resend code</Text></TouchableOpacity> : null}
@@ -835,11 +829,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 10,
   },
-  passwordVisibilityText: {
-    color: '#FFFFFF',
-    fontSize: 13,
-    fontWeight: '800',
-  },
   buttonContainer: {
     width: '100%',
     marginBottom: 16,
@@ -923,6 +912,24 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#187BCD',
     marginBottom: 8,
+  },
+  resetPasswordField: {
+    width: '100%',
+    minHeight: 46,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#BBDEFB',
+    borderRadius: 10,
+    marginBottom: 8,
+  },
+  resetPasswordInput: {
+    flex: 1,
+    minWidth: 0,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    fontSize: 14,
+    color: '#187BCD',
   },
   resetInputError: {
     borderColor: '#D32F2F',

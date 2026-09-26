@@ -1,7 +1,10 @@
 import React from 'react';
-import { auth } from '../firebase';
+import { collection, onSnapshot, query, where } from 'firebase/firestore';
+import { onAuthStateChanged } from 'firebase/auth';
+import { auth, db } from '../firebase';
 import { getApiUrl } from './apiClient';
 import { formatDisplayUniqueId, isPublicOrFormattedUniqueId } from './uniqueIds';
+import { subscribeDistributorProfile } from './distributorProfile';
 
 export async function getAssignedDistributorOrders() {
   const token = await auth.currentUser?.getIdToken();
@@ -30,7 +33,9 @@ export async function updateAssignedDistributorOrder(orderId, action, payload = 
     error.code = result?.error?.reason || 'service-unavailable';
     throw error;
   }
-  return result?.order || null;
+  const order = result?.order || null;
+  if (order) primeAssignedDistributorOrder(auth.currentUser?.uid, order);
+  return order;
 }
 
 export const acceptAssignedOrder = (orderId) => updateAssignedDistributorOrder(orderId, 'accept-assignment');
@@ -163,40 +168,193 @@ export function toDistributorScreenOrder(order = {}) {
   };
 }
 
+const distributorOrderEntries = new Map();
+
+const getOrderId = (order = {}) => String(order.id || order.requestId || order.request_id || '').trim();
+const orderSignature = (orders) => orders.map((order) => [
+  getOrderId(order),
+  order.status,
+  dateFrom(order.updatedAt || order.updated_at)?.getTime() || 0,
+  dateFrom(order.scheduledAt)?.getTime() || 0,
+  dateFrom(order.deliveredAt)?.getTime() || 0,
+].join('|')).join('::');
+
+const getDistributorOrderEntry = (uid) => {
+  if (!distributorOrderEntries.has(uid)) {
+    distributorOrderEntries.set(uid, {
+      orders: [],
+      signature: '',
+      loaded: false,
+      error: '',
+      branchId: '',
+      subscribers: new Set(),
+      profileUnsubscribe: null,
+      ordersUnsubscribe: null,
+      refreshPromise: null,
+      stopTimer: null,
+    });
+  }
+  return distributorOrderEntries.get(uid);
+};
+
+const emitDistributorOrders = (entry, force = false) => {
+  const nextSignature = orderSignature(entry.orders);
+  if (!force && nextSignature === entry.signature) return;
+  entry.signature = nextSignature;
+  const state = { orders: entry.orders, loading: !entry.loaded, error: entry.error };
+  entry.subscribers.forEach((listener) => listener(state));
+};
+
+const hydrateDistributorOrders = (uid, entry) => {
+  if (entry.refreshPromise) return entry.refreshPromise;
+  entry.refreshPromise = getAssignedDistributorOrders()
+    .then((orders) => {
+      const existing = new Map(entry.orders.map((order) => [getOrderId(order), order]));
+      const hydrated = (Array.isArray(orders) ? orders : []).map((order) => ({
+        ...order,
+        ...(existing.get(getOrderId(order)) || {}),
+      }));
+      const hydratedIds = new Set(hydrated.map(getOrderId));
+      entry.orders = [...hydrated, ...entry.orders.filter((order) => !hydratedIds.has(getOrderId(order)))];
+      entry.loaded = true;
+      entry.error = '';
+      emitDistributorOrders(entry, true);
+    })
+    .catch((error) => {
+      entry.loaded = true;
+      entry.error = error.message || 'Assigned deliveries are temporarily unavailable.';
+      emitDistributorOrders(entry, true);
+    })
+    .finally(() => {
+      entry.refreshPromise = null;
+    });
+  return entry.refreshPromise;
+};
+
+const listenForDistributorOrders = (uid, branchId, entry) => {
+  const normalizedBranchId = String(branchId || '').trim();
+  if (!normalizedBranchId || (entry.branchId === normalizedBranchId && entry.ordersUnsubscribe)) return;
+
+  entry.ordersUnsubscribe?.();
+  entry.ordersUnsubscribe = null;
+  entry.branchId = normalizedBranchId;
+  const assignedOrdersQuery = query(
+    collection(db, 'requests'),
+    where('assignedDistributorUid', '==', uid),
+    where('branchId', '==', normalizedBranchId)
+  );
+  entry.ordersUnsubscribe = onSnapshot(
+    assignedOrdersQuery,
+    (snapshot) => {
+      const cached = new Map(entry.orders.map((order) => [getOrderId(order), order]));
+      entry.orders = snapshot.docs.map((orderDocument) => ({
+        ...(cached.get(orderDocument.id) || {}),
+        id: orderDocument.id,
+        ...orderDocument.data(),
+      }));
+      entry.loaded = true;
+      entry.error = '';
+      emitDistributorOrders(entry, true);
+    },
+    (error) => {
+      entry.loaded = true;
+      entry.error = error.message || 'Assigned deliveries are temporarily unavailable.';
+      emitDistributorOrders(entry, true);
+    }
+  );
+};
+
+const startDistributorOrders = (uid, entry) => {
+  if (entry.stopTimer) {
+    clearTimeout(entry.stopTimer);
+    entry.stopTimer = null;
+  }
+  if (!entry.profileUnsubscribe) {
+    entry.profileUnsubscribe = subscribeDistributorProfile(uid, ({ profile }) => {
+      listenForDistributorOrders(uid, profile?.branchId || profile?.assignedBranchId, entry);
+    });
+  }
+  hydrateDistributorOrders(uid, entry);
+};
+
+const stopDistributorOrders = (uid, entry) => {
+  entry.profileUnsubscribe?.();
+  entry.ordersUnsubscribe?.();
+  entry.profileUnsubscribe = null;
+  entry.ordersUnsubscribe = null;
+  entry.stopTimer = null;
+  distributorOrderEntries.delete(uid);
+};
+
+export const subscribeAssignedDistributorOrders = (uid, listener) => {
+  const normalizedUid = String(uid || '').trim();
+  if (!normalizedUid) {
+    listener({ orders: [], loading: false, error: '' });
+    return () => {};
+  }
+  const entry = getDistributorOrderEntry(normalizedUid);
+  entry.subscribers.add(listener);
+  listener({ orders: entry.orders, loading: !entry.loaded, error: entry.error });
+  startDistributorOrders(normalizedUid, entry);
+
+  return () => {
+    entry.subscribers.delete(listener);
+    if (entry.subscribers.size === 0) stopDistributorOrders(normalizedUid, entry);
+  };
+};
+
+const primeAssignedDistributorOrder = (uid, order) => {
+  const normalizedUid = String(uid || '').trim();
+  const orderId = getOrderId(order);
+  if (!normalizedUid || !orderId) return;
+  const entry = getDistributorOrderEntry(normalizedUid);
+  entry.orders = [order, ...entry.orders.filter((item) => getOrderId(item) !== orderId)];
+  entry.loaded = true;
+  entry.error = '';
+  emitDistributorOrders(entry, true);
+};
+
+export const clearAssignedDistributorOrdersCache = (uid) => {
+  const normalizedUid = String(uid || '').trim();
+  const entries = normalizedUid
+    ? [[normalizedUid, distributorOrderEntries.get(normalizedUid)]]
+    : [...distributorOrderEntries.entries()];
+  entries.forEach(([key, entry]) => {
+    if (!entry) return;
+    if (entry.stopTimer) clearTimeout(entry.stopTimer);
+    stopDistributorOrders(key, entry);
+  });
+};
+
 export function useAssignedDistributorOrders() {
   const [orders, setOrders] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState('');
   const refresh = React.useCallback(async () => {
-    setLoading(true);
-    setError('');
-    try {
-      setOrders(await getAssignedDistributorOrders());
-    } catch (loadFailure) {
-      setError(loadFailure.message || 'Assigned deliveries are temporarily unavailable.');
-    } finally {
-      setLoading(false);
-    }
+    const uid = auth.currentUser?.uid;
+    if (!uid) return;
+    const entry = getDistributorOrderEntry(uid);
+    await hydrateDistributorOrders(uid, entry);
   }, []);
 
   React.useEffect(() => {
-    let active = true;
-    const unsubscribe = auth.onAuthStateChanged?.((user) => {
-      if (user && active) {
-        refresh();
-      } else if (!user && active) {
-        setOrders([]);
-        setLoading(false);
-      }
+    let unsubscribeOrders = subscribeAssignedDistributorOrders(auth.currentUser?.uid, (state) => {
+      setOrders(state.orders);
+      setLoading(state.loading);
+      setError(state.error);
+    });
+    const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
+      unsubscribeOrders?.();
+      unsubscribeOrders = subscribeAssignedDistributorOrders(user?.uid, (state) => {
+        setOrders(state.orders);
+        setLoading(state.loading);
+        setError(state.error);
+      });
     });
 
-    if (auth.currentUser) {
-      refresh();
-    }
-
     return () => {
-      active = false;
-      if (typeof unsubscribe === 'function') unsubscribe();
+      unsubscribeAuth();
+      unsubscribeOrders?.();
     };
   }, [refresh]);
 

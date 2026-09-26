@@ -1,11 +1,12 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 
 import { useAdminTheme } from '../../components/AdminTheme';
 import ManagerShell, { MANAGER_COLORS, ManagerPill, ManagerWaterDrop } from '../../components/ManagerShell';
+import { useManagerRealtimeData } from '../../components/ManagerRealtimeData';
 import { getModuleSession } from '../../services/authSession';
-import { getManagerWorkspace } from '../../services/managerWorkspace';
 import { formatPhilippinePhone } from '../../services/phoneUtils';
+import { getProfileUniqueId } from '../../services/uniqueIds';
 
 const clean = (value, fallback = 'Not set') =>
   typeof value === 'string' && value.trim() ? value.trim() : fallback;
@@ -13,34 +14,13 @@ const clean = (value, fallback = 'Not set') =>
 export default function ManagerProfilePage() {
   const { colors } = useAdminTheme(); const styles = createStyles(colors);
   const session = getModuleSession('manager');
-
-  const [workspaceManager, setWorkspaceManager] = useState(null);
-  const [workspaceBranch, setWorkspaceBranch] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState('');
-
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setLoadError('');
-    getManagerWorkspace()
-      .then((data) => {
-        if (cancelled) return;
-        setWorkspaceManager(data.manager || null);
-        setWorkspaceBranch(data.branch || null);
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        setLoadError(err.message || 'Manager profile is temporarily unavailable.');
-      })
-      .finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
-  }, []);
+  const { users, branch: workspaceBranch, loading, error: loadError } = useManagerRealtimeData();
+  const workspaceManager = users.find((user) => user.id === session?.uid || user.uid === session?.uid) || null;
 
   // Authoritative values — workspace API is preferred, session is the fallback for
   // data already persisted at login (branchId, branchName, email).
   const managerFullName = clean(workspaceManager?.fullName, '');
-  const managerUid = clean(workspaceManager?.publicUid || workspaceManager?.displayUid || workspaceManager?.uniqueId || session?.publicUid || session?.uid, loading ? '—' : 'Not set');
+  const managerUid = getProfileUniqueId(workspaceManager || session || {}) || (loading ? '—' : 'Not set');
   const rawContact = clean(workspaceManager?.phone || workspaceManager?.contactNumber || session?.phone || session?.contactNumber, '');
   const managerContact = rawContact ? formatPhilippinePhone(rawContact) : (loading ? '—' : 'Not set');
   const managerEmail = clean(workspaceManager?.email || session?.email, '');

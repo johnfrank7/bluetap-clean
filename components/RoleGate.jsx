@@ -2,12 +2,14 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
+import { doc, onSnapshot } from 'firebase/firestore';
 
-import { auth } from '../firebase';
+import { auth, db } from '../firebase';
 import {
   clearAllAuthSessions,
   clearModuleSession,
   getCachedPrivilegedAccess,
+  invalidatePrivilegedValidationCache,
   validateRoleAccess,
 } from '../services/authSession';
 import SessionSecurityGuard from './SessionSecurityGuard';
@@ -95,14 +97,36 @@ export default function RoleGate({ role, allowedRoles, children, bypass = false,
 
     console.info('[admin-performance]', { stage: 'ADMIN_ROUTE_ENTERED', roles: allowedRolesKey });
     setGateState({ status: 'checking', message: '' });
-    const unsubscribeAuth = onAuthStateChanged(auth, () => {
+    let unsubscribeProfile = () => {};
+    const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
+      unsubscribeProfile();
       setGateState({ status: 'checking', message: '' });
       validateAccess();
+
+      if (user?.uid) {
+        let initialSnapshot = true;
+        unsubscribeProfile = onSnapshot(
+          doc(db, 'users', user.uid),
+          () => {
+            if (initialSnapshot) {
+              initialSnapshot = false;
+              return;
+            }
+            invalidatePrivilegedValidationCache();
+            validateAccess();
+          },
+          () => {
+            invalidatePrivilegedValidationCache();
+            validateAccess();
+          }
+        );
+      }
     });
 
     return () => {
       validationRunRef.current += 1;
       unsubscribeAuth();
+      unsubscribeProfile();
 
       if (redirectTimerRef.current) {
         clearTimeout(redirectTimerRef.current);

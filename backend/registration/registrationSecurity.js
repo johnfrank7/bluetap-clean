@@ -48,9 +48,6 @@ function validateRegistrationSecurity(input) {
   if (typeof input?.faceVerificationEnabled !== 'boolean' || typeof input?.emailOtpEnabled !== 'boolean') {
     throw new OtpError(400, 'INVALID_REGISTRATION_SECURITY_CONFIG', 'Registration verification settings are invalid.');
   }
-  if (!input.faceVerificationEnabled && !input.emailOtpEnabled) {
-    throw new OtpError(400, 'VERIFICATION_METHOD_REQUIRED', 'At least one registration verification method must remain enabled.');
-  }
   return {
     faceVerificationEnabled: input.faceVerificationEnabled,
     emailOtpEnabled: input.emailOtpEnabled,

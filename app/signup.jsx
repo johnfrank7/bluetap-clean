@@ -16,6 +16,7 @@ import { acceptRegistrationTerms, createRegistrationSession, getRegistrationBran
 import { useFaceServiceWarmup } from '../services/useFaceServiceWarmup';
 
 import RegistrationFaceCapture from '../components/RegistrationFaceCapture';
+import PasswordVisibilityButton from '../components/PasswordVisibilityButton';
 import { RegistrationActions, RegistrationBrand, RegistrationHeading, RegistrationNotice, RegistrationStepper, REGISTRATION_STEPS as STEPS } from '../components/RegistrationUi';
 import { auth } from '../firebase';
 import { signInWithCustomToken } from 'firebase/auth';
@@ -68,6 +69,7 @@ export default function SignupPage() {
   const [branchesLoading, setBranchesLoading] = React.useState(false);
   const [branchLoadError, setBranchLoadError] = React.useState('');
   const [showPassword, setShowPassword] = React.useState(false);
+  const [showPasswordConfirmation, setShowPasswordConfirmation] = React.useState(false);
   const [usernameState, setUsernameState] = React.useState(() => usernameRetryDraft
     ? { status: 'taken', checked: normalizeUsername(usernameRetryDraft.profile.username) }
     : { status: 'idle', checked: '' });
@@ -304,7 +306,6 @@ export default function SignupPage() {
         return;
       }
       if (!termsAccepted) {
-        setErrors((current) => ({ ...current, terms: 'Please accept the Terms of Service and Privacy Policy to continue.' }));
         return;
       }
       await acceptRegistrationTerms(registrationSessionId);
@@ -441,16 +442,14 @@ export default function SignupPage() {
                   <TextInput style={[styles.input, errors.username && styles.inputError, usernameState.status === 'available' && styles.inputSuccess]} value={form.username} onChangeText={(v) => update('username', v.replace(/\s/g, ''))} autoCapitalize="none" autoCorrect={false} maxLength={20} />
                 </Field>
                 <Field label="Recovery email" error={errors.email}><TextInput style={[styles.input, errors.email && styles.inputError]} value={form.email} onChangeText={(v) => update('email', v)} keyboardType="email-address" autoCapitalize="none" autoComplete="email" /></Field>
-                <Field label="Password" error={errors.password} hint="Use at least 8 characters."><View style={[styles.password, errors.password && styles.inputError]}><TextInput style={styles.passwordInput} value={form.password} onChangeText={(v) => update('password', v)} secureTextEntry={!showPassword} autoCapitalize="none" /><TouchableOpacity onPress={() => setShowPassword((v) => !v)}><Text style={styles.show}>{showPassword ? 'Hide' : 'Show'}</Text></TouchableOpacity></View></Field>
-                <Field label="Confirm password" error={errors.confirmPassword}><TextInput style={[styles.input, errors.confirmPassword && styles.inputError]} value={form.confirmPassword} onChangeText={(v) => update('confirmPassword', v)} secureTextEntry={!showPassword} autoCapitalize="none" /></Field>
+                <Field label="Password" error={errors.password} hint="Use at least 8 characters."><View style={[styles.password, errors.password && styles.inputError]}><TextInput style={styles.passwordInput} value={form.password} onChangeText={(v) => update('password', v)} secureTextEntry={!showPassword} autoCapitalize="none" /><PasswordVisibilityButton visible={showPassword} onPress={() => setShowPassword((v) => !v)} /></View></Field>
+                <Field label="Confirm password" error={errors.confirmPassword}><View style={[styles.password, errors.confirmPassword && styles.inputError]}><TextInput style={styles.passwordInput} value={form.confirmPassword} onChangeText={(v) => update('confirmPassword', v)} secureTextEntry={!showPasswordConfirmation} autoCapitalize="none" /><PasswordVisibilityButton visible={showPasswordConfirmation} onPress={() => setShowPasswordConfirmation((v) => !v)} label="password confirmation" /></View></Field>
                 <View style={styles.termsRow}>
                   <TouchableOpacity style={styles.checkboxTouch} onPress={() => { setTermsAccepted((value) => !value); setErrors((current) => ({ ...current, terms: '' })); }} accessibilityRole="checkbox" accessibilityState={{ checked: termsAccepted }}>
                     <View style={[styles.checkboxBox, termsAccepted && styles.checkboxTouchChecked]}><Text style={styles.checkboxMark}>{termsAccepted ? '✓' : ''}</Text></View>
                   </TouchableOpacity>
                   <Text style={styles.termsText}>I agree to the BlueTap <Text style={styles.termsLink} onPress={() => router.push('/terms')}>Terms of Service</Text> and <Text style={styles.termsLink} onPress={() => router.push('/privacy')}>Privacy Policy</Text>.</Text>
                 </View>
-                {!!errors.terms && <Text style={styles.error}>{errors.terms}</Text>}
-                {!termsAccepted && <Text style={styles.termsRequired}>Terms acceptance is required to continue.</Text>}
               </View>}
 
               {step === 5 && <View style={styles.verifyPreview}><Text style={styles.verifyPreviewText}>Email verification becomes available only after BlueTap accepts the completed Credentials step and sends a secure verification code.</Text></View>}
@@ -491,8 +490,8 @@ const styles = StyleSheet.create({
   phone: { flexDirection: 'row', alignItems: 'center', minHeight: 50, borderWidth: 1, borderColor: '#C8D9E6', borderRadius: 11, backgroundColor: '#FAFCFE' }, prefix: { paddingHorizontal: 14, color: '#17324D', fontWeight: '700', borderRightWidth: 1, borderRightColor: '#D8E5EF' }, phoneInput: { flex: 1, minHeight: 48, paddingHorizontal: 12, color: '#17324D', fontSize: 15 }, select: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }, inputText: { color: '#17324D', fontSize: 15 }, placeholder: { color: '#94A3B8', fontSize: 15 }, inputDisabled: { opacity: .58 }, dropdown: { maxHeight: 170, borderWidth: 1, borderColor: '#C8D9E6', borderRadius: 11, marginTop: -10, marginBottom: 15 }, option: { padding: 13, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#D8E5EF' }, emptyDropdown: { color: '#607A90', padding: 13, fontSize: 13 },
   identityBox: { alignItems: 'center' }, faceIcon: { width: 82, height: 82, borderRadius: 41, backgroundColor: '#E8F5FF', alignItems: 'center', justifyContent: 'center', marginBottom: 15 }, faceIconText: { color: BLUETAP_COLORS.primary, fontSize: 48 }, identityTitle: { color: '#17324D', fontSize: 17, fontWeight: '800', textAlign: 'center' }, identityText: { color: '#607A90', fontSize: 14, lineHeight: 21, textAlign: 'center', marginTop: 9 }, privacy: { backgroundColor: '#F1F7FB', padding: 13, borderRadius: 10, marginTop: 16 }, privacyText: { color: '#47667E', fontSize: 12, lineHeight: 18 }, status: { flexDirection: 'row', alignItems: 'center', marginTop: 14 }, successMark: { color: '#238A57', fontSize: 18, fontWeight: '900', marginRight: 7 }, reviewDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#C47A13', marginRight: 7 }, faceMessage: { color: '#A34B23', fontSize: 13, lineHeight: 18, textAlign: 'center', marginTop: 14 }, faceSuccess: { color: '#238A57', fontSize: 13, fontWeight: '700' }, faceReview: { color: '#A5650B', fontSize: 13, fontWeight: '700' },
   faceButton: { width: '100%', minHeight: 48, marginTop: 16, borderRadius: 11, borderWidth: 1, borderColor: '#9AC7E8', alignItems: 'center', justifyContent: 'center' }, faceButtonText: { color: BLUETAP_COLORS.primary, fontSize: 14, fontWeight: '700' },
-  password: { flexDirection: 'row', alignItems: 'center', minHeight: 50, borderWidth: 1, borderColor: '#C8D9E6', borderRadius: 11, backgroundColor: '#FAFCFE' }, passwordInput: { flex: 1, minHeight: 48, paddingHorizontal: 14, color: '#17324D', fontSize: 15 }, show: { color: BLUETAP_COLORS.primary, fontWeight: '700', padding: 13 },
-  termsRow: { flexDirection: 'row', alignItems: 'flex-start', minHeight: 44, marginTop: 2 }, checkboxTouch: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', marginRight: 2, marginTop: -8 }, checkboxBox: { width: 26, height: 26, borderRadius: 7, borderWidth: 1.5, borderColor: '#91ABC0', alignItems: 'center', justifyContent: 'center' }, checkboxTouchChecked: { backgroundColor: BLUETAP_COLORS.primary, borderColor: BLUETAP_COLORS.primary }, checkboxMark: { color: '#FFF', fontWeight: '900' }, termsText: { flex: 1, color: '#526E84', fontSize: 13, lineHeight: 20 }, termsLink: { color: BLUETAP_COLORS.primary, fontWeight: '800' }, termsRequired: { color: '#7A5C24', fontSize: 12, marginTop: 4 },
+  password: { flexDirection: 'row', alignItems: 'center', minHeight: 50, borderWidth: 1, borderColor: '#C8D9E6', borderRadius: 11, backgroundColor: '#FAFCFE' }, passwordInput: { flex: 1, minHeight: 48, paddingHorizontal: 14, color: '#17324D', fontSize: 15 },
+  termsRow: { flexDirection: 'row', alignItems: 'flex-start', minHeight: 44, marginTop: 2 }, checkboxTouch: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', marginRight: 2, marginTop: -8 }, checkboxBox: { width: 26, height: 26, borderRadius: 7, borderWidth: 1.5, borderColor: '#91ABC0', alignItems: 'center', justifyContent: 'center' }, checkboxTouchChecked: { backgroundColor: BLUETAP_COLORS.primary, borderColor: BLUETAP_COLORS.primary }, checkboxMark: { color: '#FFF', fontWeight: '900' }, termsText: { flex: 1, color: '#526E84', fontSize: 13, lineHeight: 20 }, termsLink: { color: BLUETAP_COLORS.primary, fontWeight: '800' },
   primary: { flex: 1, minHeight: 50, borderRadius: 11, paddingHorizontal: 18, backgroundColor: BLUETAP_COLORS.primary, alignItems: 'center', justifyContent: 'center' }, primaryText: { color: '#FFF', fontSize: 15, fontWeight: '800', textAlign: 'center' }, loginPrompt: { textAlign: 'center', color: '#6B8498', fontSize: 13, marginTop: 20 }, loginLink: { color: BLUETAP_COLORS.primary, fontWeight: '800' },
   modalBg: { flex: 1, backgroundColor: 'rgba(0,0,0,.5)', alignItems: 'center', justifyContent: 'center', padding: 20 }, modal: { width: '100%', maxWidth: 420, backgroundColor: '#FFF', borderRadius: 20, padding: 24 },
 });

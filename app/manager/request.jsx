@@ -22,6 +22,7 @@ import { useAdminTheme } from '../../components/AdminTheme';
 import AdminIcon from '../../components/AdminIcon';
 import TopToastFeedback from '../../components/TopToastFeedback';
 import ManagerShell, { MANAGER_COLORS, ManagerPill } from '../../components/ManagerShell';
+import { useManagerRealtimeData } from '../../components/ManagerRealtimeData';
 
 
 
@@ -852,6 +853,7 @@ export default function ManagerRequestPage() {
   const [toast, setToast] = useState({ visible: false, message: '', type: 'success' });
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [modalVisible, setModalVisible] = useState(false);
+  const { revision } = useManagerRealtimeData();
 
   const [dispatchData, setDispatchData] = useState({
     orders: [],
@@ -870,8 +872,8 @@ export default function ManagerRequestPage() {
   };
 
   useEffect(() => {
-    loadDispatch();
-  }, []);
+    if (revision) loadDispatch();
+  }, [revision]);
 
   const showToast = (message, type = 'success') => {
     setToast({ visible: true, message, type });

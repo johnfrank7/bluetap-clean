@@ -28,6 +28,8 @@ const clearPrivilegedValidationCache = () => {
   privilegedValidationInFlight.clear();
 };
 
+export const invalidatePrivilegedValidationCache = clearPrivilegedValidationCache;
+
 export const cacheValidatedPrivilegedAccess = (profile = {}) => {
   const role = normalizeRole(profile.role);
   const uid = String(profile.uid || profile.id || '');

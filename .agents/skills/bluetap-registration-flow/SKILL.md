@@ -7,7 +7,7 @@ description: Preserve BlueTap's five-step signup, trusted registration-session s
 
 Keep the flow: Account → Personal → Identity → Credentials → Verify.
 
-- Face verification and Email OTP are independently configurable, but at least one must remain enabled. Enforce this invariant on the backend, not only in the client.
+- Face verification and Email OTP are independently configurable. All four combinations are valid, including both disabled. When both are disabled, the base registration flow still enforces credentials, Terms acceptance, role policy, username ownership, and account limits before finalization.
 - Registration controls are presented within the unified Admin **Security Settings** page; the existing `/admin/registration-security` route may remain for compatibility.
 - A disabled verification method is `not_required`; never represent it as successfully verified.
 - When Face Verification is disabled (`faceVerificationRequired === false` in the session's security policy snapshot):
@@ -18,6 +18,8 @@ Keep the flow: Account → Personal → Identity → Credentials → Verify.
 - `registrationSession` is authoritative for an in-progress signup. Snapshot the active security policy into the session so later Admin changes affect new sessions without changing existing flows mid-registration.
 - Enforce device and IP account limits server-side with transactions. Only finalized accounts consume permanent limits, and release temporary reservations after handled finalization failures.
 - Enforce username uniqueness server-side and require Terms acceptance.
+- Allocate Public UIDs only in trusted backend transactions. Registration clients must never read or increment Public UID counters.
+- Firestore transaction helpers must perform every required read before their first write. Prepare username ownership and account-limit mutations first, then apply their writes in the finalization transaction.
 - Never log OTP secrets or plaintext values.
 - Firebase Auth, profile, username registry, and face-enrollment finalization must be idempotent. Roll back partial finalization safely.
 - Do not mark registration successful until every required record is complete.

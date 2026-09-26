@@ -8,9 +8,6 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { collection, onSnapshot, query, where } from 'firebase/firestore';
-
-import { db } from '../../firebase';
 import { getLocalUsers, subscribeLocalUsers } from '../../localUsers';
 import { getProfileUniqueId } from '../../services/uniqueIds';
 import { getModuleSession } from '../../services/authSession';
@@ -19,6 +16,7 @@ import { haversineDistanceKm } from '../../services/location';
 import { useAdminTheme } from '../../components/AdminTheme';
 import TopToastFeedback from '../../components/TopToastFeedback';
 import ManagerShell, { MANAGER_COLORS, ManagerPill } from '../../components/ManagerShell';
+import { useManagerRealtimeData } from '../../components/ManagerRealtimeData';
 
 const normalizeApplicationStatus = (status) =>
   (status || 'pending').toString().trim().toLowerCase();
@@ -108,6 +106,7 @@ function buildScheduleDate(dayOffset, slot) {
 }
 
 function DistributorDispatchQueue({ styles, colors, onShowToast }) {
+  const { revision } = useManagerRealtimeData();
   const [data, setData] = useState({ orders: [], incomingTransfers: [], sourceDecisionEvents: [], distributors: [], branches: [] });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -135,8 +134,8 @@ function DistributorDispatchQueue({ styles, colors, onShowToast }) {
   };
 
   useEffect(() => {
-    load();
-  }, []);
+    if (revision) load();
+  }, [revision]);
 
   const openAssignmentPanel = (order) => {
     setAssigningOrderId(order.id);
@@ -426,6 +425,7 @@ export default function ManagerDistributorsPage() {
   const { colors } = useAdminTheme();
   const styles = createStyles(colors);
   const branchId = getModuleSession('manager')?.branchId || '';
+  const { users: realtimeUsers, loading: realtimeLoading, error: realtimeError } = useManagerRealtimeData();
   const [registeredDistributors, setRegisteredDistributors] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
@@ -437,52 +437,23 @@ export default function ManagerDistributorsPage() {
   };
 
   useEffect(() => {
-    let firestoreRegistered = [];
-
-    const refreshRegisteredDistributors = (nextFirestoreRegistered = firestoreRegistered) => {
-      firestoreRegistered = nextFirestoreRegistered;
+    const refreshRegisteredDistributors = () => {
+      const firestoreRegistered = realtimeUsers.filter(
+        (item) => normalizeRole(item.role) === 'distributor' &&
+          ['approved', 'active'].includes(getDistributorApplicationStatus(item))
+      );
       setRegisteredDistributors([
         ...firestoreRegistered,
         ...getRegisteredLocalDistributors(firestoreRegistered, branchId),
       ]);
-      setLoading(false);
+      setLoading(realtimeLoading);
+      setLoadError(realtimeError);
     };
 
     refreshRegisteredDistributors();
-    const unsubscribeLocalUsers = subscribeLocalUsers(() => refreshRegisteredDistributors());
-
-    const registeredQuery = query(
-      collection(db, 'users'),
-      where('role', '==', 'distributor'),
-      where('branchId', '==', branchId)
-    );
-
-    const unsubscribe = onSnapshot(
-      registeredQuery,
-      (snapshot) => {
-        const firestoreDistributors = snapshot.docs
-          .map((item) => ({
-            id: item.id,
-            uid: item.id,
-            ...item.data(),
-          }))
-          .filter((item) => ['approved', 'active'].includes(getDistributorApplicationStatus(item)));
-
-        refreshRegisteredDistributors(firestoreDistributors);
-        setLoadError('');
-      },
-      (error) => {
-        console.log('Registered distributors error:', error.message);
-        setLoadError(error.message);
-        refreshRegisteredDistributors();
-      }
-    );
-
-    return () => {
-      unsubscribe();
-      unsubscribeLocalUsers();
-    };
-  }, [branchId]);
+    const unsubscribeLocalUsers = subscribeLocalUsers(refreshRegisteredDistributors);
+    return unsubscribeLocalUsers;
+  }, [branchId, realtimeError, realtimeLoading, realtimeUsers]);
 
   const filteredDistributors = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase();
