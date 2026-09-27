@@ -1,17 +1,17 @@
 ---
 name: bluetap-registration-flow
-description: Preserve BlueTap's five-step signup, trusted registration-session state, policy enforcement, OTP flow, finalization, and account-limit behavior.
+description: Preserve BlueTap's policy-derived signup steps, trusted registration-session state, OTP flow, finalization, and account-limit behavior.
 ---
 
 # BlueTap Registration Flow
 
-Keep the flow: Account → Personal → Identity → Credentials → Verify.
+Registration navigation and progress steps MUST be derived from the same authoritative security policy used by backend registration finalization. Disabled verification methods must be completely omitted from frontend navigation, routes, progress indicators, and completion requirements. Do not hardcode Account/Personal/Identity/Credentials/Verify as an unconditional five-step sequence. Policy loading must resolve before optional verification steps are chosen. A temporary/default policy must never route a registrant into a disabled verification method.
 
 - Face verification and Email OTP are independently configurable. All four combinations are valid, including both disabled. When both are disabled, the base registration flow still enforces credentials, Terms acceptance, role policy, username ownership, and account limits before finalization.
 - Registration controls are presented within the unified Admin **Security Settings** page; the existing `/admin/registration-security` route may remain for compatibility.
 - A disabled verification method is `not_required`; never represent it as successfully verified.
 - When Face Verification is disabled (`faceVerificationRequired === false` in the session's security policy snapshot):
-  - Step 3 (Identity) is bypassed or marked not required.
+  - Identity is omitted from navigation and progress; the backend records `not_required`.
   - `completeRegistration` and `retryRegistrationFinalization` do not require `finalFaceImage` or pending face enrollment tokens.
   - Submitting a valid Email OTP finalizes account creation and returns the authentication token without throwing `face-capture-required` or `face-verification-required`.
   - When Face Verification is enabled, the presence of `finalFaceImage` and verified face session state remains strictly enforced before account creation.

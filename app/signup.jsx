@@ -12,17 +12,19 @@ import { BLUETAP_COLORS, BLUETAP_LOGIN_GRADIENT } from '../constants/bluetapThem
 import { clearAllAuthSessions } from '../services/authSession';
 import { clearPendingRegistration, completeRegistrationWithoutOtp, getPendingRegistration, requestRegistrationOtp, setPendingRegistration } from '../services/emailVerification';
 import { checkUsername, normalizeUsername, validateUsername } from '../services/usernameAuth';
-import { acceptRegistrationTerms, createRegistrationSession, getRegistrationBranches, getRegistrationSecurityPolicy } from '../services/registrationSession';
+import { acceptRegistrationTerms, createRegistrationSession, getRegistrationBranches, getRegistrationSecurityPolicy, getRegistrationSessionStatus } from '../services/registrationSession';
+import { clearPendingFaceEnrollment } from '../services/pendingFaceEnrollment';
 import { useFaceServiceWarmup } from '../services/useFaceServiceWarmup';
 
 import RegistrationFaceCapture from '../components/RegistrationFaceCapture';
 import PasswordVisibilityButton from '../components/PasswordVisibilityButton';
-import { RegistrationActions, RegistrationBrand, RegistrationHeading, RegistrationNotice, RegistrationStepper, REGISTRATION_STEPS as STEPS } from '../components/RegistrationUi';
+import { RegistrationActions, RegistrationBrand, RegistrationHeading, RegistrationNotice, RegistrationStepper } from '../components/RegistrationUi';
 import { auth } from '../firebase';
 import { signInWithCustomToken } from 'firebase/auth';
 import { getRoleHomePath, saveRoleSession } from '../services/authSession';
 
 const { isTrustedRegistrationFaceVerification } = require('../services/webFaceCaptureCore');
+const { REGISTRATION_STEP: STEP, REGISTRATION_STEP_LABELS, buildRegistrationSteps, adjacentRegistrationStep, registrationEntryStep } = require('../services/registrationStepStatus');
 
 const BARANGAYS = ['Awihao', 'Bagakay', 'Bato', 'Biga', 'Bulongan', 'Bunga', 'Cabitoonan', 'Calongcalong', 'Cambang-ug', 'Camp 8', 'Canlumampao', 'Cantabaco', 'Capitan Claudio', 'Carmen', 'Daanglungsod', 'Don Andres Soriano', 'Dumlog', 'Gen. Climaco', 'Ibo', 'Ilihan', 'Juan Climaco, Sr.', 'Landahan', 'Loay', 'Luray II', 'Matab-ang', 'Media Once', 'Pangamihan', 'Poblacion', 'Poog', 'Putingbato', 'Sagay', 'Sam-ang', 'Sangi', 'Santo Niño', 'Subayon', 'Talavera', 'Tubod', 'Tungkay'];
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -50,10 +52,10 @@ export default function SignupPage() {
   const params = useLocalSearchParams();
   const { width } = useWindowDimensions();
   const initialRole = params.role === 'requester' || params.role === 'distributor' ? params.role : '';
-  // Preserve the in-memory registration draft only for a server-reported
-  // username race. The server still validates every session field.
-  const usernameRetryDraft = React.useRef(firstParam(params.usernameTaken) === 'true' ? getPendingRegistration() : null).current;
-  const [step, setStep] = React.useState(usernameRetryDraft ? 4 : 1);
+  // Resume only an in-memory draft. The server still validates every session field.
+  const usernameTaken = firstParam(params.usernameTaken) === 'true';
+  const usernameRetryDraft = React.useRef(usernameTaken || firstParam(params.resumeRegistration) === 'true' ? getPendingRegistration() : null).current;
+  const [step, setStep] = React.useState(usernameRetryDraft ? STEP.credentials : STEP.account);
   const [form, setForm] = React.useState(() => ({
     role: usernameRetryDraft?.profile?.role || initialRole,
     firstName: usernameRetryDraft?.profile?.firstName || '', lastName: usernameRetryDraft?.profile?.lastName || '',
@@ -62,7 +64,7 @@ export default function SignupPage() {
     username: usernameRetryDraft?.profile?.username || '', email: usernameRetryDraft?.profile?.email || '',
     password: usernameRetryDraft?.profile?.password || '', confirmPassword: usernameRetryDraft?.profile?.password || '',
   }));
-  const [errors, setErrors] = React.useState(() => usernameRetryDraft ? { username: 'This username was just taken. Please choose another.' } : {});
+  const [errors, setErrors] = React.useState(() => usernameTaken && usernameRetryDraft ? { username: 'This username was just taken. Please choose another.' } : {});
   const [showBarangays, setShowBarangays] = React.useState(false);
   const [showBranches, setShowBranches] = React.useState(false);
   const [registrationBranches, setRegistrationBranches] = React.useState([]);
@@ -70,19 +72,19 @@ export default function SignupPage() {
   const [branchLoadError, setBranchLoadError] = React.useState('');
   const [showPassword, setShowPassword] = React.useState(false);
   const [showPasswordConfirmation, setShowPasswordConfirmation] = React.useState(false);
-  const [usernameState, setUsernameState] = React.useState(() => usernameRetryDraft
+  const [usernameState, setUsernameState] = React.useState(() => usernameTaken && usernameRetryDraft
     ? { status: 'taken', checked: normalizeUsername(usernameRetryDraft.profile.username) }
     : { status: 'idle', checked: '' });
   const [loading, setLoading] = React.useState(false);
   const [notice, setNotice] = React.useState(null);
   const [retryAt, setRetryAt] = React.useState(0);
   const [registrationSessionId, setRegistrationSessionId] = React.useState(usernameRetryDraft?.profile?.registrationSessionId || '');
-  const [faceVerification, setFaceVerification] = React.useState(() => usernameRetryDraft
-    ? { status: 'verified', duplicateCheck: 'clear', providerVerified: true, livenessPassed: true }
-    : { status: 'unverified', duplicateCheck: 'unknown' });
+  const [faceVerification, setFaceVerification] = React.useState({ status: 'unverified', duplicateCheck: 'unknown' });
   const [termsAccepted, setTermsAccepted] = React.useState(Boolean(usernameRetryDraft));
-  const [securityPolicy, setSecurityPolicy] = React.useState(usernameRetryDraft?.profile?.securityPolicy || { faceVerificationRequired: true, emailOtpRequired: true });
-  const [securityPolicyReady, setSecurityPolicyReady] = React.useState(Boolean(usernameRetryDraft?.profile?.securityPolicy));
+  const [securityPolicy, setSecurityPolicy] = React.useState(null);
+  const [securityPolicyReady, setSecurityPolicyReady] = React.useState(false);
+  const [policyError, setPolicyError] = React.useState('');
+  const [policyRetry, setPolicyRetry] = React.useState(0);
   const [now, setNow] = React.useState(Date.now());
   const submitting = React.useRef(false);
   const usernameCheckVersion = React.useRef(0);
@@ -91,7 +93,7 @@ export default function SignupPage() {
   const mobile = width < 600;
   const faceService = useFaceServiceWarmup(
     registrationSessionId,
-    securityPolicy.faceVerificationRequired === true,
+    securityPolicyReady && securityPolicy?.faceVerificationRequired === true,
   );
 
   React.useEffect(() => {
@@ -105,15 +107,27 @@ export default function SignupPage() {
 
   React.useEffect(() => {
     let active = true;
-    if (!registrationSessionId) setSecurityPolicyReady(false);
-    getRegistrationSecurityPolicy()
-      .then((policy) => { if (active && !registrationSessionId) setSecurityPolicy(policy); })
-      // Keep the secure default while the policy endpoint is unavailable. The
-      // session-creation endpoint remains the final, authoritative policy read.
-      .catch(() => {})
-      .finally(() => { if (active) setSecurityPolicyReady(true); });
+    setSecurityPolicyReady(false);
+    setPolicyError('');
+    const request = registrationSessionId
+      ? getRegistrationSessionStatus(registrationSessionId)
+      : getRegistrationSecurityPolicy().then((securityPolicy) => ({ securityPolicy }));
+    request.then((result) => {
+      if (!active) return;
+      const policy = result.securityPolicy;
+      if (typeof policy?.faceVerificationRequired !== 'boolean' || typeof policy?.emailOtpRequired !== 'boolean') {
+        throw new Error('Registration security settings are unavailable. Please try again.');
+      }
+      if (registrationSessionId && typeof result.faceVerification?.status !== 'string') {
+        throw new Error('Registration verification status is unavailable. Please try again.');
+      }
+      setSecurityPolicy(policy);
+      if (registrationSessionId) setFaceVerification(result.faceVerification);
+      setStep((current) => registrationEntryStep(buildRegistrationSteps(policy), current));
+      setSecurityPolicyReady(true);
+    }).catch((error) => { if (active) setPolicyError(error.message || 'Registration security settings are unavailable.'); });
     return () => { active = false; };
-  }, [registrationSessionId]);
+  }, [registrationSessionId, policyRetry]);
 
   React.useEffect(() => {
     let active = true;
@@ -149,8 +163,12 @@ export default function SignupPage() {
       setUsernameState({ status: 'idle', checked: '' });
     }
     if (['role', 'firstName', 'lastName', 'phone', 'barangay', 'address', 'requestedBranchId'].includes(key) && registrationSessionId) {
+      clearPendingRegistration();
+      clearPendingFaceEnrollment(registrationSessionId);
       setRegistrationSessionId('');
       setFaceVerification({ status: 'unverified', duplicateCheck: 'unknown' });
+      setSecurityPolicy(null);
+      setSecurityPolicyReady(false);
     }
   };
 
@@ -162,32 +180,32 @@ export default function SignupPage() {
   const retrySeconds = Math.max(0, Math.ceil((retryAt - now) / 1000));
   const accountComplete = !!form.role;
   const personalComplete = !!form.firstName.trim() && !!form.lastName.trim() && PHONE.test(form.phone) && !!form.barangay && !!form.address.trim() && (form.role !== 'distributor' || !!form.requestedBranchId);
-  const identityComplete = !!registrationSessionId && (!securityPolicy.faceVerificationRequired || isTrustedRegistrationFaceVerification(faceVerification));
+  const identityComplete = !!registrationSessionId && (securityPolicy?.faceVerificationRequired === false || isTrustedRegistrationFaceVerification(faceVerification));
   const credentialsComplete = !validateUsername(form.username) && EMAIL.test(form.email.trim()) && form.password.length >= 8 && form.password === form.confirmPassword && usernameState.status === 'available' && termsAccepted;
-  const visibleRegistrationSteps = [1, 2, ...(securityPolicy.faceVerificationRequired ? [3] : []), 4, ...(securityPolicy.emailOtpRequired ? [5] : [])];
+  const visibleRegistrationSteps = buildRegistrationSteps(securityPolicy);
   const visibleStepNumber = Math.max(1, visibleRegistrationSteps.indexOf(step) + 1);
-  const canContinue = step === 1 ? accountComplete
-    : step === 2 ? accountComplete && personalComplete
-      : step === 3 ? accountComplete && personalComplete && identityComplete
-        : step === 4 ? accountComplete && personalComplete && identityComplete && credentialsComplete
+  const canContinue = step === STEP.account ? accountComplete
+    : step === STEP.personal ? accountComplete && personalComplete
+      : step === STEP.identity ? accountComplete && personalComplete && identityComplete
+        : step === STEP.credentials ? accountComplete && personalComplete && identityComplete && credentialsComplete
           : false;
 
-  const prerequisiteNotice = step >= 2 && !accountComplete
-    ? { title: 'Account type required', message: 'Complete Step 1 before continuing with registration.', target: 1, actionLabel: 'Go to Account' }
-    : step >= 3 && !personalComplete
-      ? { title: 'Personal information required', message: 'Complete Step 2 before continuing with account setup.', target: 2, actionLabel: 'Go to Personal Information' }
-      : step >= 3 && !registrationSessionId
-        ? { title: 'Verification session required', message: 'Return to Step 2 and tap Continue to start identity verification.', target: 2, actionLabel: 'Go to Personal Information' }
-        : step >= 4 && !identityComplete
-          ? { title: 'Identity verification required', message: 'Complete Step 3 before continuing with credentials.', target: 3, actionLabel: 'Go to Identity Verification' }
-          : step >= 5 && !credentialsComplete
-            ? { title: 'Credentials required', message: 'Complete Step 4 before continuing with email verification.', target: 4, actionLabel: 'Go to Credentials' }
-            : step === 5
-              ? { title: 'Verification code required', message: 'Return to Step 4 and send the verification code to open email verification.', target: 4, actionLabel: 'Go to Credentials' }
+  const prerequisiteNotice = step >= STEP.personal && !accountComplete
+    ? { title: 'Account type required', message: 'Complete Account before continuing with registration.', target: STEP.account, actionLabel: 'Go to Account' }
+    : step >= STEP.identity && !personalComplete
+      ? { title: 'Personal information required', message: 'Complete Personal Information before continuing with account setup.', target: STEP.personal, actionLabel: 'Go to Personal Information' }
+      : step >= STEP.identity && !registrationSessionId
+        ? { title: 'Registration session required', message: 'Return to Personal Information and tap Next to continue.', target: STEP.personal, actionLabel: 'Go to Personal Information' }
+        : step >= STEP.credentials && securityPolicy?.faceVerificationRequired === true && !identityComplete
+          ? { title: 'Identity verification required', message: 'Complete Identity before continuing with credentials.', target: STEP.identity, actionLabel: 'Go to Identity Verification' }
+          : step >= STEP.verifyEmail && !credentialsComplete
+            ? { title: 'Credentials required', message: 'Complete Credentials before continuing with email verification.', target: STEP.credentials, actionLabel: 'Go to Credentials' }
+            : step === STEP.verifyEmail
+              ? { title: 'Verification code required', message: 'Return to Credentials and send the verification code to open email verification.', target: STEP.credentials, actionLabel: 'Go to Credentials' }
               : null;
 
   const openStep = (target) => {
-    if (loading || target === step || target < 1 || target > 5) return;
+    if (loading || !securityPolicyReady || target === step || !visibleRegistrationSteps.includes(target)) return;
     setErrors({});
     setShowBarangays(false);
     transitionToStep(target);
@@ -199,8 +217,8 @@ export default function SignupPage() {
       setNotice({ ...prerequisiteNotice, tone: 'warning' });
       return;
     }
-    if (step === 5) {
-      transitionToStep(4);
+    if (step === STEP.verifyEmail) {
+      transitionToStep(STEP.credentials);
       setNotice({
         tone: 'warning',
         title: 'Verification code required',
@@ -208,12 +226,12 @@ export default function SignupPage() {
       });
       return;
     }
-    if (step === 4) submit();
+    if (step === STEP.credentials) submit();
     else next();
   };
 
   React.useEffect(() => {
-    if (step !== 4) return undefined;
+    if (step !== STEP.credentials) return undefined;
     const validation = validateUsername(form.username);
     if (validation) {
       setUsernameState({ status: form.username.trim() ? 'invalid' : 'idle', checked: '' });
@@ -236,8 +254,8 @@ export default function SignupPage() {
 
   const validateStep = (target = step) => {
     const next = {};
-    if (target === 1 && !form.role) next.role = 'Choose an account type.';
-    if (target === 2) {
+    if (target === STEP.account && !form.role) next.role = 'Choose an account type.';
+    if (target === STEP.personal) {
       if (!form.firstName.trim()) next.firstName = 'First name is required.';
       if (!form.lastName.trim()) next.lastName = 'Last name is required.';
       if (!PHONE.test(form.phone)) next.phone = 'Enter a valid Philippine number (9XXXXXXXXX).';
@@ -245,7 +263,7 @@ export default function SignupPage() {
       if (!form.address.trim()) next.address = 'Address is required.';
       if (form.role === 'distributor' && !form.requestedBranchId) next.requestedBranchId = 'Choose the BlueTap branch you are applying to.';
     }
-    if (target === 4) {
+    if (target === STEP.credentials) {
       const usernameError = validateUsername(form.username);
       if (usernameError) next.username = usernameError;
       else if (usernameState.status === 'taken' && usernameState.checked === normalizeUsername(form.username)) next.username = 'This username is already taken.';
@@ -260,8 +278,8 @@ export default function SignupPage() {
   };
 
   const next = async () => {
-    if (!validateStep() || (step === 3 && !canContinue)) return;
-    if (step === 2 && !registrationSessionId) {
+    if (!validateStep() || (step === STEP.identity && !canContinue)) return;
+    if (step === STEP.personal && !registrationSessionId) {
       setLoading(true);
       try {
         const result = await createRegistrationSession({
@@ -269,35 +287,34 @@ export default function SignupPage() {
           phone: `+63${form.phone}`, barangay: form.barangay, address: form.address.trim(),
           ...(form.role === 'distributor' ? { requestedBranchId: form.requestedBranchId } : {}),
         });
+        const sessionSteps = buildRegistrationSteps(result.securityPolicy);
+        if (!sessionSteps.length) throw new Error('Registration security settings are unavailable. Please try again.');
         setRegistrationSessionId(result.registrationSessionId);
-        setSecurityPolicy(result.securityPolicy || { faceVerificationRequired: true, emailOtpRequired: true });
+        setSecurityPolicy(result.securityPolicy);
         setFaceVerification(result.securityPolicy?.faceVerificationRequired === false
           ? { required: false, status: 'not_required', duplicateCheck: 'not_required' }
           : { required: true, status: 'unverified', duplicateCheck: 'unknown' });
-        if (result.securityPolicy?.faceVerificationRequired === false) {
-          transitionToStep(4);
-          setErrors({});
-          return;
-        }
+        transitionToStep(adjacentRegistrationStep(sessionSteps, STEP.personal, 1));
+        setErrors({});
+        return;
       } catch (error) {
         setNotice({ title: 'Could not start verification', message: error.message });
         return;
       } finally { setLoading(false); }
     }
-    const nextStep = Math.min(4, step + 1);
-    transitionToStep(nextStep);
+    const nextStep = adjacentRegistrationStep(visibleRegistrationSteps, step, 1);
+    if (nextStep) transitionToStep(nextStep);
     setErrors({});
   };
 
   const back = () => {
     if (loading) return;
-    if (step === 1) router.replace('/login');
-    else if (step === 4 && !securityPolicy.faceVerificationRequired) transitionToStep(2);
-    else transitionToStep((current) => current - 1);
+    if (step === STEP.account) router.replace('/login');
+    else transitionToStep(adjacentRegistrationStep(visibleRegistrationSteps, step, -1) ?? STEP.account);
   };
 
   const submit = async () => {
-    if (!validateStep(4) || loading || submitting.current || retrySeconds > 0) return;
+    if (!securityPolicyReady || !validateStep(STEP.credentials) || loading || submitting.current || retrySeconds > 0) return;
     submitting.current = true;
     setLoading(true);
     try {
@@ -353,14 +370,14 @@ export default function SignupPage() {
     }
   };
 
-  const titles = [
-    ['Create your BlueTap account', "Choose how you'll use BlueTap."],
-    ['Personal information', 'Tell us a little about yourself.'],
-    ['Verify your identity', 'Help us keep BlueTap accounts secure.'],
-    ['Set up your account', 'Choose your login credentials and recovery email.'],
-    ['Verify your email', 'Confirm your email address to finish registration.'],
-  ];
-  const [title, subtitle] = titles[step - 1];
+  const titles = {
+    [STEP.account]: ['Create your BlueTap account', "Choose how you'll use BlueTap."],
+    [STEP.personal]: ['Personal information', 'Tell us a little about yourself.'],
+    [STEP.identity]: ['Verify your identity', 'Help us keep BlueTap accounts secure.'],
+    [STEP.credentials]: ['Set up your account', 'Choose your login credentials and recovery email.'],
+    [STEP.verifyEmail]: ['Verify your email', 'Confirm your email address to finish registration.'],
+  };
+  const [title, subtitle] = titles[step];
 
   return (
     <LinearGradient colors={BLUETAP_LOGIN_GRADIENT} style={styles.screen}>
@@ -376,36 +393,30 @@ export default function SignupPage() {
             },
           ]}>
             <RegistrationBrand />
-            <View style={[styles.card, step === 3 && styles.identityCard, step === 3 && mobile && styles.identityCardMobile]}>
+            <View style={[styles.card, step === STEP.identity && styles.identityCard, step === STEP.identity && mobile && styles.identityCardMobile]}>
               {securityPolicyReady ? <>
                 <RegistrationStepper
                   currentStep={step}
-                  requiredSteps={[
-                    1,
-                    2,
-                    ...(securityPolicy.faceVerificationRequired ? [3] : []),
-                    4,
-                    ...(securityPolicy.emailOtpRequired ? [5] : []),
-                  ]}
+                  requiredSteps={visibleRegistrationSteps}
                   visibleSteps={visibleRegistrationSteps}
                   completedSteps={[
-                    accountComplete && 1,
-                    personalComplete && !!registrationSessionId && 2,
-                    identityComplete && 3,
-                    credentialsComplete && 4,
+                    accountComplete && STEP.account,
+                    personalComplete && !!registrationSessionId && STEP.personal,
+                    securityPolicy.faceVerificationRequired && identityComplete && STEP.identity,
+                    credentialsComplete && STEP.credentials,
                   ].filter(Boolean)}
                   onStepPress={openStep}
                   disabled={loading}
                 />
-                {mobile && <Text style={styles.stepText}>Step {visibleStepNumber} of {visibleRegistrationSteps.length} · {STEPS[step - 1]}</Text>}
-              </> : <View style={styles.stepperLoading} accessibilityRole="progressbar" accessibilityLabel="Loading registration steps"><Text style={styles.stepperLoadingText}>Loading registration steps…</Text></View>}
-              <Animated.View style={{
+                {mobile && <Text style={styles.stepText}>Step {visibleStepNumber} of {visibleRegistrationSteps.length} · {REGISTRATION_STEP_LABELS[step]}</Text>}
+              </> : <View style={styles.stepperLoading} accessibilityRole="progressbar" accessibilityLabel="Loading registration steps"><Text style={styles.stepperLoadingText}>{policyError || 'Loading registration steps…'}</Text>{!!policyError && <TouchableOpacity onPress={() => setPolicyRetry((value) => value + 1)} accessibilityRole="button"><Text style={styles.loginLink}>Try again</Text></TouchableOpacity>}</View>}
+              {securityPolicyReady && <Animated.View style={{
                 opacity: stepTransition,
                 transform: [{ translateY: stepTransition.interpolate({ inputRange: [0, 1], outputRange: [10, 0] }) }],
               }}>
-              <RegistrationHeading title={step === 3 ? 'Verify your identity' : title} subtitle={step === 3 ? 'Complete a quick face check to help protect your account and prevent duplicate registrations.' : subtitle} />
+              <RegistrationHeading title={step === STEP.identity ? 'Verify your identity' : title} subtitle={step === STEP.identity ? 'Complete a quick face check to help protect your account and prevent duplicate registrations.' : subtitle} />
 
-              {step === 1 && <View style={styles.roleList}>
+              {step === STEP.account && <View style={styles.roleList}>
                 {[
                   ['requester', '💧', 'Requester', 'Order water from your water provider.'],
                   ['distributor', '🚚', 'Distributor', 'Receive and manage customer water requests for your station.'],
@@ -415,7 +426,7 @@ export default function SignupPage() {
                 {!!errors.role && <Text style={styles.error}>{errors.role}</Text>}
               </View>}
 
-              {step === 2 && <View>
+              {step === STEP.personal && <View>
                 <View style={!mobile && styles.row}>
                   <View style={!mobile && styles.half}><Field label="First name" error={errors.firstName}><TextInput style={[styles.input, errors.firstName && styles.inputError]} value={form.firstName} onChangeText={(v) => update('firstName', v)} autoComplete="given-name" /></Field></View>
                   <View style={!mobile && styles.half}><Field label="Last name" error={errors.lastName}><TextInput style={[styles.input, errors.lastName && styles.inputError]} value={form.lastName} onChangeText={(v) => update('lastName', v)} autoComplete="family-name" /></Field></View>
@@ -428,7 +439,7 @@ export default function SignupPage() {
                 {form.role === 'distributor' && showBranches && <ScrollView style={styles.dropdown} nestedScrollEnabled>{registrationBranches.map((branch) => <TouchableOpacity key={branch.id} style={styles.option} onPress={() => { update('requestedBranchId', branch.id); setShowBranches(false); }}><Text style={styles.inputText}>{branch.name}</Text></TouchableOpacity>)}{!registrationBranches.length && !branchesLoading && <Text style={styles.emptyDropdown}>No active BlueTap branches are currently available.</Text>}</ScrollView>}
               </View>}
 
-              {step === 3 && accountComplete && personalComplete && !!registrationSessionId && <RegistrationFaceCapture
+              {step === STEP.identity && accountComplete && personalComplete && !!registrationSessionId && <RegistrationFaceCapture
                 key={registrationSessionId}
                 registrationSessionId={registrationSessionId}
                 verification={faceVerification}
@@ -437,7 +448,7 @@ export default function SignupPage() {
                 onCheckService={faceService.checkAgain}
               />}
 
-              {step === 4 && <View>
+              {step === STEP.credentials && <View>
                 <Field label="Username" error={errors.username} hint={usernameState.status === 'checking' ? 'Checking username availability...' : usernameState.status === 'available' ? 'Username is available.' : usernameState.status === 'taken' ? 'Username is already taken.' : usernameState.status === 'invalid' ? 'Invalid username format' : usernameState.status === 'unavailable' ? 'Unable to check username' : '4-20 characters; letters, numbers, and underscores.'}>
                   <TextInput style={[styles.input, errors.username && styles.inputError, usernameState.status === 'available' && styles.inputSuccess]} value={form.username} onChangeText={(v) => update('username', v.replace(/\s/g, ''))} autoCapitalize="none" autoCorrect={false} maxLength={20} />
                 </Field>
@@ -452,21 +463,21 @@ export default function SignupPage() {
                 </View>
               </View>}
 
-              {step === 5 && <View style={styles.verifyPreview}><Text style={styles.verifyPreviewText}>Email verification becomes available only after BlueTap accepts the completed Credentials step and sends a secure verification code.</Text></View>}
+              {step === STEP.verifyEmail && <View style={styles.verifyPreview}><Text style={styles.verifyPreviewText}>Email verification becomes available only after BlueTap accepts the completed Credentials step and sends a secure verification code.</Text></View>}
 
               <RegistrationActions
                 stacked={mobile}
-                showBack={step !== 1}
+                showBack={step !== STEP.account}
                 onBack={back}
                 onPrimary={advanceOrGuide}
                 loading={loading}
-                primaryDisabled={retrySeconds > 0 || (!prerequisiteNotice && step !== 5 && !canContinue)}
+                primaryDisabled={retrySeconds > 0 || (!prerequisiteNotice && step !== STEP.verifyEmail && !canContinue)}
                 primaryLabel={retrySeconds > 0
                   ? `Try again in ${Math.floor(retrySeconds / 60)}:${String(retrySeconds % 60).padStart(2, '0')}`
-                  : step === 5 ? 'Continue' : 'Next'}
+                  : step === STEP.verifyEmail ? 'Continue' : step === STEP.credentials && !securityPolicy.emailOtpRequired ? 'Complete Registration' : 'Next'}
               />
               <Text style={styles.loginPrompt}>Already have an account? <Text style={styles.loginLink} onPress={() => router.replace('/login')}>Log in.</Text></Text>
-              </Animated.View>
+              </Animated.View>}
             </View>
           </Animated.View>
         </ScrollView>

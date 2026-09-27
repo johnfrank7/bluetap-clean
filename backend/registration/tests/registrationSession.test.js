@@ -71,8 +71,19 @@ test('new sessions snapshot admin policy and face-disabled sessions skip face se
   const session = f.records.get('registrationSessions/' + result.registrationSessionId);
   assert.deepEqual(session.securityPolicySnapshot, { faceVerificationRequired: false, emailOtpRequired: true, maxAccountsPerDevice: 5, maxAccountsPerIp: 4, policyVersion: 7 });
   assert.equal(session.faceVerification.status, 'not_required');
+  assert.deepEqual((await f.service.status(result.registrationSessionId)).faceVerification, {
+    required: false, status: 'not_required', duplicateCheck: 'not_required', livenessPassed: false,
+  });
   assert.equal((await f.service.acceptTerms(result.registrationSessionId)).accepted, true);
   await assert.rejects(setTrustedFaceVerification(f.db, result.registrationSessionId, { livenessPassed: true, duplicateCheck: 'clear' }, f.now), (error) => error.reason === 'face-verification-not-required');
+});
+
+test('session status restores a pending face result without inventing verification', async () => {
+  const f = fixture();
+  const { registrationSessionId } = await f.service.create(personal, 'ip');
+  const session = f.records.get('registrationSessions/' + registrationSessionId);
+  session.faceVerification = { required: true, status: 'passed_pending_finalization', duplicateCheck: 'clear', livenessPassed: true };
+  assert.equal((await f.service.status(registrationSessionId)).faceVerification.status, 'passed_pending_finalization');
 });
 
 test('admin limit changes affect only new registration session snapshots', async () => {
@@ -92,6 +103,16 @@ test('admin limit changes affect only new registration session snapshots', async
     { faceVerificationRequired: false, emailOtpRequired: true, maxAccountsPerDevice: 2, maxAccountsPerIp: 1, policyVersion: 2 });
   assert.deepEqual(f.records.get(`registrationSessions/${third.registrationSessionId}`).securityPolicySnapshot,
     { faceVerificationRequired: true, emailOtpRequired: true, maxAccountsPerDevice: 5, maxAccountsPerIp: 5, policyVersion: 3 });
+});
+
+test('a new session does not assume face is enabled when policy storage is unavailable', async () => {
+  const f = fixture();
+  const collection = f.db.collection;
+  f.db.collection = (name) => name === 'systemConfig'
+    ? { doc: () => ({ get: async () => { throw new Error('Firestore unavailable'); } }) }
+    : collection(name);
+  await assert.rejects(f.service.create(personal, 'ip'), /Firestore unavailable/);
+  assert.equal([...f.records.keys()].some((key) => key.startsWith('registrationSessions/')), false);
 });
 
 test('Distributor registration session snapshots one active requested branch without granting operational access', async () => {

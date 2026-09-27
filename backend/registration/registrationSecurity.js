@@ -66,11 +66,17 @@ function normalizeRegistrationSecurity(data) {
   }
 }
 
-async function loadRegistrationSecurity(db) {
+async function loadRegistrationSecurity(db, { strict = false } = {}) {
   try {
     const snapshot = await db.collection(CONFIG_PATH[0]).doc(CONFIG_PATH[1]).get();
-    return snapshot.exists ? normalizeRegistrationSecurity(snapshot.data()) : { ...SECURE_DEFAULTS };
-  } catch {
+    if (!snapshot.exists) return { ...SECURE_DEFAULTS };
+    if (strict) {
+      try { return validateRegistrationSecurity(snapshot.data()); }
+      catch { throw new OtpError(503, 'registration-policy-unavailable', 'Registration security settings are temporarily unavailable.'); }
+    }
+    return normalizeRegistrationSecurity(snapshot.data());
+  } catch (error) {
+    if (strict) throw error;
     return { ...SECURE_DEFAULTS };
   }
 }

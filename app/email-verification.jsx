@@ -20,6 +20,7 @@ import { auth } from '../firebase';
 import { clearAllAuthSessions, fetchFirestoreUserProfile, getPostAuthenticationDestination } from '../services/authSession';
 import { requestEmailOtp, verifyEmailOtp, getPendingRegistration, clearPendingRegistration,
   setPendingRegistration, requestRegistrationOtp, completeRegistration, retryRegistrationFinalization } from '../services/emailVerification';
+const { REGISTRATION_STEP: STEP, buildRegistrationSteps, unavailableRegistrationRoute } = require('../services/registrationStepStatus');
 
 const OTP_LENGTH = 6;
 const OTP_EXPIRY_MS = 10 * 60 * 1000;
@@ -81,6 +82,10 @@ export default function EmailVerificationPage() {
   const sent = firstParam(params.sent);
   const registration = firstParam(params.registration) === 'true';
   const draft = registration ? getPendingRegistration() : null;
+  const registrationSteps = buildRegistrationSteps(draft?.profile?.securityPolicy);
+  const unavailableRoute = registration && draft
+    ? unavailableRegistrationRoute(draft.profile.securityPolicy, STEP.verifyEmail, true)
+    : null;
   const automaticRequestRef = React.useRef(false);
   const registrationCompletedRef = React.useRef(false);
   const verificationInFlightRef = React.useRef(false);
@@ -244,6 +249,8 @@ export default function EmailVerificationPage() {
       if (registrationCompletedRef.current) return;
       if (!getPendingRegistration()) {
         router.replace('/signup?role=' + (firstParam(params.role) === 'distributor' ? 'distributor' : 'requester'));
+      } else if (unavailableRoute || !registrationSteps.length) {
+        router.replace(unavailableRoute || '/signup?resumeRegistration=true');
       } else {
         setLoading(false);
       }
@@ -283,7 +290,7 @@ export default function EmailVerificationPage() {
       active = false;
       unsubscribe();
     };
-  }, [continueAfterVerification, requestOtp, router, sent, registration, params.role]);
+  }, [continueAfterVerification, requestOtp, router, sent, registration, params.role, unavailableRoute, registrationSteps.length]);
 
   const changeOtp = (value) => {
     setOtp(value.replace(/\D/g, '').slice(0, OTP_LENGTH));
@@ -406,11 +413,11 @@ export default function EmailVerificationPage() {
           <RegistrationBrand />
 
           <View style={[styles.card, { maxWidth: width >= 768 ? 600 : 520 }]}>
-            {registration && !loading && <RegistrationStepper
-              currentStep={5}
-              completedSteps={[1, 2, 3, 4]}
-              requiredSteps={[1, 2, ...(draft?.profile?.securityPolicy?.faceVerificationRequired === false ? [] : [3]), 4, 5]}
-              visibleSteps={[1, 2, ...(draft?.profile?.securityPolicy?.faceVerificationRequired === false ? [] : [3]), 4, 5]}
+            {registration && !loading && !unavailableRoute && <RegistrationStepper
+              currentStep={STEP.verifyEmail}
+              completedSteps={registrationSteps.filter((step) => step !== STEP.verifyEmail)}
+              requiredSteps={registrationSteps}
+              visibleSteps={registrationSteps}
             />}
             {loading ? (
               <View style={styles.loadingState}>

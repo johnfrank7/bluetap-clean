@@ -167,6 +167,14 @@ test('public registration policy exposes only the step requirements', async () =
   } });
 });
 
+test('public registration policy fails closed when its persisted settings cannot be read', async () => {
+  const res = response();
+  const db = { collection: () => ({ doc: () => ({ get: async () => { throw new Error('Firestore unavailable'); } }) }) };
+  await createRegistrationSessionHandler('policy', () => ({ db }))({ method: 'POST', headers: {}, body: {} }, res);
+  assert.equal(res.statusCode, 503);
+  assert.equal(res.body.error.reason, 'service-unavailable');
+});
+
 test('Admin UI loads authoritative policy, updates from save response, and reverts a failed save', () => {
   const source = readFileSync(resolve(__dirname, '..', '..', '..', 'app', 'admin', 'registration-security.jsx'), 'utf8');
   assert.match(source, /useAdminData\(ADMIN_CACHE_KEYS\.security, getRegistrationSecurity\)/);

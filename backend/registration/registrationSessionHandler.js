@@ -17,7 +17,7 @@ function createRegistrationSessionHandler(action, getAdmin = getFirebaseAdmin, w
       if (typeof body === 'string') { try { body = JSON.parse(body); } catch { throw new OtpError(400, 'invalid-request', 'Invalid request.'); } }
       const { db } = getAdmin();
       if (action === 'policy') {
-        const policy = policySnapshot(await loadRegistrationSecurity(db));
+        const policy = policySnapshot(await loadRegistrationSecurity(db, { strict: true }));
         return res.status(200).json({ securityPolicy: {
           faceVerificationRequired: policy.faceVerificationRequired,
           emailOtpRequired: policy.emailOtpRequired,

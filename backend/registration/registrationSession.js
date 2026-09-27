@@ -81,7 +81,7 @@ function createRegistrationSessionService({ db, hashSecret, deviceHashSecret, ip
     }
     const branch = await requestedBranch(input);
     await limit(ip);
-    const config = await loadRegistrationSecurity(db);
+    const config = await loadRegistrationSecurity(db, { strict: true });
     const securityPolicySnapshot = policySnapshot(config);
     const deviceHash = abuseDigest(deviceHashSecret, 'device', input.installationId);
     const ipHash = abuseDigest(ipHashSecret, 'ip', ip);
@@ -111,7 +111,7 @@ function createRegistrationSessionService({ db, hashSecret, deviceHashSecret, ip
     const face = data.faceVerification || {};
     return { faceVerification: {
       required: face.required !== false,
-      status: ['unverified', 'pending', 'temporary', 'verified', 'review_required', 'failed', 'not_required'].includes(face.status) ? face.status : 'unverified',
+      status: ['unverified', 'pending', 'temporary', 'passed_pending_finalization', 'verified', 'review_required', 'failed', 'not_required'].includes(face.status) ? face.status : 'unverified',
       duplicateCheck: ['unknown', 'clear', 'flagged', 'not_required'].includes(face.duplicateCheck) ? face.duplicateCheck : 'unknown',
       livenessPassed: face.livenessPassed === true,
     }, securityPolicy: data.securityPolicySnapshot, expiresAt: millis(data.expiresAt) };

@@ -5,11 +5,10 @@ import { BLUETAP_COLORS } from '../constants/bluetapTheme';
 
 const {
   REGISTRATION_STEP_NUMBERS,
+  REGISTRATION_STEP_LABELS,
   getRegistrationConnectorStates,
   getRegistrationStepStates,
 } = require('../services/registrationStepStatus');
-
-export const REGISTRATION_STEPS = ['Account', 'Personal', 'Identity', 'Credentials', 'Verify'];
 
 function AnimatedConnector({ state }) {
   const target = state === 'future' ? 0 : 1;
@@ -72,16 +71,17 @@ export function RegistrationHeading({ title, subtitle }) {
 export function RegistrationStepper({
   currentStep,
   completedSteps = [],
-  requiredSteps = REGISTRATION_STEP_NUMBERS,
+  visibleSteps = [],
+  requiredSteps = visibleSteps,
   incompleteSteps = [],
-  visibleSteps = REGISTRATION_STEP_NUMBERS,
   onStepPress,
   disabled = false,
 }) {
   const stepStates = getRegistrationStepStates({ currentStep, completedSteps, requiredSteps, incompleteSteps });
-  const visibleNumbers = Array.isArray(visibleSteps) && visibleSteps.length
+  const visibleNumbers = Array.isArray(visibleSteps)
     ? visibleSteps.filter((number) => REGISTRATION_STEP_NUMBERS.includes(number))
-    : REGISTRATION_STEP_NUMBERS;
+    : [];
+  if (!visibleNumbers.length) return null;
   const visibleStates = visibleNumbers.map((number) => stepStates[number - 1]);
   const connectorStates = getRegistrationConnectorStates(visibleStates);
   const currentVisibleIndex = Math.max(0, visibleNumbers.indexOf(currentStep));
@@ -92,7 +92,7 @@ export function RegistrationStepper({
       {connectorStates.map((state, index) => <AnimatedConnector key={index} state={state} />)}
     </View>
     {visibleNumbers.map((number, visibleIndex) => {
-      const label = REGISTRATION_STEPS[number - 1];
+      const label = REGISTRATION_STEP_LABELS[number];
       const state = stepStates[number - 1];
       const complete = state === 'completed';
       const current = state === 'current';

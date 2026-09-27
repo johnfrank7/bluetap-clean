@@ -15,6 +15,7 @@ import { onAuthStateChanged, reload } from 'firebase/auth';
 
 import { BLUETAP_LOGIN_GRADIENT } from '../constants/bluetapTheme';
 import { auth } from '../firebase';
+import { getPendingRegistration } from '../services/emailVerification';
 import {
   fetchFirestoreUserProfile,
   getPostAuthenticationDestination,
@@ -24,11 +25,11 @@ import {
 } from '../services/authSession';
 import {
   createUnverifiedFaceVerification,
-  isFaceVerified,
   normalizeFaceVerification,
   startFaceVerification,
   subscribeFaceVerification,
 } from '../services/faceVerification';
+const { REGISTRATION_STEP: STEP, unavailableRegistrationRoute } = require('../services/registrationStepStatus');
 
 const isVerificationRole = (role) => role === 'requester' || role === 'distributor';
 
@@ -75,7 +76,11 @@ export default function VerificationPage() {
       unsubscribeVerification = () => {};
 
       if (!user) {
-        if (isActive) router.replace('/login');
+        const draft = getPendingRegistration();
+        const route = draft
+          ? unavailableRegistrationRoute(draft.profile?.securityPolicy, STEP.identity, true) || '/signup?resumeRegistration=true'
+          : '/login';
+        if (isActive) router.replace(route);
         return;
       }
 
@@ -122,8 +127,9 @@ export default function VerificationPage() {
 
         // Users who were already verified before opening this route can continue
         // directly. A newly received verified status remains visible as success.
-        if (isFaceVerified(nextProfile)) {
-          router.replace(getPostAuthenticationDestination(nextProfile));
+        const destination = getPostAuthenticationDestination(nextProfile);
+        if (destination !== '/verification') {
+          router.replace(destination);
           return;
         }
 
