@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { Image, View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BLUETAP_COLORS } from '../constants/bluetapTheme';
 import { useBlueTapTheme } from './BlueTapTheme';
@@ -13,6 +13,7 @@ export default function BlueTapEmptyState({
   style,
   themeColors,
   dark,
+  variant = 'default',
 }) {
   const portalTheme = useBlueTapTheme();
   const colors = themeColors || portalTheme.colors;
@@ -21,8 +22,10 @@ export default function BlueTapEmptyState({
 
   return (
     <View style={[styles.container, compact && styles.containerCompact, style]}>
-      {/* Sad Water Droplet Illustration */}
       <View style={styles.illustrationWrapper}>
+        {variant !== 'default' ? (
+          <ContextIllustration variant={variant} styles={styles} />
+        ) : <>
         <View style={styles.dropletGlow} />
         <LinearGradient
           colors={isDark ? ['#38BDF8', '#0284C7'] : ['#7DD3FC', '#0284C7']}
@@ -46,6 +49,7 @@ export default function BlueTapEmptyState({
 
         {/* Droplet puddle reflection */}
         <View style={[styles.puddle, compact && styles.puddleCompact]} />
+        </>}
       </View>
 
       <Text style={styles.title}>{title}</Text>
@@ -62,6 +66,40 @@ export default function BlueTapEmptyState({
           <Text style={styles.actionButtonText}>{actionLabel}</Text>
         </TouchableOpacity>
       )}
+    </View>
+  );
+}
+
+const ICON_ASSETS = {
+  orders: require('../assets/icons/ballot.png'),
+  management: require('../assets/icons/pencil.png'),
+  people: require('../assets/icons/user.png'),
+  applications: require('../assets/icons/square-plus.png'),
+};
+
+function ContextIllustration({ variant, styles }) {
+  if (ICON_ASSETS[variant]) {
+    return (
+      <View style={styles.contextIconSurface}>
+        <Image source={ICON_ASSETS[variant]} style={styles.contextAsset} resizeMode="contain" />
+      </View>
+    );
+  }
+  if (variant === 'dispatch') {
+    return (
+      <View style={styles.contextIconSurface}>
+        <View style={styles.truck}>
+          <View style={styles.truckCargo} />
+          <View style={styles.truckCab} />
+          <View style={[styles.truckWheel, styles.truckWheelLeft]} />
+          <View style={[styles.truckWheel, styles.truckWheelRight]} />
+        </View>
+      </View>
+    );
+  }
+  return (
+    <View style={styles.contextIconSurface}>
+      <Text style={styles.contextSymbol}>{variant === 'coordination' ? '⇄' : '!'}</Text>
     </View>
   );
 }
@@ -90,6 +128,60 @@ const createStyles = (colors, isDark) =>
       marginBottom: 16,
       position: 'relative',
     },
+    contextIconSurface: {
+      width: 68,
+      height: 68,
+      borderRadius: 22,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: isDark ? colors.surfaceAlt : colors.primarySoft,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    contextAsset: {
+      width: 32,
+      height: 32,
+      tintColor: colors.primary,
+    },
+    contextSymbol: {
+      color: colors.primary,
+      fontSize: 34,
+      fontWeight: '800',
+      lineHeight: 39,
+    },
+    truck: {
+      width: 42,
+      height: 28,
+      position: 'relative',
+    },
+    truckCargo: {
+      position: 'absolute',
+      left: 1,
+      top: 4,
+      width: 25,
+      height: 17,
+      borderRadius: 3,
+      backgroundColor: colors.primary,
+    },
+    truckCab: {
+      position: 'absolute',
+      right: 1,
+      top: 9,
+      width: 14,
+      height: 12,
+      borderTopRightRadius: 5,
+      backgroundColor: colors.primary,
+    },
+    truckWheel: {
+      position: 'absolute',
+      bottom: 1,
+      width: 7,
+      height: 7,
+      borderRadius: 4,
+      backgroundColor: colors.textPrimary,
+    },
+    truckWheelLeft: { left: 8 },
+    truckWheelRight: { right: 5 },
     dropletGlow: {
       position: 'absolute',
       width: 80,

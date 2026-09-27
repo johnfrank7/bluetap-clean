@@ -96,6 +96,7 @@ function OutsideRadiusApprovalQueue({ orders, loading, styles, colors, isDark, o
       ) : orders.length === 0 ? (
         <BlueTapEmptyState
           compact
+          variant="exceptions"
           title="No Delivery Exceptions"
           description="Outside-radius requests that need branch approval will appear here."
           themeColors={colors}
@@ -450,6 +451,7 @@ function BranchTransfersQueue({ data, styles, colors, isDark, onShowToast }) {
       {incoming.length === 0 ? (
         <BlueTapEmptyState
           compact
+          variant="coordination"
           title="No Transfer Requests"
           description="Incoming branch transfer requests will appear here for review."
           themeColors={colors}
@@ -521,6 +523,7 @@ function BranchTransfersQueue({ data, styles, colors, isDark, onShowToast }) {
       {decisions.length === 0 ? (
         <BlueTapEmptyState
           compact
+          variant="coordination"
           title="No Transfer Updates"
           description="Accepted or declined outbound transfer decisions will appear here."
           themeColors={colors}
@@ -590,6 +593,7 @@ function ReceivedRequestsQueue({ orders, loading, styles, colors, isDark, onShow
       {loading ? <View style={styles.emptyContainer}><ActivityIndicator color={colors.primary} /></View> : orders.length === 0 ? (
         <BlueTapEmptyState
           compact
+          variant="orders"
           title="No Orders Awaiting Review"
           description="New branch orders will appear here when they need your review."
           themeColors={colors}
@@ -671,6 +675,7 @@ function BranchOrdersOverview({ data, loading, styles, colors, isDark, onOpenOrd
       {loading ? <View style={styles.emptyContainer}><ActivityIndicator color={colors.primary} /></View> : orders.length === 0 ? (
         <BlueTapEmptyState
           compact
+          variant="management"
           title="No Active Branch Orders"
           description="Orders eligible for review or pre-delivery adjustment will appear here."
           themeColors={colors}

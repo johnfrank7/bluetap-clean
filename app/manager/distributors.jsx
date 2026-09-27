@@ -236,6 +236,7 @@ function DistributorDispatchQueue({ styles, colors, isDark, onShowToast }) {
       ) : dispatchableOrders.length === 0 ? (
         <BlueTapEmptyState
           compact
+          variant="dispatch"
           title="No Orders Awaiting Assignment"
           description="Accepted branch orders will appear here when they are ready for distributor assignment and scheduling."
           themeColors={colors}
@@ -520,6 +521,7 @@ export default function ManagerDistributorsPage() {
           {pendingApplications.length === 0 ? (
             <BlueTapEmptyState
               compact
+              variant="applications"
               title="No Pending Applications"
               description="Distributor applications requesting this branch will appear here."
               themeColors={colors}
@@ -557,6 +559,7 @@ export default function ManagerDistributorsPage() {
               <View style={styles.emptyState}>
                 <BlueTapEmptyState
                   compact
+                  variant="people"
                   title={registeredDistributors.length === 0 ? 'No Registered Distributors' : 'No Matching Distributors'}
                   description={registeredDistributors.length === 0
                     ? 'Approved distributors assigned to this branch will appear here.'

@@ -2,6 +2,7 @@ const { getFirebaseAdmin } = require('../firebase/firebaseAdmin');
 const { requireActiveManager } = require('../auth/authorization');
 const { applyCors } = require('../utils/cors');
 const { OtpError } = require('../utils/otpError');
+const { ensureManagerPublicUid, safeManagerProfile } = require('./profileHandler');
 
 function createManagerContextHandler(getAdmin = getFirebaseAdmin) {
   return async (req, res) => {
@@ -12,8 +13,9 @@ function createManagerContextHandler(getAdmin = getFirebaseAdmin) {
     try {
       const { auth, db } = getAdmin();
       const { decoded, branch } = await requireActiveManager(req, auth, db);
+      const profile = await ensureManagerPublicUid(db, decoded.uid);
       return res.status(200).json({
-        manager: { uid: decoded.uid, role: 'manager', managerStatus: 'active', branchId: branch.id },
+        manager: safeManagerProfile(decoded.uid, profile),
         branch: { id: branch.id, name: branch.name || '', code: branch.code || '', status: 'active', barangay: branch.barangay || '', city: branch.city || '' },
       });
     } catch (error) {

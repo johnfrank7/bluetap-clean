@@ -11,6 +11,8 @@ const notifications = read('app/manager/notifications.jsx');
 const notificationModal = read('components/ManagerNotificationDetailsModal.jsx');
 const managerShell = read('components/ManagerShell.jsx');
 const managerRealtime = read('components/ManagerRealtimeData.jsx');
+const managerProfile = read('app/manager/profile.jsx');
+const emptyState = read('components/BlueTapEmptyState.jsx');
 const notificationHook = read('components/ManagerNotifications.jsx');
 const rules = read('firestore.rules');
 
@@ -22,6 +24,35 @@ test('Manager operational queues use shared BlueTap visual empty states with con
   assert.match(distributors, /BlueTapEmptyState/);
   for (const title of ['No Orders Awaiting Assignment', 'No Registered Distributors', 'No Pending Applications']) {
     assert.match(distributors, new RegExp(title));
+  }
+  for (const variant of ['orders', 'exceptions', 'management', 'coordination']) {
+    assert.match(requests, new RegExp(`variant="${variant}"`));
+  }
+  for (const variant of ['dispatch', 'people', 'applications']) {
+    assert.match(distributors, new RegExp(`variant="${variant}"`));
+  }
+  assert.match(emptyState, /variant = 'default'/);
+  assert.match(emptyState, /ICON_ASSETS/);
+});
+
+test('Manager Profile uses the persistent shared profile and branch cache with scoped retry errors', () => {
+  assert.match(managerRealtime, /watch\(doc\(db, 'users', managerUid\), 'profile'/);
+  assert.match(managerRealtime, /const cached = stateRef\.current/);
+  assert.match(managerRealtime, /primeProfile/);
+  assert.match(managerProfile, /const manager = realtime\.profile/);
+  assert.match(managerProfile, /realtime\.errors\?\.branch \|\| realtime\.errors\?\.profile/);
+  assert.doesNotMatch(managerProfile, /users\.find/);
+  assert.doesNotMatch(managerProfile, /workspaceManager/);
+  assert.doesNotMatch(managerProfile, /session\?\.uid[^\n]*UID|managerUid = session\?\.uid/);
+});
+
+test('Manager Profile exposes only personal edits and canonical public UID display', () => {
+  assert.match(managerProfile, /getProfileUniqueId\(manager \|\| \{\}\)/);
+  assert.match(managerProfile, /updateManagerProfile\(\{ fullName, phone, address \}, selectedImage\)/);
+  assert.match(managerProfile, /normalizePhilippinePhone/);
+  assert.match(managerProfile, /TopToastFeedback/);
+  for (const label of ['UID', 'Full Name', 'Contact Number', 'Email Address', 'Complete Address / Location', 'Branch', 'Access Level']) {
+    assert.match(managerProfile, new RegExp(label));
   }
 });
 

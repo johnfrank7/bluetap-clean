@@ -3,10 +3,12 @@ import { collection, doc, onSnapshot, query, where } from 'firebase/firestore';
 
 import { db } from '../firebase';
 import { getModuleSession } from '../services/authSession';
+import { ensureManagerProfile } from '../services/managerProfile';
 const { getManagerQueues, pendingBranchApplications } = require('../services/managerOperational');
 
 const emptyState = {
   branch: null,
+  profile: null,
   users: [],
   requests: [],
   incomingTransfers: [],
@@ -16,10 +18,15 @@ const emptyState = {
   requestsCount: 0,
   dispatchCount: 0,
   loading: true,
+  branchLoading: true,
+  profileLoading: true,
   error: '',
+  errors: {},
   revision: '',
   branchId: '',
   managerUid: '',
+  retry: () => {},
+  primeProfile: () => {},
 };
 
 const ManagerRealtimeContext = React.createContext(emptyState);
@@ -35,23 +42,46 @@ export function ManagerRealtimeDataProvider({ children }) {
   const branchId = session?.branchId || '';
   const managerUid = session?.uid || '';
   const [state, setState] = React.useState(emptyState);
+  const stateRef = React.useRef(emptyState);
+  const [retryVersion, setRetryVersion] = React.useState(0);
+  const retry = React.useCallback(() => setRetryVersion((value) => value + 1), []);
+  const primeProfile = React.useCallback((profile) => {
+    if (!profile || typeof profile !== 'object') return;
+    setState((previous) => {
+      const next = { ...previous, profile: { ...(previous.profile || {}), ...profile } };
+      stateRef.current = next;
+      return next;
+    });
+  }, []);
 
   React.useEffect(() => {
-    if (!branchId) {
-      setState({ ...emptyState, loading: false });
+    if (!branchId || !managerUid) {
+      const next = { ...emptyState, loading: false, branchLoading: false, profileLoading: false, retry, primeProfile };
+      stateRef.current = next;
+      setState(next);
       return undefined;
     }
 
-    const current = { branch: null, users: [], requests: [], incomingTransfers: [], applicants: [], sourceDecisionEvents: [] };
-    const ready = { branch: false, users: false, requests: false, incomingTransfers: false, applicants: false, sourceDecisionEvents: false };
+    const cached = stateRef.current.branchId === branchId && stateRef.current.managerUid === managerUid ? stateRef.current : emptyState;
+    const current = {
+      branch: cached.branch,
+      profile: cached.profile,
+      users: cached.users,
+      requests: cached.requests,
+      incomingTransfers: cached.incomingTransfers,
+      applicants: cached.applicants,
+      sourceDecisionEvents: cached.sourceDecisionEvents,
+    };
+    const ready = { branch: false, profile: false, users: false, requests: false, incomingTransfers: false, applicants: false, sourceDecisionEvents: false };
     const listenerErrors = {};
     let active = true;
+    let ensureRequested = false;
 
     const publish = () => {
       if (!active) return;
       const loading = !(ready.branch && ready.users && ready.requests);
       const queues = getManagerQueues(current.requests, current.incomingTransfers, branchId);
-      setState({
+      const next = {
         ...current,
         branchId,
         managerUid,
@@ -59,9 +89,16 @@ export function ManagerRealtimeDataProvider({ children }) {
         requestsCount: queues.requestsCount,
         dispatchCount: queues.dispatchCount,
         loading,
+        branchLoading: !ready.branch && !current.branch,
+        profileLoading: !ready.profile && !current.profile,
         error: Object.values(listenerErrors).find(Boolean) || '',
+        errors: { ...listenerErrors },
         revision: revisionFor(current.requests, current.incomingTransfers, current.users),
-      });
+        retry,
+        primeProfile,
+      };
+      stateRef.current = next;
+      setState(next);
     };
 
     const watch = (source, key, mapSnapshot) => onSnapshot(
@@ -89,6 +126,18 @@ export function ManagerRealtimeDataProvider({ children }) {
       watch(doc(db, 'branches', branchId), 'branch', (snapshot) =>
         snapshot.exists() ? { id: snapshot.id, ...snapshot.data() } : null
       ),
+      watch(doc(db, 'users', managerUid), 'profile', (snapshot) => {
+        const profile = snapshot.exists() ? { id: snapshot.id, uid: snapshot.id, ...snapshot.data() } : null;
+        const publicUid = String(profile?.publicUid || profile?.displayUid || profile?.unique_id || '');
+        if (profile && !/^(?:Man|Mgr)-?\d+$/i.test(publicUid) && !ensureRequested) {
+          ensureRequested = true;
+          ensureManagerProfile().catch(() => {
+            listenerErrors.profileEnsure = 'Your public UID could not be loaded. Please try again.';
+            publish();
+          });
+        }
+        return profile;
+      }),
       watch(query(collection(db, 'users'), where('branchId', '==', branchId)), 'users', (snapshot) =>
         snapshot.docs.map((item) => ({ id: item.id, uid: item.id, ...item.data() }))
       ),
@@ -119,10 +168,10 @@ export function ManagerRealtimeDataProvider({ children }) {
       active = false;
       unsubscribers.forEach((unsubscribe) => unsubscribe());
     };
-  }, [branchId, managerUid]);
+  }, [branchId, managerUid, primeProfile, retry, retryVersion]);
 
   return (
-      <ManagerRealtimeContext.Provider value={state.branchId === branchId && state.managerUid === managerUid ? state : { ...emptyState, branchId, managerUid }}>
+      <ManagerRealtimeContext.Provider value={state.branchId === branchId && state.managerUid === managerUid ? state : { ...emptyState, branchId, managerUid, retry, primeProfile }}>
       {children}
     </ManagerRealtimeContext.Provider>
   );

@@ -57,6 +57,12 @@
         {
           "locationWhenInUsePermission": "Allow BlueTap to use your location when choosing a delivery address and nearby provider."
         }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow BlueTap to choose a profile picture."
+        }
       ]
     ],
     "extra": {
