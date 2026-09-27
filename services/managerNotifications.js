@@ -69,12 +69,13 @@ function getManagerNotifications(orders = [], incomingTransfers = [], decisions 
 
 const unreadManagerNotifications = (events, seenIds) => events.filter((event) => !seenIds.has(event.id));
 
-function getManagerNotificationDetail(event = {}) {
-  const order = event.order || {};
+function getManagerNotificationDetail(event) {
+  const source = event || {};
+  const order = source.order || {};
   return {
-    status: event.status || statusOf(order.status),
-    requestId: event.requestId || order.requestId || order.request_id || order.id || '',
-    requesterName: event.requesterName || order.requesterNameSnapshot || order.requesterName || '',
+    status: source.status || statusOf(order.status),
+    requestId: source.requestId || order.requestId || order.request_id || order.id || '',
+    requesterName: source.requesterName || order.requesterNameSnapshot || order.requesterName || '',
     requesterUniqueId: order.requesterUniqueIdSnapshot || order.requesterUniqueId || order.requester_unique_id || '',
     branchName: order.currentBranchNameSnapshot || order.branchNameSnapshot || order.water_station || '',
     items: Array.isArray(order.items) ? order.items.map((item) => ({
@@ -88,8 +89,8 @@ function getManagerNotificationDetail(event = {}) {
     scheduledAt: order.scheduledAt || order.expectedDeliveryDate || null,
     deliveryFee: order.deliveryFeeAtOrder ?? order.deliveryFee,
     total: order.totalAtOrder ?? order.total_cost ?? order.grandTotalAmount,
-    message: event.message || '',
-    at: event.at || null,
+    message: source.message || '',
+    at: source.at || null,
   };
 }
 

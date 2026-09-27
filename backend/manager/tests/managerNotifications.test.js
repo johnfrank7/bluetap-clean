@@ -49,6 +49,14 @@ test('Manager notification details preserve available order context without inve
   assert.equal(detail.total, 125);
 });
 
+test('Manager notification details are safe before a notification is selected', () => {
+  assert.deepEqual(getManagerNotificationDetail(null), {
+    status: '', requestId: '', requesterName: '', requesterUniqueId: '', branchName: '', items: [],
+    deliveryAddress: '', distributorName: '', distributorUniqueId: '', scheduledAt: null,
+    deliveryFee: undefined, total: undefined, message: '', at: null,
+  });
+});
+
 test('Manager notifications skip invalid dates and do not render an invalid schedule event', () => {
   const events = getManagerNotifications([{ id: 'one', branchId: 'branch-a', status: 'scheduled', createdAt: 'invalid',
     distributorDeliveryHistory: [{ event: 'DELIVERY_SCHEDULED', branchId: 'branch-a', createdAt: at }] }], [], [], 'branch-a',
