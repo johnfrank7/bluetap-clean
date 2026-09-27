@@ -2,6 +2,7 @@ import React from 'react';
 import { Text } from 'react-native';
 
 const glyphs = Object.freeze({
+  bell: '\uD83D\uDD14',
   dashboard: '▦', requests: '▤', branches: '⌘', accounts: '◫', distributors: '◉', products: '◇', analytics: '▲', security: '◈', theme: '◐', logout: '⇥', menu: '☰', close: '×', check: '✓',
 });
 

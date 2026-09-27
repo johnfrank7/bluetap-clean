@@ -19,6 +19,7 @@ import { useAdminTheme } from './AdminTheme';
 import AdminIcon from './AdminIcon';
 import { getModuleSession, signOutAndClearSessions } from '../services/authSession';
 import { useManagerRealtimeData } from './ManagerRealtimeData';
+import { useManagerNotifications } from './ManagerNotifications';
 
 export const MANAGER_COLORS = {
   navy: BLUETAP_COLORS.primary,
@@ -155,14 +156,11 @@ export default function ManagerShell({
   const { width } = useWindowDimensions();
   const compact = width < 900;
   const managerSession = getModuleSession('manager');
-  const { requests, incomingTransfers } = useManagerRealtimeData();
+  const { requestsCount, dispatchCount } = useManagerRealtimeData();
+  const { unreadCount } = useManagerNotifications();
   const [collapsed, setCollapsed] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [confirmLogout, setConfirmLogout] = useState(false);
-  const actionableStatuses = new Set(['pending', 'outside_radius_pending_approval', 'awaiting_distributor_assignment', 'delivery_failed']);
-  const actionableRequestsCount = requests.filter((request) =>
-    actionableStatuses.has(String(request.status || '').trim().toLowerCase().replace(/[\s-]+/g, '_'))
-  ).length + incomingTransfers.length;
 
   const sidebarWidth = useRef(new Animated.Value(DESKTOP_WIDTH)).current;
   const drawerProgress = useRef(new Animated.Value(0)).current;
@@ -262,8 +260,10 @@ export default function ManagerShell({
         {NAV_ITEMS.map((item) => {
           const isActive = active === item.key;
           const isReq = item.key === 'requests';
-          const label = isReq && actionableRequestsCount > 0
-            ? `Requests [${actionableRequestsCount}]`
+          const isDispatch = item.key === 'distributors';
+          const count = isReq ? requestsCount : isDispatch ? dispatchCount : 0;
+          const label = (isReq || isDispatch) && count > 0
+            ? `${item.label} [${count}]`
             : item.label;
 
           return (
@@ -288,9 +288,9 @@ export default function ManagerShell({
                     <Text numberOfLines={1} style={styles.navText}>
                       {item.label}
                     </Text>
-                    {isReq && (
-                      <View style={[styles.badgePill, { backgroundColor: actionableRequestsCount > 0 ? colors.warning : 'rgba(255,255,255,0.2)' }]}>
-                        <Text style={styles.badgePillText}>{actionableRequestsCount}</Text>
+                    {(isReq || isDispatch) && (
+                      <View style={[styles.badgePill, { backgroundColor: count > 0 ? colors.warning : 'rgba(255,255,255,0.2)' }]}>
+                        <Text style={styles.badgePillText}>{count}</Text>
                       </View>
                     )}
                   </View>
@@ -320,7 +320,7 @@ export default function ManagerShell({
         {!compact && renderSidebar(collapsed)}
 
         <View style={styles.main}>
-          <View style={[styles.header, { backgroundColor: colors.header, borderBottomColor: colors.border }]}>
+          <View style={[styles.header, compact && styles.compactHeader, { backgroundColor: colors.header, borderBottomColor: colors.border }]}>
             <TouchableOpacity
               accessibilityRole="button"
               accessibilityLabel="Toggle navigation"
@@ -345,13 +345,17 @@ export default function ManagerShell({
               )}
             </View>
 
-            <View style={[styles.managerBadge, { backgroundColor: colors.primarySoft, borderColor: colors.border }]}>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Notifications: ${unreadCount} unread`} onPress={() => navigate('/manager/notifications')} style={[styles.notificationButton, { backgroundColor: colors.primarySoft, borderColor: colors.border }]}>
+              <AdminIcon name="bell" color={colors.primary} size={20} />
+              {unreadCount > 0 && <View style={[styles.notificationCount, { backgroundColor: colors.danger }]}><Text style={styles.notificationCountText}>{unreadCount > 99 ? '99+' : unreadCount}</Text></View>}
+            </TouchableOpacity>
+            {!compact && <View style={[styles.managerBadge, { backgroundColor: colors.primarySoft, borderColor: colors.border }]}>
               <AdminIcon name="security" color={colors.primary} size={16} />
               <Text style={[styles.managerBadgeText, { color: colors.primary }]}>Manager</Text>
-            </View>
+            </View>}
           </View>
 
-          <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+          <ScrollView contentContainerStyle={[styles.content, compact && styles.compactContent]} keyboardShouldPersistTaps="handled">
             {children}
           </ScrollView>
         </View>
@@ -425,13 +429,18 @@ const styles = StyleSheet.create({
   logoutText: { color: '#FFE1E1', fontWeight: '900', fontSize: 13 },
   main: { flex: 1, minWidth: 0 },
   header: { minHeight: 92, flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 24, borderBottomWidth: 1 },
+  compactHeader: { paddingHorizontal: 14 },
   menuButton: { width: 42, height: 42, borderRadius: 11, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   heading: { flex: 1, minWidth: 0 },
   title: { fontSize: 24, fontWeight: '900' },
   subtitle: { fontSize: 13, lineHeight: 18, marginTop: 3 },
   managerBadge: { minHeight: 34, flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1, borderRadius: 999, paddingHorizontal: 10 },
   managerBadgeText: { fontSize: 12, fontWeight: '900' },
+  notificationButton: { minWidth: 42, height: 42, borderWidth: 1, borderRadius: 11, alignItems: 'center', justifyContent: 'center', position: 'relative' },
+  notificationCount: { position: 'absolute', right: -5, top: -6, minWidth: 18, height: 18, paddingHorizontal: 3, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  notificationCountText: { color: '#FFFFFF', fontSize: 10, fontWeight: '900' },
   content: { paddingHorizontal: 28, paddingBottom: 32, paddingTop: 14, flexGrow: 1 },
+  compactContent: { paddingHorizontal: 14 },
   backdrop: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, zIndex: 3 },
   modalBackdrop: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 20 },
   modal: { width: '100%', maxWidth: 420, borderWidth: 1, borderRadius: 18, padding: 22 },

@@ -11,6 +11,7 @@ Roles are `admin`, `manager`, `distributor`, and `requester`. The former operati
 - Only Admin may read or modify Admin-only registration-security settings; Manager, Requester, and Distributor access remains forbidden.
 - The unified **Security Settings** workspace is Admin-only. Session-policy changes use the same server-authoritative authorization and audit guarantees as registration-security changes.
 - Treat the persisted backend registration-security policy as authoritative. Client toggle state is only an editable draft and must never grant, remove, or prove a security requirement.
+- Frontend omission of a disabled security step never overrides backend enforcement. Backend authoritative policy remains the final security gate.
 - Audit every registration-security change with the actor UID, previous and new verification settings and limits, and a timestamp. Never include credentials or secrets.
 - Manager is scoped to an assigned active branch; keep branch assignment enforcement on the backend.
 - Manager authentication uses the shared public `/login` flow. Manager authorization still requires the trusted Firebase claim, `users/{uid}.role === "manager"`, active Manager status, and an assigned active branch on the server.
@@ -22,6 +23,7 @@ Roles are `admin`, `manager`, `distributor`, and `requester`. The former operati
 - Every Admin account edit is backend-authorized and validates the target UID, safe field changes, role transition, active Manager branch, Distributor workflow state, session override, and activation transition.
 - No general account UI or API may create or escalate an account to Admin. Manager branch assignment and Distributor approval state remain protected server-side workflows.
 - Only trusted Admin backend actions may write a Distributor's operational `branchId`, `distributorStatus`, approval/rejection metadata, or requested-branch metadata. Firestore client rules must reject those fields from the Distributor and Manager clients.
+- Manager may view branch-relevant public Distributor applications where rules permit `requestedBranchId == current Manager branchId`, but Admin remains authoritative for approval and rejection unless backend policy explicitly changes. Application visibility never grants branch order ownership or dispatch authority.
 - Approving a pending Distributor must atomically validate Admin authority, pending Distributor status, and the target active branch before writing `distributorStatus: "active"`, `branchId`, and approval metadata. Preserve requested-branch history; rejection clears `branchId` while preserving the request and safe reason.
 - Admin Accounts & Audit exposes active branch assignment and branch-change auditing. It must not permit a Distributor to self-assign or a Manager to impersonate the Admin branch-assignment workflow.
 - Audit every sensitive account change with safe before/after metadata; never record passwords, tokens, OTP values, or biometric data.

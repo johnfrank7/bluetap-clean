@@ -19,9 +19,12 @@ function fixture() {
     ['requests/order-a', { requestId: 'BT-A', requester_id: 'requester-1', requesterNameSnapshot: 'Requester A', requesterUniqueIdSnapshot: 'REQ-001', contactNumberSnapshot: '09123456789', container: 'Exchange container', branchId: 'branch-a', currentBranchId: 'branch-a', initialBranchId: 'branch-a', branchNameSnapshot: 'Branch A', status: 'awaiting_distributor_assignment', deliveryLocation: { latitude: 10.29, longitude: 123.6 }, distanceKmSnapshot: 5.2, serviceRadiusKmSnapshot: 5, items: [{ productId: 'product-1', productNameSnapshot: 'Refill', quantity: 2, totalAtOrder: 70 }], totalAtOrder: 70 }],
     ['requests/order-b', { requestId: 'BT-B', requester_id: 'requester-2', requesterNameSnapshot: 'Requester B', branchId: 'branch-b', currentBranchId: 'branch-b', initialBranchId: 'branch-b', branchNameSnapshot: 'Branch B', status: 'awaiting_distributor_assignment' }],
     ['requests/order-decline', { requestId: 'BT-D', requester_id: 'requester-3', requesterNameSnapshot: 'Requester Decline', branchId: 'branch-a', currentBranchId: 'branch-a', initialBranchId: 'branch-a', branchNameSnapshot: 'Branch A', status: 'awaiting_distributor_assignment' }],
+    ['requests/order-pending', { requestId: 'BT-P', requesterUid: 'requester-p', requesterNameSnapshot: 'Requester Pending', branchId: 'branch-a', currentBranchId: 'branch-a', status: 'pending' }],
+    ['requests/order-pending-other', { requestId: 'BT-Q', requesterUid: 'requester-q', branchId: 'branch-b', currentBranchId: 'branch-b', status: 'pending' }],
     ['products/product-1', { name: 'Refill', product_name: 'Refill', active: true, price: 35, branchIds: ['branch-a', 'branch-b'] }],
     ['products/product-2', { name: 'Dispenser', product_name: 'Dispenser', active: true, price: 150, branchIds: ['branch-a'] }],
     ['requesterActiveOrders/requester-1', { orderId: 'order-a', requesterUid: 'requester-1' }],
+    ['requesterActiveOrders/requester-p', { orderId: 'order-pending', requesterUid: 'requester-p' }],
   ]);
   const authUsers = new Map([
     ['manager-a', { disabled: false }], ['manager-b', { disabled: false }], ['manager-c', { disabled: false }],
@@ -50,11 +53,31 @@ async function call(handler, method, token, body) { const res = response(); awai
 
 const defaultSchedule = new Date(Date.now() + 86400000).toISOString();
 
+test('normal review is branch-scoped, must precede dispatch, and rejection releases the matching guard', async () => {
+  const f = fixture(); const handler = createManagerDispatchHandler(f.getAdmin);
+  assert.equal((await call(handler, 'PATCH', 'manager-a-token', { orderId: 'order-pending', action: 'assign-distributor', distributorUid: 'distributor-a', scheduledAt: defaultSchedule })).statusCode, 409);
+  assert.equal((await call(handler, 'PATCH', 'manager-b-token', { orderId: 'order-pending', action: 'accept-order' })).statusCode, 403);
+  assert.equal((await call(handler, 'PATCH', 'manager-a-token', { orderId: 'order-pending', action: 'reject-order' })).statusCode, 400);
+  const accepted = await call(handler, 'PATCH', 'manager-a-token', { orderId: 'order-pending', action: 'accept-order' });
+  assert.equal(accepted.statusCode, 200);
+  assert.equal(accepted.body.order.status, 'awaiting_distributor_assignment');
+  assert.equal((await call(handler, 'PATCH', 'manager-a-token', { orderId: 'order-pending', action: 'reject-order', rejectionReason: 'Late' })).statusCode, 409);
+  assert.equal((await call(handler, 'PATCH', 'manager-a-token', { orderId: 'order-pending', action: 'assign-distributor', distributorUid: 'distributor-a', scheduledAt: defaultSchedule })).statusCode, 200);
+  const rejected = await call(handler, 'PATCH', 'manager-b-token', { orderId: 'order-pending-other', action: 'reject-order', rejectionReason: 'Unavailable item' });
+  assert.equal(rejected.statusCode, 200);
+  assert.equal(f.records.get('requests/order-pending-other').rejectionReason, 'Unavailable item');
+  f.records.set('requests/order-pending-second', { requesterUid: 'requester-p', branchId: 'branch-a', status: 'pending' });
+  f.records.set('requesterActiveOrders/requester-p', { orderId: 'order-pending-second' });
+  assert.equal((await call(handler, 'PATCH', 'manager-a-token', { orderId: 'order-pending-second', action: 'reject-order', rejectionReason: 'No stock' })).statusCode, 200);
+  assert.equal(f.records.has('requesterActiveOrders/requester-p'), false);
+  assert.equal(f.records.get('requests/order-pending-second').status, 'rejected');
+});
+
 test('current owning Branch Manager can assign and reassign only eligible same-branch Distributors', async () => {
   const f = fixture(); const handler = createManagerDispatchHandler(f.getAdmin);
   const managerA = await call(handler, 'GET', 'manager-a-token'); const managerB = await call(handler, 'GET', 'manager-b-token');
-  assert.deepEqual(managerA.body.orders.map((order) => order.id).sort(), ['order-a', 'order-decline']);
-  assert.deepEqual(managerB.body.orders.map((order) => order.id), ['order-b']);
+  assert.deepEqual(managerA.body.orders.map((order) => order.id).sort(), ['order-a', 'order-decline', 'order-pending']);
+  assert.deepEqual(managerB.body.orders.map((order) => order.id).sort(), ['order-b', 'order-pending-other']);
   assert.equal((await call(handler, 'PATCH', 'manager-a-token', { orderId: 'order-a', action: 'assign-distributor', distributorUid: 'distributor-b', scheduledAt: defaultSchedule })).statusCode, 409);
   assert.equal((await call(handler, 'PATCH', 'manager-a-token', { orderId: 'order-a', action: 'assign-distributor', distributorUid: 'distributor-inactive', scheduledAt: defaultSchedule })).statusCode, 409);
   const assigned = await call(handler, 'PATCH', 'manager-a-token', { orderId: 'order-a', action: 'assign-distributor', distributorUid: 'distributor-a', scheduledAt: defaultSchedule });

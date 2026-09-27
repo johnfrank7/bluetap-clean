@@ -7,14 +7,13 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from 'react-native';
 
 import {
   decideOutsideRadiusOrder,
   dispatchManagerOrder,
-  getManagerDispatch,
-  getOutsideRadiusOrders,
 } from '../../services/managerOrderApprovals';
 import { subscribeProducts } from '../../services/products';
 import { haversineDistanceKm } from '../../services/location';
@@ -23,6 +22,8 @@ import AdminIcon from '../../components/AdminIcon';
 import TopToastFeedback from '../../components/TopToastFeedback';
 import ManagerShell, { MANAGER_COLORS, ManagerPill } from '../../components/ManagerShell';
 import { useManagerRealtimeData } from '../../components/ManagerRealtimeData';
+import { parseTimestamp } from '../../services/notificationTimestamp';
+const { getManagerQueues, toManagerOrder } = require('../../services/managerOperational');
 
 
 
@@ -35,20 +36,10 @@ const EDITABLE_STATUSES = new Set([
   'scheduled',
 ]);
 
-const TIME_SLOT_OPTIONS = [
-  { label: '09:00 AM', hours: 9, minutes: 0 },
-  { label: '11:00 AM', hours: 11, minutes: 0 },
-  { label: '01:00 PM', hours: 13, minutes: 0 },
-  { label: '03:00 PM', hours: 15, minutes: 0 },
-  { label: '05:00 PM', hours: 17, minutes: 0 },
-];
-
-function buildScheduleDate(dayOffset, slot) {
-  const target = new Date();
-  target.setDate(target.getDate() + dayOffset);
-  target.setHours(slot.hours, slot.minutes, 0, 0);
-  return target;
-}
+const scheduleLabel = (value) => {
+  const date = parseTimestamp(value);
+  return date ? date.toLocaleString() : '';
+};
 
 const orderProducts = (order) =>
   order.items?.map((item) => `${item.quantity} × ${item.productNameSnapshot}`).filter(Boolean).join(', ') || 'Order products';
@@ -56,27 +47,9 @@ const orderProducts = (order) =>
 const orderDistance = (order) =>
   order.distanceKmSnapshot == null ? 'Distance unavailable' : `Approx. ${Number(order.distanceKmSnapshot).toFixed(1)} km`;
 
-function OutsideRadiusApprovalQueue({ styles, colors, onOrderApproved, onShowToast }) {
-  const [orders, setOrders] = useState([]);
-  const [loading, setLoading] = useState(true);
+function OutsideRadiusApprovalQueue({ orders, loading, styles, colors, onShowToast }) {
   const [error, setError] = useState('');
   const [updatingId, setUpdatingId] = useState('');
-
-  const load = async () => {
-    setLoading(true);
-    setError('');
-    try {
-      setOrders(await getOutsideRadiusOrders());
-    } catch (loadFailure) {
-      setError(loadFailure.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    load();
-  }, []);
 
   const decide = async (order, action) => {
     if (updatingId) return;
@@ -84,9 +57,7 @@ function OutsideRadiusApprovalQueue({ styles, colors, onOrderApproved, onShowToa
     setError('');
     try {
       await decideOutsideRadiusOrder(order.id, action);
-      setOrders((current) => current.filter((item) => item.id !== order.id));
       if (action === 'approve') {
-        onOrderApproved?.();
         onShowToast?.('Outside-radius order approved.', 'success');
       } else {
         onShowToast?.('Outside-radius order declined.', 'info');
@@ -109,9 +80,6 @@ function OutsideRadiusApprovalQueue({ styles, colors, onOrderApproved, onShowToa
             Review delivery requests originating outside your branch's standard service radius.
           </Text>
         </View>
-        <TouchableOpacity onPress={load} disabled={loading} style={styles.refreshButton}>
-          <Text style={styles.refreshText}>{loading ? 'Loading…' : 'Refresh'}</Text>
-        </TouchableOpacity>
       </View>
 
       {!!error && (
@@ -129,7 +97,8 @@ function OutsideRadiusApprovalQueue({ styles, colors, onOrderApproved, onShowToa
           <Text style={styles.emptyText}>No outside-radius requests are waiting for approval.</Text>
         </View>
       ) : (
-        orders.map((order) => {
+        <ScrollView nestedScrollEnabled style={styles.sectionScroll} contentContainerStyle={styles.sectionContent}>
+        {orders.map((order) => {
           const isUpdating = updatingId === order.id;
           const products =
             order.items?.map((item) => `${item.quantity} × ${item.productNameSnapshot}`).filter(Boolean).join(', ') ||
@@ -176,26 +145,20 @@ function OutsideRadiusApprovalQueue({ styles, colors, onOrderApproved, onShowToa
               </View>
             </View>
           );
-        })
+        })}
+        </ScrollView>
       )}
     </View>
   );
 }
 
-function EditOrderModal({ visible, order, distributors = [], onClose, onSaveSuccess, colors, styles, onShowToast }) {
+function EditOrderModal({ visible, order, onClose, onSaveSuccess, colors, styles }) {
   const [catalogProducts, setCatalogProducts] = useState([]);
   const [items, setItems] = useState([]);
   const [notes, setNotes] = useState('');
   const [container, setContainer] = useState('');
   const [saving, setSaving] = useState(false);
   const [editError, setEditError] = useState('');
-
-  // Distributor assignment state
-  const [selectedDistributorUid, setSelectedDistributorUid] = useState('');
-  const [selectedDayOffset, setSelectedDayOffset] = useState(0);
-  const [selectedSlotIndex, setSelectedSlotIndex] = useState(0);
-  const [assigning, setAssigning] = useState(false);
-  const [assignError, setAssignError] = useState('');
 
   const isEditable = order && EDITABLE_STATUSES.has(order.status);
 
@@ -224,52 +187,8 @@ function EditOrderModal({ visible, order, distributors = [], onClose, onSaveSucc
       setNotes(order.notes || order.specialInstructions || '');
       setContainer(order.container || '');
       setEditError('');
-      setSelectedDistributorUid(order.assignedDistributorUid || order.distributor_id || (distributors[0]?.uid || ''));
-      setSelectedDayOffset(0);
-      setSelectedSlotIndex(0);
-      setAssignError('');
     }
-  }, [order, distributors, catalogProducts]);
-
-  const handleAssignDistributor = async () => {
-    if (!selectedDistributorUid) {
-      setAssignError('Please select a distributor.');
-      return;
-    }
-    const slot = TIME_SLOT_OPTIONS[selectedSlotIndex] || TIME_SLOT_OPTIONS[0];
-    const scheduledAt = buildScheduleDate(selectedDayOffset, slot);
-
-    if (scheduledAt.getTime() < Date.now() - 5 * 60 * 1000) {
-      setAssignError('Please select a current or future delivery time slot.');
-      return;
-    }
-
-    setAssigning(true);
-    setAssignError('');
-    const isReassign = !!(order.assignedDistributorUid || order.distributor_id);
-    try {
-      await dispatchManagerOrder(
-        order.id,
-        isReassign ? 'reassign-distributor' : 'assign-distributor',
-        {
-          distributorUid: selectedDistributorUid,
-          scheduledAt: scheduledAt.toISOString(),
-        }
-      );
-      onShowToast?.(
-        isReassign ? 'Distributor reassigned successfully.' : 'Distributor assigned and delivery scheduled.',
-        'success'
-      );
-      onSaveSuccess?.();
-      onClose();
-    } catch (err) {
-      const msg = err.message || 'Failed to assign distributor.';
-      setAssignError(msg);
-      onShowToast?.(msg, 'error');
-    } finally {
-      setAssigning(false);
-    }
-  };
+  }, [order, catalogProducts]);
 
   const updateQuantity = (index, delta) => {
     setItems((curr) =>
@@ -443,87 +362,6 @@ function EditOrderModal({ visible, order, distributors = [], onClose, onSaveSucc
               )}
             </View>
 
-            {/* Distributor & Delivery Schedule Section */}
-            <View style={styles.modalSection}>
-              <Text style={styles.modalSectionTitle}>Distributor & Delivery Schedule</Text>
-              <Text style={styles.scheduleCurrentSub}>
-                Current Assigned: {order.assignedDistributorNameSnapshot || order.assignedDistributorName || order.distributor_name || 'Not assigned'}
-                {order.scheduledAt ? ` · Scheduled: ${new Date(order.scheduledAt).toLocaleString()}` : ''}
-              </Text>
-
-              <Text style={[styles.subLabel, { marginTop: 8 }]}>Select Distributor:</Text>
-              {distributors.length === 0 ? (
-                <Text style={styles.panelEmptyText}>No eligible distributors found for this branch.</Text>
-              ) : (
-                <View style={styles.distributorList}>
-                  {distributors.map((distributor) => {
-                    const isSelected = selectedDistributorUid === distributor.uid;
-                    return (
-                      <TouchableOpacity
-                        key={distributor.uid}
-                        onPress={() => setSelectedDistributorUid(distributor.uid)}
-                        style={[styles.distributorOption, isSelected && styles.distributorOptionSelected]}
-                      >
-                        <View style={[styles.radioCircle, isSelected && styles.radioCircleSelected]}>
-                          {isSelected && <View style={styles.radioDot} />}
-                        </View>
-                        <View style={{ flex: 1 }}>
-                          <Text style={[styles.distributorName, isSelected && styles.distributorNameSelected]}>
-                            {distributor.name}
-                          </Text>
-                          <Text style={styles.distributorSub}>Eligible · This Branch</Text>
-                        </View>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-              )}
-
-              <Text style={[styles.subLabel, { marginTop: 10 }]}>Delivery Date:</Text>
-              <View style={styles.pillGroup}>
-                {['Today', 'Tomorrow', 'In 2 Days'].map((label, index) => (
-                  <TouchableOpacity
-                    key={label}
-                    onPress={() => setSelectedDayOffset(index)}
-                    style={[styles.schedulePill, selectedDayOffset === index && styles.schedulePillActive]}
-                  >
-                    <Text style={[styles.schedulePillText, selectedDayOffset === index && styles.schedulePillTextActive]}>
-                      {label}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-
-              <Text style={[styles.subLabel, { marginTop: 8 }]}>Time Slot:</Text>
-              <View style={styles.pillGroup}>
-                {TIME_SLOT_OPTIONS.map((slot, index) => (
-                  <TouchableOpacity
-                    key={slot.label}
-                    onPress={() => setSelectedSlotIndex(index)}
-                    style={[styles.schedulePill, selectedSlotIndex === index && styles.schedulePillActive]}
-                  >
-                    <Text style={[styles.schedulePillText, selectedSlotIndex === index && styles.schedulePillTextActive]}>
-                      {slot.label}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-
-              {!!assignError && (
-                <Text style={styles.scheduleErrorText}>{assignError}</Text>
-              )}
-
-              <TouchableOpacity
-                disabled={assigning || !selectedDistributorUid}
-                onPress={handleAssignDistributor}
-                style={[styles.confirmAssignmentButton, (assigning || !selectedDistributorUid) && styles.actionDisabled]}
-              >
-                <Text style={styles.confirmAssignmentText}>
-                  {assigning ? 'Saving…' : (order.assignedDistributorUid || order.distributor_id) ? 'Reassign Distributor & Schedule' : 'Assign Distributor & Schedule'}
-                </Text>
-              </TouchableOpacity>
-            </View>
-
             {!!editError && (
               <View style={styles.errorBanner}>
                 <Text style={styles.errorBannerText}>{editError}</Text>
@@ -552,7 +390,7 @@ function EditOrderModal({ visible, order, distributors = [], onClose, onSaveSucc
   );
 }
 
-function BranchTransfersQueue({ data, styles, onRefresh, colors, onShowToast }) {
+function BranchTransfersQueue({ data, styles, colors, onShowToast }) {
   const [updatingId, setUpdatingId] = useState('');
   const [decliningOrderId, setDecliningOrderId] = useState('');
   const [declineReason, setDeclineReason] = useState('');
@@ -566,7 +404,6 @@ function BranchTransfersQueue({ data, styles, onRefresh, colors, onShowToast }) 
       await dispatchManagerOrder(orderId, action, payload);
       setDecliningOrderId('');
       setDeclineReason('');
-      onRefresh?.();
       const isAccept = action === 'accept-transfer';
       onShowToast?.(
         isAccept ? 'Transfer request accepted.' : 'Transfer request declined.',
@@ -601,6 +438,7 @@ function BranchTransfersQueue({ data, styles, onRefresh, colors, onShowToast }) 
         </View>
       )}
 
+      <ScrollView nestedScrollEnabled style={styles.sectionScroll} contentContainerStyle={styles.sectionContent}>
       {/* Incoming Transfers */}
       <Text style={[styles.subSectionTitle, { marginTop: 10 }]}>Incoming Transfer Requests ({incoming.length})</Text>
       {incoming.length === 0 ? (
@@ -679,6 +517,7 @@ function BranchTransfersQueue({ data, styles, onRefresh, colors, onShowToast }) 
                 {event.targetBranchName || 'Target branch'} {accepted ? 'accepted' : 'declined'} the transfer of Order #
                 {event.requestId || 'order'}.
               </Text>
+              {!!scheduleLabel(event.decidedAt) && <Text style={styles.detailLine}>{scheduleLabel(event.decidedAt)}</Text>}
               {!accepted && !!event.declineReason && (
                 <Text style={styles.declineReasonText}>Reason: {event.declineReason}</Text>
               )}
@@ -686,96 +525,88 @@ function BranchTransfersQueue({ data, styles, onRefresh, colors, onShowToast }) 
           );
         })
       )}
+      </ScrollView>
     </View>
   );
 }
 
-function ReceivedRequestsQueue({ data, styles, onRefresh, colors, onOpenOrder }) {
-  const RECEIVED_STATUSES = useMemo(
-    () => new Set(['awaiting_distributor_assignment', 'pending', 'distributor_assigned', 'accepted', 'scheduled']),
-    []
-  );
+function ReceivedRequestsQueue({ orders, loading, styles, colors, onShowToast }) {
+  const [updatingId, setUpdatingId] = useState('');
+  const [rejectingId, setRejectingId] = useState('');
+  const [reason, setReason] = useState('');
+  const [error, setError] = useState('');
 
-  const receivedOrders = useMemo(() => {
-    return (data.orders || []).filter((order) => RECEIVED_STATUSES.has((order.status || '').toLowerCase()));
-  }, [data.orders, RECEIVED_STATUSES]);
+  const decide = async (order, action) => {
+    if (updatingId) return;
+    if (action === 'reject-order' && !reason.trim()) {
+      setError('Add a reason for rejecting this order.');
+      return;
+    }
+    setUpdatingId(order.id);
+    setError('');
+    try {
+      await dispatchManagerOrder(order.id, action, action === 'reject-order' ? { rejectionReason: reason.trim() } : {});
+      setRejectingId('');
+      setReason('');
+      onShowToast?.(action === 'accept-order' ? 'Order accepted for dispatch.' : 'Order rejected.', action === 'accept-order' ? 'success' : 'info');
+    } catch (failure) {
+      setError(failure.message || 'Unable to review order.');
+      onShowToast?.(failure.message || 'Unable to review order.', 'error');
+    } finally {
+      setUpdatingId('');
+    }
+  };
 
   return (
     <View style={styles.card}>
       <View style={styles.cardHeaderRow}>
-        <View>
+        <View style={{ flex: 1 }}>
           <Text style={styles.eyebrow}>UPCOMING / NORMAL ORDERS</Text>
-          <Text style={styles.cardTitle}>Upcoming & Active Branch Orders</Text>
-          <Text style={styles.helperText}>
-            Review customer orders awaiting action, assign distributors, and schedule branch delivery.
-          </Text>
+          <Text style={styles.cardTitle}>Upcoming & Active Branch Orders ({orders.length})</Text>
+          <Text style={styles.helperText}>Accept a branch order for dispatch or reject it with a reason.</Text>
         </View>
-        <TouchableOpacity onPress={onRefresh} style={styles.refreshButton}>
-          <Text style={styles.refreshText}>Refresh</Text>
-        </TouchableOpacity>
       </View>
-
-      {receivedOrders.length === 0 ? (
-        <View style={styles.emptyContainer}>
-          <Text style={styles.emptyText}>No active or received orders requiring branch action.</Text>
-        </View>
-      ) : (
-        receivedOrders.map((order) => {
-          const isAssigned = !!(order.assignedDistributorUid || order.distributor_id);
-          const tone =
-            order.status === 'awaiting_distributor_assignment'
-              ? 'amber'
-              : order.status === 'accepted'
-              ? 'cyan'
-              : order.status === 'scheduled'
-              ? 'green'
-              : 'blue';
-
-          return (
-            <View key={order.id} style={styles.orderItem}>
-              <View style={styles.orderHeaderRow}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.requesterName}>{order.requesterName || 'Requester'}</Text>
-                  <Text style={styles.orderIdText}>#{order.requestId || order.id}</Text>
-                </View>
-                <ManagerPill tone={tone}>{order.status?.replace(/_/g, ' ')}</ManagerPill>
+      {!!error && <View accessibilityRole="alert" style={styles.errorBanner}><Text style={styles.errorBannerText}>{error}</Text></View>}
+      {loading ? <View style={styles.emptyContainer}><ActivityIndicator color={colors.primary} /></View> : orders.length === 0 ? <View style={styles.emptyContainer}><Text style={styles.emptyText}>No normal orders awaiting review.</Text></View> : (
+        <ScrollView nestedScrollEnabled style={styles.sectionScroll} contentContainerStyle={styles.sectionContent}>
+          {orders.map((order) => <View key={order.id} style={styles.orderItem}>
+            <View style={styles.orderHeaderRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.requesterName}>{order.requesterName || 'Requester'}</Text>
+                <Text style={styles.orderIdText}>#{order.requestId || order.id}</Text>
               </View>
-
-              <Text style={styles.productsSummary}>{orderProducts(order)}</Text>
-
-              <View style={styles.detailsBlock}>
-                <Text style={styles.detailLine}>Delivery: {order.address || 'Address provided'}</Text>
-                <Text style={styles.detailLine}>Distance: {orderDistance(order)}</Text>
-                {order.deliveryFeeAtOrder ? (
-                  <Text style={styles.detailLine}>Delivery Fee: {formatAmount(order.deliveryFeeAtOrder)}</Text>
-                ) : null}
-                <Text style={styles.detailLine}>
-                  Distributor: {order.assignedDistributorNameSnapshot || order.assignedDistributorName || order.distributor_name || 'Not assigned'}
-                  {order.scheduledAt ? ` · Scheduled: ${new Date(order.scheduledAt).toLocaleString()}` : ''}
-                </Text>
-                <Text style={styles.amountText}>{formatAmount(order.totalAtOrder)}</Text>
-              </View>
-
-              <View style={styles.actionRow}>
-                <TouchableOpacity onPress={() => onOpenOrder(order)} style={styles.editOrderBtn}>
-                  <Text style={styles.editOrderBtnText}>
-                    {isAssigned ? 'Reassign / Edit Order' : 'Assign Distributor & Schedule'}
-                  </Text>
-                </TouchableOpacity>
-              </View>
+              <ManagerPill tone="blue">Pending review</ManagerPill>
             </View>
-          );
-        })
+            <Text style={styles.productsSummary}>{orderProducts(order)}</Text>
+            <Text style={styles.detailLine}>Delivery: {order.address || 'Address provided'}</Text>
+            <Text style={styles.detailLine}>Distance: {orderDistance(order)}</Text>
+            <Text style={styles.amountText}>{formatAmount(order.totalAtOrder)}</Text>
+            <View style={styles.actionRow}>
+              <TouchableOpacity disabled={!!updatingId} onPress={() => decide(order, 'accept-order')} style={[styles.approveButton, !!updatingId && styles.actionDisabled]}>
+                <Text style={styles.approveButtonText}>{updatingId === order.id ? 'Saving?' : 'Accept'}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity disabled={!!updatingId} onPress={() => { setRejectingId(rejectingId === order.id ? '' : order.id); setReason(''); setError(''); }} style={styles.declineButton}>
+                <Text style={styles.declineButtonText}>Reject</Text>
+              </TouchableOpacity>
+            </View>
+            {rejectingId === order.id && <View style={styles.declineBox}>
+              <TextInput value={reason} onChangeText={setReason} maxLength={240} multiline placeholder="Reason shown to the requester" placeholderTextColor={colors.placeholder} style={styles.inputField} />
+              <TouchableOpacity disabled={!!updatingId} onPress={() => decide(order, 'reject-order')} style={styles.confirmDeclineBtn}>
+                <Text style={styles.confirmDeclineText}>Confirm Rejection</Text>
+              </TouchableOpacity>
+            </View>}
+          </View>)}
+        </ScrollView>
       )}
     </View>
   );
 }
 
-function BranchOrdersOverview({ data, styles, onRefresh, colors, onOpenOrder }) {
+function BranchOrdersOverview({ data, loading, styles, colors, onOpenOrder }) {
   const [filter, setFilter] = useState('');
 
   const orders = useMemo(() => {
-    const all = data.orders || [];
+    const all = (data.orders || []).filter((order) => EDITABLE_STATUSES.has(order.status));
     if (!filter.trim()) return all;
     const term = filter.trim().toLowerCase();
     return all.filter(
@@ -793,12 +624,9 @@ function BranchOrdersOverview({ data, styles, onRefresh, colors, onOpenOrder }) 
           <Text style={styles.eyebrow}>BRANCH MANAGEMENT</Text>
           <Text style={styles.cardTitle}>Branch Orders & Situational Edits</Text>
           <Text style={styles.helperText}>
-            View full order details and make pre-delivery adjustments to items, quantities, and instructions.
+            Review active branch orders and make eligible pre-delivery adjustments.
           </Text>
         </View>
-        <TouchableOpacity onPress={onRefresh} style={styles.refreshButton}>
-          <Text style={styles.refreshText}>Refresh</Text>
-        </TouchableOpacity>
       </View>
 
       <View style={styles.searchBarWrap}>
@@ -811,12 +639,13 @@ function BranchOrdersOverview({ data, styles, onRefresh, colors, onOpenOrder }) 
         />
       </View>
 
-      {orders.length === 0 ? (
+      {loading ? <View style={styles.emptyContainer}><ActivityIndicator color={colors.primary} /></View> : orders.length === 0 ? (
         <View style={styles.emptyContainer}>
           <Text style={styles.emptyText}>No branch orders found.</Text>
         </View>
       ) : (
-        orders.map((order) => {
+        <ScrollView nestedScrollEnabled style={styles.sectionScroll} contentContainerStyle={styles.sectionContent}>
+        {orders.map((order) => {
           const isEditable = EDITABLE_STATUSES.has(order.status);
           return (
             <View key={order.id} style={styles.orderItem}>
@@ -841,7 +670,8 @@ function BranchOrdersOverview({ data, styles, onRefresh, colors, onOpenOrder }) 
               </View>
             </View>
           );
-        })
+        })}
+        </ScrollView>
       )}
     </View>
   );
@@ -849,31 +679,27 @@ function BranchOrdersOverview({ data, styles, onRefresh, colors, onOpenOrder }) 
 
 export default function ManagerRequestPage() {
   const { colors } = useAdminTheme();
-  const styles = createStyles(colors);
+  const { width } = useWindowDimensions();
+  const styles = createStyles(colors, width);
   const [toast, setToast] = useState({ visible: false, message: '', type: 'success' });
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [modalVisible, setModalVisible] = useState(false);
-  const { revision } = useManagerRealtimeData();
-
-  const [dispatchData, setDispatchData] = useState({
-    orders: [],
-    incomingTransfers: [],
-    sourceDecisionEvents: [],
-    distributors: [],
-  });
-
-  const loadDispatch = async () => {
-    try {
-      const res = await getManagerDispatch();
-      setDispatchData(res);
-    } catch (e) {
-      console.log('Dispatch error:', e.message);
-    }
-  };
-
-  useEffect(() => {
-    if (revision) loadDispatch();
-  }, [revision]);
+  const realtime = useManagerRealtimeData();
+  const dispatchData = useMemo(() => {
+    const queues = getManagerQueues(realtime.requests, realtime.incomingTransfers, realtime.branchId);
+    const mapOrder = (order) => toManagerOrder(order.id, order, realtime.branch?.name || '');
+    return {
+      orders: queues.editable.map(mapOrder),
+      review: queues.review.map(mapOrder),
+      exceptions: queues.exceptions.map(mapOrder),
+      incomingTransfers: queues.incomingTransfers.map(mapOrder),
+      sourceDecisionEvents: realtime.sourceDecisionEvents.map((event) => ({
+        ...event,
+        requestId: event.requestIdSnapshot || event.requestId,
+        targetBranchName: event.targetBranchNameSnapshot || event.targetBranchName,
+      })),
+    };
+  }, [realtime]);
 
   const showToast = (message, type = 'success') => {
     setToast({ visible: true, message, type });
@@ -898,40 +724,36 @@ export default function ManagerRequestPage() {
       />
       {/* 1. Received Requests */}
       <ReceivedRequestsQueue
-        data={dispatchData}
+        orders={dispatchData.review}
+        loading={realtime.loading}
         styles={styles}
         colors={colors}
-        onRefresh={loadDispatch}
-        onOpenOrder={handleOpenOrder}
+        onShowToast={showToast}
       />
 
       {/* 2. Outside Radius Approvals */}
-      <OutsideRadiusApprovalQueue styles={styles} colors={colors} onOrderApproved={loadDispatch} onShowToast={showToast} />
+      <OutsideRadiusApprovalQueue orders={dispatchData.exceptions} loading={realtime.loading} styles={styles} colors={colors} onShowToast={showToast} />
 
-      {/* 3. Branch Transfers Queue */}
-      <BranchTransfersQueue data={dispatchData} styles={styles} onRefresh={loadDispatch} colors={colors} onShowToast={showToast} />
+      {/* 3. Branch Orders Overview & Situational Order Edit */}
+      <BranchOrdersOverview data={dispatchData} loading={realtime.loading} styles={styles} colors={colors} onOpenOrder={handleOpenOrder} />
 
-      {/* 4. Branch Orders Overview & Situational Order Edit */}
-      <BranchOrdersOverview data={dispatchData} styles={styles} onRefresh={loadDispatch} colors={colors} onOpenOrder={handleOpenOrder} />
+      {/* 4. Branch Transfers Queue */}
+      <BranchTransfersQueue data={dispatchData} styles={styles} colors={colors} onShowToast={showToast} />
 
       {/* Shared Order Details, Items Edit, and Distributor Assignment Modal */}
       <EditOrderModal
         visible={modalVisible}
         order={selectedOrder}
-        distributors={dispatchData.distributors || []}
         onClose={() => setModalVisible(false)}
-        onSaveSuccess={() => {
-          loadDispatch();
-        }}
+        onSaveSuccess={() => {}}
         colors={colors}
         styles={styles}
-        onShowToast={showToast}
       />
     </ManagerShell>
   );
 }
 
-const createStyles = (colors) =>
+const createStyles = (colors, width = 1200) =>
   StyleSheet.create({
     card: {
       backgroundColor: colors.surface,
@@ -1014,11 +836,15 @@ const createStyles = (colors) =>
       fontStyle: 'italic',
       marginBottom: 10,
     },
+    sectionScroll: { maxHeight: 440 },
+    sectionContent: { paddingBottom: 4 },
     orderItem: {
-      borderTopWidth: 1,
-      borderTopColor: colors.border,
-      paddingTop: 14,
-      marginTop: 12,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surfaceAlt,
+      borderRadius: 12,
+      padding: 14,
+      marginBottom: 10,
     },
     orderHeaderRow: {
       flexDirection: 'row',
@@ -1060,6 +886,7 @@ const createStyles = (colors) =>
     actionRow: {
       flexDirection: 'row',
       flexWrap: 'wrap',
+      justifyContent: width >= 800 ? 'flex-end' : 'flex-start',
       gap: 8,
       marginTop: 10,
     },
@@ -1110,10 +937,12 @@ const createStyles = (colors) =>
       opacity: 0.6,
     },
     transferItem: {
-      borderTopWidth: 1,
-      borderTopColor: colors.border,
-      paddingTop: 12,
-      marginTop: 10,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surfaceAlt,
+      borderRadius: 12,
+      padding: 14,
+      marginBottom: 10,
     },
     declineBox: {
       marginTop: 8,
@@ -1134,10 +963,12 @@ const createStyles = (colors) =>
       fontWeight: '800',
     },
     decisionItem: {
-      borderTopWidth: 1,
-      borderTopColor: colors.border,
-      paddingTop: 10,
-      marginTop: 8,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surfaceAlt,
+      borderRadius: 12,
+      padding: 12,
+      marginBottom: 8,
     },
     decisionText: {
       color: colors.textPrimary,

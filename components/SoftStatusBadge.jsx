@@ -143,8 +143,9 @@ export const getSoftStatusMeta = (status) => {
   );
 };
 
-export default function SoftStatusBadge({ status, label, style }) {
-  const { isDark } = useBlueTapTheme();
+export default function SoftStatusBadge({ status, label, style, dark }) {
+  const { isDark: portalIsDark } = useBlueTapTheme();
+  const isDark = dark === undefined ? portalIsDark : dark;
   const normalizedStatus = normalizeStatus(status || 'Pending');
   const meta = (isDark ? DARK_STATUS_META[normalizedStatus] : null) || getSoftStatusMeta(status);
 

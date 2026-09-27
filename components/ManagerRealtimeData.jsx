@@ -3,15 +3,23 @@ import { collection, doc, onSnapshot, query, where } from 'firebase/firestore';
 
 import { db } from '../firebase';
 import { getModuleSession } from '../services/authSession';
+const { getManagerQueues, pendingBranchApplications } = require('../services/managerOperational');
 
 const emptyState = {
   branch: null,
   users: [],
   requests: [],
   incomingTransfers: [],
+  applicants: [],
+  pendingApplications: [],
+  sourceDecisionEvents: [],
+  requestsCount: 0,
+  dispatchCount: 0,
   loading: true,
   error: '',
   revision: '',
+  branchId: '',
+  managerUid: '',
 };
 
 const ManagerRealtimeContext = React.createContext(emptyState);
@@ -23,7 +31,9 @@ const revisionFor = (requests, incomingTransfers, users) => ['ready',
 ].map((item) => `${item.id}|${item.status || item.role || ''}|${item.updatedAt?.seconds || item.updated_at?.seconds || ''}`).join('::');
 
 export function ManagerRealtimeDataProvider({ children }) {
-  const branchId = getModuleSession('manager')?.branchId || '';
+  const session = getModuleSession('manager');
+  const branchId = session?.branchId || '';
+  const managerUid = session?.uid || '';
   const [state, setState] = React.useState(emptyState);
 
   React.useEffect(() => {
@@ -32,18 +42,25 @@ export function ManagerRealtimeDataProvider({ children }) {
       return undefined;
     }
 
-    const current = { branch: null, users: [], requests: [], incomingTransfers: [] };
-    const ready = { branch: false, users: false, requests: false, incomingTransfers: false };
+    const current = { branch: null, users: [], requests: [], incomingTransfers: [], applicants: [], sourceDecisionEvents: [] };
+    const ready = { branch: false, users: false, requests: false, incomingTransfers: false, applicants: false, sourceDecisionEvents: false };
+    const listenerErrors = {};
     let active = true;
 
-    const publish = (error = '') => {
+    const publish = () => {
       if (!active) return;
-      const loading = !Object.values(ready).every(Boolean);
+      const loading = !(ready.branch && ready.users && ready.requests);
+      const queues = getManagerQueues(current.requests, current.incomingTransfers, branchId);
       setState({
         ...current,
+        branchId,
+        managerUid,
+        pendingApplications: pendingBranchApplications(current.applicants, branchId),
+        requestsCount: queues.requestsCount,
+        dispatchCount: queues.dispatchCount,
         loading,
-        error,
-        revision: loading ? '' : revisionFor(current.requests, current.incomingTransfers, current.users),
+        error: Object.values(listenerErrors).find(Boolean) || '',
+        revision: revisionFor(current.requests, current.incomingTransfers, current.users),
       });
     };
 
@@ -52,11 +69,13 @@ export function ManagerRealtimeDataProvider({ children }) {
       (snapshot) => {
         current[key] = mapSnapshot(snapshot);
         ready[key] = true;
+        delete listenerErrors[key];
         publish();
       },
       (error) => {
         ready[key] = true;
-        publish(error.message || 'Branch data is temporarily unavailable.');
+        listenerErrors[key] = error.message || 'Branch data is temporarily unavailable.';
+        publish();
       }
     );
 
@@ -65,6 +84,12 @@ export function ManagerRealtimeDataProvider({ children }) {
         snapshot.exists() ? { id: snapshot.id, ...snapshot.data() } : null
       ),
       watch(query(collection(db, 'users'), where('branchId', '==', branchId)), 'users', (snapshot) =>
+        snapshot.docs.map((item) => ({ id: item.id, uid: item.id, ...item.data() }))
+      ),
+      watch(query(collection(db, 'users'),
+        where('requestedBranchId', '==', branchId),
+        where('role', '==', 'distributor'),
+        where('distributorStatus', '==', 'pending')), 'applicants', (snapshot) =>
         snapshot.docs.map((item) => ({ id: item.id, uid: item.id, ...item.data() }))
       ),
       watch(query(collection(db, 'requests'), where('branchId', '==', branchId)), 'requests', (snapshot) =>
@@ -79,16 +104,19 @@ export function ManagerRealtimeDataProvider({ children }) {
         'incomingTransfers',
         (snapshot) => snapshot.docs.map((item) => ({ id: item.id, ...item.data() }))
       ),
+      watch(query(collection(db, 'managerOperationalEvents'), where('sourceBranchId', '==', branchId)), 'sourceDecisionEvents', (snapshot) =>
+        snapshot.docs.map((item) => ({ id: item.id, ...item.data() }))
+      ),
     ];
 
     return () => {
       active = false;
       unsubscribers.forEach((unsubscribe) => unsubscribe());
     };
-  }, [branchId]);
+  }, [branchId, managerUid]);
 
   return (
-    <ManagerRealtimeContext.Provider value={{ ...state, branchId }}>
+      <ManagerRealtimeContext.Provider value={state.branchId === branchId && state.managerUid === managerUid ? state : { ...emptyState, branchId, managerUid }}>
       {children}
     </ManagerRealtimeContext.Provider>
   );

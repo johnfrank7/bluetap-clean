@@ -36,8 +36,19 @@ test('registration config counters and audit logs are backend-only', () => {
   }
 });
 
-test('Manager operational events are backend-only rather than client-readable inbox documents', () => {
-  assert.match(rules, /match \/managerOperationalEvents\/\{eventId\} \{ allow read, write: if false; \}/);
+test('Manager reads only own source-branch operational events and cannot write them', () => {
+  assert.match(rules, /match \/managerOperationalEvents\/\{eventId\}[\s\S]*allow get, list: if isManagerBranch\(resource\.data\.sourceBranchId\);/);
+  assert.match(rules, /match \/managerOperationalEvents\/\{eventId\}[\s\S]*allow create, update, delete: if false;/);
+});
+
+test('Manager may read branch-requested applications but cannot change Admin approval fields', () => {
+  assert.match(rules, /resource\.data\.role == 'distributor'/);
+  assert.match(rules, /resource\.data\.distributorStatus == 'pending'/);
+  assert.match(rules, /resource\.data\.requestedBranchId == currentUser\(\)\.branchId/);
+  const provider = readFileSync(resolve(__dirname, '..', '..', '..', 'components', 'ManagerRealtimeData.jsx'), 'utf8');
+  assert.match(provider, /where\('requestedBranchId', '==', branchId\),\s*where\('role', '==', 'distributor'\),\s*where\('distributorStatus', '==', 'pending'\)/);
+  assert.match(rules, /'distributorStatus', 'approvalStatus', 'accountStatus'/);
+  assert.match(rules, /'branchId', 'branchNameSnapshot', 'requestedBranchId'/);
 });
 
 test('request access stays bound to the authenticated requester', () => {

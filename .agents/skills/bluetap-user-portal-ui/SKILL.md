@@ -68,6 +68,8 @@ Preserve these invariants:
 
 ## Notifications and order events
 
+- Manager operational queues should use contained order cards with responsive side actions and bounded scroll regions for large queues.
+
 - Distributor notifications (`app/distributor/d_notification.jsx`) reuse the card visual system from `app/requester/r_notification.jsx`: clean structured notification cards, delivery date/status badges, real order lifecycle events, empty state handling, and theme token adherence.
 - Notifications derive directly from authenticated order states and branch dispatch events; do not use mock notifications or disconnected static lists.
 

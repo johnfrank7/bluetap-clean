@@ -6,6 +6,7 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { getLocalUsers, subscribeLocalUsers } from '../../localUsers';
@@ -17,6 +18,8 @@ import { useAdminTheme } from '../../components/AdminTheme';
 import TopToastFeedback from '../../components/TopToastFeedback';
 import ManagerShell, { MANAGER_COLORS, ManagerPill } from '../../components/ManagerShell';
 import { useManagerRealtimeData } from '../../components/ManagerRealtimeData';
+import { parseTimestamp } from '../../services/notificationTimestamp';
+const { getManagerQueues, toManagerOrder } = require('../../services/managerOperational');
 
 const normalizeApplicationStatus = (status) =>
   (status || 'pending').toString().trim().toLowerCase();
@@ -64,14 +67,8 @@ const formatAmount = (amount) => `₱${Number(amount || 0).toFixed(2)}`;
 
 const getJoinedLabel = (user = {}) => {
   const value = user.createdAt || user.created_at || user.joinedAt || user.joined;
-  if (!value) return 'Not set';
-  let date = null;
-  if (typeof value?.toDate === 'function') date = value.toDate();
-  else if (typeof value?.toMillis === 'function') date = new Date(value.toMillis());
-  else if (value.seconds) date = new Date(value.seconds * 1000);
-  else date = new Date(value);
-
-  if (!date || Number.isNaN(date.getTime())) return String(value);
+  const date = parseTimestamp(value);
+  if (!date) return 'Not set';
   return new Intl.DateTimeFormat('en-US', { month: 'short', year: 'numeric' }).format(date);
 };
 
@@ -106,9 +103,16 @@ function buildScheduleDate(dayOffset, slot) {
 }
 
 function DistributorDispatchQueue({ styles, colors, onShowToast }) {
-  const { revision } = useManagerRealtimeData();
-  const [data, setData] = useState({ orders: [], incomingTransfers: [], sourceDecisionEvents: [], distributors: [], branches: [] });
-  const [loading, setLoading] = useState(true);
+  const realtime = useManagerRealtimeData();
+  const [metadata, setMetadata] = useState({ branchId: '', distributors: [], branches: [] });
+  const branchMetadata = metadata.branchId === realtime.branchId ? metadata : { distributors: [], branches: [] };
+  const data = useMemo(() => ({
+    orders: getManagerQueues(realtime.requests, realtime.incomingTransfers, realtime.branchId).dispatch
+      .map((order) => toManagerOrder(order.id, order, realtime.branch?.name || '')),
+    distributors: branchMetadata.distributors,
+    branches: branchMetadata.branches,
+  }), [realtime, metadata]);
+  const loading = realtime.loading;
   const [error, setError] = useState('');
   const [updatingId, setUpdatingId] = useState('');
   const [assigningOrderId, setAssigningOrderId] = useState('');
@@ -122,20 +126,18 @@ function DistributorDispatchQueue({ styles, colors, onShowToast }) {
   const [scheduleError, setScheduleError] = useState('');
 
   const load = async () => {
-    setLoading(true);
     setError('');
     try {
-      setData(await getManagerDispatch());
+      const result = await getManagerDispatch();
+      setMetadata({ branchId: realtime.branchId, distributors: result.distributors || [], branches: result.branches || [] });
     } catch (loadFailure) {
       setError(loadFailure.message);
-    } finally {
-      setLoading(false);
     }
   };
 
   useEffect(() => {
-    if (revision) load();
-  }, [revision]);
+    if (realtime.branchId) load();
+  }, [realtime.branchId]);
 
   const openAssignmentPanel = (order) => {
     setAssigningOrderId(order.id);
@@ -201,8 +203,7 @@ function DistributorDispatchQueue({ styles, colors, onShowToast }) {
   const dispatchableOrders = data.orders.filter(
     (order) => {
       const st = String(order.status || '').trim().toLowerCase().replace(/\s+/g, '_');
-      return st !== 'branch_transfer_pending' &&
-        ['awaiting_distributor_assignment', 'pending', 'distributor_assigned', 'accepted', 'scheduled', 'delivery_failed'].includes(st);
+      return st !== 'pending' && ['awaiting_distributor_assignment', 'delivery_failed'].includes(st);
     }
   );
 
@@ -236,7 +237,8 @@ function DistributorDispatchQueue({ styles, colors, onShowToast }) {
           <Text style={styles.emptyText}>No orders are currently waiting for distributor assignment.</Text>
         </View>
       ) : (
-        dispatchableOrders.map((order) => {
+        <ScrollView nestedScrollEnabled style={styles.queueScroll} contentContainerStyle={styles.queueContent}>
+        {dispatchableOrders.map((order) => {
           const isUpdating = updatingId === order.id;
           const assigned = !!order.assignedDistributorUid;
           const isPanelOpen = assigningOrderId === order.id;
@@ -250,6 +252,7 @@ function DistributorDispatchQueue({ styles, colors, onShowToast }) {
                   <Text style={styles.approvalRequestId}>
                     #{order.requestId || order.id} · {order.currentBranchName || 'Current branch'}
                   </Text>
+                  {!!order.requesterUniqueId && <Text style={styles.approvalRequestId}>Requester ID: {order.requesterUniqueId}</Text>}
                 </View>
                 <ManagerPill tone={assigned ? 'green' : 'blue'}>
                   {assigned ? (order.status === 'delivery_failed' ? 'Delivery Failed' : 'Assigned') : 'Awaiting Assignment'}
@@ -266,13 +269,14 @@ function DistributorDispatchQueue({ styles, colors, onShowToast }) {
                 {assigned && (
                   <Text style={styles.assignedDistributorText}>
                     Assigned: {order.assignedDistributorName || 'Distributor assigned'}
-                    {order.scheduledAt ? ` · Scheduled: ${new Date(order.scheduledAt).toLocaleString()}` : ''}
+                    {parseTimestamp(order.scheduledAt) ? ` · Scheduled: ${parseTimestamp(order.scheduledAt).toLocaleString()}` : ' · Not scheduled'}
                   </Text>
                 )}
                 {order.status === 'delivery_failed' && !!order.failureReason && (
                   <Text style={styles.failureReasonText}>Failure Note: {order.failureReason}</Text>
                 )}
                 <Text style={styles.approvalAmount}>{formatAmount(order.totalAtOrder)}</Text>
+                {!!order.deliveryFeeAtOrder && <Text style={styles.approvalDetail}>Delivery fee: {formatAmount(order.deliveryFeeAtOrder)}</Text>}
               </View>
 
               <View style={styles.dispatchActions}>
@@ -302,7 +306,7 @@ function DistributorDispatchQueue({ styles, colors, onShowToast }) {
               {isPanelOpen && (
                 <View style={styles.assignmentPanel}>
                   <Text style={styles.panelTitle}>1. Select Available Distributor</Text>
-                  {data.distributors.length === 0 ? (
+                  {metadata.branchId !== realtime.branchId ? <ActivityIndicator color={colors.primary} /> : data.distributors.length === 0 ? (
                     <Text style={styles.panelEmptyText}>No eligible distributors currently found for this branch.</Text>
                   ) : (
                     <View style={styles.distributorList}>
@@ -415,7 +419,8 @@ function DistributorDispatchQueue({ styles, colors, onShowToast }) {
               )}
             </View>
           );
-        })
+        })}
+        </ScrollView>
       )}
     </View>
   );
@@ -423,13 +428,15 @@ function DistributorDispatchQueue({ styles, colors, onShowToast }) {
 
 export default function ManagerDistributorsPage() {
   const { colors } = useAdminTheme();
-  const styles = createStyles(colors);
+  const { width } = useWindowDimensions();
+  const styles = createStyles(colors, width);
   const branchId = getModuleSession('manager')?.branchId || '';
-  const { users: realtimeUsers, loading: realtimeLoading, error: realtimeError } = useManagerRealtimeData();
+  const { users: realtimeUsers, pendingApplications, loading: realtimeLoading, error: realtimeError } = useManagerRealtimeData();
   const [registeredDistributors, setRegisteredDistributors] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [search, setSearch] = useState('');
+  const [applicationsVisible, setApplicationsVisible] = useState(false);
   const [toast, setToast] = useState({ visible: false, message: '', type: 'info' });
 
   const showToast = (message, type = 'info') => {
@@ -488,6 +495,9 @@ export default function ManagerDistributorsPage() {
       <View style={styles.card}>
         <View style={styles.cardHeaderWithSearch}>
           <Text style={styles.cardTitle}>Registered distributors ({registeredDistributors.length})</Text>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Pending applications: ${pendingApplications.length}`} onPress={() => setApplicationsVisible((value) => !value)} style={styles.applicationsButton}>
+            <Text style={styles.applicationsButtonText}>Pending applications ({pendingApplications.length})</Text>
+          </TouchableOpacity>
           <View style={styles.searchContainer}>
             <TextInput
               style={styles.searchInput}
@@ -498,6 +508,18 @@ export default function ManagerDistributorsPage() {
             />
           </View>
         </View>
+
+        {applicationsVisible && <View style={styles.applicationsPanel}>
+          <Text style={styles.approvalHelper}>Branch applications are view only. Admin reviews and approves distributor accounts.</Text>
+          {pendingApplications.length === 0 ? <Text style={styles.emptyText}>No pending distributor applications for this branch.</Text> : pendingApplications.map((applicant) =>
+            <View key={applicant.uid || applicant.id} style={styles.applicationRow}>
+              <Text style={styles.distributorName}>{getFullName(applicant)}</Text>
+              <Text style={styles.distributorSub}>{getProfileUniqueId(applicant) || applicant.email || 'ID pending'}</Text>
+              <Text style={styles.distributorSub}>{applicant.email || applicant.phone || 'Contact not set'} · {getBarangay(applicant)}</Text>
+              <Text style={styles.distributorSub}>Applied {getJoinedLabel(applicant)} · Awaiting Admin Approval</Text>
+            </View>
+          )}
+        </View>}
 
         <ScrollView horizontal showsHorizontalScrollIndicator contentContainerStyle={styles.tableScroll}>
           <View style={styles.table}>
@@ -563,7 +585,7 @@ export default function ManagerDistributorsPage() {
   );
 }
 
-const createStyles = (colors) =>
+const createStyles = (colors, width = 1200) =>
   StyleSheet.create({
     dispatchCard: {
       backgroundColor: colors.surface,
@@ -573,6 +595,12 @@ const createStyles = (colors) =>
       padding: 20,
       marginBottom: 20,
     },
+    queueScroll: { maxHeight: 460 },
+    queueContent: { paddingBottom: 4 },
+    applicationsButton: { minHeight: 38, paddingHorizontal: 12, borderRadius: 9, borderWidth: 1, borderColor: colors.primary, backgroundColor: colors.primarySoft, justifyContent: 'center' },
+    applicationsButtonText: { color: colors.primary, fontSize: 12, fontWeight: '800' },
+    applicationsPanel: { borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceAlt, borderRadius: 12, padding: 12, marginBottom: 12, gap: 8 },
+    applicationRow: { paddingVertical: 7, borderTopWidth: 1, borderTopColor: colors.border },
     cardHeaderRow: {
       flexDirection: 'row',
       alignItems: 'flex-start',
@@ -624,10 +652,12 @@ const createStyles = (colors) =>
       justifyContent: 'center',
     },
     dispatchOrder: {
-      borderTopWidth: 1,
-      borderTopColor: colors.border,
-      paddingTop: 16,
-      marginTop: 14,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surfaceAlt,
+      borderRadius: 12,
+      padding: 14,
+      marginBottom: 10,
     },
     approvalOrderHeader: {
       flexDirection: 'row',
@@ -682,6 +712,7 @@ const createStyles = (colors) =>
     dispatchActions: {
       flexDirection: 'row',
       flexWrap: 'wrap',
+      justifyContent: width >= 800 ? 'flex-end' : 'flex-start',
       gap: 8,
       marginTop: 12,
     },
@@ -890,7 +921,7 @@ const createStyles = (colors) =>
       fontWeight: 'bold',
     },
     searchContainer: {
-      width: 220,
+      width: width < 550 ? '100%' : 220,
       height: 36,
       borderRadius: 8,
       borderWidth: 1,

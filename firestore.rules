@@ -54,9 +54,12 @@ service cloud.firestore {
     match /registrationLimits/{document=**} { allow read, write: if false; }
     match /systemConfig/{document=**} { allow read, write: if false; }
     match /adminAuditLogs/{document=**} { allow read, write: if false; }
-    // Manager operational events are created and scoped by trusted Render Node
-    // dispatch actions. Clients cannot forge, alter, or directly enumerate them.
-    match /managerOperationalEvents/{eventId} { allow read, write: if false; }
+    // Manager operational events are written by Render Node. Source Managers
+    // may read only their branch's transfer outcomes.
+    match /managerOperationalEvents/{eventId} {
+      allow get, list: if isManagerBranch(resource.data.sourceBranchId);
+      allow create, update, delete: if false;
+    }
     match /requesterActiveOrders/{document=**} { allow read, write: if false; }
     match /branches/{branchId} {
       // Manager may read only their own assigned branch (Admin-written branchId).
@@ -72,8 +75,14 @@ service cloud.firestore {
     match /users/{uid} {
       // Fixes the missing-profile read failure without allowing user discovery.
       allow get: if request.auth != null && (request.auth.uid == uid || isAdmin()
-        || (isManager() && resource.data.branchId == currentUser().branchId));
-      allow list: if isAdmin() || (isManager() && resource.data.branchId == currentUser().branchId);
+        || (isManager() && resource.data.branchId == currentUser().branchId)
+        || (isManager() && resource.data.role == 'distributor'
+          && resource.data.distributorStatus == 'pending'
+          && resource.data.requestedBranchId == currentUser().branchId));
+      allow list: if isAdmin() || (isManager() && resource.data.branchId == currentUser().branchId)
+        || (isManager() && resource.data.role == 'distributor'
+          && resource.data.distributorStatus == 'pending'
+          && resource.data.requestedBranchId == currentUser().branchId);
       allow create, delete: if false;
       // Profile screens may update ordinary contact/profile fields only. Roles,
       // approval, username ownership, completion, terms, and verification are

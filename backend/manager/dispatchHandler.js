@@ -245,13 +245,20 @@ async function updateOrder(db, orderId, prepare) {
       const prepared = await prepare(current);
       const update = prepared?.orderUpdate || prepared;
       const sideEffects = prepared?.sideEffects || [];
+      const deleteIfOrderMatches = prepared?.deleteIfOrderMatches || [];
       const newSideEffects = [];
       for (const sideEffect of sideEffects) {
         const existing = await tx.get(sideEffect.ref);
         if (!existing.exists) newSideEffects.push(sideEffect);
       }
+      const guardsToDelete = [];
+      for (const guardRef of deleteIfOrderMatches) {
+        const guard = await tx.get(guardRef);
+        if (guard.exists && guard.data()?.orderId === orderId) guardsToDelete.push(guardRef);
+      }
       tx.update(ref, update);
       for (const sideEffect of newSideEffects) tx.set(sideEffect.ref, sideEffect.data);
+      for (const guardRef of guardsToDelete) tx.delete(guardRef);
       return { ...current, ...update };
     });
   }
@@ -264,6 +271,10 @@ async function updateOrder(db, orderId, prepare) {
   for (const sideEffect of prepared?.sideEffects || []) {
     const existing = await sideEffect.ref.get();
     if (!existing.exists) await sideEffect.ref.set(sideEffect.data);
+  }
+  for (const guardRef of prepared?.deleteIfOrderMatches || []) {
+    const guard = await guardRef.get();
+    if (guard.exists && guard.data()?.orderId === orderId) await guardRef.delete();
   }
   return { ...current, ...update };
 }
@@ -314,7 +325,7 @@ function createManagerDispatchHandler(getAdmin = getFirebaseAdmin) {
       const body = bodyOf(req);
       const orderId = clean(body.orderId, 128);
       const action = clean(body.action, 48).toLowerCase();
-      if (!orderId || !['assign-distributor', 'reassign-distributor', 'request-transfer', 'accept-transfer', 'decline-transfer', 'edit-order'].includes(action)) {
+      if (!orderId || !['accept-order', 'reject-order', 'assign-distributor', 'reassign-distributor', 'request-transfer', 'accept-transfer', 'decline-transfer', 'edit-order'].includes(action)) {
         throw new OtpError(400, 'INVALID_DISPATCH_ACTION', 'Choose a valid order dispatch action.');
       }
       const requestedOrderSnapshot = await db.collection('requests').doc(orderId).get();
@@ -328,7 +339,23 @@ function createManagerDispatchHandler(getAdmin = getFirebaseAdmin) {
       const now = new Date();
       let result;
 
-      if (action === 'assign-distributor' || action === 'reassign-distributor') {
+      if (action === 'accept-order' || action === 'reject-order') {
+        const rejectionReason = clean(body.rejectionReason, 240);
+        if (action === 'reject-order' && !rejectionReason) throw new OtpError(400, 'REJECTION_REASON_REQUIRED', 'Add a reason for rejecting this order.');
+        result = await updateOrder(db, orderId, async (current) => {
+          requireOwningManager(manager, current);
+          if (clean(current.status, 80).toLowerCase() !== 'pending' || current.outsideServiceArea === true) {
+            throw new OtpError(409, 'ORDER_NOT_PENDING_REVIEW', 'This order is no longer awaiting normal review.');
+          }
+          if (action === 'accept-order') return updateWithEvent(current, 'ORDER_ACCEPTED_BY_MANAGER', manager.decoded.uid, managerBranchId, now, {
+            status: AWAITING_ASSIGNMENT, managerAcceptedAt: now, managerAcceptedBy: manager.decoded.uid,
+          });
+          const requesterUid = clean(current.requesterUid || current.requester_id, 128);
+          return { orderUpdate: updateWithEvent(current, 'ORDER_REJECTED_BY_MANAGER', manager.decoded.uid, managerBranchId, now, {
+            status: 'rejected', rejectionReason, managerRejectedAt: now, managerRejectedBy: manager.decoded.uid,
+          }), deleteIfOrderMatches: requesterUid ? [db.collection('requesterActiveOrders').doc(requesterUid)] : [] };
+        });
+      } else if (action === 'assign-distributor' || action === 'reassign-distributor') {
         const scheduledAt = body.scheduledAt ? new Date(body.scheduledAt) : null;
         if (!scheduledAt || Number.isNaN(scheduledAt.getTime()) || scheduledAt.getTime() < now.getTime() - (5 * 60 * 1000)) {
           throw new OtpError(400, 'INVALID_DELIVERY_SCHEDULE', 'Choose a current or future delivery time.');
@@ -340,7 +367,7 @@ function createManagerDispatchHandler(getAdmin = getFirebaseAdmin) {
           const assignedUid = clean(current.assignedDistributorUid || current.distributor_id, 128);
           const currentStatus = clean(current.status, 80).toLowerCase();
           const assigning = action === 'assign-distributor';
-          const assignableStatuses = new Set([AWAITING_ASSIGNMENT, 'pending', 'accepted']);
+          const assignableStatuses = new Set([AWAITING_ASSIGNMENT, 'accepted']);
           const reassignableStatuses = new Set([DISTRIBUTOR_ASSIGNED, 'accepted', 'scheduled', 'delivery_failed']);
           if ((assigning && (assignedUid || !assignableStatuses.has(currentStatus))) || (!assigning && (!assignedUid || !reassignableStatuses.has(currentStatus)))) {
             throw new OtpError(409, 'ORDER_NOT_ASSIGNABLE', 'This order is not ready for that Distributor action.');
