@@ -56,3 +56,19 @@ test('assigned Manager can decline an awaiting outside-radius request exactly on
   const replay = await call(handler, 'PATCH', 'manager-a-token', { orderId: 'pending-a', action: 'approve' });
   assert.equal(replay.statusCode, 409);
 });
+
+test('own branch Manager decides a product-limit exception once and makes it dispatch-ready', async () => {
+  const f = fixture();
+  f.records.set('requests/limit-a', { requestId: 'BT-L', requesterNameSnapshot: 'Limit Requester', branchId: 'branch-a', status: 'manager_approval_pending', approvalReasons: ['PRODUCT_LIMIT_EXCEEDED'], productLimitViolations: [{ productId: 'refill', requestedQuantity: 4, configuredLimit: 3 }] });
+  const handler = createOutsideRadiusApprovalsHandler(f.getAdmin);
+  const queue = await call(handler, 'GET', 'manager-a-token');
+  assert.ok(queue.body.orders.some((order) => order.id === 'limit-a'));
+  assert.equal((await call(handler, 'PATCH', 'manager-b-token', { orderId: 'limit-a', action: 'approve' })).statusCode, 403);
+  const approved = await call(handler, 'PATCH', 'manager-a-token', { orderId: 'limit-a', action: 'approve' });
+  assert.equal(approved.statusCode, 200);
+  assert.equal(approved.body.order.status, 'awaiting_distributor_assignment');
+  assert.ok(f.records.get('requests/limit-a').dispatchReadyAt instanceof Date);
+  assert.equal(f.records.get('requests/limit-a').managerApprovalDecision, 'approve');
+  assert.equal(f.records.get('requests/limit-a').outsideRadiusDecision, undefined);
+  assert.equal((await call(handler, 'PATCH', 'manager-a-token', { orderId: 'limit-a', action: 'approve' })).statusCode, 409);
+});

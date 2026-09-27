@@ -3,13 +3,14 @@ const { randomUUID } = require('node:crypto');
 const { requireActiveManager, requireManagerBranch } = require('../auth/authorization');
 const { applyCors } = require('../utils/cors');
 const { OtpError } = require('../utils/otpError');
+const { effectiveDeliveryDays, isAllowedDeliveryDate, productLimit, productDeliveryDays, limitViolations } = require('../../services/productOrderPolicy');
 
 const AWAITING_ASSIGNMENT = 'awaiting_distributor_assignment';
 const DISTRIBUTOR_ASSIGNED = 'distributor_assigned';
 const TRANSFER_PENDING = 'branch_transfer_pending';
 const MANAGER_OPERATIONAL_EVENTS = 'managerOperationalEvents';
 const ACTIVE_ASSIGNMENT_STATUSES = new Set([DISTRIBUTOR_ASSIGNED, 'accepted', 'scheduled', 'out_for_delivery', 'delivery_failed']);
-const MANAGER_VISIBLE_STATUSES = new Set([AWAITING_ASSIGNMENT, 'pending', DISTRIBUTOR_ASSIGNED, 'accepted', 'scheduled', 'out_for_delivery', 'delivery_failed', TRANSFER_PENDING]);
+const MANAGER_VISIBLE_STATUSES = new Set([AWAITING_ASSIGNMENT, 'pending', 'manager_approval_pending', DISTRIBUTOR_ASSIGNED, 'accepted', 'scheduled', 'out_for_delivery', 'delivery_failed', TRANSFER_PENDING]);
 const clean = (value, max = 240) => String(value || '').trim().slice(0, max);
 const safeNumber = (value) => Number.isFinite(Number(value)) ? Number(value) : null;
 const owningBranchId = (order = {}) => clean(order.currentBranchId || order.branchId, 128);
@@ -74,6 +75,7 @@ function safeOrder(id, data = {}, branchNames = new Map()) {
       quantity: Number(item.quantity) || 0,
       unitPriceAtOrder: safeNumber(item.unitPriceAtOrder ?? item.unitPrice ?? item.product_price ?? item.price) || 0,
       totalAtOrder: safeNumber(item.totalAtOrder ?? item.line_total) || 0,
+      deliveryDaysSnapshot: Array.isArray(item.deliveryDaysSnapshot) ? item.deliveryDaysSnapshot : [],
     })) : [],
     totalAtOrder: safeNumber(data.totalAtOrder ?? data.total_cost) || 0,
     subtotalAtOrder: safeNumber(data.subtotalAtOrder ?? data.subtotal) || 0,
@@ -90,6 +92,8 @@ function safeOrder(id, data = {}, branchNames = new Map()) {
     distanceKmSnapshot: safeNumber(data.distanceKmSnapshot),
     serviceRadiusKmSnapshot: safeNumber(data.serviceRadiusKmSnapshot),
     outsideServiceArea: data.outsideServiceArea === true,
+    effectiveDeliveryDaysSnapshot: Array.isArray(data.effectiveDeliveryDaysSnapshot) ? data.effectiveDeliveryDaysSnapshot : effectiveDeliveryDays(data.items || []),
+    dispatchReadyAt: data.dispatchReadyAt || data.managerApprovedAt || data.managerAcceptedAt || data.createdAt || data.created_at || null,
     assignedDistributorUid: clean(data.assignedDistributorUid || data.distributor_id, 128),
     assignedDistributorName: clean(data.assignedDistributorNameSnapshot || data.distributor_name, 160),
     assignedDistributorUniqueId: clean(data.assignedDistributorUniqueIdSnapshot || data.distributorUniqueId || data.distributor_unique_id, 80),
@@ -348,7 +352,7 @@ function createManagerDispatchHandler(getAdmin = getFirebaseAdmin) {
             throw new OtpError(409, 'ORDER_NOT_PENDING_REVIEW', 'This order is no longer awaiting normal review.');
           }
           if (action === 'accept-order') return updateWithEvent(current, 'ORDER_ACCEPTED_BY_MANAGER', manager.decoded.uid, managerBranchId, now, {
-            status: AWAITING_ASSIGNMENT, managerAcceptedAt: now, managerAcceptedBy: manager.decoded.uid,
+            status: AWAITING_ASSIGNMENT, managerAcceptedAt: now, managerAcceptedBy: manager.decoded.uid, dispatchReadyAt: now,
           });
           const requesterUid = clean(current.requesterUid || current.requester_id, 128);
           return { orderUpdate: updateWithEvent(current, 'ORDER_REJECTED_BY_MANAGER', manager.decoded.uid, managerBranchId, now, {
@@ -372,6 +376,8 @@ function createManagerDispatchHandler(getAdmin = getFirebaseAdmin) {
           if ((assigning && (assignedUid || !assignableStatuses.has(currentStatus))) || (!assigning && (!assignedUid || !reassignableStatuses.has(currentStatus)))) {
             throw new OtpError(409, 'ORDER_NOT_ASSIGNABLE', 'This order is not ready for that Distributor action.');
           }
+          const allowedDays = Array.isArray(current.effectiveDeliveryDaysSnapshot) ? current.effectiveDeliveryDaysSnapshot : effectiveDeliveryDays(current.items || []);
+          if (!isAllowedDeliveryDate(scheduledAt, allowedDays)) throw new OtpError(409, 'PRODUCT_DELIVERY_DAY_UNAVAILABLE', allowedDays.length ? 'Choose a delivery day allowed for every product in this order.' : 'These products have no common delivery day. Ask Admin to update the product schedules.');
           const event = assigning ? 'DISTRIBUTOR_ASSIGNED' : 'DISTRIBUTOR_REASSIGNED';
           const rawDistributorUid = clean(target.data?.publicUid || target.data?.displayUid || target.data?.unique_id, 80);
           const targetDistributorUniqueId = rawDistributorUid && !/^[a-zA-Z0-9]{20,}$/.test(rawDistributorUid) ? rawDistributorUid : '';
@@ -438,10 +444,13 @@ function createManagerDispatchHandler(getAdmin = getFirebaseAdmin) {
             totalAtOrder: lineTotal,
             containerTypeSnapshot: clean(productData.containerType, 80),
             sizeSnapshot: clean(productData.size, 80),
+            maxQuantityPerRequesterSnapshot: productLimit(productData.maxQuantityPerRequester),
+            deliveryDaysSnapshot: productDeliveryDays(productData.deliveryDays),
           };
         }));
         const quantity = items.reduce((sum, item) => sum + item.quantity, 0);
         const totalAtOrder = Math.round(items.reduce((sum, item) => sum + item.totalAtOrder, 0) * 100) / 100;
+        const effectiveDays = effectiveDeliveryDays(items);
         const notes = body.notes !== undefined ? clean(body.notes, 500) : (body.specialInstructions !== undefined ? clean(body.specialInstructions, 500) : undefined);
         const container = body.container !== undefined ? clean(body.container, 80) : undefined;
 
@@ -451,6 +460,7 @@ function createManagerDispatchHandler(getAdmin = getFirebaseAdmin) {
           if (!EDITABLE_STATUSES.has(status)) {
             throw new OtpError(409, 'ORDER_NOT_EDITABLE', 'Orders can only be edited before delivery begins.');
           }
+          if (current.scheduledAt && !isAllowedDeliveryDate(current.scheduledAt, effectiveDays)) throw new OtpError(409, 'PRODUCT_DELIVERY_DAY_UNAVAILABLE', 'The current schedule is not valid for these products. Reschedule before changing the items.');
           const editEntry = {
             event: 'ORDER_EDITED',
             managerUid: manager.decoded.uid,
@@ -464,6 +474,8 @@ function createManagerDispatchHandler(getAdmin = getFirebaseAdmin) {
           };
           return updateWithEvent(current, 'ORDER_EDITED', manager.decoded.uid, managerBranchId, now, {
             items,
+            effectiveDeliveryDaysSnapshot: effectiveDays,
+            productLimitViolations: limitViolations(items),
             productId: items[0]?.productId || '',
             product_id: items[0]?.productId || '',
             productNameSnapshot: items.map((item) => item.productNameSnapshot).join(', '),

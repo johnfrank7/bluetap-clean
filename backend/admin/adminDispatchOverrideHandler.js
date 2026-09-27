@@ -2,6 +2,7 @@ const { getFirebaseAdmin } = require('../firebase/firebaseAdmin');
 const { requireAdmin } = require('../auth/authorization');
 const { applyCors } = require('../utils/cors');
 const { OtpError } = require('../utils/otpError');
+const { effectiveDeliveryDays, isAllowedDeliveryDate } = require('../../services/productOrderPolicy');
 
 const clean = (value, max = 240) => String(value || '').trim().slice(0, max);
 const safeNumber = (value) => (Number.isFinite(Number(value)) ? Number(value) : null);
@@ -14,6 +15,10 @@ const isEligibleDistributor = (data = {}, branchId = '') =>
   ['active', 'approved'].includes(distributorStatus(data)) &&
   !['inactive', 'disabled'].includes(clean(data.accountStatus, 40).toLowerCase()) &&
   data.mustChangePassword !== true;
+const OVERRIDE_ELIGIBLE_STATUSES = new Set(['awaiting_distributor_assignment', 'distributor_assigned', 'accepted', 'scheduled', 'delivery_failed']);
+const requireOverrideEligible = (data) => {
+  if (!OVERRIDE_ELIGIBLE_STATUSES.has(clean(data.status, 80).toLowerCase())) throw new OtpError(409, 'ORDER_NOT_OVERRIDE_ELIGIBLE', 'This order is not eligible for distributor override.');
+};
 
 function bodyOf(req) {
   if (req.body && typeof req.body === 'object') return req.body;
@@ -59,6 +64,7 @@ function createAdminDispatchOverrideHandler(getAdmin = getFirebaseAdmin) {
         }
 
         const orderData = orderSnap.data() || {};
+        requireOverrideEligible(orderData);
         const branchId = clean(orderData.currentBranchId || orderData.branchId, 128);
         if (!branchId) {
           throw new OtpError(400, 'BRANCH_NOT_SET', 'This order is not associated with an active branch.');
@@ -68,15 +74,23 @@ function createAdminDispatchOverrideHandler(getAdmin = getFirebaseAdmin) {
         const branchName = branchSnap.exists ? clean(branchSnap.data()?.name, 160) : 'Branch';
 
         const distributorsSnap = await db.collection('users').where('role', '==', 'distributor').get();
-        const eligibleDistributors = distributorsSnap.docs
+        const distributorCandidates = distributorsSnap.docs
           .map((doc) => ({ id: doc.id, ...doc.data() }))
-          .filter((d) => isEligibleDistributor(d, branchId))
-          .map((d) => ({
+          .filter((d) => isEligibleDistributor(d, branchId));
+        const eligibleDistributors = (await Promise.all(distributorCandidates.map(async (d) => {
+          if (typeof auth.getUser === 'function') {
+            const account = await auth.getUser(d.id).catch(() => null);
+            if (!account || account.disabled === true) return null;
+          }
+          return {
             uid: d.id,
             name: fullName(d),
+            publicUid: clean(d.publicUid, 40),
             phone: clean(d.phone || d.contactNumber, 40),
             branchId: clean(d.branchId, 128),
-          }))
+          };
+        })))
+          .filter(Boolean)
           .sort((a, b) => a.name.localeCompare(b.name));
 
         return res.status(200).json({
@@ -86,6 +100,7 @@ function createAdminDispatchOverrideHandler(getAdmin = getFirebaseAdmin) {
           currentDistributorUid: clean(orderData.assignedDistributorUid || orderData.distributor_id, 128),
           currentDistributorName: clean(orderData.assignedDistributorNameSnapshot || orderData.distributor_name, 160),
           status: clean(orderData.status, 80),
+          effectiveDeliveryDaysSnapshot: Array.isArray(orderData.effectiveDeliveryDaysSnapshot) ? orderData.effectiveDeliveryDaysSnapshot : effectiveDeliveryDays(orderData.items || []),
           scheduledAt: orderData.scheduledAt || null,
           eligibleDistributors,
         });
@@ -96,10 +111,12 @@ function createAdminDispatchOverrideHandler(getAdmin = getFirebaseAdmin) {
       const orderId = clean(body.orderId, 128);
       const distributorUid = clean(body.distributorUid, 128);
       const scheduledAtRaw = body.scheduledAt;
+      const reason = clean(body.reason, 240);
 
       if (!orderId || !distributorUid) {
         throw new OtpError(400, 'INVALID_INPUT', 'Provide both orderId and distributorUid.');
       }
+      if (!reason) throw new OtpError(400, 'OVERRIDE_REASON_REQUIRED', 'Explain why this emergency reassignment is needed.');
 
       const scheduledAt = scheduledAtRaw ? new Date(scheduledAtRaw) : null;
       const now = new Date();
@@ -114,6 +131,9 @@ function createAdminDispatchOverrideHandler(getAdmin = getFirebaseAdmin) {
       }
 
       const orderData = orderSnap.data() || {};
+      requireOverrideEligible(orderData);
+      const allowedDays = Array.isArray(orderData.effectiveDeliveryDaysSnapshot) ? orderData.effectiveDeliveryDaysSnapshot : effectiveDeliveryDays(orderData.items || []);
+      if (!isAllowedDeliveryDate(scheduledAt, allowedDays)) throw new OtpError(409, 'PRODUCT_DELIVERY_DAY_UNAVAILABLE', allowedDays.length ? 'Choose a delivery day allowed for every product in this order.' : 'These products have no common delivery day. Ask Admin to update the product schedules.');
       const branchId = clean(orderData.currentBranchId || orderData.branchId, 128);
       if (!branchId) {
         throw new OtpError(400, 'BRANCH_NOT_SET', 'This order has no owning branch.');
@@ -130,7 +150,7 @@ function createAdminDispatchOverrideHandler(getAdmin = getFirebaseAdmin) {
       // STRICT SAME-BRANCH SECURITY CHECK: Admin CANNOT cross-assign branches
       if (targetBranchId !== branchId) {
         throw new OtpError(
-          409,
+          403,
           'CROSS_BRANCH_ASSIGNMENT_FORBIDDEN',
           'Admin override cannot assign a distributor from a different branch. The distributor must belong to the order\'s branch.'
         );
@@ -151,22 +171,23 @@ function createAdminDispatchOverrideHandler(getAdmin = getFirebaseAdmin) {
       const previousDistributorName = clean(orderData.assignedDistributorNameSnapshot || orderData.distributor_name, 160);
       const targetName = fullName(targetData);
 
-      const event = 'ADMIN_OVERRIDE_ASSIGNED';
+      const event = 'ADMIN_DISPATCH_OVERRIDE';
       const historyEntry = {
         event,
         previousDistributorUid: previousDistributorUid || null,
         previousDistributorNameSnapshot: previousDistributorName || null,
         distributorUid,
         distributorNameSnapshot: targetName,
-        assignedByAdminUid: admin.decoded.uid,
+        assignedByAdminUid: admin.uid,
         assignedAt: now,
         scheduledAt,
         adminOverride: true,
+        reason,
       };
 
       const dispatchHistoryEntry = {
         event,
-        actorUid: admin.decoded.uid,
+        actorUid: admin.uid,
         role: 'admin',
         branchId,
         createdAt: now,
@@ -182,7 +203,7 @@ function createAdminDispatchOverrideHandler(getAdmin = getFirebaseAdmin) {
         scheduled_at: scheduledAt,
         expectedDeliveryDate: scheduledAt.toISOString(),
         delivery_date: scheduledAt.toISOString(),
-        assignedByAdminUid: admin.decoded.uid,
+        assignedByAdminUid: admin.uid,
         adminOverride: true,
         assignmentHistory: [...(Array.isArray(orderData.assignmentHistory) ? orderData.assignmentHistory : []), historyEntry],
         dispatchEventHistory: [...(Array.isArray(orderData.dispatchEventHistory) ? orderData.dispatchEventHistory : []), dispatchHistoryEntry],
@@ -195,13 +216,14 @@ function createAdminDispatchOverrideHandler(getAdmin = getFirebaseAdmin) {
       // Persist administrative audit log
       await db.collection('adminAuditLogs').add({
         action: 'ADMIN_DISTRIBUTOR_OVERRIDE',
-        adminUid: admin.decoded.uid,
+        adminUid: admin.uid,
         orderId,
         branchId,
         previousDistributorUid: previousDistributorUid || null,
         newDistributorUid: distributorUid,
         newDistributorName: targetName,
         scheduledAt: scheduledAt.toISOString(),
+        reason,
         createdAt: now,
         timestamp: now,
       });
@@ -221,4 +243,3 @@ module.exports = {
   createAdminDispatchOverrideHandler,
   isEligibleDistributor,
 };
-

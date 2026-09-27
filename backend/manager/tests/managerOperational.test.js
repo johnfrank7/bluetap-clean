@@ -45,3 +45,10 @@ test('realtime order snapshots normalize legacy names and public IDs for Manager
   assert.equal(order.items[0].productNameSnapshot, 'Refill');
   assert.equal(order.status, 'pending');
 });
+
+test('dispatch FIFO follows ready time through edits and realtime refreshes', () => {
+  const earlier = { id: 'earlier', branchId: 'north', status: 'awaiting_distributor_assignment', dispatchReadyAt: new Date('2026-01-01T01:00:00Z'), updatedAt: new Date('2026-01-10T00:00:00Z') };
+  const later = { id: 'later', branchId: 'north', status: 'awaiting_distributor_assignment', dispatchReadyAt: new Date('2026-01-01T02:00:00Z'), updatedAt: new Date('2026-01-01T02:00:00Z') };
+  assert.deepEqual(getManagerQueues([later, earlier], [], 'north').dispatch.map((order) => order.id), ['earlier', 'later']);
+  assert.deepEqual(getManagerQueues([{ ...later, updatedAt: new Date('2026-01-11T00:00:00Z') }, { ...earlier, updatedAt: new Date('2026-01-12T00:00:00Z') }], [], 'north').dispatch.map((order) => order.id), ['earlier', 'later']);
+});

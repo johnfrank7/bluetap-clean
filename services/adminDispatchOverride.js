@@ -16,13 +16,13 @@ export async function getAdminOverrideDetails(orderId) {
   return result;
 }
 
-export async function submitAdminOverrideAssignment(orderId, distributorUid, scheduledAt) {
+export async function submitAdminOverrideAssignment(orderId, distributorUid, scheduledAt, reason) {
   const token = await auth.currentUser?.getIdToken();
   if (!token) throw new Error('Administrator authentication is required.');
   const response = await fetch(getApiUrl('/api/admin/dispatch-override'), {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ orderId, distributorUid, scheduledAt }),
+    body: JSON.stringify({ orderId, distributorUid, scheduledAt, reason }),
   });
   const result = await response.json().catch(() => null);
   if (!response.ok) {
@@ -32,4 +32,3 @@ export async function submitAdminOverrideAssignment(orderId, distributorUid, sch
   }
   return result;
 }
-

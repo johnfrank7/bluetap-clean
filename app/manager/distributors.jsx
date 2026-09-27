@@ -21,6 +21,7 @@ import ManagerShell, { MANAGER_COLORS, ManagerPill } from '../../components/Mana
 import { useManagerRealtimeData } from '../../components/ManagerRealtimeData';
 import { parseTimestamp } from '../../services/notificationTimestamp';
 const { getManagerQueues, toManagerOrder } = require('../../services/managerOperational');
+const { effectiveDeliveryDays, isAllowedDeliveryDate, manilaScheduleDate } = require('../../services/productOrderPolicy');
 
 const normalizeApplicationStatus = (status) =>
   (status || 'pending').toString().trim().toLowerCase();
@@ -97,11 +98,12 @@ const TIME_SLOT_OPTIONS = [
 ];
 
 function buildScheduleDate(dayOffset, slot) {
-  const target = new Date();
-  target.setDate(target.getDate() + dayOffset);
-  target.setHours(slot.hours, slot.minutes, 0, 0);
-  return target;
+  return manilaScheduleDate(dayOffset, slot.hours, slot.minutes);
 }
+const allowedDayOffsets = (order) => {
+  const days = Array.isArray(order.effectiveDeliveryDaysSnapshot) ? order.effectiveDeliveryDaysSnapshot : effectiveDeliveryDays(order.items || []);
+  return Array.from({ length: 14 }, (_, index) => index).filter((offset) => isAllowedDeliveryDate(buildScheduleDate(offset, TIME_SLOT_OPTIONS[0]), days));
+};
 
 function DistributorDispatchQueue({ styles, colors, isDark, onShowToast }) {
   const realtime = useManagerRealtimeData();
@@ -144,7 +146,7 @@ function DistributorDispatchQueue({ styles, colors, isDark, onShowToast }) {
     setAssigningOrderId(order.id);
     setTransferringOrderId('');
     setSelectedDistributorUid(order.assignedDistributorUid || (data.distributors[0]?.uid || ''));
-    setSelectedDayOffset(0);
+    setSelectedDayOffset(allowedDayOffsets(order)[0] ?? 0);
     setSelectedSlotIndex(0);
     setScheduleError('');
   };
@@ -156,6 +158,10 @@ function DistributorDispatchQueue({ styles, colors, isDark, onShowToast }) {
     }
     const slot = TIME_SLOT_OPTIONS[selectedSlotIndex] || TIME_SLOT_OPTIONS[0];
     const scheduledAt = buildScheduleDate(selectedDayOffset, slot);
+    if (!allowedDayOffsets(order).includes(selectedDayOffset)) {
+      setScheduleError('These products have no common delivery day in this schedule. Ask Admin to update the product schedules.');
+      return;
+    }
 
     // Validate that schedule is at least 5 minutes in the future
     if (scheduledAt.getTime() < Date.now() - 5 * 60 * 1000) {
@@ -344,7 +350,9 @@ function DistributorDispatchQueue({ styles, colors, isDark, onShowToast }) {
                   <View style={styles.scheduleRow}>
                     <Text style={styles.scheduleSubTitle}>Date:</Text>
                     <View style={styles.pillGroup}>
-                      {['Today', 'Tomorrow', 'In 2 Days'].map((label, index) => (
+                      {allowedDayOffsets(order).map((index) => {
+                        const label = index === 0 ? 'Today' : index === 1 ? 'Tomorrow' : buildScheduleDate(index, TIME_SLOT_OPTIONS[0]).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+                        return (
                         <TouchableOpacity
                           key={label}
                           onPress={() => setSelectedDayOffset(index)}
@@ -354,7 +362,9 @@ function DistributorDispatchQueue({ styles, colors, isDark, onShowToast }) {
                             {label}
                           </Text>
                         </TouchableOpacity>
-                      ))}
+                        );
+                      })}
+                      {!allowedDayOffsets(order).length && <Text style={styles.scheduleErrorText}>The products in this order have no common delivery day. Ask Admin to update the product schedules.</Text>}
                     </View>
                   </View>
 

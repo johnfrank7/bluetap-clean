@@ -3,6 +3,7 @@ const { requireAdmin } = require('../auth/authorization');
 const { applyCors } = require('../utils/cors');
 const { OtpError } = require('../utils/otpError');
 const { createSupabaseProductImageStorage, decodeProductImage } = require('../services/supabaseStorage');
+const { WEEKDAYS, productLimit, productDeliveryDays } = require('../../services/productOrderPolicy');
 
 const firestoreWriteFailed = () => new OtpError(503, 'PRODUCT_FIRESTORE_WRITE_FAILED', 'The product record could not be saved. Please try again.', { stage: 'PRODUCT_FIRESTORE_WRITE_STARTED' });
 
@@ -36,6 +37,8 @@ const safeProduct = (id, data = {}) => {
   size: clean(data.size, 80),
   active: data.active !== false,
   branchIds: branchIdsFor(data.branchIds || (data.branchId ? [data.branchId] : [])),
+  maxQuantityPerRequester: productLimit(data.maxQuantityPerRequester),
+  deliveryDays: productDeliveryDays(data.deliveryDays),
   createdAt: data.createdAt || data.created_at || null,
   updatedAt: data.updatedAt || data.updated_at || null,
 };
@@ -81,6 +84,20 @@ function productInput(body, { partial = false } = {}) {
   if (!partial || Object.prototype.hasOwnProperty.call(body, 'price')) result.price = priceFor(body.price);
   if (!partial || Object.prototype.hasOwnProperty.call(body, 'active')) result.active = body.active !== false;
   if (!partial || Object.prototype.hasOwnProperty.call(body, 'branchIds')) result.branchIds = branchIdsFor(body.branchIds);
+  if (!partial || Object.prototype.hasOwnProperty.call(body, 'maxQuantityPerRequester')) {
+    const value = body.maxQuantityPerRequester;
+    if (value !== null && value !== undefined && value !== '' && productLimit(value) === null) {
+      throw new OtpError(400, 'INVALID_PRODUCT_ORDER_LIMIT', 'Requester order limit must be an integer from 1 to 100.', { field: 'maxQuantityPerRequester' });
+    }
+    result.maxQuantityPerRequester = productLimit(value);
+  }
+  if (!partial || Object.prototype.hasOwnProperty.call(body, 'deliveryDays')) {
+    const days = body.deliveryDays === undefined && !partial ? [] : body.deliveryDays;
+    if (!Array.isArray(days) || days.some((day) => !WEEKDAYS.includes(day))) {
+      throw new OtpError(400, 'INVALID_PRODUCT_DELIVERY_DAYS', 'Choose valid delivery weekdays.', { field: 'deliveryDays' });
+    }
+    result.deliveryDays = productDeliveryDays(days);
+  }
   if (!partial && !result.product_name) throw new OtpError(400, 'INVALID_PRODUCT', 'Product name is required.', { field: 'product_name' });
   return result;
 }

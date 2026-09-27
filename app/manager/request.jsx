@@ -59,9 +59,9 @@ function OutsideRadiusApprovalQueue({ orders, loading, styles, colors, isDark, o
     try {
       await decideOutsideRadiusOrder(order.id, action);
       if (action === 'approve') {
-        onShowToast?.('Outside-radius order approved.', 'success');
+        onShowToast?.('Order exception approved.', 'success');
       } else {
-        onShowToast?.('Outside-radius order declined.', 'info');
+        onShowToast?.('Order exception declined.', 'info');
       }
     } catch (updateFailure) {
       setError(updateFailure.message);
@@ -76,9 +76,9 @@ function OutsideRadiusApprovalQueue({ orders, loading, styles, colors, isDark, o
       <View style={styles.cardHeaderRow}>
         <View>
           <Text style={styles.eyebrow}>DELIVERY EXCEPTIONS</Text>
-          <Text style={styles.cardTitle}>Outside-Radius Approvals</Text>
+          <Text style={styles.cardTitle}>Order Approvals</Text>
           <Text style={styles.helperText}>
-            Review delivery requests originating outside your branch's standard service radius.
+            Review delivery requests outside your branch radius or above a product order limit.
           </Text>
         </View>
       </View>
@@ -98,7 +98,7 @@ function OutsideRadiusApprovalQueue({ orders, loading, styles, colors, isDark, o
           compact
           variant="exceptions"
           title="No Delivery Exceptions"
-          description="Outside-radius requests that need branch approval will appear here."
+          description="Orders that need branch approval will appear here."
           themeColors={colors}
           dark={isDark}
           style={styles.visualEmpty}
@@ -118,7 +118,7 @@ function OutsideRadiusApprovalQueue({ orders, loading, styles, colors, isDark, o
                   <Text style={styles.requesterName}>{order.requesterName || 'Requester'}</Text>
                   <Text style={styles.orderIdText}>#{order.requestId || order.id}</Text>
                 </View>
-                <ManagerPill tone="cyan">Approval Needed</ManagerPill>
+                <ManagerPill tone="cyan">{order.approvalReasons?.includes('PRODUCT_LIMIT_EXCEEDED') ? 'High Quantity' : 'Outside Radius'}</ManagerPill>
               </View>
 
               <Text style={styles.productsSummary}>{products}</Text>
@@ -127,9 +127,13 @@ function OutsideRadiusApprovalQueue({ orders, loading, styles, colors, isDark, o
                 <Text style={styles.detailLine}>
                   Delivery: {order.address || (order.deliveryLocation ? `${order.deliveryLocation.latitude.toFixed(5)}, ${order.deliveryLocation.longitude.toFixed(5)}` : 'Location provided')}
                 </Text>
-                <Text style={styles.detailLine}>
+                {order.outsideServiceArea && <Text style={styles.detailLine}>
                   Approx. {Number(order.distanceKmSnapshot || 0).toFixed(1)} km · Branch radius {order.serviceRadiusKmSnapshot} km
-                </Text>
+                </Text>}
+                {(order.productLimitViolations || []).map((item) => <Text key={item.productId} style={styles.detailLine}>
+                  {item.productNameSnapshot}: requested {item.requestedQuantity} · limit {item.configuredLimit}. Order exceeds the configured requester product limit.
+                </Text>)}
+                {!!order.requesterUniqueId && <Text style={styles.detailLine}>Requester UID: {order.requesterUniqueId}</Text>}
                 <Text style={styles.amountText}>{formatAmount(order.totalAtOrder)}</Text>
               </View>
 
@@ -139,7 +143,7 @@ function OutsideRadiusApprovalQueue({ orders, loading, styles, colors, isDark, o
                   onPress={() => decide(order, 'approve')}
                   style={[styles.approveButton, isUpdating && styles.actionDisabled]}
                 >
-                  <Text style={styles.approveButtonText}>{isUpdating ? 'Saving…' : 'Approve Delivery'}</Text>
+                  <Text style={styles.approveButtonText}>{isUpdating ? 'Saving…' : 'Approve'}</Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity
@@ -147,7 +151,7 @@ function OutsideRadiusApprovalQueue({ orders, loading, styles, colors, isDark, o
                   onPress={() => decide(order, 'decline')}
                   style={[styles.declineButton, isUpdating && styles.actionDisabled]}
                 >
-                  <Text style={styles.declineButtonText}>Decline</Text>
+                  <Text style={styles.declineButtonText}>Reject</Text>
                 </TouchableOpacity>
               </View>
             </View>

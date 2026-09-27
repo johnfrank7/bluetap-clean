@@ -27,6 +27,7 @@ const isActiveRequesterOrderStatus = (status) =>
 const REQUESTER_ORDER_STATUS_LABELS = {
   pending: 'Pending',
   'outside radius pending approval': 'Waiting for branch approval',
+  'manager approval pending': 'Waiting for branch approval',
   'awaiting distributor assignment': 'Waiting for distributor assignment',
   'distributor assigned': 'Distributor assigned',
   assigned: 'Distributor assigned',

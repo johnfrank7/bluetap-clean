@@ -45,7 +45,7 @@ function AdminShellLayout({ title, subtitle, children }) {
     try {
       const q = query(
         collection(db, 'requests'),
-        where('status', 'in', ['pending', 'outside_radius_pending_approval', 'branch_transfer_pending'])
+        where('status', 'in', ['Pending', 'pending', 'outside_radius_pending_approval', 'manager_approval_pending', 'branch_transfer_pending'])
       );
       const unsubscribe = onSnapshot(
         q,

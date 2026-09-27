@@ -19,6 +19,9 @@ const STATUS_META = {
     color: '#B7791F',
     label: 'Waiting for branch approval',
   },
+  'manager approval pending': {
+    backgroundColor: '#FFF8E6', color: '#B7791F', label: 'Waiting for branch approval',
+  },
   'awaiting distributor assignment': {
     backgroundColor: '#EFF6FF',
     color: BLUE,
@@ -109,6 +112,7 @@ const STATUS_META = {
 const DARK_STATUS_META = {
   pending: { backgroundColor: '#38280B', color: '#FBBF24', label: 'Pending' },
   'outside radius pending approval': { backgroundColor: '#38280B', color: '#FBBF24', label: 'Waiting for branch approval' },
+  'manager approval pending': { backgroundColor: '#38280B', color: '#FBBF24', label: 'Waiting for branch approval' },
   'awaiting distributor assignment': { backgroundColor: '#133554', color: '#60A5FA', label: 'Waiting for distributor assignment' },
   'distributor assigned': { backgroundColor: '#0F392B', color: '#34D399', label: 'Distributor assigned' },
   assigned: { backgroundColor: '#0F392B', color: '#34D399', label: 'Distributor assigned' },

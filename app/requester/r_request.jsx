@@ -26,6 +26,7 @@ import BlueTapEmptyState from '../../components/BlueTapEmptyState';
 import PortalSwipeContainer, { REQUESTER_TABS } from '../../components/PortalSwipeContainer';
 import { createPortalStyleSheet, useBlueTapTheme } from '../../components/BlueTapTheme';
 import TopToastFeedback from '../../components/TopToastFeedback';
+import { canBuyAgain as isBuyAgainEligible } from '../../services/buyAgain';
 import { USER_PORTAL_BOTTOM_CONTENT_INSET, USER_PORTAL_LAYOUT } from '../../constants/userPortalLayout';
 import { BLUETAP_COLORS } from '../../constants/bluetapTheme';
 import {
@@ -96,7 +97,7 @@ const formatDateValue = (value, fallback = 'Date not set') => {
 };
 
 const isPendingRequest = (request) =>
-  ['pending', 'outside radius pending approval'].includes(normalizeStatus(request?.status || 'Pending'));
+  ['pending', 'outside radius pending approval', 'manager approval pending'].includes(normalizeStatus(request?.status || 'Pending'));
 
 const getRequestId = (request) => request.request_id || request.id || 'Not set';
 
@@ -226,9 +227,11 @@ const RequestCard = ({
   onCancel,
   onEdit,
   onViewDetails,
+  onBuyAgain,
 }) => {
   const canCancel = !isHistory && isPendingRequest(request);
   const canEdit = !isHistory && isPendingRequest(request) && typeof onEdit === 'function';
+  const canBuyAgain = isBuyAgainEligible(request, isHistory);
 
   return (
     <View style={styles.requestCard}>
@@ -240,6 +243,7 @@ const RequestCard = ({
         <SoftStatusBadge status={request.status} />
       </View>
       {normalizeStatus(request.status) === 'outside radius pending approval' && <View style={styles.approvalWaiting}><Text style={styles.approvalWaitingTitle}>Waiting for branch approval</Text><Text style={styles.approvalWaitingText}>This delivery point is outside the branch’s normal radius. Delivery is not confirmed until the branch approves it.</Text></View>}
+      {normalizeStatus(request.status) === 'manager approval pending' && <View style={styles.approvalWaiting}><Text style={styles.approvalWaitingTitle}>Waiting for branch approval</Text><Text style={styles.approvalWaitingText}>Your order exceeds a product limit and needs Manager approval before distributor assignment.</Text></View>}
       {normalizeStatus(request.status) === 'awaiting distributor assignment' && <View style={styles.approvalWaiting}><Text style={styles.approvalWaitingTitle}>Waiting for distributor assignment</Text><Text style={styles.approvalWaitingText}>Your branch approved the order and is assigning a Distributor.</Text></View>}
       {normalizeStatus(request.status) === 'distributor assigned' && <View style={styles.assignmentReady}><Text style={styles.assignmentReadyTitle}>Distributor assigned</Text><Text style={styles.assignmentReadyText}>A Distributor has been assigned to your order.</Text></View>}
       {normalizeStatus(request.status) === 'branch transfer pending' && <View style={styles.transferWaiting}><Text style={styles.transferWaitingTitle}>Branch transfer in progress</Text><Text style={styles.transferWaitingText}>Your order is being reviewed by another branch. Delivery is not confirmed until that review finishes.</Text></View>}
@@ -300,6 +304,8 @@ const RequestCard = ({
         >
           <Text style={styles.secondaryActionText}>View Details</Text>
         </TouchableOpacity>
+
+        {canBuyAgain && <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Buy again from order ${getRequestId(request)}`} activeOpacity={0.8} style={styles.secondaryActionButton} onPress={() => onBuyAgain(request)}><Text style={styles.secondaryActionText}>Buy Again</Text></TouchableOpacity>}
 
         {canEdit && (
           <TouchableOpacity
@@ -570,6 +576,7 @@ export default function RequesterRequests() {
                     onCancel={confirmCancelRequest}
                     onEdit={setEditingRequest}
                     onViewDetails={setSelectedRequest}
+                    onBuyAgain={(order) => router.push({ pathname: '/requester/requestform', params: { buyAgainOrderId: order.id } })}
                   />
                 ))
               )}

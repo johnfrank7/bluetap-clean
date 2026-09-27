@@ -22,8 +22,10 @@ function getManagerNotifications(orders = [], incomingTransfers = [], decisions 
   for (const order of orders.filter((item) => belongsToBranch(item, branchId))) {
     const status = statusOf(order.status);
     if ((order.initialBranchId || order.branchId) === branchId) {
-      add(`${order.id}:received`, order, order.outsideServiceArea === true || status === 'outside_radius_pending_approval'
-        ? 'Outside-radius request needs branch review.' : 'New branch order received.', status === 'outside_radius_pending_approval' ? status : 'pending', order.createdAt || order.created_at, '/manager/request');
+      const needsApproval = status === 'outside_radius_pending_approval' || status === 'manager_approval_pending';
+      add(`${order.id}:received`, order, status === 'manager_approval_pending'
+        ? 'Order quantity needs Manager approval.' : order.outsideServiceArea === true || status === 'outside_radius_pending_approval'
+          ? 'Outside-radius request needs branch review.' : 'New branch order received.', needsApproval ? status : 'pending', order.createdAt || order.created_at, '/manager/request');
     }
     if (status === 'cancelled' || status === 'canceled') add(`${order.id}:cancelled`, order, 'Requester cancelled the order.', 'cancelled', order.cancelledAt || order.updatedAt, '/manager/request');
     for (const [index, edit] of ((order.initialBranchId || order.branchId) === branchId && Array.isArray(order.editHistory) ? order.editHistory : []).entries()) {

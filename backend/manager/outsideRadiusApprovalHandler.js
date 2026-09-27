@@ -4,6 +4,7 @@ const { applyCors } = require('../utils/cors');
 const { OtpError } = require('../utils/otpError');
 
 const PENDING_STATUS = 'outside_radius_pending_approval';
+const PRODUCT_LIMIT_PENDING_STATUS = 'manager_approval_pending';
 const clean = (value, max = 240) => String(value || '').trim().slice(0, max);
 const safeNumber = (value) => Number.isFinite(Number(value)) ? Number(value) : null;
 const safeOrder = (id, data = {}) => ({
@@ -20,6 +21,9 @@ const safeOrder = (id, data = {}) => ({
   distanceKmSnapshot: safeNumber(data.distanceKmSnapshot),
   serviceRadiusKmSnapshot: safeNumber(data.serviceRadiusKmSnapshot),
   outsideServiceArea: data.outsideServiceArea === true,
+  approvalReasons: Array.isArray(data.approvalReasons) ? data.approvalReasons : data.outsideServiceArea === true ? ['OUTSIDE_RADIUS'] : [],
+  productLimitViolations: Array.isArray(data.productLimitViolations) ? data.productLimitViolations : [],
+  requesterUniqueId: clean(data.requesterUniqueIdSnapshot || data.requester_unique_id, 80),
   items: Array.isArray(data.items) ? data.items.map((item) => ({ productNameSnapshot: clean(item.productNameSnapshot || item.product_name, 160), quantity: Number(item.quantity) || 0, totalAtOrder: safeNumber(item.totalAtOrder ?? item.line_total) || 0 })) : [],
   totalAtOrder: safeNumber(data.totalAtOrder ?? data.total_cost) || 0,
   status: clean(data.status, 80),
@@ -36,7 +40,7 @@ function responseError(res, error) {
   const known = error instanceof OtpError;
   return res.status(known ? error.status : 500).json({ error: {
     reason: known ? error.reason : 'service-unavailable',
-    message: known ? error.message : 'Outside-radius approvals are temporarily unavailable.',
+    message: known ? error.message : 'Order approvals are temporarily unavailable.',
   } });
 }
 
@@ -54,7 +58,7 @@ function createOutsideRadiusApprovalsHandler(getAdmin = getFirebaseAdmin) {
         const snapshot = await db.collection('requests').where('branchId', '==', branchId).get();
         const orders = snapshot.docs
           .map((item) => safeOrder(item.id, item.data()))
-          .filter((order) => order.status === PENDING_STATUS && order.outsideServiceArea === true);
+          .filter((order) => order.status === PRODUCT_LIMIT_PENDING_STATUS || (order.status === PENDING_STATUS && order.outsideServiceArea === true));
         return res.status(200).json({ orders });
       }
       const body = bodyOf(req);
@@ -63,24 +67,27 @@ function createOutsideRadiusApprovalsHandler(getAdmin = getFirebaseAdmin) {
       if (!orderId || !['approve', 'decline'].includes(action)) throw new OtpError(400, 'INVALID_APPROVAL_ACTION', 'Choose whether to approve or decline this request.');
       const ref = db.collection('requests').doc(orderId);
       const snapshot = await ref.get();
-      if (!snapshot.exists) throw new OtpError(404, 'ORDER_NOT_FOUND', 'The outside-radius request was not found.');
+      if (!snapshot.exists) throw new OtpError(404, 'ORDER_NOT_FOUND', 'The order approval request was not found.');
       const current = snapshot.data() || {};
       requireManagerBranch(manager, current.branchId);
-      if (current.status !== PENDING_STATUS || current.outsideServiceArea !== true) {
+      if (current.status !== PRODUCT_LIMIT_PENDING_STATUS && !(current.status === PENDING_STATUS && current.outsideServiceArea === true)) {
         throw new OtpError(409, 'ORDER_NOT_AWAITING_APPROVAL', 'This request is no longer awaiting branch approval.');
       }
       const now = new Date();
-      const status = action === 'approve' ? 'awaiting_distributor_assignment' : 'declined_outside_service_area';
+      const status = action === 'approve' ? 'awaiting_distributor_assignment' : current.status === PENDING_STATUS ? 'declined_outside_service_area' : 'rejected';
+      const hasOutsideRadiusReason = current.outsideServiceArea === true || (Array.isArray(current.approvalReasons) && current.approvalReasons.includes('OUTSIDE_RADIUS'));
       const update = {
         status,
-        outsideRadiusDecision: action,
-        outsideRadiusReviewedByUid: manager.decoded.uid,
-        outsideRadiusReviewedAt: now,
+        managerApprovalDecision: action,
+        managerApprovalReviewedByUid: manager.decoded.uid,
+        managerApprovalReviewedAt: now,
+        ...(hasOutsideRadiusReason ? { outsideRadiusDecision: action, outsideRadiusReviewedByUid: manager.decoded.uid, outsideRadiusReviewedAt: now } : {}),
+        ...(action === 'approve' ? { managerApprovedAt: now, dispatchReadyAt: now } : { managerRejectedAt: now }),
         initialBranchId: clean(current.initialBranchId || current.branchId, 128),
         currentBranchId: clean(current.currentBranchId || current.branchId, 128),
         dispatchEventHistory: [
           ...(Array.isArray(current.dispatchEventHistory) ? current.dispatchEventHistory : []),
-          { event: action === 'approve' ? 'OUTSIDE_RADIUS_APPROVED' : 'OUTSIDE_RADIUS_DECLINED', branchId: clean(current.branchId, 128), actorUid: manager.decoded.uid, createdAt: now },
+          { event: current.status === PENDING_STATUS ? (action === 'approve' ? 'OUTSIDE_RADIUS_APPROVED' : 'OUTSIDE_RADIUS_DECLINED') : (action === 'approve' ? 'MANAGER_EXCEPTION_APPROVED' : 'MANAGER_EXCEPTION_REJECTED'), approvalReasons: Array.isArray(current.approvalReasons) ? current.approvalReasons : ['OUTSIDE_RADIUS'], branchId: clean(current.branchId, 128), actorUid: manager.decoded.uid, createdAt: now },
         ],
         updatedAt: now,
         updated_at: now,

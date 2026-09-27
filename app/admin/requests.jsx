@@ -20,10 +20,12 @@ import { ADMIN_CACHE_KEYS, useAdminData } from '../../services/adminDataCache';
 import { requesterOrderStatusLabel } from '../../constants/requesterOrderStatus';
 import { getAdminOverrideDetails, submitAdminOverrideAssignment } from '../../services/adminDispatchOverride';
 import TopToastFeedback from '../../components/TopToastFeedback';
+import { isAllowedDeliveryDate, manilaScheduleDate } from '../../services/productOrderPolicy';
 
 const ACTIONABLE_STATUSES = new Set([
   'pending',
   'outside_radius_pending_approval',
+  'manager_approval_pending',
   'branch_transfer_pending',
 ]);
 
@@ -44,6 +46,8 @@ const ISSUE_STATUSES = new Set([
   'rejected',
   'declined outside service area',
 ]);
+
+const OVERRIDE_ELIGIBLE_STATUSES = new Set(['awaiting_distributor_assignment', 'distributor_assigned', 'accepted', 'scheduled', 'delivery_failed']);
 
 const formatAmount = (val) => {
   if (val === undefined || val === null || val === '') return '₱0.00';
@@ -108,6 +112,9 @@ export default function AdminRequestsPage() {
   const [selectedOverrideDistributor, setSelectedOverrideDistributor] = useState('');
   const [overrideDayOffset, setOverrideDayOffset] = useState(0);
   const [overrideSlotIndex, setOverrideSlotIndex] = useState(0);
+  const [overrideReason, setOverrideReason] = useState('');
+  const [overrideDistributorOpen, setOverrideDistributorOpen] = useState(false);
+  const [overrideDistributorQuery, setOverrideDistributorQuery] = useState('');
   const [toast, setToast] = useState({ visible: false, message: '', type: 'info' });
 
   const showToast = (message, type = 'info') => {
@@ -121,6 +128,17 @@ export default function AdminRequestsPage() {
     { label: '03:00 PM', hours: 15, minutes: 0 },
     { label: '05:00 PM', hours: 17, minutes: 0 },
   ];
+  const eligibleOverrideDistributors = (overrideData?.eligibleDistributors || [])
+    .filter((dist) => dist.branchId === overrideData?.branchId);
+  const filteredOverrideDistributors = eligibleOverrideDistributors.filter((dist) =>
+    `${dist.name} ${dist.publicUid || ''}`.toLowerCase().includes(overrideDistributorQuery.trim().toLowerCase())
+  );
+  const availableOverrideSlots = (offset) => OVERRIDE_TIME_SLOTS.map((slot, index) => ({ ...slot, index }))
+    .filter((slot) => manilaScheduleDate(offset, slot.hours, slot.minutes).getTime() > Date.now() + 5 * 60 * 1000);
+  const overrideAllowedOffsets = Array.from({ length: 14 }, (_, index) => index).filter((offset) =>
+    isAllowedDeliveryDate(manilaScheduleDate(offset, 12), overrideData?.effectiveDeliveryDaysSnapshot || []) && availableOverrideSlots(offset).length
+  );
+  const selectedOverrideName = eligibleOverrideDistributors.find((dist) => dist.uid === selectedOverrideDistributor);
 
   const openOverride = async (order) => {
     if (!order) return;
@@ -128,12 +146,18 @@ export default function AdminRequestsPage() {
     setOverrideLoading(true);
     setOverrideError('');
     setOverrideSuccess('');
+    setOverrideData(null);
+    setOverrideReason('');
+    setOverrideDistributorOpen(false);
+    setOverrideDistributorQuery('');
     try {
       const data = await getAdminOverrideDetails(order.id || order.requestId);
       setOverrideData(data);
-      setSelectedOverrideDistributor(data.eligibleDistributors?.[0]?.uid || '');
-      setOverrideDayOffset(0);
-      setOverrideSlotIndex(0);
+      setSelectedOverrideDistributor(data.eligibleDistributors?.find((dist) => dist.branchId === data.branchId)?.uid || '');
+      setOverrideDayOffset(Array.from({ length: 14 }, (_, index) => index).find((offset) =>
+        isAllowedDeliveryDate(manilaScheduleDate(offset, 12), data.effectiveDeliveryDaysSnapshot || []) && availableOverrideSlots(offset).length
+      ) ?? 0);
+      setOverrideSlotIndex(availableOverrideSlots(0)[0]?.index ?? 0);
     } catch (err) {
       setOverrideError(err.message || 'Failed to load override details.');
     } finally {
@@ -146,10 +170,16 @@ export default function AdminRequestsPage() {
       setOverrideError('Please select an eligible distributor.');
       return;
     }
+    if (!overrideReason.trim()) {
+      setOverrideError('Explain why this emergency reassignment is needed.');
+      return;
+    }
+    if (!overrideAllowedOffsets.includes(overrideDayOffset)) {
+      setOverrideError('Choose a delivery day allowed for every product in this order.');
+      return;
+    }
     const slot = OVERRIDE_TIME_SLOTS[overrideSlotIndex] || OVERRIDE_TIME_SLOTS[0];
-    const sched = new Date();
-    sched.setDate(sched.getDate() + overrideDayOffset);
-    sched.setHours(slot.hours, slot.minutes, 0, 0);
+    const sched = manilaScheduleDate(overrideDayOffset, slot.hours, slot.minutes);
 
     setOverrideLoading(true);
     setOverrideError('');
@@ -157,7 +187,8 @@ export default function AdminRequestsPage() {
       const res = await submitAdminOverrideAssignment(
         selectedOrder.id || selectedOrder.requestId,
         selectedOverrideDistributor,
-        sched.toISOString()
+        sched.toISOString(),
+        overrideReason.trim()
       );
       setOverrideSuccess('Distributor successfully reassigned via Admin Override.');
       showToast('Distributor successfully reassigned via Admin Override.', 'success');
@@ -636,7 +667,7 @@ export default function AdminRequestsPage() {
                     <Text style={styles.modalValue}>
                       {selectedOrder?.distributorNameSnapshot || selectedOrder?.distributorName || 'Not assigned'}
                     </Text>
-                    {!['delivered', 'cancelled', 'canceled', 'declined'].includes((selectedOrder?.status || '').toLowerCase()) && (
+                    {OVERRIDE_ELIGIBLE_STATUSES.has((selectedOrder?.status || '').toLowerCase()) && (
                       <TouchableOpacity
                         accessibilityRole="button"
                         accessibilityLabel="Admin Override: Reassign Distributor"
@@ -759,18 +790,16 @@ export default function AdminRequestsPage() {
             </ScrollView>
 
             <View style={styles.modalFooter}>
-              <TouchableOpacity
-                accessibilityRole="button"
-                accessibilityLabel="Override Distributor Assignment"
-                onPress={() => openOverride(selectedOrder)}
-                disabled={['delivered', 'cancelled', 'canceled', 'declined'].includes((selectedOrder?.status || '').toLowerCase())}
-                style={[
-                  styles.overrideActionButton,
-                  ['delivered', 'cancelled', 'canceled', 'declined'].includes((selectedOrder?.status || '').toLowerCase()) && styles.actionDisabled,
-                ]}
-              >
-                <Text style={styles.overrideActionButtonText}>Override Distributor Assignment</Text>
-              </TouchableOpacity>
+              {OVERRIDE_ELIGIBLE_STATUSES.has((selectedOrder?.status || '').toLowerCase()) && (
+                <TouchableOpacity
+                  accessibilityRole="button"
+                  accessibilityLabel="Override Distributor Assignment"
+                  onPress={() => openOverride(selectedOrder)}
+                  style={[styles.overrideActionButton, { backgroundColor: colors.primary, borderColor: colors.primary }]}
+                >
+                  <Text style={[styles.overrideActionButtonText, { color: '#FFFFFF' }]}>Override Distributor Assignment</Text>
+                </TouchableOpacity>
+              )}
             </View>
           </View>
         </View>
@@ -812,9 +841,10 @@ export default function AdminRequestsPage() {
               </View>
             ) : (
               <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 480 }}>
-                <View style={styles.overrideNoticeBox}>
-                  <Text style={styles.overrideNoticeText}>
-                    Emergency Platform Override: Normal operational dispatch is owned by Branch Managers. Reassignments here are restricted strictly to the fulfillment branch ({overrideData?.branchName || 'Branch'}) and permanently recorded in the Admin Audit Log.
+                <View style={[styles.overrideNoticeBox, { backgroundColor: colors.warningSoft, borderColor: colors.warning, borderWidth: 1, borderRadius: 10, padding: 14 }]}>
+                  <Text style={{ color: colors.textPrimary, fontWeight: '800', marginBottom: 4 }}>Emergency reassignment</Text>
+                  <Text style={[styles.overrideNoticeText, { color: colors.textPrimary }]}>
+                    Branch Managers normally own dispatch. This action is limited to the fulfillment branch and recorded in the Admin Audit Log.
                   </Text>
                 </View>
 
@@ -843,73 +873,97 @@ export default function AdminRequestsPage() {
                 </View>
 
                 <View style={{ marginTop: 14 }}>
-                  <Text style={styles.overrideLabel}>Select Same-Branch Distributor</Text>
-                  {(!overrideData?.eligibleDistributors || overrideData.eligibleDistributors.length === 0) ? (
+                  <Text style={styles.overrideLabel}>Select Distributor</Text>
+                  {!eligibleOverrideDistributors.length ? (
                     <Text style={{ color: colors.danger, fontSize: 13, marginTop: 4 }}>
                       No eligible active distributors found for this branch.
                     </Text>
                   ) : (
-                    <View style={{ gap: 6, marginTop: 6 }}>
-                      {overrideData.eligibleDistributors.map((dist) => {
-                        const isSelected = selectedOverrideDistributor === dist.uid;
-                        return (
-                          <TouchableOpacity
-                            key={dist.uid}
-                            onPress={() => setSelectedOverrideDistributor(dist.uid)}
-                            style={[
-                              styles.overrideDistItem,
-                              isSelected && { borderColor: colors.primary, backgroundColor: colors.primarySoft },
-                            ]}
-                          >
-                            <Text style={[styles.overrideDistName, isSelected && { color: colors.primary }]}>
-                              {dist.name}
-                            </Text>
-                            <Text style={styles.overrideDistPhone}>{dist.phone || 'No phone'}</Text>
-                          </TouchableOpacity>
-                        );
-                      })}
+                    <View style={{ marginTop: 6 }}>
+                      <Pressable
+                        accessibilityRole="combobox"
+                        accessibilityLabel="Select same-branch distributor"
+                        accessibilityState={{ expanded: overrideDistributorOpen }}
+                        onPress={() => setOverrideDistributorOpen(!overrideDistributorOpen)}
+                        style={{ borderWidth: 1, borderColor: colors.inputBorder, backgroundColor: colors.surfaceAlt, borderRadius: 8, padding: 12, flexDirection: 'row', justifyContent: 'space-between' }}
+                      >
+                        <Text style={{ color: colors.textPrimary, fontWeight: '700' }}>{selectedOverrideName ? `${selectedOverrideName.name}${selectedOverrideName.publicUid ? ` · ${selectedOverrideName.publicUid}` : ''}` : 'Choose a distributor'}</Text>
+                        <Text style={{ color: colors.textSecondary }}>{overrideDistributorOpen ? '▲' : '▼'}</Text>
+                      </Pressable>
+                      {overrideDistributorOpen && (
+                        <View style={{ borderWidth: 1, borderColor: colors.inputBorder, borderRadius: 8, padding: 8, marginTop: 4, backgroundColor: colors.surface }}>
+                          <TextInput
+                            accessibilityLabel="Search distributors"
+                            placeholder="Search name or public ID"
+                            placeholderTextColor={colors.textSecondary}
+                            value={overrideDistributorQuery}
+                            onChangeText={setOverrideDistributorQuery}
+                            style={{ color: colors.textPrimary, borderWidth: 1, borderColor: colors.inputBorder, borderRadius: 6, padding: 8, marginBottom: 6 }}
+                          />
+                          {filteredOverrideDistributors.length ? filteredOverrideDistributors.map((dist) => (
+                            <Pressable key={dist.uid} accessibilityRole="option" accessibilityState={{ selected: selectedOverrideDistributor === dist.uid }} onPress={() => { setSelectedOverrideDistributor(dist.uid); setOverrideDistributorOpen(false); setOverrideDistributorQuery(''); }} style={{ padding: 10, borderRadius: 6, backgroundColor: selectedOverrideDistributor === dist.uid ? colors.primarySoft : colors.surface }}>
+                              <Text style={{ color: colors.textPrimary, fontWeight: '700' }}>{dist.name}{dist.publicUid ? ` · ${dist.publicUid}` : ''}</Text>
+                              <Text style={{ color: colors.textSecondary, fontSize: 12 }}>{dist.phone || 'No phone'}</Text>
+                            </Pressable>
+                          )) : <Text style={{ color: colors.textSecondary, padding: 8 }}>No matching distributors.</Text>}
+                        </View>
+                      )}
                     </View>
                   )}
                 </View>
 
                 <View style={{ marginTop: 14 }}>
                   <Text style={styles.overrideLabel}>Delivery Day</Text>
-                  <View style={{ flexDirection: 'row', gap: 8, marginTop: 6 }}>
-                    {['Today', 'Tomorrow', 'In 2 Days'].map((dayLabel, idx) => (
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 6 }}>
+                    {overrideAllowedOffsets.map((idx) => (
                       <TouchableOpacity
-                        key={dayLabel}
-                        onPress={() => setOverrideDayOffset(idx)}
+                        key={idx}
+                        onPress={() => { setOverrideDayOffset(idx); setOverrideSlotIndex(availableOverrideSlots(idx)[0]?.index ?? 0); }}
                         style={[
                           styles.overridePillBtn,
                           overrideDayOffset === idx && { backgroundColor: colors.primary, borderColor: colors.primary },
                         ]}
                       >
                         <Text style={[styles.overridePillText, overrideDayOffset === idx && { color: '#FFFFFF' }]}>
-                          {dayLabel}
+                          {idx === 0 ? 'Today' : idx === 1 ? 'Tomorrow' : manilaScheduleDate(idx, 12).toLocaleDateString('en-US', { timeZone: 'Asia/Manila', weekday: 'short', month: 'short', day: 'numeric' })}
                         </Text>
                       </TouchableOpacity>
                     ))}
                   </View>
+                  {!overrideAllowedOffsets.length && <Text style={{ color: colors.danger, marginTop: 6 }}>These products have no common delivery day. Update their product schedules before assigning a distributor.</Text>}
                 </View>
 
                 <View style={{ marginTop: 14 }}>
                   <Text style={styles.overrideLabel}>Delivery Time Slot</Text>
                   <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 6 }}>
-                    {OVERRIDE_TIME_SLOTS.map((slot, idx) => (
+                    {availableOverrideSlots(overrideDayOffset).map((slot) => (
                       <TouchableOpacity
                         key={slot.label}
-                        onPress={() => setOverrideSlotIndex(idx)}
+                        onPress={() => setOverrideSlotIndex(slot.index)}
                         style={[
                           styles.overridePillBtn,
-                          overrideSlotIndex === idx && { backgroundColor: colors.primary, borderColor: colors.primary },
+                          overrideSlotIndex === slot.index && { backgroundColor: colors.primary, borderColor: colors.primary },
                         ]}
                       >
-                        <Text style={[styles.overridePillText, overrideSlotIndex === idx && { color: '#FFFFFF' }]}>
+                        <Text style={[styles.overridePillText, overrideSlotIndex === slot.index && { color: '#FFFFFF' }]}>
                           {slot.label}
                         </Text>
                       </TouchableOpacity>
                     ))}
                   </View>
+                </View>
+                <View style={{ marginTop: 14, marginBottom: 12 }}>
+                  <Text style={styles.overrideLabel}>Reason for override</Text>
+                  <TextInput
+                    accessibilityLabel="Reason for emergency reassignment"
+                    placeholder="Explain why this reassignment is needed"
+                    placeholderTextColor={colors.textSecondary}
+                    value={overrideReason}
+                    onChangeText={setOverrideReason}
+                    multiline
+                    maxLength={240}
+                    style={{ color: colors.textPrimary, backgroundColor: colors.surfaceAlt, borderColor: colors.inputBorder, borderWidth: 1, borderRadius: 8, padding: 10, minHeight: 76, textAlignVertical: 'top' }}
+                  />
                 </View>
               </ScrollView>
             )}
@@ -923,9 +977,9 @@ export default function AdminRequestsPage() {
                 <Text style={styles.modalCloseButtonText}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                disabled={overrideLoading || !selectedOverrideDistributor}
+                disabled={overrideLoading || !selectedOverrideDistributor || !overrideReason.trim() || !overrideAllowedOffsets.length}
                 onPress={submitOverride}
-                style={[styles.overrideSubmitBtn, (!selectedOverrideDistributor || overrideLoading) && { opacity: 0.5 }]}
+                style={[styles.overrideSubmitBtn, { backgroundColor: colors.primary, borderColor: colors.primary }, (!selectedOverrideDistributor || !overrideReason.trim() || !overrideAllowedOffsets.length || overrideLoading) && { opacity: 0.5 }]}
               >
                 {overrideLoading ? (
                   <ActivityIndicator size="small" color="#FFFFFF" />
@@ -1408,4 +1462,3 @@ const createStyles = (colors) =>
       opacity: 0.5,
     },
   });
-

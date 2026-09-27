@@ -21,6 +21,7 @@ Preserve these invariants:
 
 - Use shared tokens for the primary blue, surfaces, borders, text, semantic colors, spacing, radii, and shadows.
 - Keep destructive actions red and success states green.
+- Admin warning callouts and primary actions must remain visibly contrasted in both light and dark themes. Use semantic warning surfaces and explicit high-contrast primary button text.
 - Pair active-state color with another visual cue such as a border, marker, weight, or icon.
 - Keep forms labelled, keyboard accessible on web, visibly focused, and usable at touch sizes.
 - At tablet and mobile widths, collapse or reflow navigation, stack cards and form fields, and keep tables horizontally scrollable.

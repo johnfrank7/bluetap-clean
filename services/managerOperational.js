@@ -7,11 +7,16 @@ const ownBranch = (order) => String(order?.currentBranchId || order?.branchId ||
 const assignedUid = (order) => String(order?.assignedDistributorUid || order?.distributor_id || '').trim();
 const belongsToBranch = (order, branchId) => !!branchId && ownBranch(order) === branchId;
 const needsReview = (order) => statusOf(order?.status) === REVIEW_STATUS && order?.outsideServiceArea !== true;
-const needsException = (order) => statusOf(order?.status) === 'outside_radius_pending_approval';
+const needsException = (order) => ['outside_radius_pending_approval', 'manager_approval_pending'].includes(statusOf(order?.status));
 const needsDispatch = (order) => {
   const status = statusOf(order?.status);
   return (status === DISPATCH_STATUS && !assignedUid(order)) || (status === 'delivery_failed' && !!assignedUid(order));
 };
+const queueTime = (order) => {
+  const value = order?.dispatchReadyAt || order?.managerApprovedAt || order?.managerAcceptedAt || order?.createdAt || order?.created_at;
+  return value?.toMillis?.() || (value?.seconds != null ? value.seconds * 1000 : new Date(value || 0).getTime() || 0);
+};
+const compareDispatchPriority = (left, right) => queueTime(left) - queueTime(right) || String(left?.id || '').localeCompare(String(right?.id || ''));
 const canEdit = (order) => EDITABLE_STATUSES.has(statusOf(order?.status));
 
 function getManagerQueues(orders = [], incomingTransfers = [], branchId = '') {
@@ -21,7 +26,7 @@ function getManagerQueues(orders = [], incomingTransfers = [], branchId = '') {
   return {
     review: owned.filter(needsReview),
     exceptions: owned.filter(needsException),
-    dispatch: owned.filter(needsDispatch),
+    dispatch: owned.filter(needsDispatch).sort(compareDispatchPriority),
     editable: owned.filter(canEdit),
     incomingTransfers: transfers,
     requestsCount: owned.filter((order) => needsReview(order) || needsException(order)).length + transfers.length,
@@ -59,4 +64,4 @@ function pendingBranchApplications(users = [], branchId = '') {
 }
 
 module.exports = { REVIEW_STATUS, DISPATCH_STATUS, EDITABLE_STATUSES, statusOf, belongsToBranch,
-  needsReview, needsException, needsDispatch, canEdit, getManagerQueues, toManagerOrder, pendingBranchApplications };
+  needsReview, needsException, needsDispatch, compareDispatchPriority, canEdit, getManagerQueues, toManagerOrder, pendingBranchApplications };

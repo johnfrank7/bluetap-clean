@@ -7,6 +7,7 @@ const { safeProduct } = require('../admin/productManagementHandler');
 const { safeBranch } = require('../admin/branchManagementHandler');
 const { DEFAULT_SERVICE_RADIUS_KM } = require('../../constants/toledoBarangays.json');
 const { isActiveRequesterOrderStatus } = require('../../constants/requesterOrderStatus');
+const { effectiveDeliveryDays, limitViolations } = require('../../services/productOrderPolicy');
 
 const clean = (value, max = 240) => String(value || '').trim().slice(0, max);
 const coordinate = (value, minimum, maximum) => {
@@ -164,6 +165,8 @@ async function buildTrustedOrder(db, requester, body) {
       totalAtOrder: lineTotal,
       containerTypeSnapshot: product.containerType || '',
       sizeSnapshot: product.size || '',
+      maxQuantityPerRequesterSnapshot: product.maxQuantityPerRequester,
+      deliveryDaysSnapshot: product.deliveryDays,
     };
   }));
   const quantity = items.reduce((sum, item) => sum + item.quantity, 0);
@@ -172,6 +175,11 @@ async function buildTrustedOrder(db, requester, body) {
   const distanceKmSnapshot = distanceKm(deliveryLocation, branch);
   const serviceRadiusKmSnapshot = serviceRadiusKm(branch);
   const outsideServiceArea = distanceKmSnapshot > serviceRadiusKmSnapshot;
+  const productLimitViolations = limitViolations(items);
+  const approvalReasons = [
+    ...(outsideServiceArea ? ['OUTSIDE_RADIUS'] : []),
+    ...(productLimitViolations.length ? ['PRODUCT_LIMIT_EXCEEDED'] : []),
+  ];
   const deliveryFeeAtOrder = calculateDeliveryFee(distanceKmSnapshot, branch);
   const totalAtOrder = Math.round((subtotalAtOrder + deliveryFeeAtOrder) * 100) / 100;
   const deliveryFeePolicy = {
@@ -202,6 +210,9 @@ async function buildTrustedOrder(db, requester, body) {
     distanceKmAtOrder: distanceKmSnapshot,
     serviceRadiusKmSnapshot,
     outsideServiceArea,
+    approvalReasons,
+    productLimitViolations,
+    effectiveDeliveryDaysSnapshot: effectiveDeliveryDays(items),
     items,
     productId: items[0]?.productId || '',
     product_id: items[0]?.productId || '',
@@ -218,7 +229,7 @@ async function buildTrustedOrder(db, requester, body) {
     container: clean(body.container, 80),
     expectedDeliveryDate: body.expectedDeliveryDate ? clean(body.expectedDeliveryDate, 40) : '',
     delivery_date: body.expectedDeliveryDate ? clean(body.expectedDeliveryDate, 40) : '',
-    status: outsideServiceArea ? 'outside_radius_pending_approval' : 'Pending',
+    status: productLimitViolations.length ? 'manager_approval_pending' : outsideServiceArea ? 'outside_radius_pending_approval' : 'Pending',
   };
 }
 
@@ -244,7 +255,7 @@ function createRequesterOrdersHandler(getAdmin = getFirebaseAdmin) {
         const snapshot = orderId ? await ref.get() : null;
         const current = snapshot?.data();
         if (!snapshot?.exists || (current.requesterUid || current.requester_id) !== requester.decoded.uid) throw new OtpError(404, 'ORDER_NOT_FOUND', 'Order not found.');
-        const isPending = ['pending', 'outside_radius_pending_approval'].includes(String(current.status).toLowerCase());
+        const isPending = ['pending', 'outside_radius_pending_approval', 'manager_approval_pending'].includes(String(current.status).toLowerCase());
 
         if (body.action === 'edit-order') {
           if (!isPending) {
@@ -269,6 +280,8 @@ function createRequesterOrdersHandler(getAdmin = getFirebaseAdmin) {
               totalAtOrder: lineTotal,
               containerTypeSnapshot: product.containerType || '',
               sizeSnapshot: product.size || '',
+              maxQuantityPerRequesterSnapshot: product.maxQuantityPerRequester,
+              deliveryDaysSnapshot: product.deliveryDays,
             };
           }));
 
@@ -277,9 +290,18 @@ function createRequesterOrdersHandler(getAdmin = getFirebaseAdmin) {
           const totalAtOrder = Math.round((subtotalAtOrder + deliveryFeeAtOrder) * 100) / 100;
           const quantity = items.reduce((sum, item) => sum + item.quantity, 0);
           const now = new Date();
+          const productLimitViolations = limitViolations(items);
+          const approvalReasons = [
+            ...(current.outsideServiceArea === true ? ['OUTSIDE_RADIUS'] : []),
+            ...(productLimitViolations.length ? ['PRODUCT_LIMIT_EXCEEDED'] : []),
+          ];
 
           const updates = {
             items,
+            approvalReasons,
+            productLimitViolations,
+            effectiveDeliveryDaysSnapshot: effectiveDeliveryDays(items),
+            status: productLimitViolations.length ? 'manager_approval_pending' : current.outsideServiceArea === true ? 'outside_radius_pending_approval' : 'Pending',
             productId: items[0]?.productId || '',
             product_id: items[0]?.productId || '',
             productNameSnapshot: items.map((item) => item.productNameSnapshot).join(', '),

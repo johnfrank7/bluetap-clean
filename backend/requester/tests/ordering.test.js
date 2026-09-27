@@ -115,6 +115,38 @@ test('server creates outside-radius orders with trusted distance and service-rad
   assert.equal(result.body.order.serviceRadiusKmSnapshot, 5);
   assert.ok(result.body.order.distanceKmSnapshot > result.body.order.serviceRadiusKmSnapshot);
 });
+test('product limit is snapshotted and only quantities above it need Manager approval', async () => {
+  for (const [quantity, expectedStatus] of [[2, 'Pending'], [3, 'Pending'], [4, 'manager_approval_pending']]) {
+    const f = fixture({ 'products/refill': { product_name: 'Refill', price: 35, active: true, branchIds: ['central'], maxQuantityPerRequester: 3, deliveryDays: ['monday', 'wednesday'] } });
+    const result = await call(createRequesterOrdersHandler(f.getAdmin), 'POST', 'requester-token', validOrder({ items: [{ productId: 'refill', quantity }] }));
+    assert.equal(result.statusCode, 201);
+    assert.equal(result.body.order.status, expectedStatus);
+    assert.equal(result.body.order.items[0].maxQuantityPerRequesterSnapshot, 3);
+    assert.deepEqual(result.body.order.items[0].deliveryDaysSnapshot, ['monday', 'wednesday']);
+    assert.deepEqual(result.body.order.effectiveDeliveryDaysSnapshot, ['monday', 'wednesday']);
+    assert.equal(result.body.order.productLimitViolations.length, quantity > 3 ? 1 : 0);
+  }
+});
+test('quantity and outside-radius conditions produce one pending approval with both reasons', async () => {
+  const f = fixture({ 'products/refill': { product_name: 'Refill', price: 35, active: true, branchIds: ['central'], maxQuantityPerRequester: 1 } });
+  const result = await call(createRequesterOrdersHandler(f.getAdmin), 'POST', 'requester-token', validOrder({ deliveryLocation: { latitude: 10.36, longitude: 123.68 } }));
+  assert.equal(result.statusCode, 201);
+  assert.equal(result.body.order.status, 'manager_approval_pending');
+  assert.deepEqual(result.body.order.approvalReasons, ['OUTSIDE_RADIUS', 'PRODUCT_LIMIT_EXCEEDED']);
+});
+test('Admin product policy rejects invalid limits and weekdays, and supports unrestricted legacy products', async () => {
+  const handler = createAdminProductsHandler(fixture().getAdmin);
+  for (const maxQuantityPerRequester of [0, 101, 1.5, true]) {
+    const result = await call(handler, 'POST', 'admin-token', { product_name: 'Invalid limit', price: 40, maxQuantityPerRequester });
+    assert.equal(result.statusCode, 400);
+  }
+  const invalidDay = await call(handler, 'POST', 'admin-token', { product_name: 'Invalid day', price: 40, deliveryDays: ['funday'] });
+  assert.equal(invalidDay.statusCode, 400);
+  const f = fixture();
+  const legacy = await call(createRequesterOrdersHandler(f.getAdmin), 'POST', 'requester-token', validOrder());
+  assert.equal(legacy.statusCode, 201);
+  assert.equal(legacy.body.order.effectiveDeliveryDaysSnapshot.length, 7);
+});
 test('inactive products cannot be ordered', async () => {
   const result = await call(createRequesterOrdersHandler(fixture().getAdmin), 'POST', 'requester-token', validOrder({ items: [{ productId: 'inactive', quantity: 1 }] }));
   assert.equal(result.statusCode, 409); assert.equal(result.body.error.reason, 'PRODUCT_UNAVAILABLE');

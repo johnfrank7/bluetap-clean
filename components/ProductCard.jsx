@@ -19,6 +19,8 @@ export default function ProductCard({ product, onOrder, compact = false, selecte
         <Text numberOfLines={2} style={[styles.name, { color: colors.textPrimary }]}>{product?.product_name || product?.name || 'Water product'}</Text>
         {!!detail && <Text numberOfLines={1} style={[styles.detail, { color: colors.textSecondary }]}>{detail}</Text>}
         <Text style={[styles.price, { color: colors.primary }]}>{formatPrice(product?.price)}</Text>
+        <Text style={[styles.policyNote, { color: colors.textSecondary }]}>{product?.deliveryDays?.length ? `Delivery days: ${product.deliveryDays.map((day) => day.slice(0, 3).replace(/^./, (letter) => letter.toUpperCase())).join(', ')}` : 'Delivery: Available daily'}</Text>
+        {product?.maxQuantityPerRequester != null && <Text style={[styles.policyNote, { color: colors.textSecondary }]}>Order limit: {product.maxQuantityPerRequester}</Text>}
         {!!onOrder && (
           <TouchableOpacity
             accessibilityRole="button"
@@ -44,5 +46,5 @@ export default function ProductCard({ product, onOrder, compact = false, selecte
 const styles = createPortalStyleSheet({
   card:{width:'100%',maxWidth:340,borderWidth:1,borderRadius:BLUETAP_LAYOUT.radius.lg,overflow:'hidden',...BLUETAP_LAYOUT.shadow},compactCard:{maxWidth:280},selectedCard:{borderWidth:2},
   imageSurface:{height:158,alignItems:'center',justifyContent:'center',padding:14},compactImageSurface:{height:128},image:{width:'100%',height:'100%'},placeholder:{alignItems:'center',justifyContent:'center'},placeholderLogo:{width:62,height:62,opacity:.45},placeholderText:{fontSize:11,fontWeight:'700',marginTop:5},
-  content:{padding:14},name:{fontSize:16,lineHeight:20,fontWeight:'900'},detail:{fontSize:12,marginTop:4},price:{fontSize:18,fontWeight:'900',marginTop:8},button:{minHeight:42,marginTop:12,borderRadius:10,alignItems:'center',justifyContent:'center'},buttonText:{color:'#FFFFFF',fontSize:13,fontWeight:'900'},
+  content:{padding:14},name:{fontSize:16,lineHeight:20,fontWeight:'900'},detail:{fontSize:12,marginTop:4},price:{fontSize:18,fontWeight:'900',marginTop:8},policyNote:{fontSize:11,lineHeight:15,marginTop:4},button:{minHeight:42,marginTop:12,borderRadius:10,alignItems:'center',justifyContent:'center'},buttonText:{color:'#FFFFFF',fontSize:13,fontWeight:'900'},
 });

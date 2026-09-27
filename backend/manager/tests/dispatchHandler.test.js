@@ -3,6 +3,7 @@ const test = require('node:test');
 
 const { createDistributorAssignedOrdersHandler } = require('../../distributor/assignedOrdersHandler');
 const { createManagerDispatchHandler } = require('../dispatchHandler');
+const { manilaScheduleDate, scheduledWeekday } = require('../../../services/productOrderPolicy');
 
 function fixture() {
   const records = new Map([
@@ -85,6 +86,21 @@ test('current owning Branch Manager can assign and reassign only eligible same-b
   assert.ok(f.records.get('requests/order-a').scheduledAt);
   const reassigned = await call(handler, 'PATCH', 'manager-a-token', { orderId: 'order-a', action: 'reassign-distributor', distributorUid: 'distributor-a2', scheduledAt: defaultSchedule });
   assert.equal(reassigned.statusCode, 200); assert.equal(f.records.get('requests/order-a').assignedDistributorUid, 'distributor-a2'); assert.equal(f.records.get('requests/order-a').assignmentHistory.length, 2);
+});
+
+test('Manager schedule enforces the order weekday snapshot even after product settings change', async () => {
+  const f = fixture(); const handler = createManagerDispatchHandler(f.getAdmin);
+  const valid = manilaScheduleDate(2, 13);
+  const allowed = scheduledWeekday(valid);
+  f.records.get('requests/order-a').effectiveDeliveryDaysSnapshot = [allowed];
+  f.records.get('products/product-1').deliveryDays = ['sunday'];
+  const invalid = manilaScheduleDate(3, 13);
+  const rejected = await call(handler, 'PATCH', 'manager-a-token', { orderId: 'order-a', action: 'assign-distributor', distributorUid: 'distributor-a', scheduledAt: invalid.toISOString() });
+  assert.equal(rejected.statusCode, 409);
+  assert.equal(rejected.body.error.reason, 'PRODUCT_DELIVERY_DAY_UNAVAILABLE');
+  const assigned = await call(handler, 'PATCH', 'manager-a-token', { orderId: 'order-a', action: 'assign-distributor', distributorUid: 'distributor-a', scheduledAt: valid.toISOString() });
+  assert.equal(assigned.statusCode, 200);
+  assert.equal(f.records.get('requests/order-a').assignedDistributorUid, 'distributor-a');
 });
 
 test('assigned Distributor receives only their own current-branch delivery', async () => {
