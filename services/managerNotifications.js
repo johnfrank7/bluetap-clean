@@ -17,7 +17,7 @@ function getManagerNotifications(orders = [], incomingTransfers = [], decisions 
     const date = parseTimestamp(at);
     if (!date) return;
     events.push({ id, orderId: order.id, requestId: order.requestId || order.request_id || order.id,
-      requesterName: order.requesterNameSnapshot || order.requesterName || 'Requester', message, status, at: date, path });
+      requesterName: order.requesterNameSnapshot || order.requesterName || 'Requester', message, status, at: date, path, order });
   };
   for (const order of orders.filter((item) => belongsToBranch(item, branchId))) {
     const status = statusOf(order.status);
@@ -54,11 +54,43 @@ function getManagerNotifications(orders = [], incomingTransfers = [], decisions 
     events.push({ id: `transfer-decision:${decision.id}`, orderId: decision.orderId,
       requestId: decision.requestIdSnapshot || decision.orderId, requesterName: '',
       message: `Branch transfer ${decision.decision === 'accepted' ? 'accepted' : 'declined'} by ${decision.targetBranchNameSnapshot || 'target branch'}.`,
-      status: decision.decision === 'accepted' ? 'accepted' : 'declined', at: date, path: '/manager/request' });
+      status: decision.decision === 'accepted' ? 'accepted' : 'declined', at: date, path: '/manager/request',
+      order: {
+        id: decision.orderId,
+        requestId: decision.requestIdSnapshot || decision.orderId,
+        status: decision.decision === 'accepted' ? 'accepted' : 'declined',
+        branchNameSnapshot: decision.sourceBranchNameSnapshot || '',
+        transferToBranchName: decision.targetBranchNameSnapshot || '',
+        transferDeclineReason: decision.declineReason || '',
+      } });
   }
   return events.sort((a, b) => b.at.getTime() - a.at.getTime()).slice(0, 150);
 }
 
 const unreadManagerNotifications = (events, seenIds) => events.filter((event) => !seenIds.has(event.id));
 
-module.exports = { getManagerNotifications, unreadManagerNotifications };
+function getManagerNotificationDetail(event = {}) {
+  const order = event.order || {};
+  return {
+    status: event.status || statusOf(order.status),
+    requestId: event.requestId || order.requestId || order.request_id || order.id || '',
+    requesterName: event.requesterName || order.requesterNameSnapshot || order.requesterName || '',
+    requesterUniqueId: order.requesterUniqueIdSnapshot || order.requesterUniqueId || order.requester_unique_id || '',
+    branchName: order.currentBranchNameSnapshot || order.branchNameSnapshot || order.water_station || '',
+    items: Array.isArray(order.items) ? order.items.map((item) => ({
+      id: item.id || item.productId || item.product_id || '',
+      name: item.productNameSnapshot || item.productName || item.product_name || item.name || 'Product',
+      quantity: Number(item.quantity) || 0,
+    })) : [],
+    deliveryAddress: order.addressSnapshot || order.deliveryAddress || order.address || '',
+    distributorName: order.assignedDistributorNameSnapshot || order.assignedDistributorName || order.distributor_name || '',
+    distributorUniqueId: order.assignedDistributorUniqueIdSnapshot || order.assignedDistributorUniqueId || order.distributor_unique_id || '',
+    scheduledAt: order.scheduledAt || order.expectedDeliveryDate || null,
+    deliveryFee: order.deliveryFeeAtOrder ?? order.deliveryFee,
+    total: order.totalAtOrder ?? order.total_cost ?? order.grandTotalAmount,
+    message: event.message || '',
+    at: event.at || null,
+  };
+}
+
+module.exports = { getManagerNotifications, getManagerNotificationDetail, unreadManagerNotifications };

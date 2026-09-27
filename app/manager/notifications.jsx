@@ -1,32 +1,54 @@
 ﻿import React from 'react';
 import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { useRouter } from 'expo-router';
 import { useAdminTheme } from '../../components/AdminTheme';
+import BlueTapEmptyState from '../../components/BlueTapEmptyState';
+import ManagerNotificationDetailsModal from '../../components/ManagerNotificationDetailsModal';
 import ManagerShell from '../../components/ManagerShell';
 import SoftStatusBadge from '../../components/SoftStatusBadge';
 import { useManagerNotifications } from '../../components/ManagerNotifications';
 import { formatNotificationTime } from '../../services/notificationTimestamp';
 
 export default function ManagerNotificationsPage() {
-  const router = useRouter();
   const { colors, resolvedTheme } = useAdminTheme();
   const styles = React.useMemo(() => createStyles(colors), [colors]);
   const { events, markRead, loading, error } = useManagerNotifications();
+  const [selectedEvent, setSelectedEvent] = React.useState(null);
   React.useEffect(() => {
     if (events.length) markRead(events.map((event) => event.id));
   }, [events, markRead]);
 
   return <ManagerShell active="notifications" title="Notifications" subtitle="Updates from your branch orders and transfer decisions">
     {loading && events.length === 0 ? <View style={styles.state}><ActivityIndicator color={colors.primary} /><Text style={styles.secondary}>Loading branch updates…</Text></View> : null}
-    {!!error && <View accessibilityRole="alert" style={styles.state}><Text style={styles.secondary}>{error}</Text></View>}
-    {!loading && events.length === 0 ? <View style={styles.state}><Text style={styles.secondary}>No branch updates yet.</Text></View> : null}
+    {!!error && events.length === 0 ? (
+      <BlueTapEmptyState
+        compact
+        title="Notifications could not be loaded."
+        description="Your branch updates are temporarily unavailable. Please try again shortly."
+        themeColors={colors}
+        dark={resolvedTheme === 'dark'}
+      />
+    ) : null}
+    {!loading && !error && events.length === 0 ? (
+      <BlueTapEmptyState
+        compact
+        title="No Branch Updates Yet"
+        description="Order lifecycle and transfer updates for your branch will appear here."
+        themeColors={colors}
+        dark={resolvedTheme === 'dark'}
+      />
+    ) : null}
     <View style={styles.list}>
-      {events.map((event) => <TouchableOpacity key={event.id} accessibilityRole="button" accessibilityLabel={`${event.message} Order ${event.requestId}`} onPress={() => router.push(event.path)} style={styles.card}>
+      {events.map((event) => <TouchableOpacity key={event.id} accessibilityRole="button" accessibilityLabel={`${event.message} Order ${event.requestId}`} onPress={() => { markRead([event.id]); setSelectedEvent(event); }} style={styles.card}>
         <View style={styles.meta}><SoftStatusBadge status={event.status} dark={resolvedTheme === 'dark'} /><Text style={styles.time}>{formatNotificationTime(event.at)}</Text></View>
         <Text style={styles.message}>{event.message}</Text>
         <Text style={styles.context}>Order #{event.requestId}{event.requesterName ? ` · ${event.requesterName}` : ''}</Text>
       </TouchableOpacity>)}
     </View>
+    <ManagerNotificationDetailsModal
+      event={selectedEvent}
+      visible={selectedEvent !== null}
+      onClose={() => setSelectedEvent(null)}
+    />
   </ManagerShell>;
 }
 

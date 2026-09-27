@@ -19,6 +19,7 @@ import { subscribeProducts } from '../../services/products';
 import { haversineDistanceKm } from '../../services/location';
 import { useAdminTheme } from '../../components/AdminTheme';
 import AdminIcon from '../../components/AdminIcon';
+import BlueTapEmptyState from '../../components/BlueTapEmptyState';
 import TopToastFeedback from '../../components/TopToastFeedback';
 import ManagerShell, { MANAGER_COLORS, ManagerPill } from '../../components/ManagerShell';
 import { useManagerRealtimeData } from '../../components/ManagerRealtimeData';
@@ -47,7 +48,7 @@ const orderProducts = (order) =>
 const orderDistance = (order) =>
   order.distanceKmSnapshot == null ? 'Distance unavailable' : `Approx. ${Number(order.distanceKmSnapshot).toFixed(1)} km`;
 
-function OutsideRadiusApprovalQueue({ orders, loading, styles, colors, onShowToast }) {
+function OutsideRadiusApprovalQueue({ orders, loading, styles, colors, isDark, onShowToast }) {
   const [error, setError] = useState('');
   const [updatingId, setUpdatingId] = useState('');
 
@@ -93,9 +94,14 @@ function OutsideRadiusApprovalQueue({ orders, loading, styles, colors, onShowToa
           <ActivityIndicator color={colors.primary} />
         </View>
       ) : orders.length === 0 ? (
-        <View style={styles.emptyContainer}>
-          <Text style={styles.emptyText}>No outside-radius requests are waiting for approval.</Text>
-        </View>
+        <BlueTapEmptyState
+          compact
+          title="No Delivery Exceptions"
+          description="Outside-radius requests that need branch approval will appear here."
+          themeColors={colors}
+          dark={isDark}
+          style={styles.visualEmpty}
+        />
       ) : (
         <ScrollView nestedScrollEnabled style={styles.sectionScroll} contentContainerStyle={styles.sectionContent}>
         {orders.map((order) => {
@@ -390,7 +396,7 @@ function EditOrderModal({ visible, order, onClose, onSaveSuccess, colors, styles
   );
 }
 
-function BranchTransfersQueue({ data, styles, colors, onShowToast }) {
+function BranchTransfersQueue({ data, styles, colors, isDark, onShowToast }) {
   const [updatingId, setUpdatingId] = useState('');
   const [decliningOrderId, setDecliningOrderId] = useState('');
   const [declineReason, setDeclineReason] = useState('');
@@ -442,7 +448,14 @@ function BranchTransfersQueue({ data, styles, colors, onShowToast }) {
       {/* Incoming Transfers */}
       <Text style={[styles.subSectionTitle, { marginTop: 10 }]}>Incoming Transfer Requests ({incoming.length})</Text>
       {incoming.length === 0 ? (
-        <Text style={styles.emptyInlineText}>No incoming transfer requests awaiting review.</Text>
+        <BlueTapEmptyState
+          compact
+          title="No Transfer Requests"
+          description="Incoming branch transfer requests will appear here for review."
+          themeColors={colors}
+          dark={isDark}
+          style={styles.inlineVisualEmpty}
+        />
       ) : (
         incoming.map((order) => {
           const isUpdating = updatingId === order.id;
@@ -506,7 +519,14 @@ function BranchTransfersQueue({ data, styles, colors, onShowToast }) {
       {/* Decision Events */}
       <Text style={[styles.subSectionTitle, { marginTop: 18 }]}>Transfer decisions ({decisions.length})</Text>
       {decisions.length === 0 ? (
-        <Text style={styles.emptyInlineText}>No transfer decision events recorded yet.</Text>
+        <BlueTapEmptyState
+          compact
+          title="No Transfer Updates"
+          description="Accepted or declined outbound transfer decisions will appear here."
+          themeColors={colors}
+          dark={isDark}
+          style={styles.inlineVisualEmpty}
+        />
       ) : (
         decisions.map((event) => {
           const accepted = event.decision === 'accepted';
@@ -530,7 +550,7 @@ function BranchTransfersQueue({ data, styles, colors, onShowToast }) {
   );
 }
 
-function ReceivedRequestsQueue({ orders, loading, styles, colors, onShowToast }) {
+function ReceivedRequestsQueue({ orders, loading, styles, colors, isDark, onShowToast }) {
   const [updatingId, setUpdatingId] = useState('');
   const [rejectingId, setRejectingId] = useState('');
   const [reason, setReason] = useState('');
@@ -567,7 +587,16 @@ function ReceivedRequestsQueue({ orders, loading, styles, colors, onShowToast })
         </View>
       </View>
       {!!error && <View accessibilityRole="alert" style={styles.errorBanner}><Text style={styles.errorBannerText}>{error}</Text></View>}
-      {loading ? <View style={styles.emptyContainer}><ActivityIndicator color={colors.primary} /></View> : orders.length === 0 ? <View style={styles.emptyContainer}><Text style={styles.emptyText}>No normal orders awaiting review.</Text></View> : (
+      {loading ? <View style={styles.emptyContainer}><ActivityIndicator color={colors.primary} /></View> : orders.length === 0 ? (
+        <BlueTapEmptyState
+          compact
+          title="No Orders Awaiting Review"
+          description="New branch orders will appear here when they need your review."
+          themeColors={colors}
+          dark={isDark}
+          style={styles.visualEmpty}
+        />
+      ) : (
         <ScrollView nestedScrollEnabled style={styles.sectionScroll} contentContainerStyle={styles.sectionContent}>
           {orders.map((order) => <View key={order.id} style={styles.orderItem}>
             <View style={styles.orderHeaderRow}>
@@ -602,7 +631,7 @@ function ReceivedRequestsQueue({ orders, loading, styles, colors, onShowToast })
   );
 }
 
-function BranchOrdersOverview({ data, loading, styles, colors, onOpenOrder }) {
+function BranchOrdersOverview({ data, loading, styles, colors, isDark, onOpenOrder }) {
   const [filter, setFilter] = useState('');
 
   const orders = useMemo(() => {
@@ -640,9 +669,14 @@ function BranchOrdersOverview({ data, loading, styles, colors, onOpenOrder }) {
       </View>
 
       {loading ? <View style={styles.emptyContainer}><ActivityIndicator color={colors.primary} /></View> : orders.length === 0 ? (
-        <View style={styles.emptyContainer}>
-          <Text style={styles.emptyText}>No branch orders found.</Text>
-        </View>
+        <BlueTapEmptyState
+          compact
+          title="No Active Branch Orders"
+          description="Orders eligible for review or pre-delivery adjustment will appear here."
+          themeColors={colors}
+          dark={isDark}
+          style={styles.visualEmpty}
+        />
       ) : (
         <ScrollView nestedScrollEnabled style={styles.sectionScroll} contentContainerStyle={styles.sectionContent}>
         {orders.map((order) => {
@@ -678,7 +712,7 @@ function BranchOrdersOverview({ data, loading, styles, colors, onOpenOrder }) {
 }
 
 export default function ManagerRequestPage() {
-  const { colors } = useAdminTheme();
+  const { colors, resolvedTheme } = useAdminTheme();
   const { width } = useWindowDimensions();
   const styles = createStyles(colors, width);
   const [toast, setToast] = useState({ visible: false, message: '', type: 'success' });
@@ -728,17 +762,18 @@ export default function ManagerRequestPage() {
         loading={realtime.loading}
         styles={styles}
         colors={colors}
+        isDark={resolvedTheme === 'dark'}
         onShowToast={showToast}
       />
 
       {/* 2. Outside Radius Approvals */}
-      <OutsideRadiusApprovalQueue orders={dispatchData.exceptions} loading={realtime.loading} styles={styles} colors={colors} onShowToast={showToast} />
+      <OutsideRadiusApprovalQueue orders={dispatchData.exceptions} loading={realtime.loading} styles={styles} colors={colors} isDark={resolvedTheme === 'dark'} onShowToast={showToast} />
 
       {/* 3. Branch Orders Overview & Situational Order Edit */}
-      <BranchOrdersOverview data={dispatchData} loading={realtime.loading} styles={styles} colors={colors} onOpenOrder={handleOpenOrder} />
+      <BranchOrdersOverview data={dispatchData} loading={realtime.loading} styles={styles} colors={colors} isDark={resolvedTheme === 'dark'} onOpenOrder={handleOpenOrder} />
 
       {/* 4. Branch Transfers Queue */}
-      <BranchTransfersQueue data={dispatchData} styles={styles} colors={colors} onShowToast={showToast} />
+      <BranchTransfersQueue data={dispatchData} styles={styles} colors={colors} isDark={resolvedTheme === 'dark'} onShowToast={showToast} />
 
       {/* Shared Order Details, Items Edit, and Distributor Assignment Modal */}
       <EditOrderModal
@@ -835,6 +870,16 @@ const createStyles = (colors, width = 1200) =>
       fontSize: 12,
       fontStyle: 'italic',
       marginBottom: 10,
+    },
+    visualEmpty: {
+      width: '100%',
+      minHeight: 150,
+      marginVertical: 0,
+    },
+    inlineVisualEmpty: {
+      width: '100%',
+      minHeight: 130,
+      marginVertical: 4,
     },
     sectionScroll: { maxHeight: 440 },
     sectionContent: { paddingBottom: 4 },

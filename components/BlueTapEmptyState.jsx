@@ -2,7 +2,7 @@ import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BLUETAP_COLORS } from '../constants/bluetapTheme';
-import { createPortalStyleSheet, useBlueTapTheme } from './BlueTapTheme';
+import { useBlueTapTheme } from './BlueTapTheme';
 
 export default function BlueTapEmptyState({
   title = 'No Water Orders Yet',
@@ -11,8 +11,12 @@ export default function BlueTapEmptyState({
   onAction,
   compact = false,
   style,
+  themeColors,
+  dark,
 }) {
-  const { colors, isDark } = useBlueTapTheme();
+  const portalTheme = useBlueTapTheme();
+  const colors = themeColors || portalTheme.colors;
+  const isDark = typeof dark === 'boolean' ? dark : portalTheme.isDark;
   const styles = createStyles(colors, isDark);
 
   return (
@@ -63,7 +67,7 @@ export default function BlueTapEmptyState({
 }
 
 const createStyles = (colors, isDark) =>
-  createPortalStyleSheet({
+  StyleSheet.create({
     container: {
       alignItems: 'center',
       justifyContent: 'center',
@@ -193,4 +197,3 @@ const createStyles = (colors, isDark) =>
       fontWeight: '700',
     },
   });
-

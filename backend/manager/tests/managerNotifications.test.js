@@ -1,6 +1,6 @@
 ﻿const test = require('node:test');
 const assert = require('node:assert/strict');
-const { getManagerNotifications, unreadManagerNotifications } = require('../../../services/managerNotifications');
+const { getManagerNotifications, getManagerNotificationDetail, unreadManagerNotifications } = require('../../../services/managerNotifications');
 const parse = (value) => value instanceof Date ? value : value?.seconds ? new Date(value.seconds * 1000) : value ? new Date(value) : null;
 const at = '2026-09-27T02:00:00.000Z';
 
@@ -23,6 +23,30 @@ test('Manager notifications derive delivery, decline, transfer, and review event
   assert.ok(events.every((item) => !item.id.includes('two') && !item.id.includes('decision-b')));
   assert.equal(unreadManagerNotifications(events, new Set(events.map((item) => item.id))).length, 0);
   assert.equal(unreadManagerNotifications(events, new Set()).length, events.length);
+  const delivered = events.find((item) => item.id === 'one:delivery:1');
+  assert.equal(getManagerNotificationDetail(delivered).requestId, 'BT-1');
+  assert.equal(getManagerNotificationDetail(delivered).status, 'delivered');
+});
+
+test('Manager notification details preserve available order context without inventing another branch record', () => {
+  const own = {
+    id: 'one', branchId: 'branch-a', requestId: 'BT-1', requesterNameSnapshot: 'Rina',
+    requesterUniqueIdSnapshot: 'Req001', branchNameSnapshot: 'North', addressSnapshot: 'Toledo City',
+    assignedDistributorNameSnapshot: 'Dino', assignedDistributorUniqueIdSnapshot: 'Dis001',
+    deliveryFeeAtOrder: 25, totalAtOrder: 125,
+    items: [{ productId: 'refill', productNameSnapshot: 'Refill', quantity: 2 }],
+    status: 'delivered', createdAt: at,
+  };
+  const other = { ...own, id: 'other', branchId: 'branch-b', requestId: 'BT-2' };
+  const events = getManagerNotifications([own, other], [], [], 'branch-a', parse);
+  assert.ok(events.length > 0);
+  assert.ok(events.every((event) => event.order?.branchId === 'branch-a'));
+  const detail = getManagerNotificationDetail(events[0]);
+  assert.deepEqual(detail.items, [{ id: 'refill', name: 'Refill', quantity: 2 }]);
+  assert.equal(detail.requesterUniqueId, 'Req001');
+  assert.equal(detail.distributorUniqueId, 'Dis001');
+  assert.equal(detail.deliveryAddress, 'Toledo City');
+  assert.equal(detail.total, 125);
 });
 
 test('Manager notifications skip invalid dates and do not render an invalid schedule event', () => {

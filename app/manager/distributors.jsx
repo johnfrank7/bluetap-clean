@@ -15,6 +15,7 @@ import { getModuleSession } from '../../services/authSession';
 import { dispatchManagerOrder, getManagerDispatch } from '../../services/managerOrderApprovals';
 import { haversineDistanceKm } from '../../services/location';
 import { useAdminTheme } from '../../components/AdminTheme';
+import BlueTapEmptyState from '../../components/BlueTapEmptyState';
 import TopToastFeedback from '../../components/TopToastFeedback';
 import ManagerShell, { MANAGER_COLORS, ManagerPill } from '../../components/ManagerShell';
 import { useManagerRealtimeData } from '../../components/ManagerRealtimeData';
@@ -102,7 +103,7 @@ function buildScheduleDate(dayOffset, slot) {
   return target;
 }
 
-function DistributorDispatchQueue({ styles, colors, onShowToast }) {
+function DistributorDispatchQueue({ styles, colors, isDark, onShowToast }) {
   const realtime = useManagerRealtimeData();
   const [metadata, setMetadata] = useState({ branchId: '', distributors: [], branches: [] });
   const branchMetadata = metadata.branchId === realtime.branchId ? metadata : { distributors: [], branches: [] };
@@ -233,9 +234,14 @@ function DistributorDispatchQueue({ styles, colors, onShowToast }) {
           <ActivityIndicator color={colors.primary} />
         </View>
       ) : dispatchableOrders.length === 0 ? (
-        <View style={styles.approvalEmpty}>
-          <Text style={styles.emptyText}>No orders are currently waiting for distributor assignment.</Text>
-        </View>
+        <BlueTapEmptyState
+          compact
+          title="No Orders Awaiting Assignment"
+          description="Accepted branch orders will appear here when they are ready for distributor assignment and scheduling."
+          themeColors={colors}
+          dark={isDark}
+          style={styles.visualEmpty}
+        />
       ) : (
         <ScrollView nestedScrollEnabled style={styles.queueScroll} contentContainerStyle={styles.queueContent}>
         {dispatchableOrders.map((order) => {
@@ -427,7 +433,7 @@ function DistributorDispatchQueue({ styles, colors, onShowToast }) {
 }
 
 export default function ManagerDistributorsPage() {
-  const { colors } = useAdminTheme();
+  const { colors, resolvedTheme } = useAdminTheme();
   const { width } = useWindowDimensions();
   const styles = createStyles(colors, width);
   const branchId = getModuleSession('manager')?.branchId || '';
@@ -489,7 +495,7 @@ export default function ManagerDistributorsPage() {
         onDismiss={() => setToast((prev) => ({ ...prev, visible: false }))}
       />
       {/* Dispatch & Scheduling Queue */}
-      <DistributorDispatchQueue styles={styles} colors={colors} onShowToast={showToast} />
+      <DistributorDispatchQueue styles={styles} colors={colors} isDark={resolvedTheme === 'dark'} onShowToast={showToast} />
 
       {/* Registered Distributors Roster */}
       <View style={styles.card}>
@@ -511,7 +517,16 @@ export default function ManagerDistributorsPage() {
 
         {applicationsVisible && <View style={styles.applicationsPanel}>
           <Text style={styles.approvalHelper}>Branch applications are view only. Admin reviews and approves distributor accounts.</Text>
-          {pendingApplications.length === 0 ? <Text style={styles.emptyText}>No pending distributor applications for this branch.</Text> : pendingApplications.map((applicant) =>
+          {pendingApplications.length === 0 ? (
+            <BlueTapEmptyState
+              compact
+              title="No Pending Applications"
+              description="Distributor applications requesting this branch will appear here."
+              themeColors={colors}
+              dark={resolvedTheme === 'dark'}
+              style={styles.inlineVisualEmpty}
+            />
+          ) : pendingApplications.map((applicant) =>
             <View key={applicant.uid || applicant.id} style={styles.applicationRow}>
               <Text style={styles.distributorName}>{getFullName(applicant)}</Text>
               <Text style={styles.distributorSub}>{getProfileUniqueId(applicant) || applicant.email || 'ID pending'}</Text>
@@ -540,8 +555,17 @@ export default function ManagerDistributorsPage() {
               </View>
             ) : filteredDistributors.length === 0 ? (
               <View style={styles.emptyState}>
-                <Text style={styles.emptyText}>No registered distributors found.</Text>
-                {!!loadError && <Text style={styles.errorText}>Firestore: {loadError}</Text>}
+                <BlueTapEmptyState
+                  compact
+                  title={registeredDistributors.length === 0 ? 'No Registered Distributors' : 'No Matching Distributors'}
+                  description={registeredDistributors.length === 0
+                    ? 'Approved distributors assigned to this branch will appear here.'
+                    : 'Try a different name, UID, or contact search.'}
+                  themeColors={colors}
+                  dark={resolvedTheme === 'dark'}
+                  style={styles.tableEmptyVisual}
+                />
+                {!!loadError && <Text style={styles.errorText}>Distributor records could not be loaded.</Text>}
               </View>
             ) : (
               filteredDistributors.map((distributor) => {
@@ -992,6 +1016,21 @@ const createStyles = (colors, width = 1200) =>
       color: colors.textSecondary,
       fontSize: 13,
       fontWeight: '600',
+    },
+    visualEmpty: {
+      width: '100%',
+      minHeight: 150,
+      marginVertical: 0,
+    },
+    inlineVisualEmpty: {
+      width: '100%',
+      minHeight: 130,
+      marginVertical: 4,
+    },
+    tableEmptyVisual: {
+      width: '100%',
+      minHeight: 150,
+      marginVertical: 0,
     },
     errorText: {
       color: colors.danger,

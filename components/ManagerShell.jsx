@@ -345,8 +345,18 @@ export default function ManagerShell({
               )}
             </View>
 
-            <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Notifications: ${unreadCount} unread`} onPress={() => navigate('/manager/notifications')} style={[styles.notificationButton, { backgroundColor: colors.primarySoft, borderColor: colors.border }]}>
-              <AdminIcon name="bell" color={colors.primary} size={20} />
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel={`Notifications: ${unreadCount} unread`}
+              activeOpacity={0.85}
+              hitSlop={8}
+              onPress={() => navigate('/manager/notifications')}
+              style={styles.notificationButton}
+            >
+              <Image
+                source={require('../assets/icons/notif.png')}
+                style={[styles.notificationIcon, { tintColor: colors.primary }]}
+              />
               {unreadCount > 0 && <View style={[styles.notificationCount, { backgroundColor: colors.danger }]}><Text style={styles.notificationCountText}>{unreadCount > 99 ? '99+' : unreadCount}</Text></View>}
             </TouchableOpacity>
             {!compact && <View style={[styles.managerBadge, { backgroundColor: colors.primarySoft, borderColor: colors.border }]}>
@@ -436,7 +446,8 @@ const styles = StyleSheet.create({
   subtitle: { fontSize: 13, lineHeight: 18, marginTop: 3 },
   managerBadge: { minHeight: 34, flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1, borderRadius: 999, paddingHorizontal: 10 },
   managerBadgeText: { fontSize: 12, fontWeight: '900' },
-  notificationButton: { minWidth: 42, height: 42, borderWidth: 1, borderRadius: 11, alignItems: 'center', justifyContent: 'center', position: 'relative' },
+  notificationButton: { width: 22, height: 22, alignItems: 'center', justifyContent: 'center', position: 'relative' },
+  notificationIcon: { width: 22, height: 22 },
   notificationCount: { position: 'absolute', right: -5, top: -6, minWidth: 18, height: 18, paddingHorizontal: 3, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   notificationCountText: { color: '#FFFFFF', fontSize: 10, fontWeight: '900' },
   content: { paddingHorizontal: 28, paddingBottom: 32, paddingTop: 14, flexGrow: 1 },

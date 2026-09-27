@@ -69,6 +69,8 @@ Preserve these invariants:
 ## Notifications and order events
 
 - Manager operational queues should use contained order cards with responsive side actions and bounded scroll regions for large queues.
+- Manager empty operational queues should reuse the same BlueTap visual empty state language as Requester and Distributor: compact illustration, clear title, and short helper copy rather than plain text floating in a large empty card.
+- Manager notification controls must reuse the canonical BlueTap notification icon/UI used by Requester and Distributor.
 
 - Distributor notifications (`app/distributor/d_notification.jsx`) reuse the card visual system from `app/requester/r_notification.jsx`: clean structured notification cards, delivery date/status badges, real order lifecycle events, empty state handling, and theme token adherence.
 - Notifications derive directly from authenticated order states and branch dispatch events; do not use mock notifications or disconnected static lists.

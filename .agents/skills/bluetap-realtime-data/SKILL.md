@@ -9,6 +9,7 @@ Keep realtime reads scoped to the signed in role and its authoritative ownership
 
 - Mount long-lived Requester, Distributor, and Manager data subscriptions at their role layout. Route screens consume the shared cache instead of recreating equivalent Firestore listeners after every navigation.
 - Manager sidebar Requests, Distributors, and notification counts must derive from the same shared branch-scoped realtime data rather than independent page fetches. Manager order cards should render from that cache while optional dispatch metadata loads.
+- Manager notifications should preferably derive from the same authorized, branch-scoped shared realtime data used by Manager operational pages. Avoid duplicate listeners or broader Firestore queries solely for notifications.
 - Deduplicate subscriptions by Firebase Auth UID and, for Manager data, the trusted session branch. Multiple consumers may subscribe to one registry or context, but they must share one underlying listener per query.
 - Deliver cached data immediately while a listener reconnects. Do not clear valid screen data merely because the user navigated between tabs.
 - Dispose auth, profile, order, branch, and timer subscriptions on logout, account change, provider unmount, or the final subscriber's idle cleanup. Never let one account receive another account's cached records.

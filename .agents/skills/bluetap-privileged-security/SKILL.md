@@ -14,6 +14,7 @@ Roles are `admin`, `manager`, `distributor`, and `requester`. The former operati
 - Frontend omission of a disabled security step never overrides backend enforcement. Backend authoritative policy remains the final security gate.
 - Audit every registration-security change with the actor UID, previous and new verification settings and limits, and a timestamp. Never include credentials or secrets.
 - Manager is scoped to an assigned active branch; keep branch assignment enforcement on the backend.
+- Notification convenience must never broaden Manager branch authorization. Raw Firestore permission errors must not be solved by collection-wide Manager read access.
 - Manager authentication uses the shared public `/login` flow. Manager authorization still requires the trusted Firebase claim, `users/{uid}.role === "manager"`, active Manager status, and an assigned active branch on the server.
 - Admin authentication remains separate at `/admin/login`; public login must reject Admin accounts without weakening credential-error privacy.
 - Do not permit client-side role escalation.

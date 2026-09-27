@@ -74,7 +74,13 @@ export function ManagerRealtimeDataProvider({ children }) {
       },
       (error) => {
         ready[key] = true;
-        listenerErrors[key] = error.message || 'Branch data is temporarily unavailable.';
+        listenerErrors[key] = 'Branch data is temporarily unavailable.';
+        if (typeof __DEV__ !== 'undefined' && __DEV__) {
+          console.warn('[ManagerRealtimeData] listener failed', {
+            source: key,
+            code: error?.code || 'unknown',
+          });
+        }
         publish();
       }
     );

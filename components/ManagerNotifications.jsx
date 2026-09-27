@@ -44,5 +44,11 @@ export function useManagerNotifications() {
     writeSeen(key, next);
     setSeen(next);
   }, [key]);
-  return { events, unreadCount: unread.length, markRead, loading: realtime.loading, error: realtime.error };
+  return {
+    events,
+    unreadCount: unread.length,
+    markRead,
+    loading: realtime.loading,
+    error: realtime.error ? 'Notifications could not be loaded.' : '',
+  };
 }
