@@ -16,6 +16,7 @@ const EXPECTED_ROUTES = [
   '/api/admin/managers',
   '/api/admin/products',
   '/api/admin/registration-security',
+  '/api/admin/system-maintenance',
   '/api/auth/accept-registration-terms',
   '/api/auth/check-username',
   '/api/auth/complete-registration',

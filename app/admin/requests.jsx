@@ -13,7 +13,7 @@ import {
 import AdminShell from '../../components/AdminShell';
 import { useAdminTheme } from '../../components/AdminTheme';
 import { TableSkeleton } from '../../components/AdminSkeleton';
-import { collection, onSnapshot } from 'firebase/firestore';
+import { collection, limit, onSnapshot, orderBy, query } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { getBranches } from '../../services/branchManagement';
 import { ADMIN_CACHE_KEYS, useAdminData } from '../../services/adminDataCache';
@@ -48,6 +48,7 @@ const ISSUE_STATUSES = new Set([
 ]);
 
 const OVERRIDE_ELIGIBLE_STATUSES = new Set(['awaiting_distributor_assignment', 'distributor_assigned', 'accepted', 'scheduled', 'delivery_failed']);
+const ADMIN_REQUEST_REALTIME_LIMIT = 500;
 
 const formatAmount = (val) => {
   if (val === undefined || val === null || val === '') return '₱0.00';
@@ -218,7 +219,7 @@ export default function AdminRequestsPage() {
   useEffect(() => {
     let isMounted = true;
     try {
-      const q = collection(db, 'requests');
+      const q = query(collection(db, 'requests'), orderBy('createdAt', 'desc'), limit(ADMIN_REQUEST_REALTIME_LIMIT));
       const unsubscribe = onSnapshot(
         q,
         (snapshot) => {

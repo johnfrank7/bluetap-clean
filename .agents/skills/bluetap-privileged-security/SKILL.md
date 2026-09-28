@@ -34,3 +34,11 @@ Roles are `admin`, `manager`, `distributor`, and `requester`. The former operati
 - Manager self-profile editing is limited to approved personal fields. Branch, role, publicUid, status, and privilege fields remain server-controlled.
 - Admin Distributor Override security: When Admins exercise emergency dispatch override, the backend enforces same-branch ownership (the target distributor's `branchId` must match the order's `branchId`), blocks cross-branch dispatch attempts with HTTP 403, and records an append-only audit entry in `assignmentHistory` with `event: 'ADMIN_DISPATCH_OVERRIDE'` containing the Admin actor UID and mandatory justification reason.
 - Admin override Distributor selection remains restricted to eligible active Distributors from the authoritative fulfillment branch. The backend checks status, branch, and scheduled weekday even when the UI filters choices.
+
+## System Maintenance retention boundaries
+
+- System Maintenance currently owns Data Retention & Cleanup only. It must not become a generic destructive reset surface.
+- Retention distinguishes ephemeral, operational, and historical records. Hard deletion is limited to verified expired ephemeral records; terminal authoritative orders are archived in place.
+- Automated cleanup must never delete user identities, public UID counters, branches, authoritative historical orders, financial snapshots, security configuration, or Admin audit records.
+- Preview Cleanup is server-authoritative and non-mutating. The backend selects supported cleanup categories, validates safe policy values, recomputes eligibility before execution, and rejects client-selected collections.
+- Historical performance problems should first be addressed through bounded queries, pagination, and scoped realtime listeners. Data deletion is not a substitute for correct query design.

@@ -8,6 +8,7 @@ export const ADMIN_CACHE_KEYS = Object.freeze({
   distributors: 'admin-distributors',
   products: 'admin-products',
   security: 'admin-security-settings',
+  maintenance: 'admin-system-maintenance',
 });
 
 const store = globalThis.__bluetapAdminDataCache || new Map();

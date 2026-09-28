@@ -12,7 +12,9 @@ import RequestDetailsModal from '../../components/RequestDetailsModal';
 import { USER_PORTAL_BOTTOM_CONTENT_INSET, USER_PORTAL_LAYOUT } from '../../constants/userPortalLayout';
 import { normalizeRequesterOrderStatus, requesterOrderStatusLabel } from '../../constants/requesterOrderStatus';
 import { refreshRequesterRequests, subscribeRequesterRequests } from '../../services/requests';
-import { formatNotificationTime, getOrderLifecycleTimestamp } from '../../services/notificationTimestamp';
+import { formatNotificationTime, getOrderLifecycleTimestamp, parseTimestamp } from '../../services/notificationTimestamp';
+
+const NOTIFICATION_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 
 const formatWhen = (order) => {
   const ts = getOrderLifecycleTimestamp(order);
@@ -96,7 +98,10 @@ export default function RequesterNotification() {
 
   const events = useMemo(
     () =>
-      orders.map((order) => ({
+      orders.filter((order) => {
+        const timestamp = parseTimestamp(getOrderLifecycleTimestamp(order));
+        return timestamp && timestamp.getTime() >= Date.now() - NOTIFICATION_RETENTION_MS;
+      }).slice(0, 150).map((order) => ({
         ...order,
         when: formatWhen(order),
       })),

@@ -3,7 +3,7 @@ import { Text } from 'react-native';
 
 const glyphs = Object.freeze({
   bell: '\uD83D\uDD14',
-  dashboard: '▦', requests: '▤', branches: '⌘', accounts: '◫', distributors: '◉', products: '◇', analytics: '▲', security: '◈', theme: '◐', logout: '⇥', menu: '☰', close: '×', check: '✓',
+  dashboard: '▦', requests: '▤', branches: '⌘', accounts: '◫', distributors: '◉', products: '◇', analytics: '▲', security: '◈', maintenance: '▣', theme: '◐', logout: '⇥', menu: '☰', close: '×', check: '✓',
 });
 
 export default function AdminIcon({ name, color = '#FFFFFF', size = 20, style }) {

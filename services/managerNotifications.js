@@ -10,12 +10,14 @@ const deliveryMessages = {
   DELIVERY_COMPLETED: ['Order was delivered.', 'delivered', '/manager/distributors'],
 };
 
-function getManagerNotifications(orders = [], incomingTransfers = [], decisions = [], branchId = '', parseTimestamp) {
+const NOTIFICATION_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+
+function getManagerNotifications(orders = [], incomingTransfers = [], decisions = [], branchId = '', parseTimestamp, now = Date.now()) {
   if (!branchId || typeof parseTimestamp !== 'function') return [];
   const events = [];
   const add = (id, order, message, status, at, path) => {
     const date = parseTimestamp(at);
-    if (!date) return;
+    if (!date || date.getTime() < now - NOTIFICATION_RETENTION_MS) return;
     events.push({ id, orderId: order.id, requestId: order.requestId || order.request_id || order.id,
       requesterName: order.requesterNameSnapshot || order.requesterName || 'Requester', message, status, at: date, path, order });
   };
@@ -52,7 +54,7 @@ function getManagerNotifications(orders = [], incomingTransfers = [], decisions 
   }
   for (const decision of decisions.filter((item) => item.sourceBranchId === branchId)) {
     const date = parseTimestamp(decision.decidedAt || decision.createdAt);
-    if (!date) continue;
+    if (!date || date.getTime() < now - NOTIFICATION_RETENTION_MS) continue;
     events.push({ id: `transfer-decision:${decision.id}`, orderId: decision.orderId,
       requestId: decision.requestIdSnapshot || decision.orderId, requesterName: '',
       message: `Branch transfer ${decision.decision === 'accepted' ? 'accepted' : 'declined'} by ${decision.targetBranchNameSnapshot || 'target branch'}.`,

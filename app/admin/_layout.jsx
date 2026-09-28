@@ -11,6 +11,7 @@ const routeCopy = {
   '/admin/managers': ['Accounts & Audit', 'Loading account workspace…'],
   '/admin/distributors': ['Distributor Management', 'Loading distributor workspace…'],
   '/admin/registration-security': ['Security Settings', 'Loading security policy…'],
+  '/admin/system-maintenance': ['System Maintenance', 'Loading data retention controls…'],
 };
 
 export default function AdminLayout() {

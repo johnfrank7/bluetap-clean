@@ -14,7 +14,9 @@ import {
   normalizeDistributorOrderStatus,
   useAssignedDistributorOrders,
 } from '../../services/distributorOrders';
-import { formatNotificationTime, getOrderLifecycleTimestamp } from '../../services/notificationTimestamp';
+import { formatNotificationTime, getOrderLifecycleTimestamp, parseTimestamp } from '../../services/notificationTimestamp';
+
+const NOTIFICATION_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 
 const formatWhen = (order) => {
   const ts = getOrderLifecycleTimestamp(order);
@@ -71,7 +73,10 @@ export default function DistributorNotification() {
 
   const events = useMemo(
     () =>
-      orders.map((order) => ({
+      orders.filter((order) => {
+        const timestamp = parseTimestamp(getOrderLifecycleTimestamp(order));
+        return timestamp && timestamp.getTime() >= Date.now() - NOTIFICATION_RETENTION_MS;
+      }).slice(0, 150).map((order) => ({
         ...order,
         message: messageFor(order),
         when: formatWhen(order),

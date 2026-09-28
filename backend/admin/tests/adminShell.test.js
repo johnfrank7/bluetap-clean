@@ -14,6 +14,7 @@ test('Admin shell owns responsive navigation, theme preference, and confirmed lo
 
   assert.match(shell, /accessibilityLabel="Toggle navigation"/);
   assert.match(shell, /'Security Settings', '\/admin\/registration-security'/);
+  assert.match(shell, /'Security Settings', '\/admin\/registration-security'[\s\S]*'System Maintenance', '\/admin\/system-maintenance'/);
   assert.doesNotMatch(shell, /'Session Security', '\/admin\//);
   assert.match(shell, /COLLAPSED_WIDTH = 76/);
   assert.match(shell, /DRAWER_WIDTH = 286/);
@@ -29,7 +30,7 @@ test('Admin shell owns responsive navigation, theme preference, and confirmed lo
   assert.match(shell, /signOutAndClearSessions\(\)/);
   assert.match(shell, /router\.replace\('\/admin\/login'\)/);
   assert.doesNotMatch(shell, /\['D', 'Dashboard'/);
-  for (const name of ['dashboard', 'branches', 'accounts', 'distributors', 'security', 'theme', 'logout']) assert.match(icons, new RegExp(`${name}:`));
+  for (const name of ['dashboard', 'branches', 'accounts', 'distributors', 'security', 'maintenance', 'theme', 'logout']) assert.match(icons, new RegExp(`${name}:`));
 
   assert.match(theme, /ADMIN_THEME_STORAGE_KEY = 'bluetap-admin-theme'/);
   assert.match(theme, /ADMIN_SIDEBAR_STORAGE_KEY = 'bluetap-admin-sidebar-collapsed'/);
@@ -43,12 +44,18 @@ test('Admin shell owns responsive navigation, theme preference, and confirmed lo
 });
 
 test('every active Admin workspace route inherits the shared shell and themed dashboard primitives', () => {
-  for (const page of ['dashboard.jsx', 'branches.jsx', 'managers.jsx', 'distributors.jsx', 'registration-security.jsx']) {
+  for (const page of ['dashboard.jsx', 'branches.jsx', 'managers.jsx', 'distributors.jsx', 'registration-security.jsx', 'system-maintenance.jsx']) {
     const source = read('app', 'admin', page);
     assert.match(source, /AdminShell/);
     assert.match(source, /useAdminTheme/);
     assert.match(source, /createStyles/);
   }
+  const maintenance = read('app', 'admin', 'system-maintenance.jsx');
+  assert.match(maintenance, /Data Retention & Cleanup/);
+  assert.match(maintenance, /Preview Cleanup/);
+  assert.match(maintenance, /Run Cleanup Now/);
+  assert.match(maintenance, /Recent Cleanup Activity/);
+  assert.match(maintenance, /TopToastFeedback/);
   assert.match(read('app', 'admin', '_layout.jsx'), /AdminThemeProvider/);
   assert.match(read('app', 'manager', '_layout.jsx'), /AdminThemeProvider/);
   assert.match(read('components', 'ManagerShell.jsx'), /useAdminTheme/);
