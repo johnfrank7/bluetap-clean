@@ -5,6 +5,19 @@ import { db } from '../firebase';
 
 const { createRegistrationPolicyLoader, validPolicy } = require('./registrationPolicyCache');
 
+export const REGISTRATION_POLICY_PUBLIC_TIMEOUT_MS = 2500;
+export const REGISTRATION_POLICY_FALLBACK_TIMEOUT_MS = 4000;
+
+const withPolicyTimeout = (load, timeoutMs, message) => {
+  let timeout;
+  return Promise.race([
+    Promise.resolve().then(load),
+    new Promise((_, reject) => {
+      timeout = setTimeout(() => reject(new Error(message)), timeoutMs);
+    }),
+  ]).finally(() => clearTimeout(timeout));
+};
+
 export const callRegistrationApi = async (path, body, timeoutMs = 30000) => {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -49,7 +62,7 @@ export const createRegistrationSession = async (personalInfo) => {
   return result;
 };
 const getBackendRegistrationSecurityPolicy = async () => {
-  const result = await callRegistrationApi('/api/auth/registration-policy', {});
+  const result = await callRegistrationApi('/api/auth/registration-policy', {}, REGISTRATION_POLICY_FALLBACK_TIMEOUT_MS);
   const policy = result?.securityPolicy;
   if (!validPolicy(policy)) {
     const error = new Error('The registration policy is unavailable. Please try again.');
@@ -60,7 +73,11 @@ const getBackendRegistrationSecurityPolicy = async () => {
 };
 
 const getPublicRegistrationSecurityPolicy = async () => {
-  const snapshot = await getDoc(doc(db, 'publicConfig', 'registrationPolicy'));
+  const snapshot = await withPolicyTimeout(
+    () => getDoc(doc(db, 'publicConfig', 'registrationPolicy')),
+    REGISTRATION_POLICY_PUBLIC_TIMEOUT_MS,
+    'Public registration policy timed out.',
+  );
   const policy = snapshot.exists() ? snapshot.data() : null;
   if (!validPolicy(policy)) throw new Error('Public registration policy is unavailable.');
   return {
@@ -78,6 +95,8 @@ const registrationPolicyLoader = createRegistrationPolicyLoader({
 export const getRegistrationSecurityPolicy = (options) => registrationPolicyLoader.get(options);
 export const prefetchRegistrationPolicy = () => registrationPolicyLoader.prefetch();
 export const primeRegistrationPolicy = (policy) => registrationPolicyLoader.prime(policy);
+export const getCachedRegistrationPolicy = () => registrationPolicyLoader.peek();
+export const revalidateRegistrationPolicy = () => registrationPolicyLoader.refresh();
 export const getRegistrationBranches = async () => {
   const result = await callRegistrationApi('/api/auth/registration-branches', {});
   if (!Array.isArray(result?.branches)) {

@@ -7,6 +7,9 @@ description: Preserve BlueTap's policy-derived signup steps, trusted registratio
 
 Registration navigation and progress steps MUST be derived from the same authoritative security policy used by backend registration finalization. Disabled verification methods must be completely omitted from frontend navigation, routes, progress indicators, and completion requirements. Do not hardcode Account/Personal/Identity/Credentials/Verify as an unconditional five-step sequence. Policy loading must resolve before optional verification steps are chosen. A temporary/default policy must never route a registrant into a disabled verification method.
 
+- Registration policy resolution must not blank or block the base Account signup UI. Cached or sanitized public policy should drive immediate step rendering while backend authority remains responsible for session creation and final verification enforcement.
+- Render cold start must not be part of the normal initial signup stepper critical path when the sanitized Firestore policy mirror is available.
+
 - Face verification and Email OTP are independently configurable. All four combinations are valid, including both disabled. When both are disabled, the base registration flow still enforces credentials, Terms acceptance, role policy, username ownership, and account limits before finalization.
 - Registration controls are presented within the unified Admin **Security Settings** page; the existing `/admin/registration-security` route may remain for compatibility.
 - A disabled verification method is `not_required`; never represent it as successfully verified.

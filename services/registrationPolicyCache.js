@@ -65,6 +65,8 @@ function createRegistrationPolicyLoader({ readPublicPolicy, readBackendPolicy, n
     return inFlight;
   };
   return {
+    peek() { return readRegistrationPolicyCache(now()); },
+    refresh,
     get({ force = false } = {}) {
       const cached = force ? null : readRegistrationPolicyCache(now());
       if (!cached) return refresh();

@@ -1,7 +1,7 @@
 import { StatusBar } from 'expo-status-bar';
 import React from 'react';
 import {
-  Animated, Easing, Modal, Platform, ScrollView, StyleSheet, Text,
+  ActivityIndicator, Animated, Easing, Modal, Platform, ScrollView, StyleSheet, Text,
   TextInput, TouchableOpacity, useWindowDimensions, View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -12,7 +12,7 @@ import { BLUETAP_COLORS, BLUETAP_LOGIN_GRADIENT } from '../constants/bluetapThem
 import { clearAllAuthSessions } from '../services/authSession';
 import { clearPendingRegistration, completeRegistrationWithoutOtp, getPendingRegistration, requestRegistrationOtp, setPendingRegistration } from '../services/emailVerification';
 import { checkUsername, normalizeUsername, validateUsername } from '../services/usernameAuth';
-import { acceptRegistrationTerms, createRegistrationSession, getRegistrationBranches, getRegistrationSecurityPolicy, getRegistrationSessionStatus, primeRegistrationPolicy } from '../services/registrationSession';
+import { acceptRegistrationTerms, createRegistrationSession, getCachedRegistrationPolicy, getRegistrationBranches, getRegistrationSessionStatus, primeRegistrationPolicy, revalidateRegistrationPolicy } from '../services/registrationSession';
 import { clearPendingFaceEnrollment } from '../services/pendingFaceEnrollment';
 import { useFaceServiceWarmup } from '../services/useFaceServiceWarmup';
 
@@ -24,7 +24,7 @@ import { signInWithCustomToken } from 'firebase/auth';
 import { getRoleHomePath, saveRoleSession } from '../services/authSession';
 
 const { isTrustedRegistrationFaceVerification } = require('../services/webFaceCaptureCore');
-const { REGISTRATION_STEP: STEP, REGISTRATION_STEP_LABELS, buildRegistrationSteps, adjacentRegistrationStep, registrationEntryStep } = require('../services/registrationStepStatus');
+const { REGISTRATION_STEP: STEP, REGISTRATION_STEP_LABELS, buildRegistrationDisplaySteps, buildRegistrationSteps, adjacentRegistrationStep, registrationEntryStep } = require('../services/registrationStepStatus');
 
 const BARANGAYS = ['Awihao', 'Bagakay', 'Bato', 'Biga', 'Bulongan', 'Bunga', 'Cabitoonan', 'Calongcalong', 'Cambang-ug', 'Camp 8', 'Canlumampao', 'Cantabaco', 'Capitan Claudio', 'Carmen', 'Daanglungsod', 'Don Andres Soriano', 'Dumlog', 'Gen. Climaco', 'Ibo', 'Ilihan', 'Juan Climaco, Sr.', 'Landahan', 'Loay', 'Luray II', 'Matab-ang', 'Media Once', 'Pangamihan', 'Poblacion', 'Poog', 'Putingbato', 'Sagay', 'Sam-ang', 'Sangi', 'Santo Niño', 'Subayon', 'Talavera', 'Tubod', 'Tungkay'];
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -79,14 +79,17 @@ export default function SignupPage() {
   const [notice, setNotice] = React.useState(null);
   const [retryAt, setRetryAt] = React.useState(0);
   const [registrationSessionId, setRegistrationSessionId] = React.useState(usernameRetryDraft?.profile?.registrationSessionId || '');
+  const cachedPolicyAtMount = React.useRef(!registrationSessionId ? getCachedRegistrationPolicy() : null).current;
   const [faceVerification, setFaceVerification] = React.useState({ status: 'unverified', duplicateCheck: 'unknown' });
   const [termsAccepted, setTermsAccepted] = React.useState(Boolean(usernameRetryDraft));
-  const [securityPolicy, setSecurityPolicy] = React.useState(null);
-  const [securityPolicyReady, setSecurityPolicyReady] = React.useState(false);
+  const [securityPolicy, setSecurityPolicy] = React.useState(cachedPolicyAtMount?.policy || null);
+  const [securityPolicyReady, setSecurityPolicyReady] = React.useState(Boolean(cachedPolicyAtMount?.policy));
+  const [policyResolving, setPolicyResolving] = React.useState(!cachedPolicyAtMount?.policy);
   const [policyError, setPolicyError] = React.useState('');
   const [policyRetry, setPolicyRetry] = React.useState(0);
   const [now, setNow] = React.useState(Date.now());
   const submitting = React.useRef(false);
+  const securityPolicyRef = React.useRef(cachedPolicyAtMount?.policy || null);
   const usernameCheckVersion = React.useRef(0);
   const entrance = React.useRef(new Animated.Value(0)).current;
   const stepTransition = React.useRef(new Animated.Value(1)).current;
@@ -107,11 +110,20 @@ export default function SignupPage() {
 
   React.useEffect(() => {
     let active = true;
-    setSecurityPolicyReady(false);
     setPolicyError('');
+    setPolicyResolving(true);
+    if (!registrationSessionId) {
+      const cached = getCachedRegistrationPolicy();
+      if (cached?.policy) {
+        securityPolicyRef.current = cached.policy;
+        setSecurityPolicy(cached.policy);
+        setSecurityPolicyReady(true);
+        setStep((current) => registrationEntryStep(buildRegistrationSteps(cached.policy), current));
+      }
+    }
     const request = registrationSessionId
       ? getRegistrationSessionStatus(registrationSessionId)
-      : getRegistrationSecurityPolicy().then((securityPolicy) => ({ securityPolicy }));
+      : revalidateRegistrationPolicy().then((securityPolicy) => ({ securityPolicy }));
     request.then((result) => {
       if (!active) return;
       const policy = result.securityPolicy;
@@ -121,11 +133,16 @@ export default function SignupPage() {
       if (registrationSessionId && typeof result.faceVerification?.status !== 'string') {
         throw new Error('Registration verification status is unavailable. Please try again.');
       }
+      securityPolicyRef.current = policy;
       setSecurityPolicy(policy);
       if (registrationSessionId) setFaceVerification(result.faceVerification);
       setStep((current) => registrationEntryStep(buildRegistrationSteps(policy), current));
       setSecurityPolicyReady(true);
-    }).catch((error) => { if (active) setPolicyError(error.message || 'Registration security settings are unavailable.'); });
+    }).catch(() => {
+      if (active && !securityPolicyRef.current) {
+        setPolicyError('We could not confirm the registration verification steps. Try again to continue.');
+      }
+    }).finally(() => { if (active) setPolicyResolving(false); });
     return () => { active = false; };
   }, [registrationSessionId, policyRetry]);
 
@@ -167,6 +184,7 @@ export default function SignupPage() {
       clearPendingFaceEnrollment(registrationSessionId);
       setRegistrationSessionId('');
       setFaceVerification({ status: 'unverified', duplicateCheck: 'unknown' });
+      securityPolicyRef.current = null;
       setSecurityPolicy(null);
       setSecurityPolicyReady(false);
     }
@@ -182,8 +200,15 @@ export default function SignupPage() {
   const personalComplete = !!form.firstName.trim() && !!form.lastName.trim() && PHONE.test(form.phone) && !!form.barangay && !!form.address.trim() && (form.role !== 'distributor' || !!form.requestedBranchId);
   const identityComplete = !!registrationSessionId && (securityPolicy?.faceVerificationRequired === false || isTrustedRegistrationFaceVerification(faceVerification));
   const credentialsComplete = !validateUsername(form.username) && EMAIL.test(form.email.trim()) && form.password.length >= 8 && form.password === form.confirmPassword && usernameState.status === 'available' && termsAccepted;
-  const visibleRegistrationSteps = buildRegistrationSteps(securityPolicy);
-  const visibleStepNumber = Math.max(1, visibleRegistrationSteps.indexOf(step) + 1);
+  const visibleRegistrationSteps = React.useMemo(
+    () => buildRegistrationSteps(securityPolicy),
+    [securityPolicy?.emailOtpRequired, securityPolicy?.faceVerificationRequired],
+  );
+  const displayedRegistrationSteps = React.useMemo(
+    () => buildRegistrationDisplaySteps(securityPolicy),
+    [securityPolicy?.emailOtpRequired, securityPolicy?.faceVerificationRequired],
+  );
+  const visibleStepNumber = Math.max(1, displayedRegistrationSteps.indexOf(step) + 1);
   const canContinue = step === STEP.account ? accountComplete
     : step === STEP.personal ? accountComplete && personalComplete
       : step === STEP.identity ? accountComplete && personalComplete && identityComplete
@@ -294,6 +319,7 @@ export default function SignupPage() {
         const sessionSteps = buildRegistrationSteps(result.securityPolicy);
         if (!sessionSteps.length) throw new Error('Registration security settings are unavailable. Please try again.');
         setRegistrationSessionId(result.registrationSessionId);
+        securityPolicyRef.current = result.securityPolicy;
         setSecurityPolicy(result.securityPolicy);
         primeRegistrationPolicy(result.securityPolicy);
         setFaceVerification(result.securityPolicy?.faceVerificationRequired === false
@@ -399,22 +425,22 @@ export default function SignupPage() {
           ]}>
             <RegistrationBrand />
             <View style={[styles.card, step === STEP.identity && styles.identityCard, step === STEP.identity && mobile && styles.identityCardMobile]}>
-              {securityPolicyReady ? <>
-                <RegistrationStepper
-                  currentStep={step}
-                  requiredSteps={visibleRegistrationSteps}
-                  visibleSteps={visibleRegistrationSteps}
-                  completedSteps={[
-                    accountComplete && STEP.account,
-                    personalComplete && !!registrationSessionId && STEP.personal,
-                    securityPolicy.faceVerificationRequired && identityComplete && STEP.identity,
-                    credentialsComplete && STEP.credentials,
-                  ].filter(Boolean)}
-                  onStepPress={openStep}
-                  disabled={loading}
-                />
-                {mobile && <Text style={styles.stepText}>Step {visibleStepNumber} of {visibleRegistrationSteps.length} · {REGISTRATION_STEP_LABELS[step]}</Text>}
-              </> : <View style={styles.stepperLoading} accessibilityRole="progressbar" accessibilityLabel="Loading registration steps"><Text style={styles.stepperLoadingText}>{policyError || 'Loading registration steps…'}</Text>{!!policyError && <TouchableOpacity onPress={() => setPolicyRetry((value) => value + 1)} accessibilityRole="button"><Text style={styles.loginLink}>Try again</Text></TouchableOpacity>}</View>}
+              <RegistrationStepper
+                currentStep={step}
+                requiredSteps={displayedRegistrationSteps}
+                visibleSteps={displayedRegistrationSteps}
+                completedSteps={[
+                  accountComplete && STEP.account,
+                  personalComplete && !!registrationSessionId && STEP.personal,
+                  securityPolicy?.faceVerificationRequired && identityComplete && STEP.identity,
+                  credentialsComplete && STEP.credentials,
+                ].filter(Boolean)}
+                onStepPress={openStep}
+                disabled={loading || !securityPolicyReady}
+              />
+              {mobile && <Text style={styles.stepText}>Step {visibleStepNumber} of {displayedRegistrationSteps.length} · {REGISTRATION_STEP_LABELS[step]}</Text>}
+              {!securityPolicyReady && policyResolving && <View style={styles.policyStatus} accessibilityRole="progressbar" accessibilityLabel="Confirming registration verification steps"><ActivityIndicator size="small" color={BLUETAP_COLORS.primary} /><Text style={styles.policyStatusText}>Confirming secure verification steps…</Text></View>}
+              {!securityPolicyReady && !!policyError && <RegistrationNotice tone="error" title="Verification steps unavailable" message={policyError} actionLabel="Try again" onAction={() => setPolicyRetry((value) => value + 1)} />}
               {(securityPolicyReady || step === STEP.account || step === STEP.personal) && <Animated.View style={{
                 opacity: stepTransition,
                 transform: [{ translateY: stepTransition.interpolate({ inputRange: [0, 1], outputRange: [10, 0] }) }],
@@ -499,7 +525,7 @@ const styles = StyleSheet.create({
   verifyPreviewText: { color: '#526E84', fontSize: 14, lineHeight: 21, textAlign: 'center' },
   screen: { flex: 1 }, safe: { flex: 1 }, scroll: { flexGrow: 1, alignItems: 'center', justifyContent: 'center', padding: 20 }, shell: { width: '100%' },
   card: { backgroundColor: '#FFF', borderRadius: 24, padding: 26, shadowColor: '#07518E', shadowOpacity: .24, shadowRadius: 18, shadowOffset: { width: 0, height: 10 }, elevation: 8 },
-  stepperLoading: { minHeight: 62, alignItems: 'center', justifyContent: 'center' }, stepperLoadingText: { color: BLUETAP_COLORS.muted, fontSize: 12, fontWeight: '600' },
+  policyStatus: { minHeight: 32, marginTop: -12, marginBottom: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 }, policyStatusText: { color: BLUETAP_COLORS.muted, fontSize: 12, fontWeight: '600' },
   stepText: { color: BLUETAP_COLORS.primary, fontSize: 12, fontWeight: '700', textAlign: 'center', marginTop: -12, marginBottom: 12 },
   roleList: { gap: 12 }, roleCard: { flexDirection: 'row', alignItems: 'center', minHeight: 94, padding: 16, borderRadius: 14, borderWidth: 1.5, borderColor: '#D8E5EF', backgroundColor: '#FAFCFE' }, roleCardSelected: { borderColor: BLUETAP_COLORS.primary, backgroundColor: '#EDF7FF' }, roleIcon: { fontSize: 28, marginRight: 14 }, roleCopy: { flex: 1 }, roleTitle: { color: '#17324D', fontSize: 16, fontWeight: '800' }, roleDescription: { color: '#607A90', fontSize: 13, lineHeight: 18, marginTop: 3 }, radio: { width: 18, height: 18, borderRadius: 9, borderWidth: 2, borderColor: '#A8BCCB' }, radioSelected: { borderWidth: 5, borderColor: BLUETAP_COLORS.primary },
   row: { flexDirection: 'row', gap: 12 }, half: { flex: 1 }, field: { marginBottom: 15 }, label: { color: '#29465F', fontSize: 13, fontWeight: '700', marginBottom: 6 }, input: { minHeight: 50, borderWidth: 1, borderColor: '#C8D9E6', borderRadius: 11, backgroundColor: '#FAFCFE', paddingHorizontal: 14, color: '#17324D', fontSize: 15 }, inputError: { borderColor: '#DC5757', backgroundColor: '#FFF8F8' }, inputSuccess: { borderColor: '#36A269' }, error: { color: '#B93A3A', fontSize: 12, marginTop: 5 }, hint: { color: '#68839A', fontSize: 12, marginTop: 5 },

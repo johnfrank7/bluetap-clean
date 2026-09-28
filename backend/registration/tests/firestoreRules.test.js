@@ -31,18 +31,26 @@ test('product catalog is readable when signed in but all client mutations are se
 });
 
 test('registration config counters and audit logs are backend-only', () => {
-  for (const collection of ['registrationLimits', 'systemConfig', 'adminAuditLogs']) {
+  for (const collection of ['authRateLimits', 'faceServiceLocks', 'registrationLimits', 'systemConfig', 'adminAuditLogs']) {
     assert.match(rules, new RegExp(`match \/${collection}\/\\{document=\\*\\*\\} \\{ allow read, write: if false; \\}`));
   }
 });
 
-test('public registration policy exposes only the sanitized server-written read model', () => {
-  assert.match(rules, /match \/publicConfig\/registrationPolicy/);
-  assert.match(rules, /resource\.data\.keys\(\)\.hasOnly\(\[/);
+test('unauthenticated signup may get only the sanitized server-written registration policy mirror', () => {
+  const start = rules.indexOf('match /publicConfig/registrationPolicy');
+  const end = rules.indexOf('match /adminAuditLogs', start);
+  const publicPolicyRule = rules.slice(start, end);
+  assert.ok(start >= 0 && end > start, 'public registration policy rule must exist');
+  assert.match(publicPolicyRule, /allow get:\s*if resource\.data\.keys\(\)\.hasOnly\(\[/);
+  assert.doesNotMatch(publicPolicyRule, /request\.auth|signedIn\(|isAdmin\(/);
   for (const field of ['faceVerificationRequired', 'emailOtpRequired', 'policyVersion', 'updatedAt']) {
-    assert.match(rules, new RegExp(`['"]${field}['"]`));
+    assert.match(publicPolicyRule, new RegExp(`['"]${field}['"]`));
   }
-  assert.match(rules, /match \/publicConfig\/registrationPolicy[\s\S]*allow list, create, update, delete:\s*if false;/);
+  for (const forbiddenField of ['maxAccountsPerDevice', 'maxAccountsPerIp', 'sessionSecurity', 'updatedBy', 'secret', 'credential']) {
+    assert.doesNotMatch(publicPolicyRule, new RegExp(forbiddenField, 'i'));
+  }
+  assert.match(publicPolicyRule, /allow list, create, update, delete:\s*if false;/);
+  assert.match(rules, /match \/registrationSessions\/\{document=\*\*\} \{ allow read, write: if false; \}/);
 });
 
 test('Manager reads only own source-branch operational events and cannot write them', () => {
