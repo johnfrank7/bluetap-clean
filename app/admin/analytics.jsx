@@ -1,11 +1,12 @@
 import React, { useState, useMemo } from 'react';
 import {
   ActivityIndicator,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
-  TouchableOpacity,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import AdminShell from '../../components/AdminShell';
@@ -136,27 +137,30 @@ function OrderStatusMiniGraph({ metrics, colors, styles }) {
     { id: 'ongoing', label: 'Ongoing', value: metrics.ongoingCount, color: colors.warning },
     { id: 'issues', label: 'Issues & cancelled', value: metrics.issuesCount, color: colors.danger },
   ];
-  const max = Math.max(1, ...rows.map((row) => row.value));
+  const total = Math.max(0, metrics.totalOrders);
 
   return <View style={styles.miniChartCard}>
     <View style={styles.cardHeader}>
       <View><Text style={styles.cardTitle}>Order Status Distribution</Text><Text style={styles.cardSubtitle}>Current lifecycle counts for the selected branch and timeframe.</Text></View>
-      <Text style={styles.chartHint}>Hover or focus for values</Text>
+      <Text style={styles.chartHint}>Share of all selected orders</Text>
     </View>
     <View style={styles.miniChartRows}>
       {rows.map((row) => <Pressable
         key={row.id}
-        accessibilityRole="button"
-        accessibilityLabel={`${row.label}: ${row.value} orders`}
+        accessibilityRole="text"
+        accessibilityLabel={`${row.label}: ${row.value} orders, ${total > 0 ? ((row.value / total) * 100).toFixed(1) : '0.0'} percent`}
         onHoverIn={() => setHovered(row.id)}
         onHoverOut={() => setHovered(null)}
         onFocus={() => setHovered(row.id)}
         onBlur={() => setHovered(null)}
         style={({ hovered: isHovered, focused }) => [styles.miniChartRow, (isHovered || focused) && styles.miniChartRowActive]}
       >
-        <View style={styles.miniChartLabelRow}><Text style={styles.miniChartLabel}>{row.label}</Text><Text style={styles.miniChartValue}>{formatNumber(row.value)}</Text></View>
-        <View style={styles.miniChartTrack}><View style={[styles.miniChartFill, { width: `${row.value ? Math.max(7, (row.value / max) * 100) : 0}%`, backgroundColor: row.color }]} /></View>
-        {hovered === row.id ? <View style={styles.chartTooltip}><Text style={styles.chartTooltipText}>{row.label}: {formatNumber(row.value)} order{row.value === 1 ? '' : 's'}</Text></View> : null}
+        <View style={styles.miniChartLabelRow}>
+          <View style={styles.miniChartLegendLabel}><View style={[styles.legendDot, { backgroundColor: row.color }]} /><Text style={styles.miniChartLabel}>{row.label}</Text></View>
+          <Text style={styles.miniChartValue}>{formatNumber(row.value)} · {total > 0 ? ((row.value / total) * 100).toFixed(1) : '0.0'}%</Text>
+        </View>
+        <View style={styles.miniChartTrack}><View style={[styles.miniChartFill, { width: `${total > 0 && row.value ? Math.max(4, (row.value / total) * 100) : 0}%`, backgroundColor: row.color }]} /></View>
+        {hovered === row.id ? <View style={styles.chartTooltip}><Text style={styles.chartTooltipText}>{row.label}: {formatNumber(row.value)} order{row.value === 1 ? '' : 's'} · {total > 0 ? ((row.value / total) * 100).toFixed(1) : '0.0'}%</Text></View> : null}
       </Pressable>)}
     </View>
   </View>;
@@ -165,11 +169,18 @@ function OrderStatusMiniGraph({ metrics, colors, styles }) {
 export default function AdminAnalyticsPage() {
   const { colors } = useAdminTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
+  const { width: viewportWidth } = useWindowDimensions();
+  const metricCardResponsiveStyle = viewportWidth >= 1180
+    ? styles.statCardThreeColumn
+    : viewportWidth >= 680
+      ? styles.statCardTwoColumn
+      : styles.statCardOneColumn;
 
   const { requests, initialLoading: loadingRequests, error: requestsError } = useAdminRealtimeData();
 
   const [stationFilter, setStationFilter] = useState('all');
   const [dateFilter, setDateFilter] = useState('recent');
+  const [hoveredMetric, setHoveredMetric] = useState(null);
 
   const { data: branchesData, loading: loadingBranches } = useAdminData(
     ADMIN_CACHE_KEYS.branches,
@@ -309,6 +320,48 @@ export default function AdminAnalyticsPage() {
     );
   }, [branches, requests, dateFilter]);
 
+  const comparisonStations = useMemo(() => (
+    stationFilter === 'all'
+      ? stationBreakdown
+      : stationBreakdown.filter((station) => station.id === stationFilter)
+  ), [stationBreakdown, stationFilter]);
+
+  const operationalHighlights = useMemo(() => {
+    const highlights = [];
+    const stationsWithOrders = comparisonStations.filter((station) => station.totalOrders > 0);
+    const zeroDeliveryStation = stationsWithOrders.find((station) => station.deliveredOrders === 0);
+    const topRevenueStation = [...stationsWithOrders]
+      .filter((station) => station.deliveredOrders > 0)
+      .sort((a, b) => b.revenue - a.revenue)[0];
+
+    if (zeroDeliveryStation) {
+      highlights.push({
+        id: 'zero-delivery',
+        tone: 'attention',
+        label: 'Attention needed',
+        text: `${zeroDeliveryStation.name} currently has 0 delivered orders in the selected scope.`,
+      });
+    }
+    if (metrics.issuesCount > 0) {
+      highlights.push({
+        id: 'issues',
+        tone: 'danger',
+        label: 'Issues recorded',
+        text: `${formatNumber(metrics.issuesCount)} cancelled, failed, or declined order${metrics.issuesCount === 1 ? '' : 's'} in the selected scope.`,
+      });
+    }
+    if (topRevenueStation && comparisonStations.length > 1) {
+      highlights.push({
+        id: 'top-revenue',
+        tone: 'positive',
+        label: 'Highest delivered revenue',
+        text: `${topRevenueStation.name} leads the selected scope with ${formatCurrency(topRevenueStation.revenue)} in delivered snapshot revenue.`,
+      });
+    }
+
+    return highlights.slice(0, 3);
+  }, [comparisonStations, metrics.issuesCount]);
+
   const selectedBranchName = useMemo(() => {
     if (stationFilter === 'all') return 'All Stations';
     const found = branchMap.get(stationFilter);
@@ -326,6 +379,23 @@ export default function AdminAnalyticsPage() {
   };
 
   const stationLoading = loadingRequests || loadingBranches;
+
+  const metricCardProps = (id, label, value, detail, accent) => ({
+    accessible: true,
+    accessibilityRole: 'text',
+    accessibilityLabel: `${label}: ${value}. ${detail}`,
+    focusable: true,
+    onPointerEnter: () => setHoveredMetric(id),
+    onPointerLeave: () => setHoveredMetric(null),
+    onFocus: () => setHoveredMetric(id),
+    onBlur: () => setHoveredMetric(null),
+    style: [
+      styles.statCard,
+      metricCardResponsiveStyle,
+      { borderTopColor: accent },
+      hoveredMetric === id && [styles.statCardActive, { borderColor: accent, borderTopColor: accent }],
+    ],
+  });
 
   return (
     <AdminShell
@@ -447,12 +517,12 @@ export default function AdminAnalyticsPage() {
       {loadingRequests && requests.length === 0 ? (
         <View style={styles.statGrid}>
           {Array.from({ length: 6 }).map((_, i) => (
-            <CardSkeleton key={i} style={styles.statSkeleton} />
+            <CardSkeleton key={i} style={[styles.statSkeleton, metricCardResponsiveStyle]} />
           ))}
         </View>
       ) : (
         <View style={styles.statGrid}>
-          <View style={[styles.statCard, { borderTopColor: colors.success }]}>
+          <View {...metricCardProps('revenue', 'Snapshot Revenue', formatCurrency(metrics.totalRevenue), 'Revenue from delivered order price snapshots', colors.success)}>
             <View style={[styles.statIconWrap, { backgroundColor: colors.successSoft }]}>
               <Text style={[styles.statIconGlyph, { color: colors.success }]}>₱</Text>
             </View>
@@ -465,7 +535,7 @@ export default function AdminAnalyticsPage() {
             </Text>
           </View>
 
-          <View style={[styles.statCard, { borderTopColor: colors.primary }]}>
+          <View {...metricCardProps('units', 'Units Sold', formatNumber(metrics.unitsSold), 'Delivered water containers or items', colors.primary)}>
             <View style={[styles.statIconWrap, { backgroundColor: colors.primarySoft }]}>
               <Text style={[styles.statIconGlyph, { color: colors.primary }]}>◇</Text>
             </View>
@@ -478,7 +548,7 @@ export default function AdminAnalyticsPage() {
             </Text>
           </View>
 
-          <View style={[styles.statCard, { borderTopColor: colors.textSecondary }]}>
+          <View {...metricCardProps('orders', 'Total Orders', formatNumber(metrics.totalOrders), `Fulfillment rate: ${metrics.fulfillmentRate.toFixed(1)}%`, colors.textSecondary)}>
             <View style={[styles.statIconWrap, { backgroundColor: colors.neutral }]}>
               <Text style={[styles.statIconGlyph, { color: colors.textPrimary }]}>▤</Text>
             </View>
@@ -491,7 +561,7 @@ export default function AdminAnalyticsPage() {
             </Text>
           </View>
 
-          <View style={[styles.statCard, { borderTopColor: colors.success }]}>
+          <View {...metricCardProps('delivered', 'Delivered', formatNumber(metrics.deliveredCount), 'Successfully completed orders', colors.success)}>
             <View style={[styles.statIconWrap, { backgroundColor: colors.successSoft }]}>
               <Text style={[styles.statIconGlyph, { color: colors.success }]}>✓</Text>
             </View>
@@ -504,7 +574,7 @@ export default function AdminAnalyticsPage() {
             </Text>
           </View>
 
-          <View style={[styles.statCard, { borderTopColor: colors.warning }]}>
+          <View {...metricCardProps('ongoing', 'Ongoing Deliveries', formatNumber(metrics.ongoingCount), 'Assigned, scheduled, or in transit', colors.warning)}>
             <View style={[styles.statIconWrap, { backgroundColor: colors.warningSoft }]}>
               <Text style={[styles.statIconGlyph, { color: colors.warning }]}>◉</Text>
             </View>
@@ -517,7 +587,7 @@ export default function AdminAnalyticsPage() {
             </Text>
           </View>
 
-          <View style={[styles.statCard, { borderTopColor: colors.danger }]}>
+          <View {...metricCardProps('issues', 'Issues & Cancelled', formatNumber(metrics.issuesCount), 'Cancelled, failed, or declined orders', colors.danger)}>
             <View style={[styles.statIconWrap, { backgroundColor: colors.dangerSoft }]}>
               <Text style={[styles.statIconGlyph, { color: colors.danger }]}>×</Text>
             </View>
@@ -533,6 +603,37 @@ export default function AdminAnalyticsPage() {
       )}
 
       {!loadingRequests || requests.length > 0 ? <OrderStatusMiniGraph metrics={metrics} colors={colors} styles={styles} /> : null}
+
+      {operationalHighlights.length > 0 ? (
+        <View style={styles.highlightsCard}>
+          <View style={styles.cardHeader}>
+            <View>
+              <Text style={styles.cardTitle}>Operational Highlights</Text>
+              <Text style={styles.cardSubtitle}>Deterministic observations from the currently selected data.</Text>
+            </View>
+          </View>
+          <View style={styles.highlightsGrid}>
+            {operationalHighlights.map((highlight) => {
+              const accent = highlight.tone === 'danger'
+                ? colors.danger
+                : highlight.tone === 'attention'
+                  ? colors.warning
+                  : colors.success;
+              const background = highlight.tone === 'danger'
+                ? colors.dangerSoft
+                : highlight.tone === 'attention'
+                  ? colors.warningSoft
+                  : colors.successSoft;
+              return (
+                <View key={highlight.id} style={[styles.highlightItem, { borderLeftColor: accent, backgroundColor: background }]}>
+                  <Text style={[styles.highlightLabel, { color: accent }]}>{highlight.label}</Text>
+                  <Text style={styles.highlightText}>{highlight.text}</Text>
+                </View>
+              );
+            })}
+          </View>
+        </View>
+      ) : null}
 
       {/* Product Performance Table */}
       <View style={styles.tableCard}>
@@ -572,7 +673,15 @@ export default function AdminAnalyticsPage() {
               {productBreakdown.map((prod, idx) => {
                 const avg = prod.unitsSold > 0 ? prod.revenue / prod.unitsSold : 0;
                 return (
-                  <View key={idx} style={[styles.tableDataRow, idx % 2 === 1 && styles.tableDataRowAlt]}>
+                  <Pressable
+                    key={prod.name || idx}
+                    accessible={false}
+                    style={({ hovered }) => [
+                      styles.tableDataRow,
+                      idx % 2 === 1 && styles.tableDataRowAlt,
+                      hovered && styles.tableDataRowHover,
+                    ]}
+                  >
                     <View style={[styles.tdWrap, { flex: 2, minWidth: 180 }]}>
                       <Text numberOfLines={1} style={styles.productNameText}>{prod.name}</Text>
                     </View>
@@ -585,13 +694,54 @@ export default function AdminAnalyticsPage() {
                     <View style={[styles.tdWrap, { flex: 1, minWidth: 120, alignItems: 'flex-end' }]}>
                       <Text style={styles.avgText}>{formatCurrency(avg)}</Text>
                     </View>
-                  </View>
+                  </Pressable>
                 );
               })}
             </View>
           </ScrollView>
         )}
       </View>
+
+      {!stationLoading && comparisonStations.length > 0 ? (
+        <View style={styles.branchComparisonCard}>
+          <View style={styles.cardHeader}>
+            <View>
+              <Text style={styles.cardTitle}>Branch Performance</Text>
+              <Text style={styles.cardSubtitle}>Fulfillment percentage and delivered snapshot revenue remain separate measures.</Text>
+            </View>
+            <View style={styles.badgePill}>
+              <Text style={styles.badgePillText}>{comparisonStations.length} in scope</Text>
+            </View>
+          </View>
+          <View style={styles.branchComparisonList}>
+            {comparisonStations.map((station) => {
+              const rate = station.totalOrders > 0 ? (station.deliveredOrders / station.totalOrders) * 100 : 0;
+              const rateColor = station.totalOrders === 0
+                ? colors.textSecondary
+                : rate === 0
+                  ? colors.danger
+                  : rate >= 70
+                    ? colors.success
+                    : colors.warning;
+              return (
+                <View key={station.id} style={styles.branchComparisonRow}>
+                  <View style={styles.branchComparisonHeader}>
+                    <Text numberOfLines={1} style={styles.branchComparisonName}>{station.name}</Text>
+                    <Text style={[styles.branchComparisonRate, { color: rateColor }]}>{rate.toFixed(1)}%</Text>
+                  </View>
+                  <View style={styles.branchComparisonTrack}>
+                    <View style={[styles.branchComparisonFill, { width: `${rate}%`, backgroundColor: rateColor }]} />
+                  </View>
+                  <View style={styles.branchComparisonMeta}>
+                    <Text style={styles.branchComparisonDetail}>{formatNumber(station.deliveredOrders)} / {formatNumber(station.totalOrders)} delivered</Text>
+                    <Text style={styles.branchComparisonRevenue}>{formatCurrency(station.revenue)}</Text>
+                  </View>
+                </View>
+              );
+            })}
+          </View>
+        </View>
+      ) : null}
 
       {/* Station Operations Breakdown */}
       <View style={styles.tableCard}>
@@ -632,14 +782,15 @@ export default function AdminAnalyticsPage() {
                 const rate = station.totalOrders > 0 ? (station.deliveredOrders / station.totalOrders) * 100 : 0;
                 const isSelected = stationFilter === station.id;
                 return (
-                  <TouchableOpacity
+                  <Pressable
                     key={station.id}
                     accessibilityRole="button"
                     accessibilityLabel={`Filter by branch ${station.name}`}
                     onPress={() => setStationFilter(isSelected ? 'all' : station.id)}
-                    style={[
+                    style={({ hovered, focused, pressed }) => [
                       styles.tableDataRow,
                       idx % 2 === 1 && styles.tableDataRowAlt,
+                      (hovered || focused || pressed) && styles.tableDataRowHover,
                       isSelected && styles.tableDataRowSelected,
                     ]}
                   >
@@ -671,14 +822,14 @@ export default function AdminAnalyticsPage() {
                       <Text style={styles.unitsSoldText}>{formatNumber(station.deliveredOrders)}</Text>
                     </View>
                     <View style={[styles.tdWrap, { flex: 1, minWidth: 100, alignItems: 'flex-end' }]}>
-                      <Text style={[styles.rateText, { color: rate >= 70 ? colors.success : colors.textPrimary }]}>
+                      <Text style={[styles.rateText, { color: station.totalOrders === 0 ? colors.textSecondary : rate === 0 ? colors.danger : rate >= 70 ? colors.success : colors.warning }]}>
                         {rate.toFixed(1)}%
                       </Text>
                     </View>
                     <View style={[styles.tdWrap, { flex: 1.2, minWidth: 130, alignItems: 'flex-end' }]}>
                       <Text style={styles.revenueText}>{formatCurrency(station.revenue)}</Text>
                     </View>
-                  </TouchableOpacity>
+                  </Pressable>
                 );
               })}
             </View>
@@ -794,6 +945,7 @@ const createStyles = (colors) =>
       flexGrow: 1,
       flexBasis: 320,
       minWidth: 0,
+      minHeight: 104,
       gap: 10,
       padding: 13,
       borderWidth: 1,
@@ -880,16 +1032,13 @@ const createStyles = (colors) =>
       marginBottom: 24,
     },
     statSkeleton: {
-      minHeight: 140,
-      flexBasis: 210,
+      minHeight: 150,
       flexGrow: 1,
-      maxWidth: 340,
     },
     statCard: {
       flexGrow: 1,
-      flexBasis: 210,
-      maxWidth: 340,
-      minHeight: 140,
+      minWidth: 0,
+      minHeight: 150,
       backgroundColor: colors.surface,
       borderWidth: 1,
       borderColor: colors.border,
@@ -897,6 +1046,32 @@ const createStyles = (colors) =>
       borderRadius: 14,
       padding: 16,
       ...BLUETAP_LAYOUT.shadow,
+      ...Platform.select({
+        web: {
+          cursor: 'default',
+          transitionDuration: '160ms',
+          transitionProperty: 'transform, box-shadow, border-color',
+        },
+        default: {},
+      }),
+    },
+    statCardThreeColumn: {
+      flexBasis: '30%',
+      minWidth: 230,
+    },
+    statCardTwoColumn: {
+      flexBasis: '46%',
+      minWidth: 250,
+    },
+    statCardOneColumn: {
+      flexBasis: '100%',
+      maxWidth: '100%',
+    },
+    statCardActive: {
+      transform: [{ translateY: -2 }],
+      shadowOpacity: 0.13,
+      shadowRadius: 18,
+      elevation: 4,
     },
     statIconWrap: {
       width: 28,
@@ -925,6 +1100,7 @@ const createStyles = (colors) =>
       color: colors.textSecondary,
       fontSize: 11,
       marginTop: 4,
+      lineHeight: 16,
     },
     miniChartCard: {
       backgroundColor: colors.surface,
@@ -940,12 +1116,77 @@ const createStyles = (colors) =>
     miniChartRow: { position: 'relative', padding: 10, borderRadius: 10, borderWidth: 1, borderColor: 'transparent' },
     miniChartRowActive: { backgroundColor: colors.primarySoft, borderColor: colors.border },
     miniChartLabelRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+    miniChartLegendLabel: { flexDirection: 'row', alignItems: 'center', gap: 8, minWidth: 0 },
+    legendDot: { width: 8, height: 8, borderRadius: 999 },
     miniChartLabel: { color: colors.textPrimary, fontSize: 12, fontWeight: '800' },
     miniChartValue: { color: colors.textPrimary, fontSize: 12, fontWeight: '900' },
     miniChartTrack: { height: 8, marginTop: 7, borderRadius: 999, overflow: 'hidden', backgroundColor: colors.neutral },
     miniChartFill: { height: '100%', borderRadius: 999 },
     chartTooltip: { position: 'absolute', right: 10, bottom: 21, backgroundColor: colors.textPrimary, borderRadius: 7, paddingHorizontal: 9, paddingVertical: 5 },
     chartTooltipText: { color: colors.surface, fontSize: 10, fontWeight: '800' },
+
+    highlightsCard: {
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 16,
+      padding: 18,
+      marginBottom: 20,
+      ...BLUETAP_LAYOUT.shadow,
+    },
+    highlightsGrid: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 10,
+    },
+    highlightItem: {
+      flexGrow: 1,
+      flexBasis: 250,
+      minWidth: 0,
+      borderLeftWidth: 3,
+      borderRadius: 10,
+      paddingHorizontal: 13,
+      paddingVertical: 11,
+    },
+    highlightLabel: {
+      fontSize: 10,
+      fontWeight: '900',
+      letterSpacing: 0.4,
+      textTransform: 'uppercase',
+    },
+    highlightText: {
+      color: colors.textPrimary,
+      fontSize: 12,
+      lineHeight: 18,
+      fontWeight: '700',
+      marginTop: 4,
+    },
+
+    branchComparisonCard: {
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 16,
+      padding: 18,
+      marginBottom: 20,
+      ...BLUETAP_LAYOUT.shadow,
+    },
+    branchComparisonList: { gap: 12 },
+    branchComparisonRow: {
+      backgroundColor: colors.surfaceAlt,
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 12,
+      padding: 13,
+    },
+    branchComparisonHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+    branchComparisonName: { flex: 1, minWidth: 0, color: colors.textPrimary, fontSize: 13, fontWeight: '900' },
+    branchComparisonRate: { fontSize: 13, fontWeight: '900', fontVariant: ['tabular-nums'] },
+    branchComparisonTrack: { height: 8, marginTop: 9, borderRadius: 999, overflow: 'hidden', backgroundColor: colors.neutral },
+    branchComparisonFill: { height: '100%', borderRadius: 999 },
+    branchComparisonMeta: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', gap: 8, marginTop: 8 },
+    branchComparisonDetail: { color: colors.textSecondary, fontSize: 11, fontWeight: '700' },
+    branchComparisonRevenue: { color: colors.success, fontSize: 12, fontWeight: '900', fontVariant: ['tabular-nums'] },
 
     tableCard: {
       backgroundColor: colors.surface,
@@ -1038,6 +1279,9 @@ const createStyles = (colors) =>
     tableDataRowAlt: {
       backgroundColor: colors.surfaceAlt,
     },
+    tableDataRowHover: {
+      backgroundColor: colors.primarySoft,
+    },
     tableDataRowSelected: {
       backgroundColor: colors.primarySoft,
     },
@@ -1053,16 +1297,19 @@ const createStyles = (colors) =>
       color: colors.textPrimary,
       fontSize: 13,
       fontWeight: '700',
+      fontVariant: ['tabular-nums'],
     },
     revenueText: {
       color: colors.success,
       fontSize: 13,
       fontWeight: '900',
+      fontVariant: ['tabular-nums'],
     },
     avgText: {
       color: colors.textSecondary,
       fontSize: 12,
       fontWeight: '700',
+      fontVariant: ['tabular-nums'],
     },
     stationNameText: {
       color: colors.textPrimary,
@@ -1087,6 +1334,7 @@ const createStyles = (colors) =>
     },
     rateText: {
       fontSize: 13,
-      fontWeight: '800',
+      fontWeight: '900',
+      fontVariant: ['tabular-nums'],
     },
   });

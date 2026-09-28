@@ -53,4 +53,6 @@ Requester and Distributor theme behavior is also governed by `bluetap-user-porta
 
 Analytics metric grids must use consistent responsive card bounds so a final or low-count metric such as Issues & Cancelled cannot stretch across an otherwise balanced row.
 
+Analytics dashboards should progress from balanced KPI summaries to compact real-data visualizations and then detailed tables. Visualizations must never fabricate data or combine incompatible units on a misleading axis.
+
 Interactive dashboard cards must expose a real destination and provide accessible keyboard focus plus restrained hover and pressed feedback; decorative cards must not imply navigation.
