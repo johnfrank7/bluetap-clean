@@ -1,5 +1,6 @@
 import { auth } from '../firebase';
 import { getApiUrl } from './apiClient';
+import { logDevelopmentTiming } from './performanceLog';
 
 const getRequests = new Map();
 
@@ -15,7 +16,7 @@ const stageFor = (path) => {
 async function runRequest(path, { method, body }) {
   const stage = stageFor(path);
   const startedAt = Date.now();
-  console.info('[admin-performance]', { stage: `${stage}_FETCH_STARTED` });
+  logDevelopmentTiming('[admin-performance]', { stage: `${stage}_FETCH_STARTED` });
   const token = await auth.currentUser?.getIdToken();
   if (!token) throw new Error('Administrator authentication is required.');
   const response = await fetch(getApiUrl(path), {
@@ -23,9 +24,9 @@ async function runRequest(path, { method, body }) {
     headers: { Authorization: `Bearer ${token}`, ...(body ? { 'Content-Type': 'application/json' } : {}) },
     ...(body ? { body: JSON.stringify(body) } : {}),
   });
-  console.info('[admin-performance]', { stage: `${stage}_FIRST_DATA`, durationMs: Date.now() - startedAt });
+  logDevelopmentTiming('[admin-performance]', { stage: `${stage}_FIRST_DATA`, durationMs: Date.now() - startedAt });
   const result = await response.json().catch(() => null);
-  console.info('[admin-performance]', { stage: `${stage}_FETCH_FINISHED`, durationMs: Date.now() - startedAt, status: response.status });
+  logDevelopmentTiming('[admin-performance]', { stage: `${stage}_FETCH_FINISHED`, durationMs: Date.now() - startedAt, status: response.status });
   if (!response.ok) {
     const error = new Error(result?.error?.message || 'Administrator data is temporarily unavailable.');
     error.code = result?.error?.reason || 'service-unavailable';
@@ -40,7 +41,7 @@ async function runRequest(path, { method, body }) {
 export function adminApiRequest(path, { method = 'GET', body } = {}) {
   const key = method === 'GET' ? `${method}:${path}` : '';
   if (key && getRequests.has(key)) {
-    console.info('[admin-performance]', { stage: 'ADMIN_API_REQUEST_DEDUPED', path });
+    logDevelopmentTiming('[admin-performance]', { stage: 'ADMIN_API_REQUEST_DEDUPED', path });
     return getRequests.get(key);
   }
   const request = runRequest(path, { method, body }).finally(() => {

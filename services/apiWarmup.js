@@ -1,4 +1,5 @@
 import { getApiBaseUrl, getApiUrl } from './apiClient';
+import { logDevelopmentTiming } from './performanceLog';
 const { faceServiceWarmupStore } = require('./faceServiceWarmupStore');
 
 const warmed = new Set();
@@ -17,7 +18,7 @@ function warm(path, stage, requestUrl = () => getApiUrl(path)) {
     signal: controller.signal,
   }).then((response) => {
     if (response.ok) warmed.add(path);
-    console.info('[client-warmup]', { stage: `${stage}_${response.ok ? 'READY' : 'PENDING'}`, durationMs: Date.now() - startedAt });
+    logDevelopmentTiming('[client-warmup]', { stage: `${stage}_${response.ok ? 'READY' : 'PENDING'}`, durationMs: Date.now() - startedAt });
     return { ready: response.ok };
   }).catch(() => ({ ready: false })).finally(() => {
     clearTimeout(timeout);
@@ -40,7 +41,7 @@ export const warmFaceServiceForSignup = () => {
     const data = await response.json().catch(() => ({}));
     const status = data?.status === 'ready' ? 'ready' : data?.status === 'not_required' ? 'not_required' : 'starting';
     faceServiceWarmupStore.publishPrewarm(status);
-    console.info('[client-warmup]', { stage: `SIGNUP_FACE_PREWARM_${status === 'ready' ? 'READY' : 'ACCEPTED'}`, durationMs: Date.now() - startedAt });
+    logDevelopmentTiming('[client-warmup]', { stage: `SIGNUP_FACE_PREWARM_${status === 'ready' ? 'READY' : 'ACCEPTED'}`, durationMs: Date.now() - startedAt });
     return { ready: status === 'ready', status };
   }).catch(() => {
     faceServiceWarmupStore.publishPrewarm('starting');

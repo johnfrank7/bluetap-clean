@@ -50,7 +50,7 @@ test('shared handoff cache discards authorization on UID or role changes and exp
   const source = readFileSync(resolve(root, 'services/authSession.js'), 'utf8');
   const cacheCode = source.slice(source.indexOf('const PRIVILEGED_VALIDATION_TTL_MS'), source.indexOf('const getMemorySessionStore'))
     .replaceAll('export const', 'const');
-  const context = vm.createContext({ normalizeRole: (role) => role || '', Date });
+  const context = vm.createContext({ normalizeRole: (role) => role || '', logDevelopmentTiming: () => {}, Date });
   vm.runInContext(`${cacheCode}\nthis.cache = cacheValidatedPrivilegedAccess; this.read = getCachedPrivilegedAccess; this.clear = clearPrivilegedValidationCache;`, context);
   context.cache({ uid: 'admin-1', role: 'admin' });
   assert.equal(context.read({ uid: 'admin-1' }, 'admin').role, 'admin');

@@ -4,8 +4,10 @@ const { applyCors } = require('../utils/cors');
 const { bearerToken, requireAdmin } = require('../auth/authorization');
 const {
   CONFIG_PATH,
+  PUBLIC_CONFIG_PATH,
   loadRegistrationSecurity,
   normalizeRegistrationSecurity,
+  publicRegistrationPolicy,
   validateRegistrationSecurity,
 } = require('../registration/registrationSecurity');
 
@@ -39,6 +41,7 @@ function createAdminRegistrationSecurityHandler(getAdmin = getFirebaseAdmin) {
       }
       const next = validateRegistrationSecurity(body);
       const configRef = db.collection(CONFIG_PATH[0]).doc(CONFIG_PATH[1]);
+      const publicConfigRef = db.collection(PUBLIC_CONFIG_PATH[0]).doc(PUBLIC_CONFIG_PATH[1]);
       const auditRef = db.collection('adminAuditLogs').doc();
       const savedConfig = await db.runTransaction(async (tx) => {
         const currentSnapshot = await tx.get(configRef);
@@ -47,6 +50,7 @@ function createAdminRegistrationSecurityHandler(getAdmin = getFirebaseAdmin) {
           : normalizeRegistrationSecurity(null);
         const saved = { ...next, version: before.version + 1, updatedAt: new Date(), updatedBy: admin.uid };
         tx.set(configRef, saved);
+        tx.set(publicConfigRef, { ...publicRegistrationPolicy(saved), updatedAt: saved.updatedAt });
         tx.set(auditRef, {
           action: 'REGISTRATION_SECURITY_UPDATED',
           actorUid: admin.uid,

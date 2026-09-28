@@ -36,6 +36,15 @@ test('registration config counters and audit logs are backend-only', () => {
   }
 });
 
+test('public registration policy exposes only the sanitized server-written read model', () => {
+  assert.match(rules, /match \/publicConfig\/registrationPolicy/);
+  assert.match(rules, /resource\.data\.keys\(\)\.hasOnly\(\[/);
+  for (const field of ['faceVerificationRequired', 'emailOtpRequired', 'policyVersion', 'updatedAt']) {
+    assert.match(rules, new RegExp(`['"]${field}['"]`));
+  }
+  assert.match(rules, /match \/publicConfig\/registrationPolicy[\s\S]*allow list, create, update, delete:\s*if false;/);
+});
+
 test('Manager reads only own source-branch operational events and cannot write them', () => {
   assert.match(rules, /match \/managerOperationalEvents\/\{eventId\}[\s\S]*allow get, list: if isManagerBranch\(resource\.data\.sourceBranchId\);/);
   assert.match(rules, /match \/managerOperationalEvents\/\{eventId\}[\s\S]*allow create, update, delete: if false;/);

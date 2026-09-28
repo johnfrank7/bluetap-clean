@@ -18,3 +18,7 @@ Keep realtime reads scoped to the signed in role and its authoritative ownership
 - Prime shared caches after successful backend mutations for immediate feedback; allow the authoritative Firestore snapshot to reconcile the result.
 - Treat listener errors as recoverable. Retain the last safe cache, expose a retry path where useful, and avoid reconnect loops or duplicate fallback listeners.
 - Keep realtime security and UI refresh separate: RoleGate revalidates access when the signed in profile changes, while backend authorization remains authoritative for every privileged request.
+- Route navigation must not clear already-resolved shared data back to an initial skeleton state. Skeletons are for true first load; realtime refresh and background revalidation retain the last valid data.
+- Registration step selection must not be unnecessarily gated by a cold privileged backend when a safe canonical public policy read model or prefetched policy exists. Cached policy only accelerates UI routing; backend registration-session and finalization policy remain authoritative.
+- Do not create duplicate realtime listeners for the same role-scoped dataset. Persistent role-layout providers own shared subscriptions and route consumers read their cache.
+- Operational realtime queries must remain bounded. Historical records belong in paginated, timeframe-specific, or explicitly on-demand views rather than unbounded listeners.

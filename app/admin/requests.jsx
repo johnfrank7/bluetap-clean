@@ -13,8 +13,7 @@ import {
 import AdminShell from '../../components/AdminShell';
 import { useAdminTheme } from '../../components/AdminTheme';
 import { TableSkeleton } from '../../components/AdminSkeleton';
-import { collection, limit, onSnapshot, orderBy, query } from 'firebase/firestore';
-import { db } from '../../firebase';
+import { useAdminRealtimeData } from '../../components/AdminDataProvider';
 import { getBranches } from '../../services/branchManagement';
 import { ADMIN_CACHE_KEYS, useAdminData } from '../../services/adminDataCache';
 import { requesterOrderStatusLabel } from '../../constants/requesterOrderStatus';
@@ -48,8 +47,6 @@ const ISSUE_STATUSES = new Set([
 ]);
 
 const OVERRIDE_ELIGIBLE_STATUSES = new Set(['awaiting_distributor_assignment', 'distributor_assigned', 'accepted', 'scheduled', 'delivery_failed']);
-const ADMIN_REQUEST_REALTIME_LIMIT = 500;
-
 const formatAmount = (val) => {
   if (val === undefined || val === null || val === '') return '₱0.00';
   const num = Number(val);
@@ -92,9 +89,7 @@ export default function AdminRequestsPage() {
   const { colors } = useAdminTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
 
-  const [requests, setRequests] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState('');
+  const { requests, initialLoading: loading, error: loadError } = useAdminRealtimeData();
 
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [statusFilter, setStatusFilter] = useState('all');
@@ -215,57 +210,6 @@ export default function AdminRequestsPage() {
     }, 200);
     return () => clearTimeout(timer);
   }, [searchQuery]);
-
-  useEffect(() => {
-    let isMounted = true;
-    try {
-      const q = query(collection(db, 'requests'), orderBy('createdAt', 'desc'), limit(ADMIN_REQUEST_REALTIME_LIMIT));
-      const unsubscribe = onSnapshot(
-        q,
-        (snapshot) => {
-          if (!isMounted) return;
-          const loaded = [];
-          snapshot.forEach((docSnap) => {
-            const data = docSnap.data() || {};
-            loaded.push({
-              id: docSnap.id,
-              ...data,
-            });
-          });
-
-          loaded.sort((a, b) => {
-            const timeA =
-              a.createdAt?.toMillis?.() ||
-              (a.createdAt ? new Date(a.createdAt).getTime() : 0) ||
-              (a.orderDate ? new Date(a.orderDate).getTime() : 0);
-            const timeB =
-              b.createdAt?.toMillis?.() ||
-              (b.createdAt ? new Date(b.createdAt).getTime() : 0) ||
-              (b.orderDate ? new Date(b.orderDate).getTime() : 0);
-            return timeB - timeA;
-          });
-
-          setRequests(loaded);
-          setLoading(false);
-          setLoadError('');
-        },
-        (err) => {
-          if (!isMounted) return;
-          setLoadError(err.message || 'Unable to subscribe to requests.');
-          setLoading(false);
-        }
-      );
-
-      return () => {
-        isMounted = false;
-        unsubscribe();
-      };
-    } catch (err) {
-      setLoadError(err.message || 'Failed to initialize requests listener.');
-      setLoading(false);
-      return undefined;
-    }
-  }, []);
 
   const counts = useMemo(() => {
     let actionable = 0;

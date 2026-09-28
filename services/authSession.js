@@ -6,6 +6,7 @@ import { saveLocalUser } from '../localUsers';
 import { isFaceVerified, normalizeFaceVerification } from './faceVerification';
 import { getManagerContext } from './managerAccess';
 import { clearAdminDataCache } from './adminDataCache';
+import { logDevelopmentTiming } from './performanceLog';
 
 const ACTIVE_SESSION_KEY = 'bluetapActiveAuthSession';
 const MODULE_SESSIONS_KEY = 'bluetapModuleAuthSessions';
@@ -45,7 +46,7 @@ export const getCachedPrivilegedAccess = (user, role) => {
     clearPrivilegedValidationCache();
     return null;
   }
-  console.info('[admin-performance]', { stage: 'ADMIN_AUTH_CACHE_HIT', role, ageMs: Date.now() - cached.validatedAt });
+  logDevelopmentTiming('[admin-performance]', { stage: 'ADMIN_AUTH_CACHE_HIT', role, ageMs: Date.now() - cached.validatedAt });
   return cached.profile;
 };
 
@@ -566,13 +567,13 @@ export const validateRoleAccess = async (expectedRole) => {
   const expected = normalizeRole(expectedRole);
   const key = `${auth.currentUser?.uid || 'signed-out'}:${expected}`;
   if (privilegedValidationInFlight.has(key)) {
-    console.info('[admin-performance]', { stage: 'ADMIN_AUTH_VALIDATION_DEDUPED', role: expected });
+    logDevelopmentTiming('[admin-performance]', { stage: 'ADMIN_AUTH_VALIDATION_DEDUPED', role: expected });
     return privilegedValidationInFlight.get(key);
   }
   const startedAt = Date.now();
-  if (expected === 'admin') console.info('[admin-performance]', { stage: 'ADMIN_AUTH_VALIDATION_STARTED' });
+  if (expected === 'admin') logDevelopmentTiming('[admin-performance]', { stage: 'ADMIN_AUTH_VALIDATION_STARTED' });
   const request = validateRoleAccessOnce(expected).then((result) => {
-    if (expected === 'admin') console.info('[admin-performance]', { stage: 'ADMIN_AUTH_VALIDATION_FINISHED', durationMs: Date.now() - startedAt, status: result.status, cached: result.cached === true });
+    if (expected === 'admin') logDevelopmentTiming('[admin-performance]', { stage: 'ADMIN_AUTH_VALIDATION_FINISHED', durationMs: Date.now() - startedAt, status: result.status, cached: result.cached === true });
     return result;
   }).finally(() => privilegedValidationInFlight.delete(key));
   privilegedValidationInFlight.set(key, request);

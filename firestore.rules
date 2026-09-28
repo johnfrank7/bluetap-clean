@@ -53,6 +53,17 @@ service cloud.firestore {
     match /faceServiceLocks/{document=**} { allow read, write: if false; }
     match /registrationLimits/{document=**} { allow read, write: if false; }
     match /systemConfig/{document=**} { allow read, write: if false; }
+    // Public signup reads only this server-maintained, sanitized step policy.
+    // The authoritative security document and every client write stay blocked.
+    match /publicConfig/registrationPolicy {
+      allow get: if resource.data.keys().hasOnly([
+        'faceVerificationRequired', 'emailOtpRequired', 'policyVersion', 'updatedAt'
+      ])
+        && resource.data.faceVerificationRequired is bool
+        && resource.data.emailOtpRequired is bool
+        && resource.data.policyVersion is int;
+      allow list, create, update, delete: if false;
+    }
     match /adminAuditLogs/{document=**} { allow read, write: if false; }
     // Manager operational events are written by Render Node. Source Managers
     // may read only their branch's transfer outcomes.

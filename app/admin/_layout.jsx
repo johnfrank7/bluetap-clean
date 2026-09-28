@@ -4,6 +4,7 @@ import RoleGate from '../../components/RoleGate';
 import { AdminThemeProvider } from '../../components/AdminTheme';
 import AdminShell from '../../components/AdminShell';
 import { AdminRouteSkeleton } from '../../components/AdminSkeleton';
+import { AdminDataProvider } from '../../components/AdminDataProvider';
 
 const routeCopy = {
   '/admin/dashboard': ['Administrator Dashboard', 'Loading secure administration overview…'],
@@ -20,7 +21,9 @@ export default function AdminLayout() {
   return (
     <AdminThemeProvider>
       <RoleGate allowedRoles={["admin"]} bypass={pathname === '/admin/login'} loadingFallback={<AdminShell title={title} subtitle={subtitle}><AdminRouteSkeleton /></AdminShell>}>
-        <Stack screenOptions={{ headerShown: false }} />
+        <AdminDataProvider>
+          <Stack screenOptions={{ headerShown: false }} />
+        </AdminDataProvider>
       </RoleGate>
     </AdminThemeProvider>
   );

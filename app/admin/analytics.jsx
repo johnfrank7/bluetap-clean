@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   ActivityIndicator,
   ScrollView,
@@ -11,8 +11,7 @@ import AdminShell from '../../components/AdminShell';
 import { useAdminTheme } from '../../components/AdminTheme';
 import { CardSkeleton, TableSkeleton } from '../../components/AdminSkeleton';
 import PortalButton from '../../components/PortalButton';
-import { collection, onSnapshot } from 'firebase/firestore';
-import { db } from '../../firebase';
+import { useAdminRealtimeData } from '../../components/AdminDataProvider';
 import { getBranches } from '../../services/branchManagement';
 import { ADMIN_CACHE_KEYS, useAdminData } from '../../services/adminDataCache';
 import { BLUETAP_LAYOUT } from '../../constants/bluetapTheme';
@@ -36,7 +35,7 @@ const ISSUE_STATUSES = new Set([
 ]);
 
 const DATE_FILTERS = [
-  { id: 'all', label: 'All Time' },
+  { id: 'recent', label: 'Recent 500' },
   { id: '7d', label: 'Last 7 Days' },
   { id: '30d', label: 'Last 30 Days' },
   { id: 'month', label: 'This Month' },
@@ -74,7 +73,7 @@ const getOrderTimestamp = (order) => {
 };
 
 const filterByDateRange = (timeMs, range) => {
-  if (range === 'all') return true;
+  if (range === 'recent') return true;
   if (!timeMs) return false;
   const now = Date.now();
   if (range === '7d') {
@@ -133,51 +132,16 @@ export default function AdminAnalyticsPage() {
   const { colors } = useAdminTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
 
-  const [requests, setRequests] = useState([]);
-  const [loadingRequests, setLoadingRequests] = useState(true);
-  const [requestsError, setRequestsError] = useState('');
+  const { requests, initialLoading: loadingRequests, error: requestsError } = useAdminRealtimeData();
 
   const [stationFilter, setStationFilter] = useState('all');
-  const [dateFilter, setDateFilter] = useState('all');
+  const [dateFilter, setDateFilter] = useState('recent');
 
   const { data: branchesData, loading: loadingBranches } = useAdminData(
     ADMIN_CACHE_KEYS.branches,
     getBranches
   );
   const branches = branchesData || [];
-
-  useEffect(() => {
-    let isMounted = true;
-    try {
-      const q = collection(db, 'requests');
-      const unsubscribe = onSnapshot(
-        q,
-        (snapshot) => {
-          if (!isMounted) return;
-          const loaded = [];
-          snapshot.forEach((docSnap) => {
-            loaded.push({ id: docSnap.id, ...docSnap.data() });
-          });
-          setRequests(loaded);
-          setLoadingRequests(false);
-          setRequestsError('');
-        },
-        (err) => {
-          if (!isMounted) return;
-          setRequestsError(err.message || 'Unable to subscribe to requests collection.');
-          setLoadingRequests(false);
-        }
-      );
-      return () => {
-        isMounted = false;
-        unsubscribe();
-      };
-    } catch (err) {
-      setRequestsError(err.message || 'Failed to initialize requests listener.');
-      setLoadingRequests(false);
-      return undefined;
-    }
-  }, []);
 
   const branchMap = useMemo(() => {
     const map = new Map();
@@ -319,15 +283,15 @@ export default function AdminAnalyticsPage() {
 
   const selectedDateLabel = useMemo(() => {
     const found = DATE_FILTERS.find((f) => f.id === dateFilter);
-    return found?.label || 'All Time';
+    return found?.label || 'Recent 500';
   }, [dateFilter]);
 
   const resetFilters = () => {
     setStationFilter('all');
-    setDateFilter('all');
+    setDateFilter('recent');
   };
 
-  const isLoading = loadingRequests || loadingBranches;
+  const stationLoading = loadingRequests || loadingBranches;
 
   return (
     <AdminShell
@@ -355,7 +319,7 @@ export default function AdminAnalyticsPage() {
       <View style={styles.filterSection}>
         <View style={styles.filterRowHeader}>
           <Text style={styles.filterSectionTitle}>Filter by Station & Timeframe</Text>
-          {(stationFilter !== 'all' || dateFilter !== 'all') && (
+          {(stationFilter !== 'all' || dateFilter !== 'recent') && (
             <PortalButton
               variant="ghost"
               size="sm"
@@ -444,7 +408,7 @@ export default function AdminAnalyticsPage() {
         </Text>
       </View>
 
-      {isLoading ? (
+      {loadingRequests && requests.length === 0 ? (
         <View style={styles.statGrid}>
           {Array.from({ length: 6 }).map((_, i) => (
             <CardSkeleton key={i} style={styles.statSkeleton} />
@@ -548,7 +512,7 @@ export default function AdminAnalyticsPage() {
           </View>
         </View>
 
-        {isLoading ? (
+        {loadingRequests && requests.length === 0 ? (
           <TableSkeleton rows={4} />
         ) : productBreakdown.length === 0 ? (
           <View style={styles.emptyContainer}>
@@ -607,7 +571,7 @@ export default function AdminAnalyticsPage() {
           </View>
         </View>
 
-        {isLoading ? (
+        {stationLoading && stationBreakdown.length === 0 ? (
           <TableSkeleton rows={4} />
         ) : stationBreakdown.length === 0 ? (
           <View style={styles.emptyContainer}>

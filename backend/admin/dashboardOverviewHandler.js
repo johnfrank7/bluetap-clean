@@ -3,6 +3,7 @@ const { requireAdmin } = require('../auth/authorization');
 const { applyCors } = require('../utils/cors');
 const { OtpError } = require('../utils/otpError');
 const { loadRegistrationSecurity } = require('../registration/registrationSecurity');
+const { logDevelopmentTiming } = require('../utils/performanceLog');
 
 const ACCOUNT_ROLES = new Set(['requester', 'distributor', 'manager']);
 const clean = (value, max = 160) => String(value || '').trim().slice(0, max);
@@ -11,7 +12,7 @@ const timeOf = (value) => value?.toMillis?.() || Number(value?.seconds || 0) * 1
 async function timed(stage, operation) {
   const startedAt = Date.now();
   try { return await operation(); }
-  finally { console.info('[admin-performance]', { stage, durationMs: Date.now() - startedAt }); }
+  finally { logDevelopmentTiming('[admin-performance]', { stage, durationMs: Date.now() - startedAt }); }
 }
 
 function accountStatus(data = {}) {
@@ -71,7 +72,7 @@ function createAdminDashboardOverviewHandler(getAdmin = getFirebaseAdmin) {
       const activeAccounts = accounts.filter((profile) => !['inactive', 'rejected'].includes(accountStatus(profile))).length;
       const countRole = (role) => accounts.filter((profile) => profile.role === role).length;
 
-      console.info('[admin-performance]', { stage: 'ADMIN_DASHBOARD_OVERVIEW_FINISHED', durationMs: Date.now() - startedAt });
+      logDevelopmentTiming('[admin-performance]', { stage: 'ADMIN_DASHBOARD_OVERVIEW_FINISHED', durationMs: Date.now() - startedAt });
       return res.status(200).json({
         summary: {
           totalBranches: branchResult.status === 'fulfilled' ? branches.length : null,

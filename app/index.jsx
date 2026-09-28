@@ -23,6 +23,7 @@ import {
 import { useBlueTapTheme } from '../components/BlueTapTheme';
 import ThemeIconButton from '../components/ThemeIconButton';
 import { warmFaceServiceForSignup } from '../services/apiWarmup';
+import { prefetchRegistrationPolicy } from '../services/registrationSession';
 
 const BLUE = BLUETAP_COLORS.primary;
 const BLUE_DARK = BLUETAP_COLORS.primaryDeep;
@@ -34,6 +35,9 @@ const DESKTOP_BREAKPOINT = 1024;
 const TABLET_BREAKPOINT = 600;
 const logo = require('../assets/icons/bluetaplogo.png');
 const whiteLogo = require('../assets/icons/bluetapwhitelogo.png');
+const prepareSignup = () => prefetchRegistrationPolicy()
+  .then((policy) => policy?.faceVerificationRequired === true ? warmFaceServiceForSignup() : null)
+  .catch(() => null);
 
 const LIGHT_THEME = {
   surface: BLUETAP_LIGHT_PORTAL_COLORS.surface,
@@ -307,7 +311,7 @@ function WebLanding({ router, width }) {
   const contentPadding = isDesktop ? 42 : isTablet ? 30 : 20;
   const theme = isDark ? DARK_THEME : LIGHT_THEME;
   const openSignup = (role) => {
-    warmFaceServiceForSignup();
+    prepareSignup();
     router.push(role ? { pathname: '/signup', params: { role } } : '/login?signup=true');
   };
 
@@ -599,7 +603,7 @@ function WebLanding({ router, width }) {
 function NativeLanding({ router, width }) {
   const isSmallPhone = width < 360;
   const openSignup = () => {
-    warmFaceServiceForSignup();
+    prepareSignup();
     router.push('/login?signup=true');
   };
 
@@ -669,6 +673,8 @@ function NativeLanding({ router, width }) {
 export default function LandingPage() {
   const router = useRouter();
   const { width } = useWindowDimensions();
+
+  useEffect(() => { prepareSignup(); }, []);
 
   if (Platform.OS !== 'web') {
     return <NativeLanding router={router} width={width} />;

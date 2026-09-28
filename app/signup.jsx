@@ -12,7 +12,7 @@ import { BLUETAP_COLORS, BLUETAP_LOGIN_GRADIENT } from '../constants/bluetapThem
 import { clearAllAuthSessions } from '../services/authSession';
 import { clearPendingRegistration, completeRegistrationWithoutOtp, getPendingRegistration, requestRegistrationOtp, setPendingRegistration } from '../services/emailVerification';
 import { checkUsername, normalizeUsername, validateUsername } from '../services/usernameAuth';
-import { acceptRegistrationTerms, createRegistrationSession, getRegistrationBranches, getRegistrationSecurityPolicy, getRegistrationSessionStatus } from '../services/registrationSession';
+import { acceptRegistrationTerms, createRegistrationSession, getRegistrationBranches, getRegistrationSecurityPolicy, getRegistrationSessionStatus, primeRegistrationPolicy } from '../services/registrationSession';
 import { clearPendingFaceEnrollment } from '../services/pendingFaceEnrollment';
 import { useFaceServiceWarmup } from '../services/useFaceServiceWarmup';
 
@@ -279,6 +279,10 @@ export default function SignupPage() {
 
   const next = async () => {
     if (!validateStep() || (step === STEP.identity && !canContinue)) return;
+    if (!securityPolicyReady) {
+      if (step === STEP.account) transitionToStep(STEP.personal);
+      return;
+    }
     if (step === STEP.personal && !registrationSessionId) {
       setLoading(true);
       try {
@@ -291,6 +295,7 @@ export default function SignupPage() {
         if (!sessionSteps.length) throw new Error('Registration security settings are unavailable. Please try again.');
         setRegistrationSessionId(result.registrationSessionId);
         setSecurityPolicy(result.securityPolicy);
+        primeRegistrationPolicy(result.securityPolicy);
         setFaceVerification(result.securityPolicy?.faceVerificationRequired === false
           ? { required: false, status: 'not_required', duplicateCheck: 'not_required' }
           : { required: true, status: 'unverified', duplicateCheck: 'unknown' });
@@ -410,7 +415,7 @@ export default function SignupPage() {
                 />
                 {mobile && <Text style={styles.stepText}>Step {visibleStepNumber} of {visibleRegistrationSteps.length} · {REGISTRATION_STEP_LABELS[step]}</Text>}
               </> : <View style={styles.stepperLoading} accessibilityRole="progressbar" accessibilityLabel="Loading registration steps"><Text style={styles.stepperLoadingText}>{policyError || 'Loading registration steps…'}</Text>{!!policyError && <TouchableOpacity onPress={() => setPolicyRetry((value) => value + 1)} accessibilityRole="button"><Text style={styles.loginLink}>Try again</Text></TouchableOpacity>}</View>}
-              {securityPolicyReady && <Animated.View style={{
+              {(securityPolicyReady || step === STEP.account || step === STEP.personal) && <Animated.View style={{
                 opacity: stepTransition,
                 transform: [{ translateY: stepTransition.interpolate({ inputRange: [0, 1], outputRange: [10, 0] }) }],
               }}>
@@ -471,10 +476,10 @@ export default function SignupPage() {
                 onBack={back}
                 onPrimary={advanceOrGuide}
                 loading={loading}
-                primaryDisabled={retrySeconds > 0 || (!prerequisiteNotice && step !== STEP.verifyEmail && !canContinue)}
+                primaryDisabled={retrySeconds > 0 || (!securityPolicyReady && step !== STEP.account) || (!prerequisiteNotice && step !== STEP.verifyEmail && !canContinue)}
                 primaryLabel={retrySeconds > 0
                   ? `Try again in ${Math.floor(retrySeconds / 60)}:${String(retrySeconds % 60).padStart(2, '0')}`
-                  : step === STEP.verifyEmail ? 'Continue' : step === STEP.credentials && !securityPolicy.emailOtpRequired ? 'Complete Registration' : 'Next'}
+                  : !securityPolicyReady && step === STEP.personal ? 'Preparing secure registration…' : step === STEP.verifyEmail ? 'Continue' : step === STEP.credentials && !securityPolicy.emailOtpRequired ? 'Complete Registration' : 'Next'}
               />
               <Text style={styles.loginPrompt}>Already have an account? <Text style={styles.loginLink} onPress={() => router.replace('/login')}>Log in.</Text></Text>
               </Animated.View>}

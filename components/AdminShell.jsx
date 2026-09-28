@@ -6,8 +6,7 @@ import { StatusBar } from 'expo-status-bar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ADMIN_SIDEBAR_STORAGE_KEY, useAdminTheme } from './AdminTheme';
 import AdminIcon from './AdminIcon';
-import { collection, onSnapshot, query, where } from 'firebase/firestore';
-import { db } from '../firebase';
+import { useAdminRealtimeData } from './AdminDataProvider';
 import { signOutAndClearSessions } from '../services/authSession';
 import { warmAdminBackend } from '../services/apiWarmup';
 import { prefetchAdminDestination } from '../services/adminPrefetch';
@@ -40,25 +39,7 @@ function LogoutControl({ collapsed, onPress, colors }) {
 function AdminShellLayout({ title, subtitle, children }) {
   const router = useRouter(), pathname = usePathname(); const { width } = useWindowDimensions(); const { colors, resolvedTheme } = useAdminTheme(); const compact = width < 900;
   const [collapsed, setCollapsed] = React.useState(false), [drawerOpen, setDrawerOpen] = React.useState(false), [confirmLogout, setConfirmLogout] = React.useState(false);
-  const [actionableRequestsCount, setActionableRequestsCount] = React.useState(0);
-  React.useEffect(() => {
-    try {
-      const q = query(
-        collection(db, 'requests'),
-        where('status', 'in', ['Pending', 'pending', 'outside_radius_pending_approval', 'manager_approval_pending', 'branch_transfer_pending'])
-      );
-      const unsubscribe = onSnapshot(
-        q,
-        (snapshot) => {
-          setActionableRequestsCount(snapshot.size);
-        },
-        () => {}
-      );
-      return () => unsubscribe();
-    } catch {
-      return undefined;
-    }
-  }, []);
+  const { actionableRequestsCount } = useAdminRealtimeData();
   const sidebarWidth = React.useRef(new Animated.Value(DESKTOP_WIDTH)).current, drawerProgress = React.useRef(new Animated.Value(0)).current;
   React.useEffect(() => { warmAdminBackend(); }, []);
   React.useEffect(() => { let active = true; AsyncStorage.getItem(ADMIN_SIDEBAR_STORAGE_KEY).then((value) => { if (active && value === 'true') setCollapsed(true); }).catch(() => {}); return () => { active = false; }; }, []);

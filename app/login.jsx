@@ -31,6 +31,7 @@ import { loginWithUsernameResult } from '../services/usernameAuth';
 import { restartIncompleteRegistration } from '../services/profileRecovery';
 import { completePasswordRecovery, requestPasswordRecovery, verifyPasswordRecovery } from '../services/passwordRecovery';
 import { clearPendingRegistration } from '../services/emailVerification';
+import { prefetchRegistrationPolicy } from '../services/registrationSession';
 import { warmFaceServiceForSignup, warmLoginBackend } from '../services/apiWarmup';
 import PasswordVisibilityButton from '../components/PasswordVisibilityButton';
 
@@ -66,6 +67,9 @@ const requiresEmailVerification = (profile) => profile?.emailVerificationRequire
 const BASE_SCROLL_PADDING_BOTTOM = 20;
 const DEFAULT_KEYBOARD_GAP = 24;
 const PASSWORD_KEYBOARD_GAP = 112;
+const prepareSignup = () => prefetchRegistrationPolicy()
+  .then((policy) => policy?.faceVerificationRequired === true ? warmFaceServiceForSignup() : null)
+  .catch(() => null);
 
 const getKeyboardTop = (keyboardFrame) => {
   const windowHeight = Dimensions.get('window').height;
@@ -128,7 +132,7 @@ export default function LoginPage() {
 
   React.useEffect(() => () => adminEntryTracker.reset(), [adminEntryTracker]);
 
-  React.useEffect(() => { warmLoginBackend(); }, []);
+  React.useEffect(() => { warmLoginBackend(); prepareSignup(); }, []);
 
   React.useEffect(() => {
     if (signup === 'true') {
@@ -251,7 +255,7 @@ export default function LoginPage() {
   };
 
   const openSignupOptions = () => {
-    warmFaceServiceForSignup();
+    prepareSignup();
     router.push('/signup');
   };
 

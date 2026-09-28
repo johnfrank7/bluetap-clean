@@ -4,11 +4,11 @@ const { createRegistrationSessionService } = require('./registrationSession');
 const { applyCors } = require('../utils/cors');
 const { getClientIp } = require('../utils/request');
 const { getWarmFaceService } = require('../verification/faceServiceWarmup');
-const { loadRegistrationSecurity, policySnapshot } = require('./registrationSecurity');
+const { loadRegistrationSecurity, PUBLIC_CONFIG_PATH, publicRegistrationPolicy } = require('./registrationSecurity');
 
 function createRegistrationSessionHandler(action, getAdmin = getFirebaseAdmin, warmFaceService = getWarmFaceService) {
   return async (req, res) => {
-    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('Cache-Control', action === 'policy' ? 'public, max-age=60, stale-while-revalidate=300' : 'no-store');
     if (!applyCors(req, res)) return;
     if (req.method === 'OPTIONS') return res.status(204).end();
     if (req.method !== 'POST') return res.status(405).json({ error: { reason: 'method-not-allowed', message: 'Use POST.' } });
@@ -17,12 +17,11 @@ function createRegistrationSessionHandler(action, getAdmin = getFirebaseAdmin, w
       if (typeof body === 'string') { try { body = JSON.parse(body); } catch { throw new OtpError(400, 'invalid-request', 'Invalid request.'); } }
       const { db } = getAdmin();
       if (action === 'policy') {
-        const policy = policySnapshot(await loadRegistrationSecurity(db, { strict: true }));
-        return res.status(200).json({ securityPolicy: {
-          faceVerificationRequired: policy.faceVerificationRequired,
-          emailOtpRequired: policy.emailOtpRequired,
-          policyVersion: policy.policyVersion,
-        } });
+        const policy = publicRegistrationPolicy(await loadRegistrationSecurity(db, { strict: true }));
+        try {
+          await db.collection(PUBLIC_CONFIG_PATH[0]).doc(PUBLIC_CONFIG_PATH[1]).set({ ...policy, updatedAt: new Date() });
+        } catch { /* The canonical response remains usable if mirror repair is temporarily unavailable. */ }
+        return res.status(200).json({ securityPolicy: policy });
       }
       const service = createRegistrationSessionService({
         db,

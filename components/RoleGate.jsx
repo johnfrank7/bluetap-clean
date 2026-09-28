@@ -13,6 +13,7 @@ import {
   validateRoleAccess,
 } from '../services/authSession';
 import SessionSecurityGuard from './SessionSecurityGuard';
+import { logDevelopmentTiming } from '../services/performanceLog';
 
 export default function RoleGate({ role, allowedRoles, children, bypass = false, loadingFallback = null }) {
   const router = useRouter();
@@ -45,7 +46,7 @@ export default function RoleGate({ role, allowedRoles, children, bypass = false,
     let result = null;
     for (const allowedRole of roles) {
       if (allowedRole === 'admin' || allowedRole === 'manager') {
-        console.info('[role-validation]', {
+        logDevelopmentTiming('[role-validation]', {
           stage: `${allowedRole.toUpperCase()}_VALIDATION_CALLED_FROM_ROLEGATE`,
         });
       }
@@ -95,7 +96,7 @@ export default function RoleGate({ role, allowedRoles, children, bypass = false,
       return undefined;
     }
 
-    console.info('[admin-performance]', { stage: 'ADMIN_ROUTE_ENTERED', roles: allowedRolesKey });
+    logDevelopmentTiming('[admin-performance]', { stage: 'ADMIN_ROUTE_ENTERED', roles: allowedRolesKey });
     setGateState({ status: 'checking', message: '' });
     let unsubscribeProfile = () => {};
     const unsubscribeAuth = onAuthStateChanged(auth, (user) => {

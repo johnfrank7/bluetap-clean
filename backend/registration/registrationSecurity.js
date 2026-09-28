@@ -1,6 +1,7 @@
 const { OtpError } = require('../utils/otpError');
 
 const CONFIG_PATH = ['systemConfig', 'registrationSecurity'];
+const PUBLIC_CONFIG_PATH = ['publicConfig', 'registrationPolicy'];
 const POLICY_VERSION = 1;
 const MIN_ACCOUNT_LIMIT = 1;
 const MAX_ACCOUNT_LIMIT = 20;
@@ -92,8 +93,18 @@ function policySnapshot(config) {
   };
 }
 
+function publicRegistrationPolicy(config) {
+  const policy = policySnapshot(config);
+  return {
+    faceVerificationRequired: policy.faceVerificationRequired,
+    emailOtpRequired: policy.emailOtpRequired,
+    policyVersion: policy.policyVersion,
+  };
+}
+
 module.exports = {
   CONFIG_PATH,
+  PUBLIC_CONFIG_PATH,
   MAX_ACCOUNT_LIMIT,
   MIN_ACCOUNT_LIMIT,
   POLICY_VERSION,
@@ -104,5 +115,6 @@ module.exports = {
   loadRegistrationSecurity,
   normalizeRegistrationSecurity,
   policySnapshot,
+  publicRegistrationPolicy,
   validateRegistrationSecurity,
 };

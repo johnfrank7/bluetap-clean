@@ -93,6 +93,12 @@ test('only Firebase-authenticated trusted admin can change registration security
   await f.handler({ method: 'PATCH', headers: { authorization: 'Bearer valid' }, body: { faceVerificationEnabled: true, emailOtpEnabled: false, maxAccountsPerDevice: 5, maxAccountsPerIp: 4 } }, res);
   assert.equal(res.statusCode, 200);
   assert.equal(f.records.get('systemConfig/registrationSecurity').maxAccountsPerDevice, 5);
+  assert.deepEqual(f.records.get('publicConfig/registrationPolicy'), {
+    faceVerificationRequired: true,
+    emailOtpRequired: false,
+    policyVersion: 2,
+    updatedAt: f.records.get('systemConfig/registrationSecurity').updatedAt,
+  });
   assert.deepEqual(f.records.get('systemConfig/registrationSecurity').sessionSecurity, DEFAULT_SESSION_SECURITY);
   const audit = [...f.records.values()].find((value) => value.action === 'REGISTRATION_SECURITY_UPDATED');
   assert.deepEqual({

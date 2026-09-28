@@ -1,4 +1,5 @@
 import React from 'react';
+import { logDevelopmentTiming } from './performanceLog';
 
 export const ADMIN_CACHE_STALE_MS = 45_000;
 export const ADMIN_CACHE_KEYS = Object.freeze({
@@ -37,11 +38,11 @@ export function loadAdminData(key, loader, { force = false, staleMs = ADMIN_CACH
   const current = entryFor(key);
   const fresh = current.data !== undefined && Date.now() - current.updatedAt < staleMs;
   if (!force && fresh) {
-    console.info('[admin-performance]', { stage: 'ADMIN_DATA_CACHE_HIT', dataset: key, ageMs: Date.now() - current.updatedAt });
+    logDevelopmentTiming('[admin-performance]', { stage: 'ADMIN_DATA_CACHE_HIT', dataset: key, ageMs: Date.now() - current.updatedAt });
     return Promise.resolve(current.data);
   }
   if (current.inFlight && !force) {
-    console.info('[admin-performance]', { stage: 'ADMIN_DATA_REQUEST_DEDUPED', dataset: key });
+    logDevelopmentTiming('[admin-performance]', { stage: 'ADMIN_DATA_REQUEST_DEDUPED', dataset: key });
     return current.inFlight;
   }
 
@@ -51,7 +52,7 @@ export function loadAdminData(key, loader, { force = false, staleMs = ADMIN_CACH
     .then(loader)
     .then((data) => {
       if (entryFor(key).generation === generation) store.set(key, { data, updatedAt: Date.now(), inFlight: null, generation });
-      console.info('[admin-performance]', { stage: 'ADMIN_DATA_READY', dataset: key, durationMs: Date.now() - startedAt });
+      logDevelopmentTiming('[admin-performance]', { stage: 'ADMIN_DATA_READY', dataset: key, durationMs: Date.now() - startedAt });
       return data;
     })
     .catch((error) => {

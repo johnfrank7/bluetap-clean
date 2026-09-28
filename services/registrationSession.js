@@ -1,5 +1,9 @@
 import { getApiUrl } from './apiClient';
 import { getInstallationId } from './installationId';
+import { doc, getDoc } from 'firebase/firestore';
+import { db } from '../firebase';
+
+const { createRegistrationPolicyLoader, validPolicy } = require('./registrationPolicyCache');
 
 export const callRegistrationApi = async (path, body, timeoutMs = 30000) => {
   const controller = new AbortController();
@@ -44,16 +48,36 @@ export const createRegistrationSession = async (personalInfo) => {
   }
   return result;
 };
-export const getRegistrationSecurityPolicy = async () => {
+const getBackendRegistrationSecurityPolicy = async () => {
   const result = await callRegistrationApi('/api/auth/registration-policy', {});
   const policy = result?.securityPolicy;
-  if (typeof policy?.faceVerificationRequired !== 'boolean' || typeof policy?.emailOtpRequired !== 'boolean') {
+  if (!validPolicy(policy)) {
     const error = new Error('The registration policy is unavailable. Please try again.');
     error.code = 'registration/invalid-response';
     throw error;
   }
   return policy;
 };
+
+const getPublicRegistrationSecurityPolicy = async () => {
+  const snapshot = await getDoc(doc(db, 'publicConfig', 'registrationPolicy'));
+  const policy = snapshot.exists() ? snapshot.data() : null;
+  if (!validPolicy(policy)) throw new Error('Public registration policy is unavailable.');
+  return {
+    faceVerificationRequired: policy.faceVerificationRequired,
+    emailOtpRequired: policy.emailOtpRequired,
+    ...(Number.isInteger(policy.policyVersion) ? { policyVersion: policy.policyVersion } : {}),
+  };
+};
+
+const registrationPolicyLoader = createRegistrationPolicyLoader({
+  readPublicPolicy: getPublicRegistrationSecurityPolicy,
+  readBackendPolicy: getBackendRegistrationSecurityPolicy,
+});
+
+export const getRegistrationSecurityPolicy = (options) => registrationPolicyLoader.get(options);
+export const prefetchRegistrationPolicy = () => registrationPolicyLoader.prefetch();
+export const primeRegistrationPolicy = (policy) => registrationPolicyLoader.prime(policy);
 export const getRegistrationBranches = async () => {
   const result = await callRegistrationApi('/api/auth/registration-branches', {});
   if (!Array.isArray(result?.branches)) {
