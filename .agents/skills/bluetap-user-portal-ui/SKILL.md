@@ -90,6 +90,9 @@ Preserve these invariants:
 - When a primary action button (such as "Add Request") is already pinned in the fixed header area, do not duplicate it inside the empty state view below.
 - User portal feedback across forms and actions uses `TopToastFeedback` for theme-aware, top-anchored, auto-dismissing feedback messages (`success`, `error`, `warning`, `info`).
 - Public user identifiers must display formatted public UIDs (`Req001`, `Dis001`, `Mgr001`, `Adm001`) with label "UID" positioned at the top of profile fields above Full Name. Contact numbers must validate and normalize Philippine mobile numbers (`+639XXXXXXXXX`, formatted for display as `09XX XXX XXXX`).
+- Operation-result feedback must remain top-anchored and visible without scrolling; confirmation dialogs remain separate from success, error, warning, and informational toasts.
+- Shared empty states should select context-specific variants for requests, schedules, history, notifications, deliveries, products, and analytics while retaining one BlueTap visual system.
+- An open order or notification detail view must resolve its selected ID against the current canonical realtime order collection instead of retaining a stale copied object.
 
 ## Deferred messaging scope
 

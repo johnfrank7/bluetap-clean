@@ -1,608 +1,75 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  Image,
-  Modal,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
-} from 'react-native';
-
-import {
-  createProduct,
-  deleteProduct,
-  subscribeProducts,
-  updateProduct,
-} from '../../services/products';
+import React from 'react';
+import { ActivityIndicator, Image, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { useAdminTheme } from '../../components/AdminTheme';
-import ManagerShell, {
-  MANAGER_COLORS,
-  ManagerWaterDrop,
-} from '../../components/ManagerShell';
+import BlueTapEmptyState from '../../components/BlueTapEmptyState';
+import ManagerShell from '../../components/ManagerShell';
+import TopToastFeedback from '../../components/TopToastFeedback';
+import { getManagerWorkspace, updateManagerProductPolicy } from '../../services/managerWorkspace';
+const { WEEKDAYS } = require('../../services/productOrderPolicy');
 
-const emptyForm = {
-  product_name: '',
-  price: '',
-  imageFile: null,
-  imagePreview: '',
-  imageDataUrl: '',
-};
-
-const formatPrice = (price) => `\u20B1${Number(price || 0).toFixed(2)}`;
+const money = (value) => `₱${Number(value || 0).toFixed(2)}`;
+const dayLabel = (days = []) => days.length === 7 ? 'Daily' : days.map((day) => day.slice(0, 3).replace(/^./, (letter) => letter.toUpperCase())).join(', ');
 
 export default function ManagerProductsPage() {
-  const { colors } = useAdminTheme(); const styles = createStyles(colors);
-  const [products, setProducts] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState('');
-  const [search, setSearch] = useState('');
-  const [modalVisible, setModalVisible] = useState(false);
-  const [editingProduct, setEditingProduct] = useState(null);
-  const [form, setForm] = useState(emptyForm);
-  const [saving, setSaving] = useState(false);
-  const [deletingId, setDeletingId] = useState(null);
-
-  useEffect(() => {
-    const unsubscribe = subscribeProducts(
-      (nextProducts) => {
-        setProducts(nextProducts);
-        setLoading(false);
-      },
-      (error) => {
-        setLoadError(error.message);
-        setLoading(false);
-      }
-    );
-
-    return unsubscribe;
+  const { colors, resolvedTheme } = useAdminTheme();
+  const compact = useWindowDimensions().width < 760;
+  const styles = React.useMemo(() => createStyles(colors, compact), [colors, compact]);
+  const [workspace, setWorkspace] = React.useState(null);
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState('');
+  const [search, setSearch] = React.useState('');
+  const [editingId, setEditingId] = React.useState('');
+  const [days, setDays] = React.useState([]);
+  const [limit, setLimit] = React.useState('');
+  const [saving, setSaving] = React.useState(false);
+  const [toast, setToast] = React.useState({ visible: false, message: '', type: 'info' });
+  const load = React.useCallback(async () => {
+    setError('');
+    try { setWorkspace(await getManagerWorkspace()); }
+    catch (nextError) { setError(nextError.message || 'Unable to load branch products.'); }
+    finally { setLoading(false); }
   }, []);
-
-  const filteredProducts = useMemo(() => {
-    const normalizedSearch = search.trim().toLowerCase();
-
-    if (!normalizedSearch) return products;
-
-    return products.filter((product) =>
-      product.product_name.toLowerCase().includes(normalizedSearch)
-    );
-  }, [products, search]);
-
-  const openAddModal = () => {
-    setEditingProduct(null);
-    setForm(emptyForm);
-    setModalVisible(true);
+  React.useEffect(() => { load(); }, [load]);
+  const products = React.useMemo(() => {
+    const query = search.trim().toLowerCase();
+    return (workspace?.products || []).filter((product) => !query || [product.product_name, product.containerType, product.size].join(' ').toLowerCase().includes(query));
+  }, [search, workspace?.products]);
+  const editPolicy = (product) => {
+    setEditingId(product.id);
+    setDays(product.effectivePolicy?.configuredDeliveryDays || product.effectivePolicy?.deliveryDays || []);
+    setLimit(product.effectivePolicy?.maxQuantityPerRequester == null ? '' : String(product.effectivePolicy.maxQuantityPerRequester));
   };
-
-  const openEditModal = (product) => {
-    setEditingProduct(product);
-    setForm({
-      product_name: product.product_name || '',
-      price: String(product.price ?? ''),
-      imageFile: null,
-      imagePreview: product.image || '',
-      imageDataUrl: '',
-    });
-    setModalVisible(true);
-  };
-
-  const closeModal = (forceClose = false) => {
-    if (saving && !forceClose) return;
-    setModalVisible(false);
-    setEditingProduct(null);
-    setForm(emptyForm);
-  };
-
-  const chooseImage = () => {
-    if (!globalThis.document) {
-      Alert.alert(
-        'Image upload unavailable',
-        'Please open the manager panel in a web browser to upload product images.'
-      );
-      return;
+  const savePolicy = async (product) => {
+    const parsedLimit = limit.trim() === '' ? null : Number(limit);
+    if (parsedLimit !== null && (!Number.isInteger(parsedLimit) || parsedLimit < 1 || parsedLimit > 100)) {
+      setToast({ visible: true, message: 'Order limit must be a whole number from 1 to 100.', type: 'error' }); return;
     }
-
-    const input = globalThis.document.createElement('input');
-    input.type = 'file';
-    input.accept = 'image/*';
-    input.onchange = () => {
-      const file = input.files?.[0];
-
-      if (!file) return;
-
-      if (globalThis.FileReader) {
-        const reader = new globalThis.FileReader();
-        reader.onload = () => {
-          setForm((currentForm) => ({
-            ...currentForm,
-            imageFile: file,
-            imagePreview: String(reader.result || ''),
-            imageDataUrl: String(reader.result || ''),
-          }));
-        };
-        reader.readAsDataURL(file);
-        return;
-      }
-
-      const imagePreview = globalThis.URL?.createObjectURL
-        ? globalThis.URL.createObjectURL(file)
-        : '';
-
-      setForm((currentForm) => ({
-        ...currentForm,
-        imageFile: file,
-        imagePreview,
-        imageDataUrl: '',
-      }));
-    };
-    input.click();
-  };
-
-  const saveProduct = async () => {
-    const productName = form.product_name.trim();
-    const parsedPrice = Number(form.price);
-
-    if (!productName) {
-      Alert.alert('Missing product name', 'Please enter a product name.');
-      return;
-    }
-
-    if (!Number.isFinite(parsedPrice) || parsedPrice < 0) {
-      Alert.alert('Invalid price', 'Please enter a valid product price.');
-      return;
-    }
-
+    setSaving(true);
     try {
-      setSaving(true);
-
-      if (editingProduct) {
-        await updateProduct(editingProduct.id, {
-          product_name: productName,
-          price: parsedPrice,
-          imageFile: form.imageFile,
-          imageDataUrl: form.imageDataUrl,
-          existingProduct: editingProduct,
-        });
-      } else {
-        await createProduct({
-          product_name: productName,
-          price: parsedPrice,
-          imageFile: form.imageFile,
-          imageDataUrl: form.imageDataUrl,
-        });
-      }
-
-      closeModal(true);
-      Alert.alert(
-        'Product saved',
-        'This product is now available on the requester dashboard.'
-      );
-    } catch (error) {
-      if (error.savedLocal) {
-        closeModal(true);
-        Alert.alert(
-          'Saved locally',
-          error.code === 'operation-timeout'
-            ? 'Firebase is taking too long, so the product was saved on this device for now.'
-            : 'The product was saved on this device, but Firebase did not accept the change.'
-        );
-        return;
-      }
-
-      Alert.alert('Save failed', error.message);
-    } finally {
-      setSaving(false);
-    }
+      const result = await updateManagerProductPolicy(product.id, { deliveryDays: days, maxQuantityPerRequester: parsedLimit });
+      setWorkspace((current) => ({ ...current, products: current.products.map((item) => item.id === product.id ? { ...item, effectivePolicy: { ...result.policy, configuredDeliveryDays: result.policy.deliveryDays } } : item) }));
+      setEditingId(''); setToast({ visible: true, message: 'Branch delivery rules saved successfully.', type: 'success' });
+    } catch (nextError) { setToast({ visible: true, message: nextError.message || 'Unable to save branch delivery rules.', type: 'error' }); }
+    finally { setSaving(false); }
   };
-
-  const removeProduct = async (product) => {
-    try {
-      setDeletingId(product.id);
-      await deleteProduct(product);
-    } catch (error) {
-      Alert.alert('Delete failed', error.message);
-    } finally {
-      setDeletingId(null);
-    }
-  };
-
-  const confirmDeleteProduct = (product) => {
-    const message = 'Are you sure you want to delete this product?';
-
-    if (globalThis.confirm) {
-      if (globalThis.confirm(message)) {
-        removeProduct(product);
-      }
-      return;
-    }
-
-    Alert.alert('Delete product', message, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: () => removeProduct(product),
-      },
-    ]);
-  };
-
-  return (
-    <ManagerShell
-      active="products"
-      title="Products"
-      subtitle="View the active catalog assigned by an Administrator"
-      searchValue={search}
-      onSearchChange={setSearch}
-      searchPlaceholder="Search products..."
-    >
-      <View style={styles.card}>
-        <View style={styles.cardHeader}>
-          <View>
-            <Text style={styles.cardTitle}>Branch product catalog</Text>
-            <Text style={styles.readOnlyNote}>Pricing, images, and availability are managed in Admin Products.</Text>
-          </View>
-        </View>
-
-        <ScrollView horizontal showsHorizontalScrollIndicator contentContainerStyle={styles.tableScroll}>
-        <View style={styles.table}>
-        <View style={[styles.tableRow, styles.tableHeadRow]}>
-          <Text style={[styles.th, styles.productCol]}>PRODUCT</Text>
-          <Text style={[styles.th, styles.priceCol]}>PRICE</Text>
-          <Text style={[styles.th, styles.actionsCol]}>STATUS</Text>
-        </View>
-
-        {loading ? (
-          <View style={styles.emptyState}>
-            <ActivityIndicator color={colors.primary} size="small" />
-          </View>
-        ) : filteredProducts.length === 0 ? (
-          <View style={styles.emptyState}>
-            <Text style={styles.emptyText}>No products yet.</Text>
-            {!!loadError && <Text style={styles.errorText}>Firestore: {loadError}</Text>}
-          </View>
-        ) : (
-          filteredProducts.map((product, index) => {
-            const isDeleting = deletingId === product.id;
-            const dropColor =
-              index % 3 === 0
-                ? colors.primary
-                : index % 3 === 1
-                  ? colors.primaryLight
-                  : colors.success;
-
-            return (
-              <View key={product.id} style={styles.tableRow}>
-                <View style={[styles.productCell, styles.productCol]}>
-                  {product.image ? (
-                    <Image
-                      source={{ uri: product.image }}
-                      style={styles.productImage}
-                      resizeMode="cover"
-                    />
-                  ) : (
-                    <View style={styles.dropWrap}>
-                      <ManagerWaterDrop color={dropColor} size={22} />
-                    </View>
-                  )}
-                  <Text style={styles.productName} numberOfLines={1}>
-                    {product.product_name}
-                  </Text>
-                </View>
-
-                <Text style={[styles.priceText, styles.priceCol]}>
-                  {formatPrice(product.price)}
-                </Text>
-
-                <View style={[styles.actionsCell, styles.actionsCol]}>
-                  <View style={styles.activePill}><Text style={styles.activePillText}>Active</Text></View>
-                </View>
-              </View>
-            );
-          })
-        )}
-        </View>
-        </ScrollView>
-      </View>
-
-      <Modal visible={modalVisible} transparent animationType="fade">
-        <View style={styles.modalBackground}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>
-              {editingProduct ? 'Edit product' : 'Add product'}
-            </Text>
-
-            <Text style={styles.inputLabel}>Product name</Text>
-            <TextInput
-              style={styles.modalInput}
-              value={form.product_name}
-              onChangeText={(value) =>
-                setForm((currentForm) => ({ ...currentForm, product_name: value }))
-              }
-              placeholder="Product name"
-              placeholderTextColor="#95A6B8"
-            />
-
-            <Text style={styles.inputLabel}>Price</Text>
-            <TextInput
-              style={styles.modalInput}
-              value={form.price}
-              onChangeText={(value) =>
-                setForm((currentForm) => ({ ...currentForm, price: value }))
-              }
-              placeholder="Price"
-              placeholderTextColor="#95A6B8"
-              keyboardType="decimal-pad"
-            />
-
-            <Text style={styles.inputLabel}>Product image</Text>
-            <TouchableOpacity activeOpacity={0.85} style={styles.uploadButton} onPress={chooseImage}>
-              <Text style={styles.uploadButtonText}>Choose image</Text>
-            </TouchableOpacity>
-
-            {!!form.imagePreview && (
-              <Image
-                source={{ uri: form.imagePreview }}
-                style={styles.imagePreview}
-                resizeMode="cover"
-              />
-            )}
-
-            <View style={styles.modalActions}>
-              <TouchableOpacity
-                activeOpacity={0.82}
-                style={[styles.cancelButton, saving && styles.actionDisabled]}
-                onPress={closeModal}
-                disabled={saving}
-              >
-                <Text style={styles.cancelButtonText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                activeOpacity={0.85}
-                style={[styles.saveButton, saving && styles.actionDisabled]}
-                onPress={saveProduct}
-                disabled={saving}
-              >
-                <Text style={styles.saveButtonText}>
-                  {saving ? 'Saving...' : 'Save'}
-                </Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
-    </ManagerShell>
-  );
+  const branch = workspace?.branch;
+  return <ManagerShell active="products" title="Products" subtitle="Branch catalog, delivery pricing, and operational product rules">
+    <TopToastFeedback visible={toast.visible} message={toast.message} type={toast.type} onDismiss={() => setToast((current) => ({ ...current, visible: false }))} />
+    <View style={styles.infoGrid}>
+      <View style={styles.infoCard}><Text style={styles.eyebrow}>DELIVERY PRICING</Text><Text style={styles.cardTitle}>Authoritative branch pricing</Text><Text style={styles.cardHelp}>Pricing is managed by Admin and shown here for dispatch planning.</Text><View style={styles.metricGrid}><Metric label="Base delivery fee" value={money(branch?.baseDeliveryFee)} styles={styles}/><Metric label="Included radius" value={`${branch?.includedRadiusKm || 0} km`} styles={styles}/><Metric label="Outside-radius fee" value={`${money(branch?.outsideRadiusFeePerKm)} / km`} styles={styles}/><Metric label="Service radius" value={`${branch?.serviceRadiusKm || 0} km`} styles={styles}/></View></View>
+      <View style={styles.infoCard}><Text style={styles.eyebrow}>BRANCH DELIVERY RULES</Text><Text style={styles.cardTitle}>Operational policy for {branch?.name || 'your branch'}</Text><Text style={styles.cardHelp}>Overrides apply only to this branch. Admin product identity, price, image, and activation remain unchanged.</Text><View style={styles.precedence}><Text style={styles.precedenceText}>Branch override → Admin default → unrestricted legacy fallback</Text></View></View>
+    </View>
+    <View style={styles.catalogCard}>
+      <View style={styles.toolbar}><View style={styles.toolbarCopy}><Text style={styles.cardTitle}>Branch product catalog ({workspace?.products?.length || 0})</Text><Text style={styles.cardHelp}>Configure delivery weekdays and Requester quantity limits per product.</Text></View><TextInput accessibilityLabel="Search products" value={search} onChangeText={setSearch} placeholder="Search products…" placeholderTextColor={colors.placeholder} style={styles.search}/></View>
+      {loading ? <View style={styles.state}><ActivityIndicator color={colors.primary}/><Text style={styles.cardHelp}>Loading branch catalog…</Text></View> : error ? <BlueTapEmptyState compact variant="products" title="Products unavailable" description={error} actionLabel="Retry" onAction={load} themeColors={colors} dark={resolvedTheme === 'dark'}/> : products.length === 0 ? <BlueTapEmptyState compact variant="products" title="No products found" description="Active products assigned to this branch will appear here." themeColors={colors} dark={resolvedTheme === 'dark'}/> : <View style={styles.productGrid}>{products.map((product) => {
+        const policy = product.effectivePolicy || {}; const editing = editingId === product.id;
+        return <View key={product.id} style={styles.productCard}><View style={styles.productTop}><View style={styles.imageSurface}>{product.imageUrl || product.image ? <Image source={{ uri: product.imageUrl || product.image }} style={styles.image} resizeMode="contain"/> : <Text style={styles.imagePlaceholder}>◈</Text>}</View><View style={styles.productCopy}><View style={styles.nameRow}><Text style={styles.productName}>{product.product_name}</Text><Text style={styles.activeBadge}>{product.active === false ? 'Inactive' : 'Active'}</Text></View><Text style={styles.price}>{money(product.price)}</Text><Text style={styles.meta}>{[product.containerType, product.size].filter(Boolean).join(' · ') || 'Container details not set'}</Text></View></View><View style={styles.policySummary}><Metric label="Delivery availability" value={dayLabel(policy.deliveryDays || WEEKDAYS)} styles={styles} small/><Metric label="Requester order limit" value={policy.maxQuantityPerRequester == null ? 'No limit' : `${policy.maxQuantityPerRequester} per request`} styles={styles} small/></View>
+        {editing ? <View style={styles.editor}><Text style={styles.fieldLabel}>Available delivery weekdays</Text><View style={styles.dayChoices}>{WEEKDAYS.map((day) => <TouchableOpacity key={day} accessibilityRole="checkbox" accessibilityState={{ checked: days.includes(day) }} onPress={() => setDays((current) => current.includes(day) ? current.filter((item) => item !== day) : [...current, day])} style={[styles.dayChoice, days.includes(day) && styles.dayChoiceActive]}><Text style={[styles.dayChoiceText, days.includes(day) && styles.dayChoiceTextActive]}>{day.slice(0, 3).toUpperCase()}</Text></TouchableOpacity>)}</View><Text style={styles.fieldHint}>No selected days means daily availability.</Text><Text style={styles.fieldLabel}>Requester quantity limit</Text><TextInput accessibilityLabel="Requester quantity limit" value={limit} onChangeText={setLimit} keyboardType="number-pad" placeholder="No limit" placeholderTextColor={colors.placeholder} style={styles.limitInput}/><View style={styles.actions}><TouchableOpacity disabled={saving} onPress={() => setEditingId('')} style={styles.secondary}><Text style={styles.secondaryText}>Cancel</Text></TouchableOpacity><TouchableOpacity disabled={saving} onPress={() => savePolicy(product)} style={[styles.primary, saving && styles.disabled]}><Text style={styles.primaryText}>{saving ? 'Saving…' : 'Save branch rules'}</Text></TouchableOpacity></View></View> : <TouchableOpacity accessibilityRole="button" onPress={() => editPolicy(product)} style={styles.editButton}><Text style={styles.editButtonText}>Edit branch delivery rules</Text></TouchableOpacity>}</View>;
+      })}</View>}
+    </View>
+  </ManagerShell>;
 }
-
-const createStyles = (colors) => StyleSheet.create({
-  card: {
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 16,
-    paddingHorizontal: 20,
-    paddingTop: 18,
-    paddingBottom: 20,
-  },
-  tableScroll: { flexGrow: 1 },
-  table: { minWidth: 620, flexGrow: 1 },
-  cardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 18,
-  },
-  cardTitle: {
-    color: colors.textPrimary,
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
-  readOnlyNote: { color: colors.textSecondary, fontSize: 12, marginTop: 5 },
-  activePill: { backgroundColor: '#E8F7EF', borderRadius: 999, paddingHorizontal: 12, paddingVertical: 6 },
-  activePillText: { color: colors.success, fontSize: 12, fontWeight: 'bold' },
-  addButton: {
-    borderRadius: 20,
-    backgroundColor: colors.primary,
-    paddingHorizontal: 16,
-    paddingVertical: 9,
-  },
-  addButtonText: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: 'bold',
-  },
-  tableRow: {
-    minHeight: 55,
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  tableHeadRow: {
-    minHeight: 38,
-  },
-  th: {
-    color: colors.textSecondary,
-    fontSize: 11,
-    fontWeight: 'bold',
-  },
-  productCol: {
-    flex: 2.2,
-  },
-  priceCol: {
-    flex: 1,
-  },
-  actionsCol: {
-    flex: 1,
-    textAlign: 'right',
-  },
-  productCell: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    minWidth: 0,
-  },
-  productImage: {
-    width: 28,
-    height: 28,
-    borderRadius: 6,
-    backgroundColor: colors.surfaceAlt,
-    marginRight: 14,
-  },
-  dropWrap: {
-    width: 34,
-    alignItems: 'center',
-    marginRight: 8,
-  },
-  productName: {
-    flex: 1,
-    color: colors.textPrimary,
-    fontSize: 14,
-    fontWeight: 'bold',
-  },
-  priceText: {
-    color: colors.textPrimary,
-    fontSize: 14,
-    fontWeight: 'bold',
-  },
-  actionsCell: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    gap: 8,
-  },
-  editButton: {
-    borderRadius: 999,
-    backgroundColor: '#E1F8F6',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-  },
-  editButtonText: {
-    color: colors.primary,
-    fontSize: 12,
-    fontWeight: 'bold',
-  },
-  deleteButton: {
-    borderRadius: 999,
-    backgroundColor: '#FFE9E9',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-  },
-  deleteButtonText: {
-    color: colors.danger,
-    fontSize: 12,
-    fontWeight: 'bold',
-  },
-  actionDisabled: {
-    opacity: 0.6,
-  },
-  emptyState: {
-    minHeight: 96,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  emptyText: {
-    color: colors.textSecondary,
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  errorText: {
-    color: colors.danger,
-    fontSize: 12,
-    marginTop: 8,
-  },
-  modalBackground: {
-    flex: 1,
-    backgroundColor: 'rgba(6, 36, 71, 0.46)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-  },
-  modalCard: {
-    width: '90%',
-    maxWidth: 430,
-    borderRadius: 8,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: 22,
-  },
-  modalTitle: {
-    color: colors.textPrimary,
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginBottom: 18,
-  },
-  inputLabel: {
-    color: colors.textSecondary,
-    fontSize: 12,
-    fontWeight: 'bold',
-    marginBottom: 6,
-  },
-  modalInput: {
-    minHeight: 42,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 8,
-    color: colors.textPrimary,
-    fontSize: 14,
-    paddingHorizontal: 12,
-    marginBottom: 14,
-    outlineStyle: 'none',
-  },
-  uploadButton: {
-    alignSelf: 'flex-start',
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: colors.primary,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    marginBottom: 12,
-  },
-  uploadButtonText: {
-    color: colors.primary,
-    fontSize: 12,
-    fontWeight: 'bold',
-  },
-  imagePreview: {
-    width: 120,
-    height: 86,
-    borderRadius: 8,
-    backgroundColor: colors.surfaceAlt,
-    marginBottom: 16,
-  },
-  modalActions: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    gap: 10,
-  },
-  cancelButton: {
-    minWidth: 92,
-    height: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: colors.primary,
-    backgroundColor: colors.surface,
-  },
-  cancelButtonText: {
-    color: colors.primary,
-    fontSize: 13,
-    fontWeight: 'bold',
-  },
-  saveButton: {
-    minWidth: 92,
-    height: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 20,
-    backgroundColor: colors.primary,
-  },
-  saveButtonText: {
-    color: '#FFFFFF',
-    fontSize: 13,
-    fontWeight: 'bold',
-  },
+function Metric({ label, value, styles, small = false }) { return <View style={[styles.metric, small && styles.metricSmall]}><Text style={styles.metricLabel}>{label}</Text><Text style={styles.metricValue}>{value}</Text></View>; }
+const createStyles = (colors, compact) => StyleSheet.create({
+  infoGrid:{flexDirection:compact?'column':'row',gap:16,marginBottom:18},infoCard:{flex:1,minWidth:0,backgroundColor:colors.surface,borderWidth:1,borderColor:colors.border,borderRadius:16,padding:18},eyebrow:{color:colors.primary,fontSize:10,fontWeight:'900',letterSpacing:1},cardTitle:{color:colors.textPrimary,fontSize:18,fontWeight:'900',marginTop:4},cardHelp:{color:colors.textSecondary,fontSize:12,lineHeight:18,marginTop:5},metricGrid:{flexDirection:'row',flexWrap:'wrap',gap:10,marginTop:15},metric:{flexGrow:1,flexBasis:135,backgroundColor:colors.surfaceAlt,borderWidth:1,borderColor:colors.border,borderRadius:11,padding:12},metricSmall:{flexBasis:180},metricLabel:{color:colors.textSecondary,fontSize:10,fontWeight:'800'},metricValue:{color:colors.textPrimary,fontSize:13,fontWeight:'900',marginTop:4},precedence:{backgroundColor:colors.primarySoft,borderRadius:10,padding:12,marginTop:15},precedenceText:{color:colors.textPrimary,fontSize:12,fontWeight:'800'},catalogCard:{backgroundColor:colors.surface,borderWidth:1,borderColor:colors.border,borderRadius:16,padding:18},toolbar:{flexDirection:compact?'column':'row',alignItems:compact?'stretch':'center',justifyContent:'space-between',gap:14,marginBottom:16},toolbarCopy:{flex:1,minWidth:0},search:{minHeight:44,minWidth:compact?0:250,borderWidth:1,borderColor:colors.inputBorder,backgroundColor:colors.input,borderRadius:10,paddingHorizontal:12,color:colors.textPrimary,outlineStyle:'none'},state:{minHeight:160,alignItems:'center',justifyContent:'center',gap:10},productGrid:{flexDirection:'row',flexWrap:'wrap',gap:14},productCard:{flexGrow:1,flexBasis:compact?'100%':360,maxWidth:compact?undefined:540,minWidth:0,borderWidth:1,borderColor:colors.border,backgroundColor:colors.surfaceAlt,borderRadius:14,padding:15},productTop:{flexDirection:'row',gap:14},imageSurface:{width:92,height:92,borderRadius:12,backgroundColor:colors.surface,alignItems:'center',justifyContent:'center',borderWidth:1,borderColor:colors.border},image:{width:'88%',height:'88%'},imagePlaceholder:{color:colors.primary,fontSize:32},productCopy:{flex:1,minWidth:0},nameRow:{flexDirection:'row',alignItems:'flex-start',justifyContent:'space-between',gap:8},productName:{flex:1,color:colors.textPrimary,fontSize:16,fontWeight:'900'},activeBadge:{color:colors.success,backgroundColor:colors.successSoft,borderRadius:999,paddingHorizontal:8,paddingVertical:4,fontSize:10,fontWeight:'900'},price:{color:colors.primary,fontSize:16,fontWeight:'900',marginTop:8},meta:{color:colors.textSecondary,fontSize:12,marginTop:4},policySummary:{flexDirection:'row',flexWrap:'wrap',gap:8,marginTop:14},editButton:{minHeight:42,borderWidth:1,borderColor:colors.primary,borderRadius:9,alignItems:'center',justifyContent:'center',marginTop:13},editButtonText:{color:colors.primary,fontWeight:'900',fontSize:12},editor:{borderTopWidth:1,borderTopColor:colors.border,marginTop:14,paddingTop:14},fieldLabel:{color:colors.textPrimary,fontSize:12,fontWeight:'900',marginBottom:7,marginTop:7},dayChoices:{flexDirection:'row',flexWrap:'wrap',gap:7},dayChoice:{minWidth:48,minHeight:36,borderWidth:1,borderColor:colors.inputBorder,borderRadius:8,alignItems:'center',justifyContent:'center'},dayChoiceActive:{backgroundColor:colors.primary,borderColor:colors.primary},dayChoiceText:{color:colors.textPrimary,fontSize:10,fontWeight:'900'},dayChoiceTextActive:{color:'#FFF'},fieldHint:{color:colors.textSecondary,fontSize:10,marginTop:6},limitInput:{minHeight:42,maxWidth:180,borderWidth:1,borderColor:colors.inputBorder,backgroundColor:colors.input,borderRadius:9,paddingHorizontal:11,color:colors.textPrimary,outlineStyle:'none'},actions:{flexDirection:'row',justifyContent:'flex-end',flexWrap:'wrap',gap:9,marginTop:14},secondary:{minHeight:42,borderWidth:1,borderColor:colors.inputBorder,borderRadius:9,paddingHorizontal:14,justifyContent:'center'},secondaryText:{color:colors.textPrimary,fontWeight:'900'},primary:{minHeight:42,backgroundColor:colors.primary,borderRadius:9,paddingHorizontal:15,justifyContent:'center'},primaryText:{color:'#FFF',fontWeight:'900'},disabled:{opacity:.55},
 });

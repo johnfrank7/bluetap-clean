@@ -13,3 +13,16 @@ export async function getManagerWorkspace() {
   }
   return result || {};
 }
+
+export async function updateManagerProductPolicy(productId, policy) {
+  const token = await auth.currentUser?.getIdToken();
+  if (!token) throw new Error('Manager authentication is required.');
+  const response = await fetch(getApiUrl('/api/manager/workspace'), {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'updateProductPolicy', productId, ...policy }),
+  });
+  const result = await response.json().catch(() => null);
+  if (!response.ok) throw new Error(result?.error?.message || 'Unable to save branch delivery rules.');
+  return result;
+}

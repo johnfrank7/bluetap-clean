@@ -3,6 +3,8 @@ const { requireActiveManager } = require('../auth/authorization');
 const { applyCors } = require('../utils/cors');
 const { OtpError } = require('../utils/otpError');
 const { safeProduct } = require('../admin/productManagementHandler');
+const { productDeliveryDays, productLimit } = require('../../services/productOrderPolicy');
+const { resolveEffectiveProductPolicy } = require('../utils/effectiveProductPolicy');
 
 const clean = (value, max = 240) => String(value || '').trim().slice(0, max);
 const number = (value) => Number.isFinite(Number(value)) ? Number(value) : 0;
@@ -65,11 +67,34 @@ function createManagerWorkspaceHandler(getAdmin = getFirebaseAdmin) {
     res.setHeader('Cache-Control', 'no-store');
     if (!applyCors(req, res)) return;
     if (req.method === 'OPTIONS') return res.status(204).end();
-    if (req.method !== 'GET') return res.status(405).json({ error: { reason: 'method-not-allowed', message: 'Use GET.' } });
+    if (!['GET', 'POST'].includes(req.method)) return res.status(405).json({ error: { reason: 'method-not-allowed', message: 'Use GET or POST.' } });
     try {
       const { auth, db } = getAdmin();
       const manager = await requireActiveManager(req, auth, db);
       const branchId = manager.branch.id;
+      if (req.method === 'POST') {
+        const body = req.body && typeof req.body === 'object' ? req.body : {};
+        if (body.action !== 'updateProductPolicy') throw new OtpError(400, 'INVALID_MANAGER_ACTION', 'Choose a valid Manager action.');
+        const productId = clean(body.productId, 128);
+        const productSnapshot = productId ? await db.collection('products').doc(productId).get() : null;
+        if (!productSnapshot?.exists || !visibleProduct(productSnapshot.data(), branchId)) throw new OtpError(404, 'PRODUCT_NOT_FOUND', 'This product is not available to your branch.');
+        if (!Array.isArray(body.deliveryDays) || productDeliveryDays(body.deliveryDays).length !== body.deliveryDays.length) throw new OtpError(400, 'INVALID_PRODUCT_DELIVERY_DAYS', 'Choose valid delivery weekdays.');
+        const limit = body.maxQuantityPerRequester === null || body.maxQuantityPerRequester === '' ? null : productLimit(body.maxQuantityPerRequester);
+        if (body.maxQuantityPerRequester !== null && body.maxQuantityPerRequester !== '' && limit === null) throw new OtpError(400, 'INVALID_PRODUCT_ORDER_LIMIT', 'Requester order limit must be an integer from 1 to 100.');
+        const branchRef = db.collection('branches').doc(branchId);
+        const now = new Date();
+        await db.runTransaction(async (tx) => {
+          const currentSnapshot = await tx.get(branchRef);
+          if (!currentSnapshot.exists) throw new OtpError(404, 'BRANCH_NOT_FOUND', 'Your assigned branch no longer exists.');
+          const current = currentSnapshot.data() || {};
+          const overrides = current.productPolicyOverrides && typeof current.productPolicyOverrides === 'object' ? { ...current.productPolicyOverrides } : {};
+          const before = overrides[productId] || null;
+          overrides[productId] = { deliveryDays: productDeliveryDays(body.deliveryDays), maxQuantityPerRequester: limit, updatedAt: now, updatedBy: manager.decoded.uid };
+          tx.update(branchRef, { productPolicyOverrides: overrides, updatedAt: now, updatedBy: manager.decoded.uid });
+          tx.set(db.collection('adminAuditLogs').doc(), { action: 'MANAGER_BRANCH_PRODUCT_POLICY_UPDATED', actorUid: manager.decoded.uid, branchId, productId, before, after: overrides[productId], createdAt: now });
+        });
+        return res.status(200).json({ productId, policy: { deliveryDays: productDeliveryDays(body.deliveryDays), maxQuantityPerRequester: limit, source: 'branch_override' } });
+      }
       const [usersSnapshot, requestsSnapshot, productsSnapshot] = await Promise.all([
         db.collection('users').get(),
         db.collection('requests').where('branchId', '==', branchId).get(),
@@ -97,11 +122,12 @@ function createManagerWorkspaceHandler(getAdmin = getFirebaseAdmin) {
       const products = productsSnapshot.docs
         .map((item) => safeProduct(item.id, item.data()))
         .filter((product) => visibleProduct(product, branchId))
+        .map((product) => ({ ...product, effectivePolicy: resolveEffectiveProductPolicy(product, manager.branch) }))
         .sort((left, right) => left.product_name.localeCompare(right.product_name));
       const productSales = orders.reduce((total, order) => total + (order.quantity || order.items.reduce((sum, item) => sum + item.quantity, 0)), 0);
       return res.status(200).json({
         manager: safeAccount(manager.decoded.uid, manager.profile),
-        branch: { id: branchId, name: clean(manager.branch.name, 160), status: 'active', barangay: clean(manager.branch.barangay, 120), city: clean(manager.branch.city, 120) },
+        branch: { id: branchId, name: clean(manager.branch.name, 160), status: 'active', barangay: clean(manager.branch.barangay, 120), city: clean(manager.branch.city, 120), baseDeliveryFee: number(manager.branch.baseDeliveryFee), includedRadiusKm: number(manager.branch.includedRadiusKm || manager.branch.serviceRadiusKm), outsideRadiusFeePerKm: number(manager.branch.outsideRadiusFeePerKm), serviceRadiusKm: number(manager.branch.serviceRadiusKm) },
         distributors,
         pendingDistributors,
         requesters,

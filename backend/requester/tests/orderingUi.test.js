@@ -89,6 +89,15 @@ test('Admin Products supports add, edit, archive, image preview, and branch avai
 });
 test('Admin Branches uses a location-first Toledo City form with a shared interactive map picker', () => {
   assert.match(adminBranches, /TOLEDO_BARANGAYS/); assert.match(adminBranches, /TOLEDO_CITY/); assert.match(adminBranches, /Use my current location/); assert.match(adminBranches, /LocationMap/); assert.match(adminBranches, /Coordinates/); assert.match(adminBranches, /Delivery coverage/);
+  assert.match(adminBranches, /parseCoordinateText/);
+  assert.match(adminBranches, /Use coordinates/);
+  assert.match(adminBranches, /label === 'Barangay'.*zIndex/s);
+});
+
+test('Admin Product modal visually separates core information from delivery policy', () => {
+  assert.match(adminProducts, /PRODUCT INFORMATION/);
+  assert.match(adminProducts, /DELIVERY &amp; ORDER POLICY/);
+  assert.match(adminProducts, /Active status/);
 });
 test('Requester catalog is short-cached, deduplicated, and exposes shared queries', () => {
   assert.match(ordering, /CACHE_MS = 30_000/); assert.match(ordering, /catalogRequest/);
@@ -238,4 +247,34 @@ test('Manager dispatch presents durable source-branch transfer decisions without
   assert.match(managerRequests, /Transfer decisions/);
   assert.match(managerRequests, /accepted.*transfer of Order|declined.*transfer of Order/);
   assert.doesNotMatch(managerRequests, /conversation|typing indicator|read receipt/);
+});
+
+test('order details use live selected records and canonical COD/public UID presentation', () => {
+  const requesterNotification = read('app/requester/r_notification.jsx');
+  const distributorNotification = read('app/distributor/d_notification.jsx');
+  assert.match(requesterRequests, /liveSelectedRequest/);
+  assert.match(dashboard, /liveDetailsRequest/);
+  assert.match(requesterNotification, /orders\.find/);
+  assert.match(distributorNotification, /events\.find/);
+  assert.match(requestDetailsModal, /Cash on Delivery/);
+  assert.match(requestDetailsModal, /formatDisplayUniqueId/);
+  assert.match(requestDetailsModal, /Ordered Products/);
+  assert.doesNotMatch(requestDetailsModal, /\{ label: 'Product'/);
+  assert.doesNotMatch(requestDetailsModal, /\{ label: 'Container Type'/);
+});
+
+test('Requester form explains and consumes the selected branch effective policy', () => {
+  assert.match(form, /selectedBranch\?\.productPolicies/);
+  assert.match(form, /Delivery Schedule/);
+  assert.match(form, /effective branch policy/);
+  assert.match(productCard, /Delivery days:/);
+  assert.match(productCard, /Order limit:/);
+});
+
+test('Distributor empty states select context-specific shared variants', () => {
+  assert.match(distributorDashboard, /variant="delivery"/);
+  assert.match(distributorRequests, /variant="requests"/);
+  assert.match(distributorScheduled, /variant="schedule"/);
+  assert.match(distributorHistory, /variant="history"/);
+  assert.match(distributorNotifications, /variant="notifications"/);
 });

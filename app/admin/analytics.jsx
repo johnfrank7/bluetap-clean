@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import {
   ActivityIndicator,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -127,6 +128,39 @@ const extractDeliveredOrderStats = (order) => {
 
   return { unitsSold, revenue, productItems };
 };
+
+function OrderStatusMiniGraph({ metrics, colors, styles }) {
+  const [hovered, setHovered] = useState(null);
+  const rows = [
+    { id: 'delivered', label: 'Delivered', value: metrics.deliveredCount, color: colors.success },
+    { id: 'ongoing', label: 'Ongoing', value: metrics.ongoingCount, color: colors.warning },
+    { id: 'issues', label: 'Issues & cancelled', value: metrics.issuesCount, color: colors.danger },
+  ];
+  const max = Math.max(1, ...rows.map((row) => row.value));
+
+  return <View style={styles.miniChartCard}>
+    <View style={styles.cardHeader}>
+      <View><Text style={styles.cardTitle}>Order Status Distribution</Text><Text style={styles.cardSubtitle}>Current lifecycle counts for the selected branch and timeframe.</Text></View>
+      <Text style={styles.chartHint}>Hover or focus for values</Text>
+    </View>
+    <View style={styles.miniChartRows}>
+      {rows.map((row) => <Pressable
+        key={row.id}
+        accessibilityRole="button"
+        accessibilityLabel={`${row.label}: ${row.value} orders`}
+        onHoverIn={() => setHovered(row.id)}
+        onHoverOut={() => setHovered(null)}
+        onFocus={() => setHovered(row.id)}
+        onBlur={() => setHovered(null)}
+        style={({ hovered: isHovered, focused }) => [styles.miniChartRow, (isHovered || focused) && styles.miniChartRowActive]}
+      >
+        <View style={styles.miniChartLabelRow}><Text style={styles.miniChartLabel}>{row.label}</Text><Text style={styles.miniChartValue}>{formatNumber(row.value)}</Text></View>
+        <View style={styles.miniChartTrack}><View style={[styles.miniChartFill, { width: `${row.value ? Math.max(7, (row.value / max) * 100) : 0}%`, backgroundColor: row.color }]} /></View>
+        {hovered === row.id ? <View style={styles.chartTooltip}><Text style={styles.chartTooltipText}>{row.label}: {formatNumber(row.value)} order{row.value === 1 ? '' : 's'}</Text></View> : null}
+      </Pressable>)}
+    </View>
+  </View>;
+}
 
 export default function AdminAnalyticsPage() {
   const { colors } = useAdminTheme();
@@ -333,10 +367,11 @@ export default function AdminAnalyticsPage() {
           )}
         </View>
 
+        <View style={styles.filterGrid}>
         {/* Date Filter Pills */}
         <View style={styles.filterGroup}>
-          <Text style={styles.filterGroupLabel}>TIMEFRAME:</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.pillsScroll}>
+          <Text style={styles.filterGroupLabel}>TIMEFRAME</Text>
+          <View style={styles.pillsScroll}>
             {DATE_FILTERS.map((f) => {
               const isActive = dateFilter === f.id;
               return (
@@ -354,13 +389,13 @@ export default function AdminAnalyticsPage() {
                 </PortalButton>
               );
             })}
-          </ScrollView>
+          </View>
         </View>
 
         {/* Station Filter Pills */}
-        <View style={[styles.filterGroup, { marginTop: 10 }]}>
-          <Text style={styles.filterGroupLabel}>STATION:</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.pillsScroll}>
+        <View style={styles.filterGroup}>
+          <Text style={styles.filterGroupLabel}>STATION</Text>
+          <View style={styles.pillsScroll}>
             <PortalButton
               variant="pill"
               size="pill"
@@ -389,7 +424,8 @@ export default function AdminAnalyticsPage() {
                 </PortalButton>
               );
             })}
-          </ScrollView>
+          </View>
+        </View>
         </View>
       </View>
 
@@ -495,6 +531,8 @@ export default function AdminAnalyticsPage() {
           </View>
         </View>
       )}
+
+      {!loadingRequests || requests.length > 0 ? <OrderStatusMiniGraph metrics={metrics} colors={colors} styles={styles} /> : null}
 
       {/* Product Performance Table */}
       <View style={styles.tableCard}>
@@ -735,6 +773,12 @@ const createStyles = (colors) =>
       fontSize: 14,
       fontWeight: '900',
     },
+    filterGrid: {
+      flexDirection: 'row',
+      alignItems: 'stretch',
+      flexWrap: 'wrap',
+      gap: 12,
+    },
     resetButton: {
       paddingHorizontal: 10,
       paddingVertical: 4,
@@ -747,20 +791,25 @@ const createStyles = (colors) =>
       fontWeight: '800',
     },
     filterGroup: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 12,
-      flexWrap: 'wrap',
+      flexGrow: 1,
+      flexBasis: 320,
+      minWidth: 0,
+      gap: 10,
+      padding: 13,
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 12,
+      backgroundColor: colors.surfaceAlt,
     },
     filterGroupLabel: {
       color: colors.textSecondary,
       fontSize: 11,
       fontWeight: '900',
       letterSpacing: 0.6,
-      minWidth: 80,
     },
     pillsScroll: {
       flexDirection: 'row',
+      flexWrap: 'wrap',
       gap: 8,
       paddingVertical: 2,
     },
@@ -832,12 +881,14 @@ const createStyles = (colors) =>
     },
     statSkeleton: {
       minHeight: 140,
-      flexBasis: 180,
+      flexBasis: 210,
       flexGrow: 1,
+      maxWidth: 340,
     },
     statCard: {
       flexGrow: 1,
-      flexBasis: 180,
+      flexBasis: 210,
+      maxWidth: 340,
       minHeight: 140,
       backgroundColor: colors.surface,
       borderWidth: 1,
@@ -875,6 +926,26 @@ const createStyles = (colors) =>
       fontSize: 11,
       marginTop: 4,
     },
+    miniChartCard: {
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 16,
+      padding: 18,
+      marginBottom: 20,
+      ...BLUETAP_LAYOUT.shadow,
+    },
+    chartHint: { color: colors.textSecondary, fontSize: 11, fontWeight: '700' },
+    miniChartRows: { gap: 10 },
+    miniChartRow: { position: 'relative', padding: 10, borderRadius: 10, borderWidth: 1, borderColor: 'transparent' },
+    miniChartRowActive: { backgroundColor: colors.primarySoft, borderColor: colors.border },
+    miniChartLabelRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+    miniChartLabel: { color: colors.textPrimary, fontSize: 12, fontWeight: '800' },
+    miniChartValue: { color: colors.textPrimary, fontSize: 12, fontWeight: '900' },
+    miniChartTrack: { height: 8, marginTop: 7, borderRadius: 999, overflow: 'hidden', backgroundColor: colors.neutral },
+    miniChartFill: { height: '100%', borderRadius: 999 },
+    chartTooltip: { position: 'absolute', right: 10, bottom: 21, backgroundColor: colors.textPrimary, borderRadius: 7, paddingHorizontal: 9, paddingVertical: 5 },
+    chartTooltipText: { color: colors.surface, fontSize: 10, fontWeight: '800' },
 
     tableCard: {
       backgroundColor: colors.surface,

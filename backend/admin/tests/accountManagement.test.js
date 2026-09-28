@@ -177,6 +177,21 @@ test('backfillLegacyUids is idempotent, converts legacy hyphenated UIDs, and doe
   fixture.records.set('users/legacy-manager', {
     uid: 'legacy-manager', role: 'manager', email: 'manager@example.test', publicUid: 'Mgr009', managerStatus: 'active', branchId: 'north',
   });
+  fixture.records.set('users/requester-duplicate-oldest', {
+    uid: 'requester-duplicate-oldest', role: 'requester', publicUid: 'Req005', createdAt: '2020-01-01T00:00:00Z',
+  });
+  fixture.records.set('users/requester-duplicate-newer', {
+    uid: 'requester-duplicate-newer', role: 'requester', publicUid: 'Req005', createdAt: '2021-01-01T00:00:00Z',
+  });
+  fixture.records.set('users/missing-requester', {
+    uid: 'missing-requester', role: 'requester', createdAt: '2019-01-01T00:00:00Z',
+  });
+  fixture.records.set('users/missing-distributor', {
+    uid: 'missing-distributor', role: 'distributor', createdAt: '2019-01-01T00:00:00Z',
+  });
+  fixture.records.set('users/missing-manager', {
+    uid: 'missing-manager', role: 'manager', createdAt: '2019-01-01T00:00:00Z',
+  });
 
   await backfillLegacyUids({
     auth,
@@ -193,6 +208,16 @@ test('backfillLegacyUids is idempotent, converts legacy hyphenated UIDs, and doe
   const existingUser = fixture.records.get('users/existing-1');
   assert.equal(existingUser.publicUid, 'Dis042');
   assert.equal(fixture.records.get('users/legacy-manager').publicUid, 'Man009');
+  assert.equal(fixture.records.get('users/requester-duplicate-oldest').publicUid, 'Req005');
+  assert.notEqual(fixture.records.get('users/requester-duplicate-newer').publicUid, 'Req005');
+  assert.match(fixture.records.get('users/missing-requester').publicUid, /^Req\d{3,}$/);
+  assert.match(fixture.records.get('users/missing-distributor').publicUid, /^Dis\d{3,}$/);
+  assert.match(fixture.records.get('users/missing-manager').publicUid, /^Man\d{3,}$/);
+  const requesterIds = [...fixture.records.entries()]
+    .filter(([path, value]) => path.startsWith('users/') && value.role === 'requester')
+    .map(([, value]) => value.publicUid)
+    .filter(Boolean);
+  assert.equal(new Set(requesterIds).size, requesterIds.length);
 
   // Rerun backfill - should be idempotent and not change anything
   await backfillLegacyUids({
@@ -203,4 +228,5 @@ test('backfillLegacyUids is idempotent, converts legacy hyphenated UIDs, and doe
   assert.equal(fixture.records.get('users/legacy-1').publicUid, 'Req007');
   assert.equal(fixture.records.get('users/existing-1').publicUid, 'Dis042');
   assert.equal(fixture.records.get('users/legacy-manager').publicUid, 'Man009');
+  assert.equal(fixture.records.get('users/requester-duplicate-oldest').publicUid, 'Req005');
 });

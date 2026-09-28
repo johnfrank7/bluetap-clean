@@ -12,7 +12,11 @@ export default function ManagerNotificationsPage() {
   const { colors, resolvedTheme } = useAdminTheme();
   const styles = React.useMemo(() => createStyles(colors), [colors]);
   const { events, markRead, loading, error } = useManagerNotifications();
-  const [selectedEvent, setSelectedEvent] = React.useState(null);
+  const [selectedEventId, setSelectedEventId] = React.useState(null);
+  const selectedEvent = React.useMemo(
+    () => events.find((event) => String(event.id) === String(selectedEventId)) || null,
+    [events, selectedEventId]
+  );
   React.useEffect(() => {
     if (events.length) markRead(events.map((event) => event.id));
   }, [events, markRead]);
@@ -38,7 +42,7 @@ export default function ManagerNotificationsPage() {
       />
     ) : null}
     <View style={styles.list}>
-      {events.map((event) => <TouchableOpacity key={event.id} accessibilityRole="button" accessibilityLabel={`${event.message} Order ${event.requestId}`} onPress={() => { markRead([event.id]); setSelectedEvent(event); }} style={styles.card}>
+      {events.map((event) => <TouchableOpacity key={event.id} accessibilityRole="button" accessibilityLabel={`${event.message} Order ${event.requestId}`} onPress={() => { markRead([event.id]); setSelectedEventId(event.id); }} style={styles.card}>
         <View style={styles.meta}><SoftStatusBadge status={event.status} dark={resolvedTheme === 'dark'} /><Text style={styles.time}>{formatNotificationTime(event.at)}</Text></View>
         <Text style={styles.message}>{event.message}</Text>
         <Text style={styles.context}>Order #{event.requestId}{event.requesterName ? ` · ${event.requesterName}` : ''}</Text>
@@ -47,7 +51,7 @@ export default function ManagerNotificationsPage() {
     <ManagerNotificationDetailsModal
       event={selectedEvent}
       visible={selectedEvent !== null}
-      onClose={() => setSelectedEvent(null)}
+      onClose={() => setSelectedEventId(null)}
     />
   </ManagerShell>;
 }

@@ -520,10 +520,13 @@ function createManagerDispatchHandler(getAdmin = getFirebaseAdmin) {
             targetManagerUids: targetManagers.map((item) => item.uid),
             assignedDistributorUid: null,
             assignedDistributorNameSnapshot: '',
+            assignedDistributorUniqueIdSnapshot: '',
             assignedAt: null,
             assignedByManagerUid: '',
             distributor_id: '',
             distributor_name: '',
+            distributorUniqueId: '',
+            distributor_unique_id: '',
             assignmentHistory,
             transferHistory: [...history(current.transferHistory), transferEntry],
           });

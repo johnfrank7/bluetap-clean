@@ -328,6 +328,7 @@ function DistributorDashboardContent() {
                 </PortalSwipeIgnore>
               ) : (
                 <BlueTapEmptyState
+                  variant="delivery"
                   title="No Active Delivery"
                   description="New branch assignments will appear here once assigned by your branch manager."
                   compact

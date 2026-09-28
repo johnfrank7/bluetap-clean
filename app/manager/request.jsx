@@ -29,6 +29,12 @@ const { getManagerQueues, toManagerOrder } = require('../../services/managerOper
 
 
 const formatAmount = (amount) => `₱${Number(amount || 0).toFixed(2)}`;
+const approvalLabel = (order = {}) => {
+  const reasons = Array.isArray(order.approvalReasons) ? order.approvalReasons : [];
+  if (reasons.includes('NON_STANDARD_DELIVERY_DAY')) return 'Delivery Day Review';
+  if (reasons.includes('PRODUCT_LIMIT_EXCEEDED')) return 'High Quantity';
+  return 'Outside Radius';
+};
 
 const EDITABLE_STATUSES = new Set([
   'awaiting_distributor_assignment',
@@ -118,7 +124,7 @@ function OutsideRadiusApprovalQueue({ orders, loading, styles, colors, isDark, o
                   <Text style={styles.requesterName}>{order.requesterName || 'Requester'}</Text>
                   <Text style={styles.orderIdText}>#{order.requestId || order.id}</Text>
                 </View>
-                <ManagerPill tone="cyan">{order.approvalReasons?.includes('PRODUCT_LIMIT_EXCEEDED') ? 'High Quantity' : 'Outside Radius'}</ManagerPill>
+                <ManagerPill tone="cyan">{approvalLabel(order)}</ManagerPill>
               </View>
 
               <Text style={styles.productsSummary}>{products}</Text>
@@ -133,6 +139,7 @@ function OutsideRadiusApprovalQueue({ orders, loading, styles, colors, isDark, o
                 {(order.productLimitViolations || []).map((item) => <Text key={item.productId} style={styles.detailLine}>
                   {item.productNameSnapshot}: requested {item.requestedQuantity} · limit {item.configuredLimit}. Order exceeds the configured requester product limit.
                 </Text>)}
+                {order.approvalReasons?.includes('NON_STANDARD_DELIVERY_DAY') && <Text style={styles.detailLine}>The requested date falls outside the effective product delivery weekdays and requires Manager review.</Text>}
                 {!!order.requesterUniqueId && <Text style={styles.detailLine}>Requester UID: {order.requesterUniqueId}</Text>}
                 <Text style={styles.amountText}>{formatAmount(order.totalAtOrder)}</Text>
               </View>
@@ -725,7 +732,7 @@ export default function ManagerRequestPage() {
   const { width } = useWindowDimensions();
   const styles = createStyles(colors, width);
   const [toast, setToast] = useState({ visible: false, message: '', type: 'success' });
-  const [selectedOrder, setSelectedOrder] = useState(null);
+  const [selectedOrderSnapshot, setSelectedOrder] = useState(null);
   const [modalVisible, setModalVisible] = useState(false);
   const realtime = useManagerRealtimeData();
   const dispatchData = useMemo(() => {
@@ -743,6 +750,11 @@ export default function ManagerRequestPage() {
       })),
     };
   }, [realtime]);
+  const selectedOrder = useMemo(() => {
+    if (!selectedOrderSnapshot) return null;
+    const live = realtime.requests.find((order) => String(order.id || order.requestId) === String(selectedOrderSnapshot.id || selectedOrderSnapshot.requestId));
+    return live ? toManagerOrder(live.id, live, realtime.branch?.name || '') : selectedOrderSnapshot;
+  }, [realtime.branch?.name, realtime.requests, selectedOrderSnapshot]);
 
   const showToast = (message, type = 'success') => {
     setToast({ visible: true, message, type });

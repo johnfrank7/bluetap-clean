@@ -126,6 +126,7 @@ function DistributorDispatchQueue({ styles, colors, isDark, onShowToast }) {
   const [selectedDistributorUid, setSelectedDistributorUid] = useState('');
   const [selectedDayOffset, setSelectedDayOffset] = useState(0); // 0 = today, 1 = tomorrow, 2 = in 2 days
   const [selectedSlotIndex, setSelectedSlotIndex] = useState(0);
+  const [dateSelectorOpen, setDateSelectorOpen] = useState(false);
   const [scheduleError, setScheduleError] = useState('');
 
   const load = async () => {
@@ -148,6 +149,7 @@ function DistributorDispatchQueue({ styles, colors, isDark, onShowToast }) {
     setSelectedDistributorUid(order.assignedDistributorUid || (data.distributors[0]?.uid || ''));
     setSelectedDayOffset(allowedDayOffsets(order)[0] ?? 0);
     setSelectedSlotIndex(0);
+    setDateSelectorOpen(false);
     setScheduleError('');
   };
 
@@ -348,23 +350,30 @@ function DistributorDispatchQueue({ styles, colors, isDark, onShowToast }) {
 
                   <Text style={[styles.panelTitle, { marginTop: 14 }]}>2. Set Delivery Schedule</Text>
                   <View style={styles.scheduleRow}>
-                    <Text style={styles.scheduleSubTitle}>Date:</Text>
-                    <View style={styles.pillGroup}>
+                    <Text style={styles.scheduleSubTitle}>Delivery Date</Text>
+                    <View style={styles.dateSelectorWrap}>
+                      <TouchableOpacity accessibilityRole="combobox" accessibilityState={{ expanded: dateSelectorOpen }} onPress={() => setDateSelectorOpen((open) => !open)} style={styles.dateSelector}>
+                        <Text style={styles.dateSelectorText}>{selectedDayOffset === 0 ? 'Today' : selectedDayOffset === 1 ? 'Tomorrow' : buildScheduleDate(selectedDayOffset, TIME_SLOT_OPTIONS[0]).toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })}</Text>
+                        <Text style={styles.dateSelectorChevron}>{dateSelectorOpen ? '▲' : '▼'}</Text>
+                      </TouchableOpacity>
+                      {dateSelectorOpen && <ScrollView nestedScrollEnabled style={styles.dateOptions}>
                       {allowedDayOffsets(order).map((index) => {
                         const label = index === 0 ? 'Today' : index === 1 ? 'Tomorrow' : buildScheduleDate(index, TIME_SLOT_OPTIONS[0]).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
                         return (
                         <TouchableOpacity
                           key={label}
-                          onPress={() => setSelectedDayOffset(index)}
-                          style={[styles.schedulePill, selectedDayOffset === index && styles.schedulePillActive]}
+                          onPress={() => { setSelectedDayOffset(index); setDateSelectorOpen(false); }}
+                          style={[styles.dateOption, selectedDayOffset === index && styles.dateOptionActive]}
                         >
-                          <Text style={[styles.schedulePillText, selectedDayOffset === index && styles.schedulePillTextActive]}>
+                          <Text style={[styles.dateOptionText, selectedDayOffset === index && styles.schedulePillTextActive]}>
                             {label}
                           </Text>
                         </TouchableOpacity>
                         );
                       })}
                       {!allowedDayOffsets(order).length && <Text style={styles.scheduleErrorText}>The products in this order have no common delivery day. Ask Admin to update the product schedules.</Text>}
+                      </ScrollView>}
+                      <View style={styles.quickDates}>{[0, 1].filter((offset) => allowedDayOffsets(order).includes(offset)).map((offset) => <TouchableOpacity key={offset} onPress={() => setSelectedDayOffset(offset)} style={styles.quickDate}><Text style={styles.quickDateText}>{offset === 0 ? 'Today' : 'Tomorrow'}</Text></TouchableOpacity>)}</View>
                     </View>
                   </View>
 
@@ -860,6 +869,17 @@ const createStyles = (colors, width = 1200) =>
       fontWeight: '700',
       minWidth: 70,
     },
+    dateSelectorWrap: { flex: 1, minWidth: 220, maxWidth: 420, position: 'relative' },
+    dateSelector: { minHeight: 42, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, borderWidth: 1, borderColor: colors.inputBorder, backgroundColor: colors.input, borderRadius: 9, paddingHorizontal: 12 },
+    dateSelectorText: { flex: 1, minWidth: 0, color: colors.textPrimary, fontSize: 12, fontWeight: '800' },
+    dateSelectorChevron: { color: colors.primary, fontSize: 11, fontWeight: '900' },
+    dateOptions: { maxHeight: 190, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, borderRadius: 9, marginTop: 5 },
+    dateOption: { minHeight: 40, justifyContent: 'center', paddingHorizontal: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
+    dateOptionActive: { backgroundColor: colors.primary },
+    dateOptionText: { color: colors.textPrimary, fontSize: 12, fontWeight: '700' },
+    quickDates: { flexDirection: 'row', flexWrap: 'wrap', gap: 7, marginTop: 7 },
+    quickDate: { minHeight: 34, justifyContent: 'center', paddingHorizontal: 11, borderWidth: 1, borderColor: colors.primary, borderRadius: 8, backgroundColor: colors.primarySoft },
+    quickDateText: { color: colors.primary, fontSize: 11, fontWeight: '900' },
     pillGroup: {
       flexDirection: 'row',
       flexWrap: 'wrap',

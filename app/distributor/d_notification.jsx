@@ -9,6 +9,7 @@ import BlueTapEmptyState from '../../components/BlueTapEmptyState';
 import { USER_PORTAL_BOTTOM_CONTENT_INSET, USER_PORTAL_LAYOUT } from '../../constants/userPortalLayout';
 import BlueTapHeader from '../../components/BlueTapHeader';
 import DistributorPortalBackground from '../../components/DistributorPortalBackground';
+import RequestDetailsModal from '../../components/RequestDetailsModal';
 import {
   formatDistributorOrderDate,
   normalizeDistributorOrderStatus,
@@ -70,6 +71,7 @@ export default function DistributorNotification() {
   useBlueTapTheme();
   const router = useRouter();
   const { orders, loading, error, refresh } = useAssignedDistributorOrders();
+  const [selectedOrderId, setSelectedOrderId] = React.useState(null);
 
   const events = useMemo(
     () =>
@@ -82,6 +84,10 @@ export default function DistributorNotification() {
         when: formatWhen(order),
       })),
     [orders]
+  );
+  const selectedOrder = useMemo(
+    () => events.find((event) => String(event.sourceId || event.id) === String(selectedOrderId)) || null,
+    [events, selectedOrderId]
   );
 
   return (
@@ -112,6 +118,7 @@ export default function DistributorNotification() {
           </View>
         ) : events.length === 0 ? (
           <BlueTapEmptyState
+            variant="notifications"
             title="No Assignment Notifications Yet"
             description="Updates for deliveries assigned to you will appear here."
             actionLabel="View Assigned Requests"
@@ -120,15 +127,11 @@ export default function DistributorNotification() {
         ) : (
           <View style={styles.list}>
             {events.map((event) => {
-              const isPending = ['pending', 'distributor assigned', 'distributor_assigned'].includes(
-                normalizeDistributorOrderStatus(event.status)
-              );
-              const destination = isPending ? '/distributor/d_requests' : '/distributor/d_scheduled_requests';
               const tone = getNotificationTone(event.status);
               return (
                 <TouchableOpacity
                   key={event.id}
-                  onPress={() => router.push(destination)}
+                  onPress={() => setSelectedOrderId(event.sourceId || event.id)}
                   style={[styles.card, { borderLeftWidth: 4, borderLeftColor: tone.dot }]}
                 >
                   <View style={[styles.dot, { backgroundColor: tone.dot }]} />
@@ -146,6 +149,11 @@ export default function DistributorNotification() {
           </View>
         )}
       </ScrollView>
+      <RequestDetailsModal
+        visible={selectedOrder !== null}
+        request={selectedOrder}
+        onClose={() => setSelectedOrderId(null)}
+      />
     </SafeAreaView>
     </DistributorPortalBackground>
   );

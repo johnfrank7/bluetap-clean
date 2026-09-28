@@ -11,6 +11,7 @@ function fixture() {
     ['users/distributor-1', { role: 'distributor', approvalStatus: 'pending', fullName: 'Distributor One', createdAt: new Date('2026-01-04') }],
     ['branches/north', { name: 'North', code: 'NORTH', city: 'Toledo', status: 'active', createdAt: new Date('2026-01-01') }],
     ['branches/south', { name: 'South', code: 'SOUTH', city: 'Toledo', status: 'inactive', createdAt: new Date('2025-12-01') }],
+    ['requests/delivered-1', { status: 'delivered', createdAt: new Date('2026-01-05'), items: [{ quantity: 2, totalAtOrder: 120 }], totalAtOrder: 140 }],
     ['systemConfig/registrationSecurity', {
       faceVerificationEnabled: true, emailOtpEnabled: true, maxAccountsPerDevice: 3, maxAccountsPerIp: 4,
       sessionSecurity: {
@@ -21,10 +22,11 @@ function fixture() {
     }],
   ]);
   const snapshot = (path) => ({ id: path.split('/').pop(), exists: records.has(path), data: () => records.get(path) });
-  const db = { collection(name) { return {
+  const db = { collection(name) { const api = {
     doc(id) { return { get: async () => snapshot(`${name}/${id}`) }; },
     async get() { return { docs: [...records.keys()].filter((path) => path.startsWith(`${name}/`)).map(snapshot) }; },
-  }; } };
+    orderBy() { return { limit() { return { get: api.get }; } }; },
+  }; return api; } };
   const auth = { async verifyIdToken(token) {
     if (token === 'admin-token') return { uid: 'admin-1', admin: true, role: 'admin' };
     if (token === 'manager-token') return { uid: 'manager-1', manager: true, role: 'manager' };
@@ -54,6 +56,7 @@ test('dashboard overview consolidates only lightweight Admin summary data', asyn
   assert.equal(result.body.branches[0].managerCount, 1);
   assert.equal(result.body.security.maxAccountsPerIp, 4);
   assert.equal(result.body.recentActivity.length, 5);
+  assert.deepEqual(result.body.sales, { deliveredOrders: 1, revenue: 140, units: 2, scope: 'Recent 500 orders' });
   assert.equal(Object.hasOwn(result.body, 'accounts'), false);
 });
 

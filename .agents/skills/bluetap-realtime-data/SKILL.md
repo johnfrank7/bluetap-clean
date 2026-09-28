@@ -22,3 +22,4 @@ Keep realtime reads scoped to the signed in role and its authoritative ownership
 - Registration step selection must not be unnecessarily gated by a cold privileged backend when a safe canonical public policy read model or prefetched policy exists. Cached policy only accelerates UI routing; backend registration-session and finalization policy remain authoritative.
 - Do not create duplicate realtime listeners for the same role-scoped dataset. Persistent role-layout providers own shared subscriptions and route consumers read their cache.
 - Operational realtime queries must remain bounded. Historical records belong in paginated, timeframe-specific, or explicitly on-demand views rather than unbounded listeners.
+- While an order-detail surface is open, retain only its stable order ID and resolve the displayed record from the latest role-scoped live collection so lifecycle, assignment, totals, notes, schedule, and public UID changes appear without reopening the view.

@@ -46,8 +46,8 @@ export default function ManagerNotificationDetailsModal({ event, visible, onClos
               <Text style={styles.eyebrow}>MANAGER NOTIFICATION</Text>
               <Text style={styles.title}>Order Update Details</Text>
             </View>
-            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Close notification details" onPress={onClose} style={styles.closeButton}>
-              <Text style={styles.closeText}>Close</Text>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back to notifications" onPress={onClose} style={styles.closeButton}>
+              <Text style={styles.closeText}>‹ Back</Text>
             </TouchableOpacity>
           </View>
 

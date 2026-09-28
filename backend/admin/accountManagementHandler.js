@@ -62,101 +62,112 @@ async function updateAccount({ auth, db, admin, uid, before, body }) {
 
 async function backfillLegacyUids({ auth, db, admin }) {
   const usersSnapshot = await db.collection('users').get();
+  const authPage = typeof auth.listUsers === 'function' ? await auth.listUsers(1000) : { users: [] };
+  const authCreatedAt = new Map((authPage.users || []).map((user) => [user.uid, user.metadata?.creationTime || null]));
+  const uidRoles = ['requester', 'distributor', 'manager', 'admin'];
+  const roleOrder = new Map(uidRoles.map((role, index) => [role, index]));
+  const timestamp = (value) => value?.toMillis?.() || Number(value?.seconds || 0) * 1000 || new Date(value || 0).getTime() || 0;
+  const accounts = usersSnapshot.docs
+    .map((doc) => ({ ref: db.collection('users').doc(doc.id), id: doc.id, role: clean(doc.data()?.role, 30).toLowerCase(), data: doc.data() || {} }))
+    .filter(({ data }) => uidRoles.includes(clean(data.role, 30).toLowerCase()) && data.registrationCompleted !== false)
+    .sort((left, right) => {
+      const roleDelta = roleOrder.get(left.role) - roleOrder.get(right.role);
+      if (roleDelta) return roleDelta;
+      const timeDelta = timestamp(left.data.createdAt || left.data.created_at || authCreatedAt.get(left.id)) - timestamp(right.data.createdAt || right.data.created_at || authCreatedAt.get(right.id));
+      return timeDelta || left.id.localeCompare(right.id);
+    });
   let backfilled = 0;
   let alreadyValid = 0;
+  let publicUidsAssigned = 0;
   const unmatched = [];
   const now = new Date();
+  for (const role of uidRoles) {
+    const roleAccounts = accounts.filter((account) => account.role === role);
+    if (!roleAccounts.length) continue;
+    const roleResult = await db.runTransaction(async (tx) => {
+      const counterRef = db.collection('accountCounters').doc(role);
+      const counterSnapshot = await tx.get(counterRef);
+      const currentSnapshots = await Promise.all(roleAccounts.map((account) => tx.get(account.ref)));
+      const currentAccounts = roleAccounts.map((account, index) => ({
+        ...account,
+        current: currentSnapshots[index].exists ? currentSnapshots[index].data() || {} : account.data,
+      }));
+      const usedNumbers = new Set();
+      const preservedNumberById = new Map();
+      for (const account of currentAccounts) {
+        const candidate = account.current.publicUid || account.current.displayUid || account.current.unique_id || account.current.uniqueId;
+        const number = parsePublicUidNumber(role, candidate);
+        if (number > 0 && !usedNumbers.has(number)) {
+          usedNumbers.add(number);
+          preservedNumberById.set(account.id, number);
+        }
+      }
+      let nextNumber = Math.max(
+        Number(counterSnapshot.exists ? counterSnapshot.data()?.lastNumber || counterSnapshot.data()?.count : 0) || 0,
+        ...usedNumbers,
+        0
+      );
+      let transactionAlreadyValid = 0;
+      let transactionAssigned = 0;
+      for (const account of currentAccounts) {
+        const current = account.current;
+        const persistedCandidate = current.publicUid || current.displayUid;
+        const candidate = persistedCandidate || current.unique_id || current.uniqueId;
+        const parsedExistingNumber = parsePublicUidNumber(role, candidate);
+        const existingNumber = preservedNumberById.get(account.id) === parsedExistingNumber ? parsedExistingNumber : 0;
+        const canonicalExisting = existingNumber > 0 ? formatPublicUid(role, existingNumber) : '';
+        const identifiersAlreadySynced = canonicalExisting
+          && current.publicUid === canonicalExisting
+          && current.displayUid === canonicalExisting;
+        if (identifiersAlreadySynced) {
+          transactionAlreadyValid++;
+          continue;
+        }
+        let assignedNumber = existingNumber;
+        if (!assignedNumber) {
+          do { nextNumber++; } while (usedNumbers.has(nextNumber));
+          assignedNumber = nextNumber;
+          usedNumbers.add(assignedNumber);
+        }
+        const publicUid = formatPublicUid(role, assignedNumber);
+        const updates = { publicUid, displayUid: publicUid, unique_id: publicUid, updatedAt: now, updatedBy: admin.uid };
+        tx.update(account.ref, updates);
+        tx.set(db.collection('adminAuditLogs').doc(), auditRecord('PUBLIC_UID_BACKFILLED', admin, account.id, role, current, { ...current, ...updates }, now, current.branchId || null));
+        transactionAssigned++;
+      }
+      tx.set(counterRef, { role, lastNumber: nextNumber, count: nextNumber, updatedAt: now }, { merge: true });
+      return { alreadyValid: transactionAlreadyValid, assigned: transactionAssigned };
+    });
+    alreadyValid += roleResult.alreadyValid;
+    publicUidsAssigned += roleResult.assigned;
+  }
 
-  for (const userDoc of usersSnapshot.docs) {
-    const data = userDoc.data() || {};
-    if (data.registrationCompleted === false) {
-      unmatched.push({ id: userDoc.id, email: data.email || null, role: data.role || null, reason: 'incomplete-registration' });
+  for (const account of accounts) {
+    const data = account.data;
+    if (data.uid && String(data.uid).trim()) continue;
+    let resolvedUid = null;
+    try {
+      const authUser = typeof auth.getUser === 'function' ? await auth.getUser(account.id) : null;
+      if (authUser?.uid === account.id) resolvedUid = account.id;
+    } catch {}
+    if (!resolvedUid && data.email && typeof auth.getUserByEmail === 'function') {
+      try { resolvedUid = (await auth.getUserByEmail(data.email))?.uid || null; } catch {}
+    }
+    if (!resolvedUid) {
+      unmatched.push({ id: account.id, email: data.email || null, role: data.role || null });
       continue;
     }
-    let resolvedUid = null;
-    let needsAuthUidBackfill = !data.uid || !String(data.uid).trim();
-
-    if (needsAuthUidBackfill) {
-      try {
-        if (typeof auth.getUser === 'function') {
-          const authUser = await auth.getUser(userDoc.id);
-          if (authUser?.uid === userDoc.id) {
-            resolvedUid = userDoc.id;
-          }
-        }
-      } catch {}
-
-      if (!resolvedUid && data.email && typeof auth.getUserByEmail === 'function') {
-        try {
-          const authUser = await auth.getUserByEmail(data.email);
-          if (authUser?.uid) {
-            resolvedUid = authUser.uid;
-          }
-        } catch {}
-      }
-    } else {
-      resolvedUid = data.uid;
-      alreadyValid++;
-    }
-
-    // Check if publicUid needs backfilling
-    let assignedPublicUid = data.publicUid || data.displayUid || null;
-    let publicUidAssigned = false;
-    if (data.role === 'manager' && assignedPublicUid) {
-      const managerNumber = parsePublicUidNumber('manager', assignedPublicUid);
-      if (managerNumber > 0) {
-        const migrated = formatPublicUid('manager', managerNumber);
-        if (migrated !== assignedPublicUid) { assignedPublicUid = migrated; publicUidAssigned = true; }
-      }
-    }
-    if (!assignedPublicUid && data.role) {
-      if (data.unique_id) {
-        const isRawUid = /^[a-zA-Z0-9]{20,}$/.test(String(data.unique_id).trim());
-        const parsedNum = parsePublicUidNumber(data.role, data.unique_id) || (!isRawUid ? parseInt(String(data.unique_id).replace(/\D/g, ''), 10) : 0);
-        if (Number.isFinite(parsedNum) && parsedNum > 0 && parsedNum < 1000000) {
-          assignedPublicUid = formatPublicUid(data.role, parsedNum);
-        }
-      }
-      if (!assignedPublicUid) {
-        try {
-          assignedPublicUid = await db.runTransaction((tx) => generateNextPublicUid(tx, db, data.role));
-        } catch {}
-      }
-      if (assignedPublicUid) publicUidAssigned = true;
-    }
-
-    const updates = {};
-    if (resolvedUid && needsAuthUidBackfill) updates.uid = resolvedUid;
-    if (assignedPublicUid && publicUidAssigned) {
-      updates.publicUid = assignedPublicUid;
-      updates.displayUid = assignedPublicUid;
-      if (!data.unique_id) updates.unique_id = assignedPublicUid;
-    }
-
-    if (Object.keys(updates).length > 0) {
-      updates.updatedAt = now;
-      updates.updatedBy = admin.uid;
-      await db.collection('users').doc(userDoc.id).update(updates);
-      if (needsAuthUidBackfill && resolvedUid) {
-        await db.collection('adminAuditLogs').doc().set(
-          auditRecord('LEGACY_UID_BACKFILLED', admin, resolvedUid, data.role || 'unknown', data, { ...data, ...updates }, now, data.branchId || null)
-        );
-        backfilled++;
-      }
-      if (publicUidAssigned) {
-        await db.collection('adminAuditLogs').doc().set(
-          auditRecord('PUBLIC_UID_BACKFILLED', admin, resolvedUid || userDoc.id, data.role || 'unknown', data, { ...data, ...updates }, now, data.branchId || null)
-        );
-      }
-    } else if (needsAuthUidBackfill) {
-      unmatched.push({ id: userDoc.id, email: data.email || null, role: data.role || null });
-    }
+    const updates = { uid: resolvedUid, updatedAt: now, updatedBy: admin.uid };
+    await account.ref.update(updates);
+    await db.collection('adminAuditLogs').doc().set(auditRecord('LEGACY_UID_BACKFILLED', admin, resolvedUid, data.role, data, { ...data, ...updates }, now, data.branchId || null));
+    backfilled++;
   }
 
   return {
     total: usersSnapshot.size,
     backfilled,
     alreadyValid,
+    publicUidsAssigned,
     unmatched,
   };
 }

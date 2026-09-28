@@ -107,6 +107,9 @@ export default function RequesterNotification() {
       })),
     [orders]
   );
+  const liveSelectedOrder = selectedOrder
+    ? orders.find((order) => order.id === selectedOrder.id) || selectedOrder
+    : null;
 
   return (
     <SafeAreaView edges={['left', 'right', 'bottom']} style={styles.safe}>
@@ -173,7 +176,7 @@ export default function RequesterNotification() {
       <RequestDetailsModal
         visible={selectedOrder !== null}
         onClose={() => setSelectedOrder(null)}
-        request={selectedOrder}
+        request={liveSelectedOrder}
       />
     </SafeAreaView>
   );

@@ -375,7 +375,7 @@ export default function DistributorRequests() {
   const sheetAnim = useRef(new Animated.Value(0)).current;
   const toastAnim = useRef(new Animated.Value(0)).current;
   const successTimer = useRef(null);
-  const [detailsRequest, setDetailsRequest] = useState(null);
+  const [detailsRequestId, setDetailsRequestId] = useState(null);
   const [scheduleSheetVisible, setScheduleSheetVisible] = useState(false);
   const [selectedRequest, setSelectedRequest] = useState(null);
   const [selectedSchedule, setSelectedSchedule] = useState('today');
@@ -417,8 +417,6 @@ export default function DistributorRequests() {
     }, 2200);
   }, [toastAnim]);
 
-  const selectedDetailsRequest = getDetailsRequestData(detailsRequest);
-
   const pendingRequests = useMemo(
     () =>
       orders
@@ -426,6 +424,8 @@ export default function DistributorRequests() {
         .filter((request) => ASSIGNMENT_STATUSES.has(normalizeDistributorOrderStatus(request.status))),
     [orders]
   );
+  const detailsRequest = pendingRequests.find((request) => String(request.sourceId) === String(detailsRequestId)) || null;
+  const selectedDetailsRequest = getDetailsRequestData(detailsRequest);
 
   const handleAcceptAssignment = useCallback(async (request) => {
     if (!isComplete) {
@@ -645,7 +645,7 @@ export default function DistributorRequests() {
         request={item}
         index={index}
         isProcessing={processingRequestId === item.sourceId}
-        onViewDetails={setDetailsRequest}
+        onViewDetails={(request) => setDetailsRequestId(request.sourceId)}
         onAccept={handleAcceptAssignment}
         onDecline={handleDeclineRequest}
       />
@@ -736,6 +736,7 @@ export default function DistributorRequests() {
                 </View>
               ) : (
                 <BlueTapEmptyState
+                  variant="requests"
                   title="No Pending Requests"
                   description="New branch assignments will appear here when they are ready to schedule."
                 />
@@ -755,7 +756,7 @@ export default function DistributorRequests() {
 
       <RequestDetailsModal
         visible={!!detailsRequest}
-        onClose={() => setDetailsRequest(null)}
+        onClose={() => setDetailsRequestId(null)}
         request={selectedDetailsRequest}
       />
 

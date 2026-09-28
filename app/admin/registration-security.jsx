@@ -6,6 +6,7 @@ import { SectionCard, StatusBadge } from '../../components/DashboardUi';
 import { useAdminTheme } from '../../components/AdminTheme';
 import { getRegistrationSecurity, updateRegistrationSecurity } from '../../services/adminRegistrationSecurity';
 import { ADMIN_CACHE_KEYS, useAdminData } from '../../services/adminDataCache';
+import TopToastFeedback from '../../components/TopToastFeedback';
 
 const IDLE_OPTIONS = [[5, '5 minutes'], [10, '10 minutes'], [15, '15 minutes'], [30, '30 minutes'], [60, '1 hour'], [120, '2 hours']];
 const ABSOLUTE_OPTIONS = [[8, '8 hours'], [12, '12 hours'], [24, '24 hours'], [168, '7 days']];
@@ -43,6 +44,8 @@ export default function SecuritySettingsPage() {
   const [message, setMessage] = React.useState('');
   const [isError, setIsError] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
+  const [toast, setToast] = React.useState({ visible: false, message: '', type: 'success' });
+  const showToast = (toastMessage, type) => setToast({ visible: true, message: toastMessage, type });
 
   React.useEffect(() => {
     if (!data || dirty) return;
@@ -57,19 +60,20 @@ export default function SecuritySettingsPage() {
   const save = async () => {
     const next = { ...draftSettings, maxAccountsPerDevice: Number(draftSettings.maxAccountsPerDevice), maxAccountsPerIp: Number(draftSettings.maxAccountsPerIp) };
     if (![next.maxAccountsPerDevice, next.maxAccountsPerIp].every((value) => Number.isInteger(value) && value >= 1 && value <= 20)) {
-      setMessage('Account limits must be whole numbers from 1 to 20.'); setIsError(true); return;
+      setMessage('Account limits must be whole numbers from 1 to 20.'); setIsError(true); showToast('Account limits must be whole numbers from 1 to 20.', 'error'); return;
     }
     setSaving(true); setMessage('');
     try {
       const authoritative = await updateRegistrationSecurity(next);
       await refresh();
-      setSavedSettings(authoritative); setDraftSettings(authoritative); setDirty(false); setMessage('Security settings saved.'); setIsError(false);
-    } catch (error) { setDraftSettings(savedSettings); setDirty(false); setMessage(error.message); setIsError(true); }
+      setSavedSettings(authoritative); setDraftSettings(authoritative); setDirty(false); setMessage('Security settings saved.'); setIsError(false); showToast('Security settings saved.', 'success');
+    } catch (error) { setDraftSettings(savedSettings); setDirty(false); setMessage(error.message); setIsError(true); showToast(error.message || 'Unable to save security settings.', 'error'); }
     finally { setSaving(false); }
   };
 
   const settings = draftSettings;
   return <AdminShell title="Security Settings" subtitle="Manage registration protection, account limits, verification methods, and user session security.">
+    <TopToastFeedback visible={toast.visible} message={toast.message} type={toast.type} onDismiss={() => setToast((current) => ({ ...current, visible: false }))} />
     <View style={styles.stack}>{!settings ? <>
       <SectionCard><Text style={styles.sectionEyebrow}>SAVED POLICY</Text><Text style={styles.title}>BlueTap account protection</Text><SkeletonBlock style={styles.skeletonWide} /><SkeletonBlock style={styles.skeletonGrid} /></SectionCard>
       <SectionCard><Text style={styles.sectionEyebrow}>VERIFICATION METHODS</Text><Text style={styles.title}>Registration verification</Text><SkeletonBlock style={styles.skeletonRow} /><SkeletonBlock style={styles.skeletonRow} /></SectionCard>

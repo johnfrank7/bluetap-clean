@@ -203,8 +203,7 @@ const getDetailsRequestData = (request) =>
         quantity: getQuantityText(request),
         totalAmount: getTotalAmount(request),
         waterStation: request.water_station || 'Not set',
-        paymentMethod:
-          request.payment_method || request.paymentMethod || 'Not set',
+        paymentMethod: request.payment_method || request.paymentMethod || 'cash_on_delivery',
         requesterName: request.requester_name || 'Not set',
         requesterUniqueId:
           request.requester_unique_id ||
@@ -393,7 +392,10 @@ export default function RequesterRequests() {
       ))),
     [isActiveOrdersTab, requests]
   );
-  const selectedDetailsRequest = getDetailsRequestData(selectedRequest);
+  const liveSelectedRequest = selectedRequest
+    ? requests.find((request) => request.id === selectedRequest.id) || selectedRequest
+    : null;
+  const selectedDetailsRequest = getDetailsRequestData(liveSelectedRequest);
 
   const retryOrders = () => {
     const requesterId = auth.currentUser?.uid;
@@ -586,13 +588,13 @@ export default function RequesterRequests() {
               visible={!!selectedRequest}
               onClose={() => setSelectedRequest(null)}
               request={selectedDetailsRequest}
-              onEdit={selectedRequest && isPendingRequest(selectedRequest) ? () => {
-                const reqToEdit = selectedRequest;
+              onEdit={liveSelectedRequest && isPendingRequest(liveSelectedRequest) ? () => {
+                const reqToEdit = liveSelectedRequest;
                 setSelectedRequest(null);
                 setEditingRequest(reqToEdit);
               } : undefined}
-              onCancel={selectedRequest && isPendingRequest(selectedRequest) ? () => {
-                const reqToCancel = selectedRequest;
+              onCancel={liveSelectedRequest && isPendingRequest(liveSelectedRequest) ? () => {
+                const reqToCancel = liveSelectedRequest;
                 setSelectedRequest(null);
                 confirmCancelRequest(reqToCancel);
               } : undefined}

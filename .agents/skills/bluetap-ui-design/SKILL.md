@@ -13,6 +13,8 @@ Admin navigation uses a shared collapsible sidebar: keep desktop transitions sub
 
 Admin Requests oversight (`/admin/requests`) provides a platform-wide read-only view of customer orders and fulfillment statuses across all branches. The Admin sidebar displays a live actionable count badge (`Requests [N]`) subscribing to orders pending review (`pending`, `outside_radius_pending_approval`, `branch_transfer_pending`). Admin oversight remains strictly read-only; operational branch dispatch, assignments, and situational edits belong exclusively to Branch Managers, except for emergency Admin Distributor Override (`AdminOverrideModal`) strictly constrained to same-branch distributors with required audit reason logging. Manager navigation (`ManagerShell`) similarly displays an active badge on the Requests link, subscribing in real time to branch-scoped unfulfilled orders and incoming transfer requests.
 
+Admin override actions must expose only one clear entry point per order-details context, and emergency override dialogs must use structured callouts, grouped context, and visible primary/secondary actions in both light and dark mode.
+
 ProductCard discovery and ordering components adhere to shared theme tokens: high-contrast action buttons (`BLUETAP_COLORS.primary` with white text), surface styling, and contain-based image presentation that preserves packaging aspect ratios across light and dark modes. Pinned dashboard and portal headers must maintain opaque backgrounds to prevent scrollable content bleed-through. Toast notifications use `TopToastFeedback` for theme-aware, top-anchored alerts.
 
 BlueTap dark mode uses layered deep navy and blue-black surfaces, never pure black as the main background. Keep BlueTap blue as the primary accent; Admin and Manager share one dark palette through theme tokens, while the landing page remains the branding reference. Build premium card separation with subtle borders and restrained highlights. Do not introduce random hardcoded dark colors in screens: use the shared background, sidebar, surface, surfaceAlt, border, primary, text, muted, and semantic tokens.
@@ -48,3 +50,7 @@ Requester bottom navigation remains a detached, floating rounded pill/card: neve
 Requester and Distributor portal structural sizing is governed by `bluetap-user-portal-ui`.
 
 Requester and Distributor theme behavior is also governed by `bluetap-user-portal-ui`: both roles share one persisted BlueTap theme, use the landing page as the dark-palette and toggle-pattern reference, and must use shared semantic tokens rather than role-specific palettes.
+
+Analytics metric grids must use consistent responsive card bounds so a final or low-count metric such as Issues & Cancelled cannot stretch across an otherwise balanced row.
+
+Interactive dashboard cards must expose a real destination and provide accessible keyboard focus plus restrained hover and pressed feedback; decorative cards must not imply navigation.

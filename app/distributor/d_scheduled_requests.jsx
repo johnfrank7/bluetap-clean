@@ -240,7 +240,7 @@ const ScheduledRequestCard = ({
 export default function DistributorScheduledRequests() {
   const { colors, isDark } = useBlueTapTheme();
   const router = useRouter();
-  const [selectedRequest, setSelectedRequest] = useState(null);
+  const [selectedRequestId, setSelectedRequestId] = useState(null);
   const [processingRequestId, setProcessingRequestId] = useState('');
   const [actionError, setActionError] = useState('');
 
@@ -265,6 +265,7 @@ export default function DistributorScheduledRequests() {
         .filter((request) => UPCOMING_STATUSES.has(normalizeDistributorOrderStatus(request.status))),
     [orders]
   );
+  const selectedRequest = scheduledRequests.find((request) => String(request.sourceId) === String(selectedRequestId)) || null;
   const selectedDetailsRequest = getDetailsRequestData(selectedRequest);
 
   const advanceDelivery = async (request, action) => {
@@ -412,6 +413,7 @@ export default function DistributorScheduledRequests() {
               </View>
             ) : scheduledRequests.length === 0 ? (
               <BlueTapEmptyState
+                variant="schedule"
                 title="No Scheduled Deliveries"
                 description="Accepted and upcoming assigned deliveries will appear here."
               />
@@ -455,7 +457,7 @@ export default function DistributorScheduledRequests() {
                     setSelectedSlotIndex(0);
                     setRescheduleError('');
                   }}
-                  onViewDetails={setSelectedRequest}
+                  onViewDetails={(request) => setSelectedRequestId(request.sourceId)}
                 />
               ))
             )}
@@ -465,7 +467,7 @@ export default function DistributorScheduledRequests() {
 
       <RequestDetailsModal
         visible={!!selectedRequest}
-        onClose={() => setSelectedRequest(null)}
+        onClose={() => setSelectedRequestId(null)}
         request={selectedDetailsRequest}
       />
 

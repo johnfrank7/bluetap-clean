@@ -8,6 +8,7 @@ const { safeBranch } = require('../admin/branchManagementHandler');
 const { DEFAULT_SERVICE_RADIUS_KM } = require('../../constants/toledoBarangays.json');
 const { isActiveRequesterOrderStatus } = require('../../constants/requesterOrderStatus');
 const { effectiveDeliveryDays, limitViolations } = require('../../services/productOrderPolicy');
+const { requestedDateNeedsApproval, resolveEffectiveProductPolicy } = require('../utils/effectiveProductPolicy');
 
 const clean = (value, max = 240) => String(value || '').trim().slice(0, max);
 const coordinate = (value, minimum, maximum) => {
@@ -85,12 +86,21 @@ async function activeCatalog(db) {
     db.collection('branches').get(),
     db.collection('products').get(),
   ]);
-  const branches = branchSnapshot.docs
-    .map((item) => safeBranch(item.id, item.data()))
-    .filter((branch) => branch.status === 'active' && validBranchLocation(branch));
   const products = productSnapshot.docs
     .map((item) => safeProduct(item.id, item.data()))
     .filter((product) => product.active && product.product_name && product.price !== null);
+  const branches = branchSnapshot.docs
+    .map((item) => {
+      const data = item.data() || {};
+      return {
+        ...safeBranch(item.id, data),
+        productPolicies: Object.fromEntries(products.map((product) => {
+          const policy = resolveEffectiveProductPolicy(product, data);
+          return [product.id, { deliveryDays: policy.deliveryDays, maxQuantityPerRequester: policy.maxQuantityPerRequester, source: policy.source }];
+        })),
+      };
+    })
+    .filter((branch) => branch.status === 'active' && validBranchLocation(branch));
   return { branches, products };
 }
 
@@ -143,7 +153,8 @@ async function buildTrustedOrder(db, requester, body) {
   const summary = profileSummary(requester.profile);
   if (!summary.complete) throw new OtpError(409, 'PROFILE_INCOMPLETE', 'Complete your profile before placing an order.');
   const branchSnapshot = await db.collection('branches').doc(branchId).get();
-  const branch = branchSnapshot.exists ? safeBranch(branchId, branchSnapshot.data()) : null;
+  const branchData = branchSnapshot.exists ? branchSnapshot.data() || {} : null;
+  const branch = branchData ? safeBranch(branchId, branchData) : null;
   if (!branch) throw new OtpError(404, 'BRANCH_NOT_FOUND', 'The selected provider branch no longer exists.');
   if (branch.status !== 'active' || !validBranchLocation(branch)) {
     throw new OtpError(409, 'BRANCH_UNAVAILABLE', 'The selected provider branch is unavailable.');
@@ -157,6 +168,7 @@ async function buildTrustedOrder(db, requester, body) {
       throw new OtpError(409, 'PRODUCT_UNAVAILABLE', `${product.product_name || 'A selected product'} is not available from this branch.`);
     }
     const lineTotal = Math.round(product.price * item.quantity * 100) / 100;
+    const effectivePolicy = resolveEffectiveProductPolicy(product, branchData);
     return {
       productId: product.id,
       productNameSnapshot: product.product_name,
@@ -165,8 +177,9 @@ async function buildTrustedOrder(db, requester, body) {
       totalAtOrder: lineTotal,
       containerTypeSnapshot: product.containerType || '',
       sizeSnapshot: product.size || '',
-      maxQuantityPerRequesterSnapshot: product.maxQuantityPerRequester,
-      deliveryDaysSnapshot: product.deliveryDays,
+      maxQuantityPerRequesterSnapshot: effectivePolicy.maxQuantityPerRequester,
+      deliveryDaysSnapshot: effectivePolicy.deliveryDays,
+      productPolicySourceSnapshot: effectivePolicy.source,
     };
   }));
   const quantity = items.reduce((sum, item) => sum + item.quantity, 0);
@@ -176,9 +189,12 @@ async function buildTrustedOrder(db, requester, body) {
   const serviceRadiusKmSnapshot = serviceRadiusKm(branch);
   const outsideServiceArea = distanceKmSnapshot > serviceRadiusKmSnapshot;
   const productLimitViolations = limitViolations(items);
+  const effectiveDeliveryDaysSnapshot = effectiveDeliveryDays(items);
+  const deliveryDayApprovalRequired = requestedDateNeedsApproval(body.expectedDeliveryDate, effectiveDeliveryDaysSnapshot);
   const approvalReasons = [
     ...(outsideServiceArea ? ['OUTSIDE_RADIUS'] : []),
     ...(productLimitViolations.length ? ['PRODUCT_LIMIT_EXCEEDED'] : []),
+    ...(deliveryDayApprovalRequired ? ['NON_STANDARD_DELIVERY_DAY'] : []),
   ];
   const deliveryFeeAtOrder = calculateDeliveryFee(distanceKmSnapshot, branch);
   const totalAtOrder = Math.round((subtotalAtOrder + deliveryFeeAtOrder) * 100) / 100;
@@ -212,7 +228,8 @@ async function buildTrustedOrder(db, requester, body) {
     outsideServiceArea,
     approvalReasons,
     productLimitViolations,
-    effectiveDeliveryDaysSnapshot: effectiveDeliveryDays(items),
+    effectiveDeliveryDaysSnapshot,
+    deliveryDayApprovalRequired,
     items,
     productId: items[0]?.productId || '',
     product_id: items[0]?.productId || '',
@@ -226,10 +243,12 @@ async function buildTrustedOrder(db, requester, body) {
     deliveryFeePolicy,
     totalAtOrder,
     total_cost: totalAtOrder,
+    paymentMethod: 'cash_on_delivery',
+    payment_method: 'cash_on_delivery',
     container: clean(body.container, 80),
     expectedDeliveryDate: body.expectedDeliveryDate ? clean(body.expectedDeliveryDate, 40) : '',
     delivery_date: body.expectedDeliveryDate ? clean(body.expectedDeliveryDate, 40) : '',
-    status: productLimitViolations.length ? 'manager_approval_pending' : outsideServiceArea ? 'outside_radius_pending_approval' : 'Pending',
+    status: productLimitViolations.length || deliveryDayApprovalRequired ? 'manager_approval_pending' : outsideServiceArea ? 'outside_radius_pending_approval' : 'Pending',
   };
 }
 
@@ -264,6 +283,8 @@ function createRequesterOrdersHandler(getAdmin = getFirebaseAdmin) {
 
           const submittedItems = requestItems(body);
           const branchId = current.branchId || current.currentBranchId;
+          const branchSnapshot = branchId ? await db.collection('branches').doc(branchId).get() : null;
+          const branchData = branchSnapshot?.exists ? branchSnapshot.data() || {} : {};
           const items = await Promise.all(submittedItems.map(async (item) => {
             const productSnap = await db.collection('products').doc(item.productId).get();
             if (!productSnap.exists) throw new OtpError(404, 'PRODUCT_NOT_FOUND', 'A selected product no longer exists.');
@@ -271,6 +292,7 @@ function createRequesterOrdersHandler(getAdmin = getFirebaseAdmin) {
             if (!product.active || product.price === null || !productAvailableAtBranch(product, branchId)) {
               throw new OtpError(409, 'PRODUCT_UNAVAILABLE', `${product.product_name || 'A selected product'} is not available.`);
             }
+            const effectivePolicy = resolveEffectiveProductPolicy(product, branchData);
             const lineTotal = Math.round(product.price * item.quantity * 100) / 100;
             return {
               productId: product.id,
@@ -280,8 +302,9 @@ function createRequesterOrdersHandler(getAdmin = getFirebaseAdmin) {
               totalAtOrder: lineTotal,
               containerTypeSnapshot: product.containerType || '',
               sizeSnapshot: product.size || '',
-              maxQuantityPerRequesterSnapshot: product.maxQuantityPerRequester,
-              deliveryDaysSnapshot: product.deliveryDays,
+              maxQuantityPerRequesterSnapshot: effectivePolicy.maxQuantityPerRequester,
+              deliveryDaysSnapshot: effectivePolicy.deliveryDays,
+              productPolicySourceSnapshot: effectivePolicy.source,
             };
           }));
 
@@ -291,17 +314,22 @@ function createRequesterOrdersHandler(getAdmin = getFirebaseAdmin) {
           const quantity = items.reduce((sum, item) => sum + item.quantity, 0);
           const now = new Date();
           const productLimitViolations = limitViolations(items);
+          const nextExpectedDeliveryDate = body.expectedDeliveryDate || current.expectedDeliveryDate;
+          const effectiveDeliveryDaysSnapshot = effectiveDeliveryDays(items);
+          const deliveryDayApprovalRequired = requestedDateNeedsApproval(nextExpectedDeliveryDate, effectiveDeliveryDaysSnapshot);
           const approvalReasons = [
             ...(current.outsideServiceArea === true ? ['OUTSIDE_RADIUS'] : []),
             ...(productLimitViolations.length ? ['PRODUCT_LIMIT_EXCEEDED'] : []),
+            ...(deliveryDayApprovalRequired ? ['NON_STANDARD_DELIVERY_DAY'] : []),
           ];
 
           const updates = {
             items,
             approvalReasons,
             productLimitViolations,
-            effectiveDeliveryDaysSnapshot: effectiveDeliveryDays(items),
-            status: productLimitViolations.length ? 'manager_approval_pending' : current.outsideServiceArea === true ? 'outside_radius_pending_approval' : 'Pending',
+            deliveryDayApprovalRequired,
+            effectiveDeliveryDaysSnapshot,
+            status: productLimitViolations.length || deliveryDayApprovalRequired ? 'manager_approval_pending' : current.outsideServiceArea === true ? 'outside_radius_pending_approval' : 'Pending',
             productId: items[0]?.productId || '',
             product_id: items[0]?.productId || '',
             productNameSnapshot: items.map((item) => item.productNameSnapshot).join(', '),

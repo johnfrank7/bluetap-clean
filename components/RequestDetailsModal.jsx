@@ -43,10 +43,10 @@ const normalizeAmount = (value) =>
 
 const normalizeProduct = (item = {}, index) => ({
   id: item.id || item.product_id || `${item.productName || item.product_name || 'product'}-${index}`,
-  productName: item.productName || item.product_name || 'Product',
+  productName: item.productNameSnapshot || item.productName || item.product_name || 'Product',
   quantity: displayValue(item.quantity),
-  unitPrice: normalizeAmount(item.unitPrice ?? item.product_price ?? item.price),
-  subtotal: normalizeAmount(item.subtotal ?? item.line_total),
+  unitPrice: normalizeAmount(item.unitPriceAtOrder ?? item.unitPrice ?? item.product_price ?? item.price),
+  subtotal: normalizeAmount(item.totalAtOrder ?? item.subtotal ?? item.line_total),
 });
 
 export default function RequestDetailsModal({
@@ -61,13 +61,12 @@ export default function RequestDetailsModal({
     request?.requesterUniqueId || request?.requester_unique_id || request?.requesterId,
     'Not assigned'
   );
-  const distributorName =
+  const distributorName = request?.distributorNameSnapshot ||
     request?.distributorName || request?.distributor_name || '';
   const distributorUniqueId = formatDisplayUniqueId(
-    request?.distributorUniqueId || request?.distributor_unique_id || request?.distributorId,
-    distributorName ? 'Not assigned' : ''
+    request?.distributorPublicUidSnapshot || request?.distributorUniqueId || request?.distributor_unique_id,
+    'Not assigned'
   );
-  const hasDistributorInfo = !!(distributorName || (distributorUniqueId && distributorUniqueId !== 'Not assigned'));
   const products = Array.isArray(request?.items)
     ? request.items.map(normalizeProduct)
     : [];
@@ -81,29 +80,8 @@ export default function RequestDetailsModal({
       { label: 'Delivery Date', value: request?.deliveryDate },
     ],
     [
-      { label: 'Product', value: request?.product },
-      { label: 'Container Type', value: request?.containerType },
-    ],
-    [
-      { label: 'Quantity', value: request?.quantity },
-      { label: 'Total Amount', value: formatAmount(request?.totalAmount) },
-    ],
-    ...(request?.deliveryFeeAtOrder !== undefined || request?.subtotalAtOrder !== undefined
-      ? [
-          [
-            { label: 'Items Subtotal', value: formatAmount(request?.subtotalAtOrder ?? request?.subtotal) },
-            {
-              label: request?.distanceKmAtOrder || request?.distanceKm
-                ? `Delivery Fee (${Number(request?.distanceKmAtOrder || request?.distanceKm).toFixed(1)} km)`
-                : 'Delivery Fee',
-              value: formatAmount(request?.deliveryFeeAtOrder ?? request?.deliveryFee ?? 0),
-            },
-          ],
-        ]
-      : []),
-    [
       { label: 'Water Station', value: request?.waterStation },
-      { label: 'Payment Method', value: request?.paymentMethod },
+      { label: 'Payment Method', value: 'Cash on Delivery' },
     ],
   ];
   const customerRows = [
@@ -111,14 +89,10 @@ export default function RequestDetailsModal({
       { label: 'Requester Name', value: request?.requesterName || request?.customerName },
       { label: 'Requester ID', value: requesterUniqueId },
     ],
-    ...(hasDistributorInfo
-      ? [
-          [
-            { label: 'Distributor Name', value: distributorName },
-            { label: 'Distributor ID', value: distributorUniqueId },
-          ],
-        ]
-      : []),
+    [
+      { label: 'Distributor Name', value: distributorName || 'Not assigned' },
+      { label: 'Distributor ID', value: distributorUniqueId },
+    ],
     [{ label: 'Contact Number', value: request?.contactNumber }],
   ];
 
@@ -273,11 +247,19 @@ export default function RequestDetailsModal({
                 )}
               </View>
 
-              <View style={styles.grandTotalRow}>
-                <Text style={styles.grandTotalLabel}>Grand Total Amount</Text>
-                <Text style={styles.grandTotalValue}>
-                  {formatAmount(request?.grandTotalAmount ?? request?.totalAmount)}
-                </Text>
+              <View style={styles.totalsCard}>
+                <View style={styles.totalRow}>
+                  <Text style={styles.totalLabel}>Subtotal</Text>
+                  <Text style={styles.totalValue}>{formatAmount(request?.subtotalAtOrder ?? request?.subtotal ?? products.reduce((sum, item) => sum + Number(item.subtotal || 0), 0))}</Text>
+                </View>
+                <View style={styles.totalRow}>
+                  <Text style={styles.totalLabel}>Delivery Fee</Text>
+                  <Text style={styles.totalValue}>{formatAmount(request?.deliveryFeeAtOrder ?? request?.deliveryFee ?? 0)}</Text>
+                </View>
+                <View style={[styles.totalRow, styles.grandTotalRow]}>
+                  <Text style={styles.grandTotalLabel}>Grand Total</Text>
+                  <Text style={styles.grandTotalValue}>{formatAmount(request?.grandTotalAmount ?? request?.totalAmount)}</Text>
+                </View>
               </View>
 
               {typeof onEdit === 'function' && (
@@ -479,19 +461,35 @@ const styles = createPortalStyleSheet({
     paddingHorizontal: 12,
     paddingVertical: 12,
   },
-  grandTotalRow: {
-    minHeight: 48,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
+  totalsCard: {
     borderWidth: 1,
     borderColor: CARD_BORDER,
     borderRadius: 14,
     backgroundColor: '#F8FCFF',
     paddingHorizontal: 12,
-    paddingVertical: 12,
     marginTop: 12,
+  },
+  totalRow: {
+    minHeight: 42,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    paddingVertical: 9,
+  },
+  grandTotalRow: {
+    borderTopWidth: 1,
+    borderTopColor: CARD_BORDER,
+  },
+  totalLabel: {
+    color: TEXT_MUTED,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  totalValue: {
+    color: TEXT_DARK,
+    fontSize: 12,
+    fontWeight: '800',
   },
   grandTotalLabel: {
     flex: 1,

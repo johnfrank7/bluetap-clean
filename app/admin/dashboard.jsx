@@ -1,9 +1,9 @@
 import React from 'react';
-import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import AdminShell from '../../components/AdminShell';
 import { CardSkeleton } from '../../components/AdminSkeleton';
-import { EmptyState, SectionCard, StatCard, StatusBadge } from '../../components/DashboardUi';
+import { EmptyState, SectionCard, StatCard as DashboardStatCard, StatusBadge } from '../../components/DashboardUi';
 import { useAdminTheme } from '../../components/AdminTheme';
 import { getAdminDashboardOverview } from '../../services/branchManagement';
 import { ADMIN_CACHE_KEYS, useAdminData } from '../../services/adminDataCache';
@@ -16,6 +16,24 @@ const quickActions = [
 ];
 const toTime = (value) => value?.toMillis?.() || value?.seconds * 1000 || new Date(value || 0).getTime() || 0;
 const dateLabel = (value) => { const time = toTime(value); return time ? new Date(time).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : 'Recently'; };
+const money = (value) => `₱${Number(value || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+function Interactive({ children, label, onPress, style, styles }) { return <Pressable accessibilityRole="button" accessibilityLabel={label} onPress={onPress} style={({ hovered, pressed, focused }) => [style, styles.interactive, hovered && styles.interactiveHover, pressed && styles.interactivePressed, focused && styles.interactiveFocus]}>{children}</Pressable>; }
+
+const dashboardRouteByLabel = {
+  'Total branches': '/admin/branches',
+  Managers: '/admin/managers',
+  'Managed accounts': '/admin/managers',
+  Requesters: '/admin/managers',
+  Distributors: '/admin/distributors',
+};
+function StatCard(props) {
+  const router = useRouter();
+  const { colors } = useAdminTheme();
+  const styles = createStyles(colors);
+  const route = dashboardRouteByLabel[props.label];
+  if (!route) return <DashboardStatCard {...props} />;
+  return <Interactive label={`Open ${props.label}`} onPress={() => router.push(route)} style={{ flexGrow: 1, flexBasis: 180 }} styles={styles}><DashboardStatCard {...props} /></Interactive>;
+}
 
 function SectionError({ message, onRetry, styles }) {
   return <View style={styles.sectionError}><Text style={styles.noticeText}>{message}</Text><TouchableOpacity onPress={onRetry}><Text style={styles.retry}>Retry</Text></TouchableOpacity></View>;
@@ -30,6 +48,7 @@ export default function AdminDashboard() {
   const retry = () => refresh({ force: true });
   const summary = data?.summary;
   const security = data?.security;
+  const sales = data?.sales;
   const registrationLabel = security
     ? `${security.faceVerificationEnabled ? 'Face' : ''}${security.faceVerificationEnabled && security.emailOtpEnabled ? ' + ' : ''}${security.emailOtpEnabled ? 'Email OTP' : ''}`
     : '';
@@ -47,7 +66,7 @@ export default function AdminDashboard() {
     </> : Array.from({ length: 5 }, (_, index) => <CardSkeleton key={index} style={styles.statSkeleton} />)}</View>
 
     <View style={styles.mainGrid}>
-      <SectionCard style={styles.salesCard}><View style={styles.sectionHeader}><View><Text style={styles.cardTitle}>Sales overview</Text><Text style={styles.cardSubtitle}>Platform-wide sales reporting</Text></View><StatusBadge status="Unavailable" /></View><EmptyState title="No sales data yet" detail="A platform-wide sales aggregate is not available through the current Admin data sources." /></SectionCard>
+      <Interactive label="Open Analytics and Reporting" onPress={() => router.push('/admin/analytics')} style={styles.salesCard} styles={styles}><SectionCard><View style={styles.sectionHeader}><View><Text style={styles.cardTitle}>Sales overview</Text><Text style={styles.cardSubtitle}>{sales?.scope || 'Recent 500 orders'}</Text></View><StatusBadge status={sales ? 'Live' : 'Unavailable'} /></View>{sales ? <View style={styles.salesMetrics}><View><Text style={styles.salesLabel}>SNAPSHOT REVENUE</Text><Text style={styles.salesValue}>{money(sales.revenue)}</Text></View><View><Text style={styles.salesLabel}>DELIVERED ORDERS</Text><Text style={styles.salesMetric}>{sales.deliveredOrders}</Text></View><View><Text style={styles.salesLabel}>UNITS SOLD</Text><Text style={styles.salesMetric}>{sales.units}</Text></View></View> : <SectionError message={data?.errors?.sales || 'Sales overview is unavailable.'} onRetry={retry} styles={styles} />}</SectionCard></Interactive>
       {!data && loading ? <CardSkeleton lines={5} style={styles.securityCard} /> : <SectionCard style={styles.securityCard}><Text style={styles.cardTitle}>Security policy</Text><Text style={styles.cardSubtitle}>Current verification and account safeguards</Text>{data?.errors?.security || !security ? <SectionError message={data?.errors?.security || 'Security overview is unavailable.'} onRetry={retry} styles={styles} /> : <><View style={styles.policyRow}><Text style={styles.policyLabel}>Face verification</Text><StatusBadge status={security.faceVerificationEnabled ? 'enabled' : 'disabled'} /></View><View style={styles.policyRow}><Text style={styles.policyLabel}>Email OTP</Text><StatusBadge status={security.emailOtpEnabled ? 'enabled' : 'disabled'} /></View><Text style={styles.policyLimit}>{security.maxAccountsPerDevice} accounts/device · {security.maxAccountsPerIp} accounts/network</Text></>}<TouchableOpacity onPress={() => router.push('/admin/registration-security')}><Text style={styles.inlineLink}>Open security settings →</Text></TouchableOpacity></SectionCard>}
     </View>
 
@@ -62,9 +81,9 @@ export default function AdminDashboard() {
 
 const createStyles = (colors) => StyleSheet.create({
   hero:{flexDirection:'row',flexWrap:'wrap',alignItems:'center',justifyContent:'space-between',gap:20,backgroundColor:colors.primary,borderRadius:20,padding:26,marginBottom:26},heroCopy:{flex:1,minWidth:220},eyebrow:{color:'#CBEAFF',fontSize:11,fontWeight:'900',letterSpacing:1},heroTitle:{color:'#FFF',fontSize:25,fontWeight:'900',marginTop:6},heroBody:{color:'#E3F2FD',lineHeight:20,marginTop:7,maxWidth:600},heroChip:{minWidth:135,backgroundColor:'rgba(255,255,255,.14)',borderWidth:1,borderColor:'rgba(255,255,255,.2)',borderRadius:14,padding:14},heroChipLabel:{color:'#CBEAFF',fontSize:10,fontWeight:'900',letterSpacing:.6},heroChipValue:{color:'#FFF',fontWeight:'800',marginTop:5},
-  sectionHeading:{flexDirection:'row',justifyContent:'space-between',alignItems:'center'},sectionTitle:{color:colors.textPrimary,fontSize:17,fontWeight:'900',marginBottom:12},refreshing:{color:colors.textSecondary,fontSize:12,marginBottom:12},statGrid:{flexDirection:'row',flexWrap:'wrap',gap:14,marginBottom:24},statSkeleton:{minHeight:152,flexBasis:180},
+  sectionHeading:{flexDirection:'row',justifyContent:'space-between',alignItems:'center'},sectionTitle:{color:colors.textPrimary,fontSize:17,fontWeight:'900',marginBottom:12},refreshing:{color:colors.textSecondary,fontSize:12,marginBottom:12},statGrid:{flexDirection:'row',flexWrap:'wrap',gap:14,marginBottom:24},statSkeleton:{minHeight:152,flexBasis:180},interactive:{borderRadius:16,transitionDuration:'160ms',transitionProperty:'transform, box-shadow, border-color',cursor:'pointer',outlineStyle:'none'},interactiveHover:{transform:[{translateY:-3},{scale:1.01}],shadowColor:colors.primary,shadowOpacity:.16,shadowRadius:12,elevation:5},interactivePressed:{transform:[{scale:.985}]},interactiveFocus:{borderWidth:2,borderColor:colors.primary},
   mainGrid:{flexDirection:'row',flexWrap:'wrap',gap:16,marginBottom:16},salesCard:{flexGrow:1,flexBasis:430},securityCard:{flexGrow:1,flexBasis:290},performanceCard:{flexGrow:1,flexBasis:430},activityCard:{flexGrow:1,flexBasis:290},sectionHeader:{flexDirection:'row',flexWrap:'wrap',justifyContent:'space-between',gap:12,alignItems:'flex-start',marginBottom:18},cardTitle:{color:colors.textPrimary,fontSize:17,fontWeight:'900'},cardSubtitle:{color:colors.textSecondary,fontSize:12,marginTop:4},
-  policyRow:{flexDirection:'row',alignItems:'center',justifyContent:'space-between',paddingVertical:12,borderBottomWidth:1,borderBottomColor:colors.border},policyLabel:{color:colors.textPrimary,fontWeight:'700'},policyLimit:{color:colors.textSecondary,fontSize:12,marginTop:14},inlineLink:{color:colors.primary,fontWeight:'800',fontSize:13,marginTop:13},branchRow:{minHeight:62,flexDirection:'row',alignItems:'center',gap:12,borderTopWidth:1,borderTopColor:colors.border,paddingVertical:10},branchNameWrap:{flex:1,minWidth:120},branchName:{color:colors.textPrimary,fontWeight:'800'},branchMeta:{color:colors.textSecondary,fontSize:12,marginTop:3},managerCount:{color:colors.textSecondary,fontSize:12,fontWeight:'700'},
+  salesMetrics:{flexDirection:'row',flexWrap:'wrap',gap:18,alignItems:'flex-end'},salesLabel:{color:colors.textSecondary,fontSize:10,fontWeight:'900'},salesValue:{color:colors.success,fontSize:25,fontWeight:'900',marginTop:5},salesMetric:{color:colors.textPrimary,fontSize:20,fontWeight:'900',marginTop:5},policyRow:{flexDirection:'row',alignItems:'center',justifyContent:'space-between',paddingVertical:12,borderBottomWidth:1,borderBottomColor:colors.border},policyLabel:{color:colors.textPrimary,fontWeight:'700'},policyLimit:{color:colors.textSecondary,fontSize:12,marginTop:14},inlineLink:{color:colors.primary,fontWeight:'800',fontSize:13,marginTop:13},branchRow:{minHeight:62,flexDirection:'row',alignItems:'center',gap:12,borderTopWidth:1,borderTopColor:colors.border,paddingVertical:10},branchNameWrap:{flex:1,minWidth:120},branchName:{color:colors.textPrimary,fontWeight:'800'},branchMeta:{color:colors.textSecondary,fontSize:12,marginTop:3},managerCount:{color:colors.textSecondary,fontSize:12,fontWeight:'700'},
   activityRow:{flexDirection:'row',alignItems:'center',paddingVertical:11,borderTopWidth:1,borderTopColor:colors.border},activityDot:{width:9,height:9,borderRadius:5,backgroundColor:colors.primary,marginRight:11},activityCopy:{flex:1},activityTitle:{color:colors.textPrimary,fontWeight:'800'},activityMeta:{color:colors.textSecondary,fontSize:12,marginTop:2},compactEmpty:{minHeight:130,marginTop:16},actionGrid:{flexDirection:'row',flexWrap:'wrap',gap:14},actionTouch:{flexGrow:1,flexBasis:230,maxWidth:390},actionCard:{minHeight:145},actionTitle:{color:colors.textPrimary,fontSize:16,fontWeight:'900'},actionBody:{color:colors.textSecondary,lineHeight:19,marginTop:7},
   sectionError:{marginTop:14,borderWidth:1,borderColor:colors.danger,borderRadius:10,padding:12,backgroundColor:colors.dangerSoft},noticeText:{color:colors.danger,fontWeight:'700'},retry:{color:colors.primary,fontWeight:'900',marginTop:8},
 });

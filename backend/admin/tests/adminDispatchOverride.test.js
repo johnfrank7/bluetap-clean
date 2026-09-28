@@ -60,7 +60,10 @@ test('Admin override persists selected distributor, delivery time, and mandatory
   assert.equal(result.statusCode, 200);
   const order = f.records.get('requests/order-a');
   assert.equal(order.assignedDistributorUid, 'distributor-a');
+  assert.equal(order.assignedDistributorUniqueIdSnapshot, 'Dis001');
+  assert.equal(order.distributor_unique_id, 'Dis001');
   assert.equal(order.assignmentHistory[0].event, 'ADMIN_DISPATCH_OVERRIDE');
+  assert.equal(order.assignmentHistory[0].distributorUniqueIdSnapshot, 'Dis001');
   assert.equal(order.assignmentHistory[0].reason, 'Emergency capacity');
   assert.equal([...f.records.values()].find((value) => value.action === 'ADMIN_DISTRIBUTOR_OVERRIDE').reason, 'Emergency capacity');
 });

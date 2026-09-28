@@ -34,6 +34,8 @@ Roles are `admin`, `manager`, `distributor`, and `requester`. The former operati
 - Manager self-profile editing is limited to approved personal fields. Branch, role, publicUid, status, and privilege fields remain server-controlled.
 - Admin Distributor Override security: When Admins exercise emergency dispatch override, the backend enforces same-branch ownership (the target distributor's `branchId` must match the order's `branchId`), blocks cross-branch dispatch attempts with HTTP 403, and records an append-only audit entry in `assignmentHistory` with `event: 'ADMIN_DISPATCH_OVERRIDE'` containing the Admin actor UID and mandatory justification reason.
 - Admin override Distributor selection remains restricted to eligible active Distributors from the authoritative fulfillment branch. The backend checks status, branch, and scheduled weekday even when the UI filters choices.
+- Managers may update product delivery-rule overrides only for their server-authoritative `manager.branchId`; client-supplied branch identifiers never select the write target and global Admin defaults remain immutable to Managers.
+- Public UID migration/backfill remains an Admin-authorized, server-side, deterministic, idempotent, audited workflow that preserves the oldest valid unique assignment and never derives a display identifier from a raw Firebase Auth UID.
 
 ## System Maintenance retention boundaries
 

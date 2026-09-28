@@ -170,6 +170,7 @@ function createAdminDispatchOverrideHandler(getAdmin = getFirebaseAdmin) {
       const previousDistributorUid = clean(orderData.assignedDistributorUid || orderData.distributor_id, 128);
       const previousDistributorName = clean(orderData.assignedDistributorNameSnapshot || orderData.distributor_name, 160);
       const targetName = fullName(targetData);
+      const targetPublicUid = clean(targetData.publicUid || targetData.displayUid || targetData.unique_id, 80);
 
       const event = 'ADMIN_DISPATCH_OVERRIDE';
       const historyEntry = {
@@ -178,6 +179,7 @@ function createAdminDispatchOverrideHandler(getAdmin = getFirebaseAdmin) {
         previousDistributorNameSnapshot: previousDistributorName || null,
         distributorUid,
         distributorNameSnapshot: targetName,
+        distributorUniqueIdSnapshot: targetPublicUid,
         assignedByAdminUid: admin.uid,
         assignedAt: now,
         scheduledAt,
@@ -197,6 +199,9 @@ function createAdminDispatchOverrideHandler(getAdmin = getFirebaseAdmin) {
         status: 'distributor_assigned',
         assignedDistributorUid: distributorUid,
         assignedDistributorNameSnapshot: targetName,
+        assignedDistributorUniqueIdSnapshot: targetPublicUid,
+        distributorUniqueId: targetPublicUid,
+        distributor_unique_id: targetPublicUid,
         distributor_id: distributorUid,
         distributor_name: targetName,
         scheduledAt,

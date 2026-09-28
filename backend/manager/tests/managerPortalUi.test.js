@@ -12,6 +12,8 @@ const notificationModal = read('components/ManagerNotificationDetailsModal.jsx')
 const managerShell = read('components/ManagerShell.jsx');
 const managerRealtime = read('components/ManagerRealtimeData.jsx');
 const managerProfile = read('app/manager/profile.jsx');
+const managerProducts = read('app/manager/products.jsx');
+const managerAnalytics = read('app/manager/analytics.jsx');
 const emptyState = read('components/BlueTapEmptyState.jsx');
 const notificationHook = read('components/ManagerNotifications.jsx');
 const rules = read('firestore.rules');
@@ -64,7 +66,8 @@ test('Manager notification control reuses the canonical BlueTap bell asset and k
 });
 
 test('notification cards open read-only context details with no operational actions', () => {
-  assert.match(notifications, /setSelectedEvent\(event\)/);
+  assert.match(notifications, /setSelectedEventId\(event\.id\)/);
+  assert.match(notifications, /events\.find/);
   assert.match(notifications, /ManagerNotificationDetailsModal/);
   for (const label of ['Order ID', 'Requester UID', 'Delivery address', 'Distributor UID', 'Delivery fee', 'Event time', 'Products']) {
     assert.match(notificationModal, new RegExp(label));
@@ -85,4 +88,26 @@ test('Manager notification listeners and rules remain strictly branch scoped', (
   assert.match(managerRealtime, /where\('sourceBranchId', '==', branchId\)/);
   assert.match(rules, /allow get, list: if isManagerBranch\(resource\.data\.sourceBranchId\);/);
   assert.doesNotMatch(rules, /match \/managerOperationalEvents\/\{eventId\}[\s\S]*allow read: if isManager\(\);/);
+});
+
+test('Manager Products separates read-only catalog data, pricing, and branch-scoped delivery rules', () => {
+  for (const label of ['DELIVERY PRICING', 'BRANCH DELIVERY RULES', 'Base delivery fee', 'Outside-radius fee', 'Order limit']) {
+    assert.match(managerProducts, new RegExp(label, 'i'));
+  }
+  assert.match(managerProducts, /updateManagerProductPolicy/);
+  assert.doesNotMatch(managerProducts, /createAdminProduct|updateAdminProduct|Choose image/);
+});
+
+test('Manager Analytics uses only shared branch realtime data and contains no demo station series', () => {
+  assert.match(managerAnalytics, /useManagerRealtimeData/);
+  assert.match(managerAnalytics, /Snapshot revenue/);
+  assert.match(managerAnalytics, /Order status distribution/);
+  assert.doesNotMatch(managerAnalytics, /Station A|Station B|Aquabea|DEFAULT_STATIONS/);
+});
+
+test('Manager dispatch uses a compact valid-date selector rather than a long date-pill row', () => {
+  assert.match(distributors, /accessibilityRole="combobox"/);
+  assert.match(distributors, /allowedDayOffsets/);
+  assert.match(distributors, /Today/);
+  assert.match(distributors, /Tomorrow/);
 });

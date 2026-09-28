@@ -80,6 +80,9 @@ test('Admin analytics uses the bounded shared snapshot and renders sections prog
   assert.match(analytics, /loadingRequests && requests\.length === 0/);
   assert.match(analytics, /stationLoading && stationBreakdown\.length === 0/);
   assert.doesNotMatch(analytics, /collection\(db, 'requests'\)/);
+  assert.match(analytics, /OrderStatusMiniGraph/);
+  assert.match(analytics, /onHoverIn/);
+  assert.match(analytics, /filterGrid/);
 });
 
 test('Admin product metadata renders independently from cached image loading', () => {
@@ -88,6 +91,34 @@ test('Admin product metadata renders independently from cached image loading', (
   assert.match(products, /cachePolicy="memory-disk"/);
   assert.match(products, /contentFit="contain"/);
   assert.match(products, /product\.product_name/);
+});
+
+test('Admin Request Oversight exposes one structured, theme-aware override entry point', () => {
+  const requests = read('app', 'admin', 'requests.jsx');
+  const override = read('backend', 'admin', 'adminDispatchOverrideHandler.js');
+  assert.equal((requests.match(/onPress=\{\(\) => openOverride\(selectedOrder\)\}/g) || []).length, 1);
+  assert.doesNotMatch(requests, /overrideTriggerBtn/);
+  for (const section of ['overrideCallout', 'overrideContextGrid', 'overrideCombobox', 'overrideScheduleWarning', 'overrideFooter']) {
+    assert.match(requests, new RegExp(`styles\\.${section}`));
+  }
+  assert.match(requests, /selectedOrderOverrideEligible/);
+  assert.match(requests, /colors\.warningSoft/);
+  assert.match(requests, /colors\.textPrimary/);
+  assert.match(override, /targetBranchId !== branchId/);
+  assert.match(override, /OVERRIDE_REASON_REQUIRED/);
+  assert.match(override, /ADMIN_DISTRIBUTOR_OVERRIDE/);
+  assert.match(requests, /requests\.find/);
+});
+
+test('Admin dashboard cards are accessible destinations and sales uses bounded snapshot data', () => {
+  const dashboard = read('app', 'admin', 'dashboard.jsx');
+  const overview = read('backend', 'admin', 'dashboardOverviewHandler.js');
+  assert.match(dashboard, /dashboardRouteByLabel/);
+  assert.match(dashboard, /accessibilityRole="button"/);
+  assert.match(dashboard, /interactiveHover/);
+  assert.match(dashboard, /sales\?\.scope/);
+  assert.match(overview, /deliveredOrderStats/);
+  assert.match(overview, /Recent 500 orders/);
 });
 
 test('performance timing instrumentation is development-only', () => {

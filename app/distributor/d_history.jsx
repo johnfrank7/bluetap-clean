@@ -180,11 +180,12 @@ const HistoryRequestCard = ({ request, onViewDetails }) => {
 export default function DistributorHistory() {
   const { colors, isDark } = useBlueTapTheme();
   const router = useRouter();
-  const [selectedRequest, setSelectedRequest] = useState(null);
+  const [selectedRequestId, setSelectedRequestId] = useState(null);
   const { orders, loading, error, refresh } = useAssignedDistributorOrders();
   const historyRequests = useMemo(() => orders
     .map(toDistributorScreenOrder)
     .filter((request) => HISTORY_STATUSES.has(normalizeDistributorOrderStatus(request.status))), [orders]);
+  const selectedRequest = historyRequests.find((request) => String(request.sourceId) === String(selectedRequestId)) || null;
   const selectedDetailsRequest = getDetailsRequestData(selectedRequest);
 
   return (
@@ -228,6 +229,7 @@ export default function DistributorHistory() {
             : error ? <View style={styles.emptyCard}><Text style={styles.emptyTitle}>History unavailable.</Text><Text style={styles.emptyText}>{error}</Text><TouchableOpacity onPress={refresh} style={styles.fullWidthActionButton}><Text style={styles.secondaryActionText}>Try Again</Text></TouchableOpacity></View>
               : historyRequests.length === 0 ? (
                 <BlueTapEmptyState
+                  variant="history"
                   title="No Delivery History"
                   description="Completed assigned deliveries will appear here."
                 />
@@ -236,7 +238,7 @@ export default function DistributorHistory() {
             <HistoryRequestCard
               key={request.sourceId}
               request={request}
-              onViewDetails={setSelectedRequest}
+              onViewDetails={(request) => setSelectedRequestId(request.sourceId)}
             />
           ))}
         </ScrollView>
@@ -245,7 +247,7 @@ export default function DistributorHistory() {
 
       <RequestDetailsModal
         visible={!!selectedRequest}
-        onClose={() => setSelectedRequest(null)}
+        onClose={() => setSelectedRequestId(null)}
         request={selectedDetailsRequest}
       />
     </SafeAreaView>

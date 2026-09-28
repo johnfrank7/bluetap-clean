@@ -21,6 +21,16 @@ function accountStatus(data = {}) {
   return clean(data.accountStatus || data.status || 'active', 30).toLowerCase();
 }
 
+function deliveredOrderStats(order = {}) {
+  const status = clean(order.status, 60).toLowerCase().replace(/[\s-]+/g, '_');
+  if (status !== 'delivered') return { deliveredOrders: 0, revenue: 0, units: 0 };
+  const items = Array.isArray(order.items) ? order.items : [];
+  const units = items.length ? items.reduce((sum, item) => sum + Number(item.quantity || 0), 0) : Number(order.quantity || 0);
+  const itemRevenue = items.reduce((sum, item) => sum + (Number(item.totalAtOrder ?? item.line_total ?? (Number(item.unitPriceAtOrder || 0) * Number(item.quantity || 0))) || 0), 0);
+  const revenue = Number(order.totalAtOrder ?? order.total_cost ?? itemRevenue) || 0;
+  return { deliveredOrders: 1, revenue, units };
+}
+
 function createAdminDashboardOverviewHandler(getAdmin = getFirebaseAdmin) {
   return async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
@@ -31,10 +41,11 @@ function createAdminDashboardOverviewHandler(getAdmin = getFirebaseAdmin) {
     try {
       const { auth, db } = getAdmin();
       await requireAdmin(req, auth, db);
-      const [branchResult, userResult, securityResult] = await Promise.allSettled([
+      const [branchResult, userResult, securityResult, requestResult] = await Promise.allSettled([
         timed('ADMIN_OVERVIEW_BRANCHES_READ', () => db.collection('branches').get()),
         timed('ADMIN_OVERVIEW_USERS_READ', () => db.collection('users').get()),
         timed('ADMIN_OVERVIEW_SECURITY_READ', () => loadRegistrationSecurity(db)),
+        timed('ADMIN_OVERVIEW_REQUESTS_READ', () => db.collection('requests').orderBy('createdAt', 'desc').limit(500).get()),
       ]);
 
       const errors = {};
@@ -43,6 +54,7 @@ function createAdminDashboardOverviewHandler(getAdmin = getFirebaseAdmin) {
       if (branchResult.status === 'rejected') errors.branches = 'Branch overview is temporarily unavailable.';
       if (userResult.status === 'rejected') errors.accounts = 'Account overview is temporarily unavailable.';
       if (securityResult.status === 'rejected') errors.security = 'Security overview is temporarily unavailable.';
+      if (requestResult.status === 'rejected') errors.sales = 'Sales overview is temporarily unavailable.';
 
       const accounts = userDocs
         .map((doc) => ({ uid: doc.id, ...doc.data() }))
@@ -71,6 +83,12 @@ function createAdminDashboardOverviewHandler(getAdmin = getFirebaseAdmin) {
       const security = securityResult.status === 'fulfilled' ? securityResult.value : null;
       const activeAccounts = accounts.filter((profile) => !['inactive', 'rejected'].includes(accountStatus(profile))).length;
       const countRole = (role) => accounts.filter((profile) => profile.role === role).length;
+      const sales = requestResult.status === 'fulfilled'
+        ? requestResult.value.docs.reduce((total, doc) => {
+            const stats = deliveredOrderStats(doc.data() || {});
+            return { deliveredOrders: total.deliveredOrders + stats.deliveredOrders, revenue: total.revenue + stats.revenue, units: total.units + stats.units, scope: 'Recent 500 orders' };
+          }, { deliveredOrders: 0, revenue: 0, units: 0, scope: 'Recent 500 orders' })
+        : null;
 
       logDevelopmentTiming('[admin-performance]', { stage: 'ADMIN_DASHBOARD_OVERVIEW_FINISHED', durationMs: Date.now() - startedAt });
       return res.status(200).json({
@@ -92,6 +110,7 @@ function createAdminDashboardOverviewHandler(getAdmin = getFirebaseAdmin) {
           maxAccountsPerDevice: security.maxAccountsPerDevice,
           maxAccountsPerIp: security.maxAccountsPerIp,
         } : null,
+        sales,
         errors,
       });
     } catch (error) {
@@ -104,4 +123,4 @@ function createAdminDashboardOverviewHandler(getAdmin = getFirebaseAdmin) {
   };
 }
 
-module.exports = { createAdminDashboardOverviewHandler };
+module.exports = { createAdminDashboardOverviewHandler, deliveredOrderStats };

@@ -506,33 +506,39 @@ export default function RequesterDashboard() {
     },
     [productCarouselItemWidth, productCarouselSideInset]
   );
-  const detailsRequestData = detailsRequest
+  const liveDetailsRequest = detailsRequest
+    ? currentRequests.find((request) => request.id === detailsRequest.id) || detailsRequest
+    : null;
+  const detailsRequestData = liveDetailsRequest
     ? {
-        requestId: detailsRequest.request_id || detailsRequest.id,
-        status: detailsRequest.status || 'Pending',
-        orderDate: formatRequestDate(detailsRequest.created_at),
-        deliveryDate: formatRequestDate(detailsRequest.delivery_date),
-        product: getCardProductSummary(detailsRequest),
-        containerType: detailsRequest.container || 'Not set',
-        quantity: getRequestQuantityText(detailsRequest),
-        totalAmount: getRequestTotalAmount(detailsRequest),
-        waterStation: detailsRequest.water_station || 'Not set',
+        requestId: liveDetailsRequest.request_id || liveDetailsRequest.id,
+        status: liveDetailsRequest.status || 'Pending',
+        orderDate: formatRequestDate(liveDetailsRequest.created_at),
+        deliveryDate: formatRequestDate(liveDetailsRequest.delivery_date),
+        product: getCardProductSummary(liveDetailsRequest),
+        containerType: liveDetailsRequest.container || 'Not set',
+        quantity: getRequestQuantityText(liveDetailsRequest),
+        totalAmount: getRequestTotalAmount(liveDetailsRequest),
+        waterStation: liveDetailsRequest.water_station || 'Not set',
         paymentMethod:
-          detailsRequest.payment_method ||
-          detailsRequest.paymentMethod ||
-          'Not set',
-        requesterName: detailsRequest.requester_name || 'Not set',
+          liveDetailsRequest.payment_method ||
+          liveDetailsRequest.paymentMethod ||
+          'cash_on_delivery',
+        requesterName: liveDetailsRequest.requesterNameSnapshot || liveDetailsRequest.requester_name || 'Not set',
         requesterUniqueId:
-          detailsRequest.requester_unique_id ||
+          liveDetailsRequest.requesterUniqueIdSnapshot ||
+          liveDetailsRequest.requester_unique_id ||
           findLocalUserForAuthRole(auth.currentUser, 'requester')?.unique_id ||
           '',
-        customerName: detailsRequest.requester_name || 'Not set',
-        distributorName: detailsRequest.distributor_name || '',
-        distributorUniqueId: detailsRequest.distributor_unique_id || '',
-        contactNumber: detailsRequest.contact_number || 'Not set',
-        deliveryAddress: detailsRequest.address || 'Not set',
-        items: getRequestItems(detailsRequest),
-        grandTotalAmount: getRequestTotalAmount(detailsRequest),
+        customerName: liveDetailsRequest.requesterNameSnapshot || liveDetailsRequest.requester_name || 'Not set',
+        distributorName: liveDetailsRequest.distributorNameSnapshot || liveDetailsRequest.distributor_name || '',
+        distributorUniqueId: liveDetailsRequest.distributorPublicUidSnapshot || liveDetailsRequest.distributor_unique_id || '',
+        contactNumber: liveDetailsRequest.contactNumberSnapshot || liveDetailsRequest.contact_number || 'Not set',
+        deliveryAddress: liveDetailsRequest.addressSnapshot || liveDetailsRequest.address || 'Not set',
+        items: getRequestItems(liveDetailsRequest),
+        subtotalAtOrder: liveDetailsRequest.subtotalAtOrder,
+        deliveryFeeAtOrder: liveDetailsRequest.deliveryFeeAtOrder,
+        grandTotalAmount: getRequestTotalAmount(liveDetailsRequest),
       }
     : null;
 
@@ -1326,29 +1332,29 @@ const styles = createPortalStyleSheet({
     marginBottom: 16,
     paddingBottom: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#E2E8F0',
+    borderBottomColor: '#D7ECFF',
   },
   allProductsModalTitle: {
     fontSize: 18,
     fontWeight: '800',
-    color: '#0F172A',
+    color: '#12304A',
   },
   allProductsModalSubtitle: {
     fontSize: 12,
-    color: '#64748B',
+    color: '#455A64',
     marginTop: 2,
   },
   allProductsCloseBtn: {
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: '#F1F5F9',
+    backgroundColor: '#EEF3F7',
     alignItems: 'center',
     justifyContent: 'center',
   },
   allProductsCloseText: {
     fontSize: 20,
-    color: '#475569',
+    color: '#455A64',
     lineHeight: 22,
     fontWeight: '700',
   },

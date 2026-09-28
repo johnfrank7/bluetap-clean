@@ -72,6 +72,12 @@ export default function BlueTapEmptyState({
 
 const ICON_ASSETS = {
   orders: require('../assets/icons/ballot.png'),
+  requests: require('../assets/icons/ballot.png'),
+  schedule: require('../assets/icons/calendar-clock.png'),
+  history: require('../assets/icons/time-past.png'),
+  notifications: require('../assets/icons/notif.png'),
+  products: require('../assets/icons/square-plus.png'),
+  analytics: require('../assets/icons/time-past.png'),
   management: require('../assets/icons/pencil.png'),
   people: require('../assets/icons/user.png'),
   applications: require('../assets/icons/square-plus.png'),
@@ -85,7 +91,7 @@ function ContextIllustration({ variant, styles }) {
       </View>
     );
   }
-  if (variant === 'dispatch') {
+  if (variant === 'dispatch' || variant === 'delivery') {
     return (
       <View style={styles.contextIconSurface}>
         <View style={styles.truck}>
