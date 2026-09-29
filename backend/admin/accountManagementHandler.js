@@ -13,6 +13,7 @@ const {
   distributorBranchMembershipKey,
   getBranchMembershipVersion,
 } = require('../utils/relationshipEpochs');
+const { reconcileDistributorMembershipInTransaction } = require('../chat/conversationLifecycleService');
 
 const ROLES = new Set(SESSION_ROLES);
 const ACTIONS = new Set(['deactivate', 'suspend', 'terminate', 'reactivate', 'resetPassword', 'updateProfile', 'reassignManager', 'signOutAllSessions', 'updateAccount', 'backfillUids']);
@@ -87,6 +88,15 @@ async function updateAccount({ auth, db, admin, uid, before, body }) {
       if (!latestSnapshot.exists || distributorBranchMembershipKey(latest) !== membershipEpoch.previousMembershipKey || getBranchMembershipVersion(latest) !== membershipEpoch.previousVersion) {
         throw new OtpError(409, 'DISTRIBUTOR_MEMBERSHIP_CHANGED', 'The Distributor branch membership changed. Refresh and try again.');
       }
+      await reconcileDistributorMembershipInTransaction({
+        tx,
+        db,
+        distributorUid: uid,
+        before: latest,
+        after,
+        now,
+        reason: 'distributor_branch_membership_changed',
+      });
     }
     tx.update(targetRef, changes);
     audits.forEach((action) => tx.set(db.collection('adminAuditLogs').doc(), auditRecord(action, admin, uid, effectiveRole, before, after, now, branch?.id || after.branchId || null, action === 'DISTRIBUTOR_BRANCH_CHANGED' ? { previousBranchId: clean(before.branchId, 80), newBranchId: clean(after.branchId, 80), changedByAdminUid: admin.uid, changedAt: now } : {})));

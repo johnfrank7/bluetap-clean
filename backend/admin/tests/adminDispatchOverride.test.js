@@ -1,6 +1,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const { createAdminDispatchOverrideHandler } = require('../adminDispatchOverrideHandler');
+const { authorityKeyHash, buildConversationFoundation } = require('../../chat/conversationService');
 const { manilaScheduleDate, scheduledWeekday } = require('../../../services/productOrderPolicy');
 
 function fixture() {
@@ -70,4 +71,27 @@ test('Admin override persists selected distributor, delivery time, and mandatory
   const retried = await call(f.handler, 'POST', { orderId: 'order-a', distributorUid: 'distributor-a', scheduledAt: f.validDate.toISOString(), reason: 'Retry after timeout' });
   assert.equal(retried.statusCode, 200);
   assert.equal(f.records.get('requests/order-a').assignmentVersion, 2);
+});
+
+test('Admin reassignment uses the shared lifecycle reconciler and disables the old assignment thread', async () => {
+  const f = fixture();
+  f.records.set('users/distributor-a2', { role: 'distributor', branchId: 'branch-a', distributorStatus: 'active', fullName: 'Alex Driver', publicUid: 'Dis002' });
+  f.records.set('requests/order-a', {
+    ...f.records.get('requests/order-a'),
+    requester_id: 'requester-a',
+    assignedDistributorUid: 'distributor-a',
+    distributor_id: 'distributor-a',
+    assignmentVersion: 2,
+    status: 'accepted',
+  });
+  const authority = { orderId: 'order-a', requesterUid: 'requester-a', distributorUid: 'distributor-a', assignmentVersion: 2, branchId: 'branch-a' };
+  const hash = authorityKeyHash('requester_distributor', authority);
+  f.records.set(`chatAuthorityRegistry/${hash}`, { authorityKeyHash: hash, conversationId: 'old-admin-thread', type: 'requester_distributor' });
+  f.records.set('chatConversations/old-admin-thread', buildConversationFoundation({ type: 'requester_distributor', authority, createdBy: { uid: 'requester-a', role: 'requester' }, now: new Date('2026-09-29T00:00:00Z') }));
+
+  const result = await call(f.handler, 'POST', { orderId: 'order-a', distributorUid: 'distributor-a2', scheduledAt: f.validDate.toISOString(), reason: 'Emergency reassignment' });
+  assert.equal(result.statusCode, 200);
+  assert.equal(f.records.get('requests/order-a').assignmentVersion, 3);
+  assert.equal(f.records.get('chatConversations/old-admin-thread').status, 'read_only');
+  assert.equal(f.records.get('chatConversations/old-admin-thread').lifecycleReason, 'ADMIN_DISPATCH_OVERRIDE');
 });

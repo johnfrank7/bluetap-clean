@@ -62,17 +62,29 @@ service cloud.firestore {
 
     function isConversationUserParticipant(conversation) {
       return conversation.participantUserUids is list
-        && request.auth.uid in conversation.participantUserUids;
+        && request.auth.uid in conversation.participantUserUids
+        && conversation.get('participantUserAccess', {}).get(request.auth.uid, '') in ['active', 'read_only'];
     }
 
     function isConversationBranchParticipant(conversation) {
       return conversation.participantBranchIds is list
-        && currentUser().branchId in conversation.participantBranchIds;
+        && currentUser().branchId in conversation.participantBranchIds
+        && conversation.get('participantBranchAccess', {}).get(currentUser().branchId, '') in ['active', 'read_only'];
+    }
+
+    function conversationAccessIsCurrent(conversation) {
+      return (conversation.status == 'active'
+          && (conversation.get('accessEndsAt', null) == null
+            || (conversation.accessEndsAt is timestamp && conversation.accessEndsAt > request.time)))
+        || (conversation.status == 'read_only'
+          && conversation.get('accessEndsAt', null) is timestamp
+          && conversation.accessEndsAt > request.time);
     }
 
     function canReadConversation(conversation) {
-      return ((isRequester() || isDistributor()) && isConversationUserParticipant(conversation))
-        || (isManager() && isConversationBranchParticipant(conversation));
+      return conversationAccessIsCurrent(conversation)
+        && (((isRequester() || isDistributor()) && isConversationUserParticipant(conversation))
+          || (isManager() && isConversationBranchParticipant(conversation)));
     }
 
     // The registration backend is the sole writer for these protected records.
@@ -165,12 +177,15 @@ service cloud.firestore {
       allow get, list: if canReadConversation(resource.data);
       allow create, update, delete: if false;
 
-      // Phase 2 history is served through the bounded Render endpoint, which
-      // can revalidate relationship epochs and lifecycle state. Direct reads
-      // remain closed until an equally strict Phase 3 realtime rule exists.
-      // Every message write is always server-only.
+      // Render transactionally maintains the parent lifecycle/access
+      // projection. Message listeners may read only while that parent remains
+      // readable to the caller's current logical principal. Every message
+      // write remains server-only.
       match /messages/{messageId} {
-        allow read, write: if false;
+        allow read: if canReadConversation(
+          get(/databases/$(database)/documents/chatConversations/$(conversationId)).data
+        );
+        allow create, update, delete: if false;
       }
     }
 

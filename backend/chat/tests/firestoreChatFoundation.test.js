@@ -11,7 +11,10 @@ const indexes = JSON.parse(readFileSync(resolve(root, 'firestore.indexes.json'),
 test('conversation summaries are scoped to the caller UID or current Manager branch', () => {
   const conversationBlock = rules.slice(rules.indexOf('match /chatConversations/{conversationId}'), rules.indexOf('match /requests/{requestId}'));
   assert.match(rules, /function isConversationUserParticipant\(conversation\)[\s\S]*request\.auth\.uid in conversation\.participantUserUids/);
+  assert.match(rules, /participantUserAccess[\s\S]*\['active', 'read_only'\]/);
   assert.match(rules, /function isConversationBranchParticipant\(conversation\)[\s\S]*currentUser\(\)\.branchId in conversation\.participantBranchIds/);
+  assert.match(rules, /participantBranchAccess[\s\S]*\['active', 'read_only'\]/);
+  assert.match(rules, /function conversationAccessIsCurrent\(conversation\)[\s\S]*conversation\.accessEndsAt > request\.time/);
   assert.match(rules, /function canReadConversation\(conversation\)[\s\S]*isRequester\(\) \|\| isDistributor\(\)[\s\S]*isManager\(\)/);
   assert.match(conversationBlock, /allow get, list:\s*if canReadConversation\(resource\.data\);/);
   assert.doesNotMatch(conversationBlock, /allow (?:get|read|list):\s*if isAdmin\(\)/);
@@ -19,7 +22,7 @@ test('conversation summaries are scoped to the caller UID or current Manager bra
 
 test('all authoritative chat, message, report, moderation, and restriction client writes are denied', () => {
   assert.match(rules, /match \/chatConversations\/\{conversationId\}[\s\S]*allow create, update, delete:\s*if false;/);
-  assert.match(rules, /match \/messages\/\{messageId\}[\s\S]*allow read, write:\s*if false;/);
+  assert.match(rules, /match \/messages\/\{messageId\}[\s\S]*allow create, update, delete:\s*if false;/);
   for (const collection of ['chatReports', 'chatModerationActions', 'chatRestrictions']) {
     assert.match(rules, new RegExp(`match \/${collection}\/\\{document=\\*\\*\\} \\{ allow read, write: if false; \\}`));
   }
@@ -28,10 +31,11 @@ test('all authoritative chat, message, report, moderation, and restriction clien
   }
 });
 
-test('direct message reads stay closed until Phase 3 can enforce current lifecycle authority', () => {
+test('direct message reads require the current server-maintained parent lifecycle projection', () => {
   const messageBlock = rules.slice(rules.indexOf('match /messages/{messageId}'), rules.indexOf('match /requests/{requestId}'));
-  assert.match(messageBlock, /allow read, write:\s*if false;/);
-  assert.match(rules, /Phase 2 history is served through the bounded Render endpoint/);
+  assert.match(messageBlock, /allow read:\s*if canReadConversation\(/);
+  assert.match(messageBlock, /get\(\/databases\/\$\(database\)\/documents\/chatConversations\/\$\(conversationId\)\)\.data/);
+  assert.match(messageBlock, /allow create, update, delete:\s*if false;/);
 });
 
 test('Firebase config keeps the two approved conversation summary indexes', () => {

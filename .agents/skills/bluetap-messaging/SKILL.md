@@ -45,9 +45,20 @@ There is no Requester-to-Requester chat, personal Manager-to-Manager direct mess
 ## History and rate limits
 
 - Phase 2 message history is loaded through `GET /api/chat/messages`, newest first, with a default page size of 40 and maximum of 50. Older pages use `beforeSeq`.
-- Direct Firestore message reads remain denied until a Phase 3 rule can enforce current epoch and lifecycle authority as strictly as Render Node. Direct client message writes always remain denied.
+- Direct Firestore message reads are allowed only through the parent conversation's Render-maintained participant-access and lifecycle projection. The current account/role, current Manager branch, participant access state, conversation status, and `accessEndsAt` must all permit the read. Direct client message writes always remain denied.
 - Persistent Firestore-backed limits are 5 committed new messages per 10 seconds and 30 per minute per authenticated user. Idempotent retries do not consume another allowance.
 - Rate-limit records contain bounded recent timestamps and a cleanup timestamp; retention cleanup is not implemented in Phase 2.
+
+## Lifecycle persistence
+
+- Canonical conversation states are `active`, `read_only`, and `closed`. Only Render Node may change lifecycle fields or participant access projections.
+- Requester/Distributor conversations remain active for seven calendar days after the trusted `deliveredAt` time. Render persists `accessEndsAt`; server and Firestore reads fail closed when that deadline expires.
+- Distributor decline, assignment clearing, reassignment, and Admin dispatch override invalidate the old `assignmentVersion` thread in the same order transaction. A later assignment uses a new authority hash and never reactivates the old thread.
+- A transfer request keeps source-branch order authority but immediately invalidates a cleared Distributor assignment. Transfer acceptance removes the source `active_order` reason and adds it for the target Branch; transfer decline grants the target nothing.
+- Requester/Branch reasons are independent. Removing `active_order` must not close a conversation while `requester_inquiry` or an unexpired `post_order_followup` reason remains valid.
+- A Distributor `branchMembershipVersion` change closes the old Distributor/Branch epoch in the same profile transaction. Same-branch profile and operational edits do not create a new conversation epoch.
+- Lifecycle reconciliation updates only existing conversations. New valid assignment, membership, and branch relationships remain eligible for the normal on-demand resolve/create path.
+- Terminal order context is a minimal sanitized snapshot only; never copy delivery coordinates or the entire order into chat.
 
 ## Current V1 exclusions
 

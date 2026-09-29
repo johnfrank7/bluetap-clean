@@ -5,6 +5,7 @@ const { canonicalAccountStatus } = require('../auth/accountStatus');
 const { applyCors } = require('../utils/cors');
 const { OtpError } = require('../utils/otpError');
 const { assignmentVersionForTransition } = require('../utils/relationshipEpochs');
+const { reconcileOrderLifecycleInTransaction } = require('../chat/conversationLifecycleService');
 const { effectiveDeliveryDays, isAllowedDeliveryDate, productLimit, productDeliveryDays, limitViolations } = require('../../services/productOrderPolicy');
 
 const AWAITING_ASSIGNMENT = 'awaiting_distributor_assignment';
@@ -263,27 +264,24 @@ async function updateOrder(db, orderId, prepare) {
         const guard = await tx.get(guardRef);
         if (guard.exists && guard.data()?.orderId === orderId) guardsToDelete.push(guardRef);
       }
+      const lifecycleEvent = prepared?.lifecycleEvent
+        || update.dispatchEventHistory?.[update.dispatchEventHistory.length - 1]?.event
+        || 'ORDER_UPDATED';
+      await reconcileOrderLifecycleInTransaction({
+        tx,
+        db,
+        before: { id: orderId, ...current },
+        after: { id: orderId, ...current, ...update },
+        event: lifecycleEvent,
+        now: update.updatedAt || new Date(),
+      });
       tx.update(ref, update);
       for (const sideEffect of newSideEffects) tx.set(sideEffect.ref, sideEffect.data);
       for (const guardRef of guardsToDelete) tx.delete(guardRef);
       return { ...current, ...update };
     });
   }
-  const snapshot = await ref.get();
-  if (!snapshot.exists) throw new OtpError(404, 'ORDER_NOT_FOUND', 'The order was not found.');
-  const current = snapshot.data() || {};
-  const prepared = await prepare(current);
-  const update = prepared?.orderUpdate || prepared;
-  await ref.update(update);
-  for (const sideEffect of prepared?.sideEffects || []) {
-    const existing = await sideEffect.ref.get();
-    if (!existing.exists) await sideEffect.ref.set(sideEffect.data);
-  }
-  for (const guardRef of prepared?.deleteIfOrderMatches || []) {
-    const guard = await guardRef.get();
-    if (guard.exists && guard.data()?.orderId === orderId) await guardRef.delete();
-  }
-  return { ...current, ...update };
+  throw new OtpError(500, 'CHAT_RECONCILIATION_REQUIRED', 'Order lifecycle updates require transactional chat reconciliation.');
 }
 
 function requireOwningManager(manager, order) {

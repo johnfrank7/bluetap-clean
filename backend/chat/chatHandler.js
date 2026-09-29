@@ -31,6 +31,7 @@ const {
   hasActiveAuthorityReason,
   normalizeAuthorityReasons,
 } = require('./conversationService');
+const { isAccessExpired, participantAccessProjection } = require('./conversationLifecycleService');
 const {
   advanceParticipantReadState,
   applyMessageToParticipantState,
@@ -246,6 +247,7 @@ async function resolveConversationIntent(tx, db, callerUid, callerClaims, body, 
         branch: activeBranch(branch, branchId),
         order,
         assignmentVersion,
+        now,
       });
     } catch (error) {
       if (error instanceof OtpError && ['INVALID_ASSIGNMENT_VERSION', 'CHAT_ASSIGNMENT_VERSION_STALE'].includes(error.reason)) {
@@ -334,8 +336,13 @@ async function resolveOrCreateConversation({ db, callerUid, callerClaims, body, 
     if (resolved.type === CONVERSATION_TYPES.REQUESTER_BRANCH && !created) {
       const authorityReasons = addAuthorityReason(conversation.authorityReasons, resolved.reason, resolved.reasonOptions);
       const status = hasActiveAuthorityReason(authorityReasons, timeOf(now)) ? CONVERSATION_STATUS.ACTIVE : conversation.status;
-      tx.update(conversationRef, { authorityReasons, status, updatedAt: now });
-      conversation = { ...conversation, authorityReasons, status, updatedAt: now };
+      const projection = participantAccessProjection(conversation, status === CONVERSATION_STATUS.ACTIVE ? 'active' : 'read_only');
+      tx.update(conversationRef, { authorityReasons, status, ...projection, updatedAt: now });
+      conversation = { ...conversation, authorityReasons, status, ...projection, updatedAt: now };
+    } else if (!created) {
+      const projection = participantAccessProjection(conversation, conversation.status === CONVERSATION_STATUS.ACTIVE ? 'active' : 'read_only');
+      tx.update(conversationRef, { ...projection, updatedAt: now });
+      conversation = { ...conversation, ...projection, updatedAt: now };
     }
     return { created, conversation };
   });
@@ -437,10 +444,11 @@ async function authorizeConversation(tx, db, conversation, callerUid, callerClai
       }
     }
     const status = normalizedStatus(order.status);
-    if (mode === 'send' && TERMINAL_ORDER_STATUSES.has(status) && !(['delivered', 'completed'].includes(status) && timeOf(conversation.accessEndsAt) > nowMs)) {
+    const deliveredFollowupActive = ['delivered', 'completed'].includes(status) && timeOf(conversation.accessEndsAt) > 0 && !isAccessExpired(conversation.accessEndsAt, nowMs);
+    if (mode === 'send' && TERMINAL_ORDER_STATUSES.has(status) && !deliveredFollowupActive) {
       throw new OtpError(409, 'CHAT_READ_ONLY', 'This conversation is read-only.');
     }
-    if (mode === 'read' && TERMINAL_ORDER_STATUSES.has(status) && !hasBoundedHistoricalRead(conversation, nowMs)) {
+    if (mode === 'read' && TERMINAL_ORDER_STATUSES.has(status) && !deliveredFollowupActive && !hasBoundedHistoricalRead(conversation, nowMs)) {
       throw new OtpError(403, 'CHAT_NOT_AUTHORIZED', 'Historical conversation access has ended.');
     }
     if (caller.role === 'distributor') senderBranchId = branchId;
@@ -486,9 +494,11 @@ async function authorizeConversation(tx, db, conversation, callerUid, callerClai
   if (mode === 'send' && conversation.status === CONVERSATION_STATUS.READ_ONLY) {
     throw new OtpError(409, 'CHAT_READ_ONLY', 'This conversation is read-only.');
   }
-  if (!(conversation.participantState || []).some((state) => principalKey(state) === principalKey(principal))) {
+  const principalState = (conversation.participantState || []).find((state) => principalKey(state) === principalKey(principal));
+  if (!principalState || principalState.accessState === 'closed') {
     throw new OtpError(403, 'CHAT_NOT_AUTHORIZED', 'The logical principal is not a participant.');
   }
+  if (mode === 'send' && principalState.accessState !== 'active') throw new OtpError(409, 'CHAT_READ_ONLY', 'This conversation is read-only.');
   return { caller, principal, senderBranchId, validContextOrderIds };
 }
 

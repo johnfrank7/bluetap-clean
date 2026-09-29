@@ -254,19 +254,20 @@ function buildConversationFoundation({ type, authority, createdBy, authorityReas
   if (type === CONVERSATION_TYPES.REQUESTER_BRANCH) {
     const requesterUid = tuple[2]; const branchId = tuple[3];
     const normalizedReasons = normalizeAuthorityReasons(authorityReasons);
-    return { ...base, status: hasActiveAuthorityReason(normalizedReasons, timeOf(now)) ? CONVERSATION_STATUS.ACTIVE : CONVERSATION_STATUS.READ_ONLY, participantUserUids: [requesterUid], participantBranchIds: [branchId], requesterUid, branchIds: [branchId], authorityReasons: normalizedReasons, participantState: [participantState('user', requesterUid), participantState('branch', branchId)] };
+    return { ...base, status: hasActiveAuthorityReason(normalizedReasons, timeOf(now)) ? CONVERSATION_STATUS.ACTIVE : CONVERSATION_STATUS.READ_ONLY, participantUserUids: [requesterUid], participantBranchIds: [branchId], participantUserAccess: { [requesterUid]: 'active' }, participantBranchAccess: { [branchId]: 'active' }, requesterUid, branchIds: [branchId], authorityReasons: normalizedReasons, participantState: [participantState('user', requesterUid), participantState('branch', branchId)] };
   }
   if (type === CONVERSATION_TYPES.REQUESTER_DISTRIBUTOR) {
     const [, , orderId, requesterUid, distributorUid, assignmentVersion] = tuple;
     const branchFields = authority.branchId ? { branchIds: [required(authority.branchId, 'branchId')] } : {};
-    return { ...base, participantUserUids: [requesterUid, distributorUid], ...branchFields, requesterUid, distributorUid, orderId, assignmentVersion, participantState: [participantState('user', requesterUid), participantState('user', distributorUid)] };
+    const accessFields = authority.accessEndsAt ? { accessEndsAt: authority.accessEndsAt, readAccessEndsAt: authority.accessEndsAt } : {};
+    return { ...base, ...accessFields, participantUserUids: [requesterUid, distributorUid], participantUserAccess: { [requesterUid]: 'active', [distributorUid]: 'active' }, participantBranchAccess: {}, ...branchFields, requesterUid, distributorUid, orderId, assignmentVersion, participantState: [participantState('user', requesterUid), participantState('user', distributorUid)] };
   }
   if (type === CONVERSATION_TYPES.DISTRIBUTOR_BRANCH) {
     const [, , distributorUid, branchId, branchMembershipVersion] = tuple;
-    return { ...base, participantUserUids: [distributorUid], participantBranchIds: [branchId], distributorUid, branchIds: [branchId], branchMembershipVersion, participantState: [participantState('user', distributorUid), participantState('branch', branchId)] };
+    return { ...base, participantUserUids: [distributorUid], participantBranchIds: [branchId], participantUserAccess: { [distributorUid]: 'active' }, participantBranchAccess: { [branchId]: 'active' }, distributorUid, branchIds: [branchId], branchMembershipVersion, participantState: [participantState('user', distributorUid), participantState('branch', branchId)] };
   }
   const branchIds = tuple.slice(2);
-  return { ...base, participantBranchIds: branchIds, branchIds, participantState: branchIds.map((branchId) => participantState('branch', branchId)) };
+  return { ...base, participantBranchIds: branchIds, participantUserAccess: {}, participantBranchAccess: Object.fromEntries(branchIds.map((branchId) => [branchId, 'active'])), branchIds, participantState: branchIds.map((branchId) => participantState('branch', branchId)) };
 }
 
 module.exports = {

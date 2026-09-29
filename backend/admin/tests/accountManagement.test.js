@@ -1,6 +1,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const { backfillLegacyUids, createAdminAccountsHandler, emailFor, passwordFor, safeAccount, safeAudit, statusOf } = require('../accountManagementHandler');
+const { authorityKeyHash, buildConversationFoundation } = require('../../chat/conversationService');
 
 test('manual account input normalizes email and applies the shared password policy', () => {
   assert.equal(emailFor('  Person@Gmail.com '), 'person@gmail.com');
@@ -170,10 +171,16 @@ test('Admin account edits keep the session override and Manager branch server-au
 
 test('Admin Distributor reassignment requires an active branch, records an audit, and blocks active deliveries', async () => {
   const fixture = managementFixture(); fixture.records.set('branches/south', { name: 'South', status: 'active' });
+  const membershipAuthority = { distributorUid: 'distributor-1', branchId: 'north', branchMembershipVersion: 1 };
+  const membershipHash = authorityKeyHash('distributor_branch', membershipAuthority);
+  fixture.records.set(`chatAuthorityRegistry/${membershipHash}`, { authorityKeyHash: membershipHash, conversationId: 'old-membership-thread', type: 'distributor_branch' });
+  fixture.records.set('chatConversations/old-membership-thread', buildConversationFoundation({ type: 'distributor_branch', authority: membershipAuthority, createdBy: { uid: 'distributor-1', role: 'distributor' }, now: new Date('2026-09-29T00:00:00Z') }));
   const handler = createAdminAccountsHandler(fixture.getAdmin);
   const moved = await call(handler, 'PATCH', 'admin-token', { uid: 'distributor-1', action: 'updateAccount', fullName: 'Dina Driver', email: 'dina@example.test', role: 'distributor', branchId: 'south', active: true });
   assert.equal(moved.statusCode, 200); assert.equal(fixture.records.get('users/distributor-1').branchId, 'south');
   assert.equal(fixture.records.get('users/distributor-1').branchMembershipVersion, 2);
+  assert.equal(fixture.records.get('chatConversations/old-membership-thread').status, 'closed');
+  assert.equal(fixture.records.get('chatConversations/old-membership-thread').participantBranchAccess.north, 'closed');
   const profileEdit = await call(handler, 'PATCH', 'admin-token', { uid: 'distributor-1', action: 'updateAccount', fullName: 'Dina Driver Updated', email: 'dina@example.test', role: 'distributor', branchId: 'south', active: true });
   assert.equal(profileEdit.statusCode, 200);
   assert.equal(fixture.records.get('users/distributor-1').branchMembershipVersion, 2);

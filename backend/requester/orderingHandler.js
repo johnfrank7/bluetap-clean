@@ -10,6 +10,7 @@ const { isActiveRequesterOrderStatus } = require('../../constants/requesterOrder
 const { effectiveDeliveryDays, limitViolations } = require('../../services/productOrderPolicy');
 const { requestedDateNeedsApproval, resolveEffectiveProductPolicy } = require('../utils/effectiveProductPolicy');
 const { RELATIONSHIP_VERSION_BASELINE } = require('../utils/relationshipEpochs');
+const { reconcileOrderLifecycleInTransaction } = require('../chat/conversationLifecycleService');
 
 const clean = (value, max = 240) => String(value || '').trim().slice(0, max);
 const coordinate = (value, minimum, maximum) => {
@@ -365,12 +366,30 @@ function createRequesterOrdersHandler(getAdmin = getFirebaseAdmin) {
 
         if (!isPending) throw new OtpError(409, 'ORDER_NOT_CANCELLABLE', 'Only pending orders can be cancelled.');
         const now = new Date();
-        await ref.update({ status: 'Cancelled', updatedAt: now, updated_at: now, cancelledAt: now });
-        const guardRef = db.collection('requesterActiveOrders').doc(requester.decoded.uid);
-        if (typeof guardRef.delete === 'function') {
-          await guardRef.delete().catch(() => {});
-        }
-        return res.status(200).json({ order: safeOrder(orderId, { ...current, status: 'Cancelled', updatedAt: now, updated_at: now, cancelledAt: now }) });
+        if (typeof db.runTransaction !== 'function') throw new OtpError(500, 'CHAT_RECONCILIATION_REQUIRED', 'Order cancellation requires transactional chat reconciliation.');
+        const cancelled = await db.runTransaction(async (tx) => {
+          const latestSnapshot = await tx.get(ref);
+          const latest = latestSnapshot.data() || {};
+          const latestPending = latestSnapshot.exists
+            && (latest.requesterUid || latest.requester_id) === requester.decoded.uid
+            && ['pending', 'outside_radius_pending_approval', 'manager_approval_pending'].includes(String(latest.status).toLowerCase());
+          if (!latestPending) throw new OtpError(409, 'ORDER_NOT_CANCELLABLE', 'Only pending orders can be cancelled.');
+          const updates = { status: 'Cancelled', updatedAt: now, updated_at: now, cancelledAt: now };
+          const guardRef = db.collection('requesterActiveOrders').doc(requester.decoded.uid);
+          const guard = await tx.get(guardRef);
+          await reconcileOrderLifecycleInTransaction({
+            tx,
+            db,
+            before: { id: orderId, ...latest },
+            after: { id: orderId, ...latest, ...updates },
+            event: 'ORDER_CANCELLED',
+            now,
+          });
+          tx.update(ref, updates);
+          if (guard.exists && guard.data()?.orderId === orderId) tx.delete(guardRef);
+          return { ...latest, ...updates };
+        });
+        return res.status(200).json({ order: safeOrder(orderId, cancelled) });
       }
 
       // Check process-level in-flight creation (local optimization against rapid double-clicks)
@@ -420,6 +439,14 @@ function createRequesterOrdersHandler(getAdmin = getFirebaseAdmin) {
                 }
               }
             }
+            await reconcileOrderLifecycleInTransaction({
+              tx,
+              db,
+              before: { id: ref.id },
+              after: { id: ref.id, ...saved },
+              event: 'ORDER_CREATED',
+              now,
+            });
             tx.set(ref, saved);
             tx.set(guardRef, {
               orderId: ref.id,
@@ -437,17 +464,7 @@ function createRequesterOrdersHandler(getAdmin = getFirebaseAdmin) {
             }
           });
         } else {
-          await ref.set(saved);
-          await guardRef.set({
-            orderId: ref.id,
-            requestId: requestNumber,
-            requesterUid: requester.decoded.uid,
-            status: saved.status,
-            createdAt: now,
-          });
-          if (defaultDeliveryLocation && typeof userRef.update === 'function') {
-            await userRef.update({ defaultDeliveryLocation, updatedAt: now });
-          }
+          throw new OtpError(500, 'CHAT_RECONCILIATION_REQUIRED', 'Order creation requires transactional chat reconciliation.');
         }
         return res.status(201).json({ order: safeOrder(ref.id, saved) });
       } finally {

@@ -133,6 +133,7 @@ test('Distributor delivery scheduling and status changes are server-owned and as
   const delivered = await call(distributor, 'PATCH', 'distributor-a-token', { orderId: 'order-a', action: 'mark-delivered' });
   assert.equal(delivered.statusCode, 200); assert.equal(delivered.body.order.status, 'delivered');
   assert.equal(f.records.get('requests/order-a').assignmentVersion, assignmentVersion);
+  assert.equal(f.records.get('requests/order-a').chatAccessEndsAt.getTime() - f.records.get('requests/order-a').deliveredAt.getTime(), 7 * 24 * 60 * 60 * 1000);
   assert.deepEqual(f.records.get('requests/order-a').distributorDeliveryHistory.map((entry) => entry.event), ['DELIVERY_SCHEDULED', 'DELIVERY_STARTED', 'DELIVERY_COMPLETED']);
 });
 

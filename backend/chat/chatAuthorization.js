@@ -15,6 +15,7 @@ const TERMINAL_ORDER_STATUSES = new Set([
 ]);
 
 const clean = (value) => String(value || '').trim();
+const timeOf = (value) => value?.toMillis?.() || value?.getTime?.() || Number(value?.seconds || 0) * 1000 || new Date(value || 0).getTime() || 0;
 const normalizedStatus = (value) => clean(value).toLowerCase().replace(/[\s-]+/g, '_');
 const owningBranchId = (order = {}) => clean(order.currentBranchId || order.branchId);
 const orderRequesterUid = (order = {}) => clean(order.requester_id || order.requesterUid);
@@ -84,7 +85,7 @@ function authorizeExistingRequesterBranchForManager({ manager, branch, requester
   return { branchId, requesterUid: clean(requesterUid), conversationId: clean(conversation.id) };
 }
 
-function authorizeRequesterDistributor({ requester, distributor, branch, order, assignmentVersion } = {}) {
+function authorizeRequesterDistributor({ requester, distributor, branch, order, assignmentVersion, now = Date.now() } = {}) {
   requireRole(requester, 'requester');
   requireActiveDistributor(distributor);
   const requesterUid = clean(requester.uid || requester.id);
@@ -96,9 +97,12 @@ function authorizeRequesterDistributor({ requester, distributor, branch, order, 
   if (!distributorUid || assignedDistributorUid(order) !== distributorUid) denied('CHAT_ASSIGNMENT_MISMATCH', 'The Distributor is not assigned to this order.');
   if (owningBranchId(order) !== branchId || clean(distributor.branchId) !== branchId) denied('CHAT_BRANCH_MISMATCH', 'The Distributor is outside the authoritative fulfillment branch.');
   if (!Number.isSafeInteger(assignmentVersion) || assignmentVersion !== expectedVersion) denied('CHAT_ASSIGNMENT_VERSION_STALE', 'The Distributor assignment epoch is stale.');
-  if (TERMINAL_ORDER_STATUSES.has(normalizedStatus(order?.status))) denied('CHAT_ASSIGNMENT_NOT_WRITABLE', 'This assignment no longer grants send authority.');
+  const status = normalizedStatus(order?.status);
+  const accessEndsAt = order?.chatAccessEndsAt || order?.postOrderChatAccessEndsAt || null;
+  const deliveredFollowupActive = ['delivered', 'completed'].includes(status) && timeOf(accessEndsAt) > timeOf(now);
+  if (TERMINAL_ORDER_STATUSES.has(status) && !deliveredFollowupActive) denied('CHAT_ASSIGNMENT_NOT_WRITABLE', 'This assignment no longer grants send authority.');
 
-  return { requesterUid, distributorUid, branchId, orderId: clean(order.id || order.requestId), assignmentVersion: expectedVersion };
+  return { requesterUid, distributorUid, branchId, orderId: clean(order.id || order.requestId), assignmentVersion: expectedVersion, ...(deliveredFollowupActive ? { accessEndsAt } : {}) };
 }
 
 function authorizeDistributorBranch({ distributor, branch, branchMembershipVersion } = {}) {

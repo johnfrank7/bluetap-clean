@@ -4,6 +4,7 @@ const { canonicalAccountStatus } = require('../auth/accountStatus');
 const { applyCors } = require('../utils/cors');
 const { OtpError } = require('../utils/otpError');
 const { assignmentVersionForTransition } = require('../utils/relationshipEpochs');
+const { reconcileOrderLifecycleInTransaction } = require('../chat/conversationLifecycleService');
 const { effectiveDeliveryDays, isAllowedDeliveryDate } = require('../../services/productOrderPolicy');
 
 const clean = (value, max = 240) => String(value || '').trim().slice(0, max);
@@ -200,6 +201,14 @@ function createAdminDispatchOverrideHandler(getAdmin = getFirebaseAdmin) {
           updated_at: now,
         };
 
+        await reconcileOrderLifecycleInTransaction({
+          tx,
+          db,
+          before: { id: orderId, ...orderData },
+          after: { id: orderId, ...orderData, ...updatePayload },
+          event,
+          now,
+        });
         tx.update(orderRef, updatePayload);
         tx.set(auditRef, {
           action: 'ADMIN_DISTRIBUTOR_OVERRIDE',

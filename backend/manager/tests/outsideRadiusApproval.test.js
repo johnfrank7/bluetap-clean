@@ -28,7 +28,17 @@ function fixture() {
     if (token === 'manager-b-token') return { uid: 'manager-b', role: 'manager', manager: true };
     throw new Error('bad token');
   } };
-  return { records, getAdmin: () => ({ auth, db: { collection } }) };
+  const db = {
+    collection,
+    async runTransaction(run) {
+      return run({
+        get: async (ref) => snapshot(ref.path),
+        update(ref, data) { records.set(ref.path, { ...records.get(ref.path), ...data }); },
+        delete(ref) { records.delete(ref.path); },
+      });
+    },
+  };
+  return { records, getAdmin: () => ({ auth, db }) };
 }
 
 function response() { return { statusCode: 200, body: null, setHeader() {}, status(code) { this.statusCode = code; return this; }, json(value) { this.body = value; return this; }, end() { return this; } }; }

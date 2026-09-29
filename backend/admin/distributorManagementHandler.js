@@ -3,6 +3,7 @@ const { requireAdmin } = require('../auth/authorization');
 const { applyCors } = require('../utils/cors');
 const { OtpError } = require('../utils/otpError');
 const { branchMembershipVersionForTransition } = require('../utils/relationshipEpochs');
+const { reconcileDistributorMembershipInTransaction } = require('../chat/conversationLifecycleService');
 
 const clean = (value, max = 240) => String(value || '').trim().slice(0, max);
 const statusOf = (data = {}) => {
@@ -76,6 +77,17 @@ function createAdminDistributorsHandler(getAdmin = getFirebaseAdmin) {
         };
         const membershipEpoch = branchMembershipVersionForTransition(data, { ...data, ...changes });
         if (membershipEpoch.changed) changes.branchMembershipVersion = membershipEpoch.branchMembershipVersion;
+        if (membershipEpoch.changed) {
+          await reconcileDistributorMembershipInTransaction({
+            tx,
+            db,
+            distributorUid: targetRef.id,
+            before: data,
+            after: { ...data, ...changes },
+            now,
+            reason: `distributor_${action}`,
+          });
+        }
         tx.update(targetRef, changes);
         tx.set(db.collection('adminAuditLogs').doc(), {
           action: ({ approve: 'DISTRIBUTOR_APPROVED', reject: 'DISTRIBUTOR_REJECTED', deactivate: 'DISTRIBUTOR_DEACTIVATED', reactivate: 'DISTRIBUTOR_REACTIVATED' })[action], actorUid: admin.uid, targetUid: targetRef.id,

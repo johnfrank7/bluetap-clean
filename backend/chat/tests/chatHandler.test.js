@@ -184,6 +184,19 @@ test('Requester conversation intents derive participants and reject client-owned
   assert.equal((await call(f.messages, 'POST', 'requester-a-token', { conversationId: inquiry.body.conversation.id, clientMutationId: 'general-inquiry', body: 'General question' })).statusCode, 201);
 });
 
+test('a delivered assignment can resolve on demand only during its trusted follow-up window', async () => {
+  const f = fixture();
+  const accessEndsAt = new Date('2026-01-08T00:00:00Z');
+  f.records.set('requests/order-a', { ...f.records.get('requests/order-a'), status: 'delivered', deliveredAt: new Date('2026-01-01T00:00:00Z'), chatAccessEndsAt: accessEndsAt });
+  const active = await resolve(f, 'requester-a-token', { type: 'requester_distributor', orderId: 'order-a' });
+  assert.equal(active.statusCode, 201);
+  assert.equal(active.body.conversation.accessEndsAt.getTime(), accessEndsAt.getTime());
+  f.setTime(accessEndsAt.getTime());
+  const expired = await resolve(f, 'requester-a-token', { type: 'requester_distributor', orderId: 'order-a' });
+  assert.equal(expired.statusCode, 403);
+  assert.equal(expired.body.error.reason, 'CHAT_ASSIGNMENT_NOT_WRITABLE');
+});
+
 test('concurrent resolve is registry-backed and returns exactly one conversation', async () => {
   const f = fixture();
   const body = { type: 'requester_branch', intent: 'inquiry', branchId: 'branch-a' };
@@ -196,7 +209,12 @@ test('concurrent resolve is registry-backed and returns exactly one conversation
 test('assignment and membership epochs create distinct conversations and stale sends fail closed', async () => {
   const f = fixture();
   const directV4 = await directConversation(f);
+  const legacyProjection = { ...f.records.get(`chatConversations/${directV4}`) };
+  delete legacyProjection.participantUserAccess;
+  delete legacyProjection.participantBranchAccess;
+  f.records.set(`chatConversations/${directV4}`, legacyProjection);
   assert.equal((await resolve(f, 'distributor-a-token', { type: 'requester_distributor', orderId: 'order-a' })).body.conversation.id, directV4);
+  assert.equal(f.records.get(`chatConversations/${directV4}`).participantUserAccess['distributor-a'], 'active');
   f.records.set('requests/order-a', { ...f.records.get('requests/order-a'), assignedDistributorUid: 'distributor-b', assignmentVersion: 5 });
   const stale = await call(f.messages, 'POST', 'distributor-a-token', { conversationId: directV4, clientMutationId: 'stale-1', body: 'old assignment' });
   assert.equal(stale.statusCode, 409);
@@ -349,6 +367,25 @@ test('terminal direct-order history requires an explicit bounded read deadline',
   const expired = await call(f.messages, 'GET', 'requester-a-token', {}, `?conversationId=${conversationId}`);
   assert.equal(expired.statusCode, 403);
   assert.equal(expired.body.error.reason, 'CHAT_NOT_AUTHORIZED');
+});
+
+test('delivered assignment remains writable only until the trusted seven-day deadline', async () => {
+  const f = fixture();
+  const conversationId = await directConversation(f);
+  const accessEndsAt = new Date(Date.parse('2026-01-08T00:00:00Z'));
+  f.records.set('requests/order-a', { ...f.records.get('requests/order-a'), status: 'delivered', deliveredAt: new Date('2026-01-01T00:00:00Z'), chatAccessEndsAt: accessEndsAt });
+  f.records.set(`chatConversations/${conversationId}`, {
+    ...f.records.get(`chatConversations/${conversationId}`),
+    status: 'active',
+    accessEndsAt,
+    readAccessEndsAt: accessEndsAt,
+  });
+  const beforeExpiry = await call(f.messages, 'POST', 'requester-a-token', { conversationId, clientMutationId: 'followup-1', body: 'Delivery follow-up' });
+  assert.equal(beforeExpiry.statusCode, 201);
+  f.setTime(accessEndsAt.getTime());
+  const expired = await call(f.messages, 'POST', 'requester-a-token', { conversationId, clientMutationId: 'followup-2', body: 'Too late' });
+  assert.equal(expired.statusCode, 409);
+  assert.equal(expired.body.error.reason, 'CHAT_READ_ONLY');
 });
 
 test('message history is newest-first and bounded by sequence pagination', async () => {

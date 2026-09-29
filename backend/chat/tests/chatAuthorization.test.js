@@ -40,6 +40,9 @@ test('Requester and Distributor authority requires ownership, assignment, branch
   const { assignedDistributorUid: _modernAssignment, ...legacyFieldOrder } = legacyOrder;
   legacyFieldOrder.distributor_id = 'distributor-a';
   assert.equal(authorizeRequesterDistributor({ requester, distributor, branch: branchA, order: legacyFieldOrder, assignmentVersion: 1 }).distributorUid, 'distributor-a');
+  const delivered = { ...order, status: 'delivered', chatAccessEndsAt: new Date('2026-10-07T00:00:00Z') };
+  assert.equal(authorizeRequesterDistributor({ requester, distributor, branch: branchA, order: delivered, assignmentVersion: 4, now: new Date('2026-10-06T23:59:59Z') }).accessEndsAt, delivered.chatAccessEndsAt);
+  assert.throws(() => authorizeRequesterDistributor({ requester, distributor, branch: branchA, order: delivered, assignmentVersion: 4, now: delivered.chatAccessEndsAt }), (error) => error.reason === 'CHAT_ASSIGNMENT_NOT_WRITABLE');
   assert.throws(() => authorizeRequesterDistributor({ requester, distributor, branch: branchA, order: { ...order, assignmentVersion: 0 }, assignmentVersion: 1 }), (error) => error.reason === 'INVALID_ASSIGNMENT_VERSION');
 });
 

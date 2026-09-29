@@ -4,6 +4,7 @@ const { applyCors } = require('../utils/cors');
 const { safeOrder, owningBranchId } = require('../manager/dispatchHandler');
 const { OtpError } = require('../utils/otpError');
 const { assignmentVersionForTransition } = require('../utils/relationshipEpochs');
+const { postOrderAccessEndsAt, reconcileOrderLifecycleInTransaction } = require('../chat/conversationLifecycleService');
 
 const clean = (value, max = 128) => String(value || '').trim().slice(0, max);
 const history = (value) => Array.isArray(value) ? value : [];
@@ -23,16 +24,29 @@ async function updateOrder(db, orderId, prepare) {
       if (!snapshot.exists) throw new OtpError(404, 'ORDER_NOT_FOUND', 'The assigned delivery was not found.');
       const current = snapshot.data() || {};
       const update = await prepare(current, tx);
+      let activeOrderGuard = null;
+      if (statusOf(update) === 'delivered') {
+        const requesterUid = clean(current.requesterUid || current.requester_id, 128);
+        if (requesterUid) {
+          const guardRef = db.collection('requesterActiveOrders').doc(requesterUid);
+          const guard = await tx.get(guardRef);
+          if (guard.exists && guard.data()?.orderId === orderId) activeOrderGuard = guardRef;
+        }
+      }
+      await reconcileOrderLifecycleInTransaction({
+        tx,
+        db,
+        before: { id: orderId, ...current },
+        after: { id: orderId, ...current, ...update },
+        event: update.distributorDeliveryHistory?.[update.distributorDeliveryHistory.length - 1]?.event || 'ORDER_UPDATED',
+        now: update.updatedAt || new Date(),
+      });
       tx.update(ref, update);
+      if (activeOrderGuard) tx.delete(activeOrderGuard);
       return { ...current, ...update };
     });
   }
-  const snapshot = await ref.get();
-  if (!snapshot.exists) throw new OtpError(404, 'ORDER_NOT_FOUND', 'The assigned delivery was not found.');
-  const current = snapshot.data() || {};
-  const update = await prepare(current, null);
-  await ref.update(update);
-  return { ...current, ...update };
+  throw new OtpError(500, 'CHAT_RECONCILIATION_REQUIRED', 'Delivery lifecycle updates require transactional chat reconciliation.');
 }
 
 function responseError(res, error) {
@@ -187,17 +201,8 @@ function createDistributorAssignedOrdersHandler(getAdmin = getFirebaseAdmin) {
             throw new OtpError(409, 'ORDER_NOT_COMPLETABLE', 'Only an active delivery can be marked delivered.');
           }
           event = 'DELIVERY_COMPLETED';
-          update = { status: 'delivered', deliveredAt: now };
-
-          const requesterUid = clean(current.requesterUid || current.requester_id, 128);
-          if (requesterUid) {
-            const guardRef = db.collection('requesterActiveOrders').doc(requesterUid);
-            if (tx && typeof tx.delete === 'function') {
-              tx.delete(guardRef);
-            } else if (typeof guardRef.delete === 'function') {
-              await guardRef.delete().catch(() => {});
-            }
-          }
+          const chatAccessEndsAt = postOrderAccessEndsAt(now);
+          update = { status: 'delivered', deliveredAt: now, chatAccessEndsAt, postOrderChatAccessEndsAt: chatAccessEndsAt };
         }
         return {
           ...update,
