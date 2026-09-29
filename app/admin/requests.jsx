@@ -2,12 +2,14 @@ import React, { useState, useEffect, useMemo } from 'react';
 import {
   ActivityIndicator,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import AdminShell from '../../components/AdminShell';
@@ -19,7 +21,10 @@ import { ADMIN_CACHE_KEYS, useAdminData } from '../../services/adminDataCache';
 import { requesterOrderStatusLabel } from '../../constants/requesterOrderStatus';
 import { getAdminOverrideDetails, submitAdminOverrideAssignment } from '../../services/adminDispatchOverride';
 import TopToastFeedback from '../../components/TopToastFeedback';
+import BlueTapEmptyState from '../../components/BlueTapEmptyState';
+import SoftStatusBadge from '../../components/SoftStatusBadge';
 import { isAllowedDeliveryDate, manilaScheduleDate } from '../../services/productOrderPolicy';
+import { formatPhilippinePhone } from '../../services/phoneUtils';
 
 const ACTIONABLE_STATUSES = new Set([
   'pending',
@@ -47,6 +52,15 @@ const ISSUE_STATUSES = new Set([
 ]);
 
 const OVERRIDE_ELIGIBLE_STATUSES = new Set(['awaiting_distributor_assignment', 'distributor_assigned', 'accepted', 'scheduled', 'delivery_failed']);
+const PAGE_SIZE = 10;
+const SORT_OPTIONS = [
+  { id: 'newest', label: 'Newest first' },
+  { id: 'oldest', label: 'Oldest first' },
+  { id: 'status', label: 'Status' },
+  { id: 'branch', label: 'Branch' },
+  { id: 'amount_desc', label: 'Highest amount' },
+  { id: 'amount_asc', label: 'Lowest amount' },
+];
 const formatAmount = (val) => {
   if (val === undefined || val === null || val === '') return '₱0.00';
   const num = Number(val);
@@ -85,9 +99,40 @@ const formatDate = (val) => {
   return isNaN(d.getTime()) ? String(val) : d.toLocaleString();
 };
 
+const orderTimestamp = (order = {}) => {
+  const value = order.createdAt || order.orderDate || order.requestedAt;
+  if (value?.toMillis) return value.toMillis();
+  if (value?.seconds) return value.seconds * 1000;
+  const parsed = new Date(value || 0).getTime();
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const orderAmount = (order = {}) => {
+  const value = Number(order.totalAtOrder ?? order.totalAmount ?? order.total_amount ?? 0);
+  return Number.isFinite(value) ? value : 0;
+};
+
+const compactPageItems = (current, total) => {
+  if (total <= 7) return Array.from({ length: total }, (_, index) => index + 1);
+  const pages = new Set([1, total, current - 1, current, current + 1]);
+  const ordered = [...pages].filter((page) => page >= 1 && page <= total).sort((a, b) => a - b);
+  const result = [];
+  ordered.forEach((page, index) => {
+    if (index > 0 && page - ordered[index - 1] > 1) result.push(`ellipsis-${page}`);
+    result.push(page);
+  });
+  return result;
+};
+
 export default function AdminRequestsPage() {
-  const { colors } = useAdminTheme();
+  const { colors, resolvedTheme } = useAdminTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
+  const { width: viewportWidth } = useWindowDimensions();
+  const orderColumnStyle = viewportWidth >= 1180
+    ? styles.gridColumnDesktop
+    : viewportWidth >= 680
+      ? styles.gridColumnTablet
+      : styles.gridColumnMobile;
 
   const { requests, initialLoading: loading, error: loadError } = useAdminRealtimeData();
 
@@ -101,6 +146,11 @@ export default function AdminRequestsPage() {
   const [branchFilter, setBranchFilter] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
+  const [sortBy, setSortBy] = useState('newest');
+  const [sortOpen, setSortOpen] = useState(false);
+  const [page, setPage] = useState(1);
+  const [hoveredOrderId, setHoveredOrderId] = useState(null);
+  const [searchFocused, setSearchFocused] = useState(false);
 
   const branchState = useAdminData(ADMIN_CACHE_KEYS.branches, getBranches);
   const branches = branchState.data || [];
@@ -241,6 +291,15 @@ export default function AdminRequestsPage() {
     };
   }, [requests]);
 
+  const branchCounts = useMemo(() => {
+    const result = new Map();
+    requests.forEach((order) => {
+      const branchId = order.currentBranchId || order.branchId;
+      if (branchId) result.set(branchId, (result.get(branchId) || 0) + 1);
+    });
+    return result;
+  }, [requests]);
+
   const filteredOrders = useMemo(() => {
     return requests.filter((r) => {
       const status = (r.status || '').toLowerCase();
@@ -277,6 +336,60 @@ export default function AdminRequestsPage() {
       return true;
     });
   }, [requests, statusFilter, branchFilter, debouncedQuery]);
+
+  const sortedOrders = useMemo(() => {
+    const result = [...filteredOrders];
+    result.sort((a, b) => {
+      if (sortBy === 'oldest') return orderTimestamp(a) - orderTimestamp(b);
+      if (sortBy === 'status') {
+        return requesterOrderStatusLabel(a.status).localeCompare(requesterOrderStatusLabel(b.status)) || orderTimestamp(b) - orderTimestamp(a);
+      }
+      if (sortBy === 'branch') {
+        const aBranch = String(a.branchNameSnapshot || a.branchName || a.currentBranchId || a.branchId || 'Unassigned');
+        const bBranch = String(b.branchNameSnapshot || b.branchName || b.currentBranchId || b.branchId || 'Unassigned');
+        return aBranch.localeCompare(bBranch) || orderTimestamp(b) - orderTimestamp(a);
+      }
+      if (sortBy === 'amount_desc') return orderAmount(b) - orderAmount(a) || orderTimestamp(b) - orderTimestamp(a);
+      if (sortBy === 'amount_asc') return orderAmount(a) - orderAmount(b) || orderTimestamp(b) - orderTimestamp(a);
+      return orderTimestamp(b) - orderTimestamp(a);
+    });
+    return result;
+  }, [filteredOrders, sortBy]);
+
+  const issueBreakdown = useMemo(() => {
+    const result = { cancelled: 0, rejected: 0, failed: 0 };
+    sortedOrders.forEach((order) => {
+      const status = String(order.status || '').toLowerCase().replace(/[\s-]+/g, '_');
+      if (status === 'cancelled' || status === 'canceled') result.cancelled++;
+      else if (status === 'delivery_failed') result.failed++;
+      else if (status === 'rejected' || status === 'declined' || status === 'declined_outside_service_area') result.rejected++;
+    });
+    return result;
+  }, [sortedOrders]);
+
+  const pageCount = Math.max(1, Math.ceil(sortedOrders.length / PAGE_SIZE));
+  const visiblePage = Math.min(page, pageCount);
+  const pageStart = sortedOrders.length === 0 ? 0 : (visiblePage - 1) * PAGE_SIZE + 1;
+  const pageEnd = Math.min(visiblePage * PAGE_SIZE, sortedOrders.length);
+  const pagedOrders = sortedOrders.slice((visiblePage - 1) * PAGE_SIZE, visiblePage * PAGE_SIZE);
+  const pageItems = compactPageItems(visiblePage, pageCount);
+
+  useEffect(() => {
+    setPage(1);
+  }, [statusFilter, branchFilter, searchQuery, sortBy]);
+
+  useEffect(() => {
+    if (page > pageCount) setPage(pageCount);
+  }, [page, pageCount]);
+
+  const emptyState = useMemo(() => {
+    if (debouncedQuery) return { title: 'No Matching Orders', description: 'Try another order ID, requester, branch, phone number, or address.', variant: 'requests' };
+    if (statusFilter === 'actionable') return { title: 'No Orders Awaiting Review', description: 'Orders requiring Admin oversight will appear here.', variant: 'requests' };
+    if (statusFilter === 'delivered') return { title: 'No Delivered Orders', description: 'Completed deliveries in the selected scope will appear here.', variant: 'history' };
+    if (statusFilter === 'issues') return { title: 'No Order Issues', description: 'Cancelled, rejected, failed, or declined orders will appear here.', variant: 'delivery' };
+    if (statusFilter === 'active') return { title: 'No Orders In Progress', description: 'Assigned, scheduled, or in-transit orders will appear here.', variant: 'delivery' };
+    return { title: 'No Orders Yet', description: 'Customer orders will appear here as they enter the authorized recent-order scope.', variant: 'requests' };
+  }, [debouncedQuery, statusFilter]);
 
   const getStatusTone = (status) => {
     const s = (status || '').toLowerCase();
@@ -335,79 +448,154 @@ export default function AdminRequestsPage() {
             { id: 'active', label: 'In Progress', count: counts.active },
             { id: 'delivered', label: 'Delivered', count: counts.delivered },
             { id: 'issues', label: 'Issues & Cancelled', count: counts.issues },
-          ].map((tab) => (
-            <TouchableOpacity
-              key={tab.id}
-              accessibilityRole="button"
-              accessibilityLabel={`${tab.label} (${tab.count})`}
-              onPress={() => setStatusFilter(tab.id)}
-              style={[styles.tab, statusFilter === tab.id && styles.tabActive]}
-            >
-              <Text style={[styles.tabText, statusFilter === tab.id && styles.tabTextActive]}>
-                {tab.label} ({tab.count})
-              </Text>
-            </TouchableOpacity>
-          ))}
+          ].map((tab) => {
+            const selected = statusFilter === tab.id;
+            return (
+              <Pressable
+                key={tab.id}
+                accessibilityRole="button"
+                accessibilityLabel={`${tab.label} (${tab.count})`}
+                accessibilityState={{ selected }}
+                onPress={() => setStatusFilter(tab.id)}
+                style={({ hovered, focused, pressed }) => [
+                  styles.tab,
+                  selected && styles.tabActive,
+                  !selected && hovered && styles.tabHover,
+                  (focused || pressed) && styles.tabInteractive,
+                ]}
+              >
+                <Text style={[styles.tabText, selected && styles.tabTextActive]}>
+                  {tab.label} ({tab.count})
+                </Text>
+              </Pressable>
+            );
+          })}
         </View>
 
         {/* Filters Row: Branch Picker + Search Bar */}
         <View style={styles.filtersRow}>
           <View style={styles.branchSelectWrap}>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.branchScroll}>
-              <TouchableOpacity
+              <Pressable
+                accessibilityRole="button"
+                accessibilityState={{ selected: branchFilter === 'all' }}
                 onPress={() => setBranchFilter('all')}
-                style={[
+                style={({ hovered, focused, pressed }) => [
                   styles.branchChip,
-                  branchFilter === 'all' && { backgroundColor: colors.primary, borderColor: colors.primary },
+                  branchFilter === 'all' && styles.branchChipActive,
+                  branchFilter !== 'all' && hovered && styles.branchChipHover,
+                  (focused || pressed) && styles.branchChipInteractive,
                 ]}
               >
                 <Text
                   style={[
                     styles.branchChipText,
-                    branchFilter === 'all' && { color: '#FFFFFF', fontWeight: '800' },
+                    branchFilter === 'all' && { color: colors.white, fontWeight: '800' },
                   ]}
                 >
-                  All Branches
+                  All Branches ({requests.length})
                 </Text>
-              </TouchableOpacity>
+              </Pressable>
               {branches.map((b) => (
-                <TouchableOpacity
+                <Pressable
                   key={b.id}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Filter by ${b.name || b.code || b.id}, ${branchCounts.get(b.id) || 0} orders`}
+                  accessibilityState={{ selected: branchFilter === b.id }}
                   onPress={() => setBranchFilter(b.id)}
-                  style={[
+                  style={({ hovered, focused, pressed }) => [
                     styles.branchChip,
-                    branchFilter === b.id && { backgroundColor: colors.primary, borderColor: colors.primary },
+                    branchFilter === b.id && styles.branchChipActive,
+                    branchFilter !== b.id && hovered && styles.branchChipHover,
+                    (focused || pressed) && styles.branchChipInteractive,
                   ]}
                 >
                   <Text
                     style={[
                       styles.branchChipText,
-                      branchFilter === b.id && { color: '#FFFFFF', fontWeight: '800' },
+                      branchFilter === b.id && { color: colors.white, fontWeight: '800' },
                     ]}
                   >
-                    {b.name || b.code || b.id}
+                    {b.name || b.code || b.id} ({branchCounts.get(b.id) || 0})
                   </Text>
-                </TouchableOpacity>
+                </Pressable>
               ))}
             </ScrollView>
           </View>
 
-          <TextInput
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-            placeholder="Search by order ID, customer name, phone, or address..."
-            placeholderTextColor={colors.placeholder}
-            style={styles.searchInput}
-          />
+          <View style={styles.controlRow}>
+            <View style={[styles.searchWrap, searchFocused && styles.searchWrapFocused]}>
+              <TextInput
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+                onFocus={() => setSearchFocused(true)}
+                onBlur={() => setSearchFocused(false)}
+                placeholder="Search by order ID, requester, phone, branch, or address..."
+                placeholderTextColor={colors.placeholder}
+                style={styles.searchInput}
+              />
+              {!!searchQuery && (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Clear order search"
+                  onPress={() => setSearchQuery('')}
+                  style={({ hovered, focused, pressed }) => [styles.clearSearchButton, (hovered || focused || pressed) && styles.clearSearchButtonActive]}
+                >
+                  <Text style={styles.clearSearchText}>Clear</Text>
+                </Pressable>
+              )}
+            </View>
+
+            <View style={styles.sortWrap}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`Sort orders. Current selection: ${SORT_OPTIONS.find((option) => option.id === sortBy)?.label}`}
+                accessibilityState={{ expanded: sortOpen }}
+                onPress={() => setSortOpen((open) => !open)}
+                style={({ hovered, focused, pressed }) => [styles.sortButton, (hovered || focused || pressed) && styles.controlButtonInteractive]}
+              >
+                <Text style={styles.sortButtonLabel}>SORT</Text>
+                <Text style={styles.sortButtonValue}>{SORT_OPTIONS.find((option) => option.id === sortBy)?.label} {sortOpen ? '▴' : '▾'}</Text>
+              </Pressable>
+              {sortOpen && (
+                <View style={styles.sortMenu}>
+                  {SORT_OPTIONS.map((option) => {
+                    const selected = option.id === sortBy;
+                    return (
+                      <Pressable
+                        key={option.id}
+                        accessibilityRole="button"
+                        accessibilityState={{ selected }}
+                        onPress={() => { setSortBy(option.id); setSortOpen(false); }}
+                        style={({ hovered, focused, pressed }) => [
+                          styles.sortOption,
+                          selected && styles.sortOptionActive,
+                          (hovered || focused || pressed) && styles.sortOptionInteractive,
+                        ]}
+                      >
+                        <Text style={[styles.sortOptionText, selected && styles.sortOptionTextActive]}>{option.label}</Text>
+                        {selected ? <Text style={styles.sortOptionCheck}>✓</Text> : null}
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              )}
+            </View>
+          </View>
         </View>
 
         {/* Status Count & Info */}
         <View style={styles.listHeaderRow}>
           <Text style={styles.resultsCount}>
-            Showing {filteredOrders.length} order{filteredOrders.length === 1 ? '' : 's'}
+            Showing {sortedOrders.length} of {requests.length} order{requests.length === 1 ? '' : 's'}
           </Text>
           <Text style={styles.readOnlyNote}>Oversight mode: Read-Only</Text>
         </View>
+        {statusFilter === 'issues' && sortedOrders.length > 0 ? (
+          <Text style={styles.issueBreakdown}>
+            {issueBreakdown.cancelled} Cancelled · {issueBreakdown.rejected} Rejected / Declined · {issueBreakdown.failed} Failed
+          </Text>
+        ) : null}
 
         {/* Error Box */}
         {!!loadError && (
@@ -419,47 +607,53 @@ export default function AdminRequestsPage() {
         {/* Loading Skeleton */}
         {loading && requests.length === 0 ? (
           <TableSkeleton rows={5} />
-        ) : filteredOrders.length === 0 ? (
-          <View style={styles.emptyContainer}>
-            <Text style={styles.emptyText}>No customer orders match the selected filters.</Text>
-          </View>
+        ) : sortedOrders.length === 0 ? (
+          <BlueTapEmptyState
+            compact
+            variant={emptyState.variant}
+            title={emptyState.title}
+            description={emptyState.description}
+            themeColors={colors}
+            dark={resolvedTheme === 'dark'}
+          />
         ) : (
           /* Orders List */
+          <>
           <View style={styles.ordersList}>
-            {filteredOrders.map((order) => {
-              const tone = getStatusTone(order.status);
+            {pagedOrders.map((order) => {
               const itemsList = Array.isArray(order.items) && order.items.length > 0
                 ? order.items.map((i) => `${i.quantity} × ${i.productNameSnapshot || i.productName || 'Item'}`).join(', ')
                 : order.productNameSnapshot || 'Water Order';
               const branchDisplay = order.branchNameSnapshot || order.branchName || order.currentBranchId || 'Unassigned';
               const requesterDisplay = order.requesterNameSnapshot || order.requesterName || order.customerName || 'Customer';
               const orderId = order.requestId || order.id;
+              const rawPhone = order.deliveryPhoneSnapshot || order.contactNumber;
+              const phoneDisplay = rawPhone ? formatPhilippinePhone(rawPhone) : 'Contact not provided';
 
               return (
-                <View key={order.id} style={styles.orderCard}>
+                <View
+                  key={order.id || orderId}
+                  onPointerEnter={() => setHoveredOrderId(orderId)}
+                  onPointerLeave={() => setHoveredOrderId(null)}
+                  style={[styles.orderCard, hoveredOrderId === orderId && styles.orderCardHover]}
+                >
                   <View style={styles.orderHeaderRow}>
                     <View style={styles.orderIdGroup}>
                       <Text style={styles.orderIdText}>#{orderId}</Text>
                       <Text style={styles.orderDateText}>{formatDate(order.createdAt || order.orderDate)}</Text>
                     </View>
 
-                    <View style={[styles.statusPill, { backgroundColor: tone.bg, borderColor: tone.border }]}>
-                      <Text style={[styles.statusPillText, { color: tone.text }]}>
-                        {requesterOrderStatusLabel(order.status)}
-                      </Text>
-                    </View>
+                    <SoftStatusBadge status={order.status} dark={resolvedTheme === 'dark'} style={styles.statusBadge} />
                   </View>
 
                   <View style={styles.orderBodyGrid}>
-                    <View style={styles.gridColumn}>
+                    <View style={[styles.gridColumn, orderColumnStyle]}>
                       <Text style={styles.fieldLabel}>Requester</Text>
                       <Text style={styles.fieldValuePrimary}>{requesterDisplay}</Text>
-                      <Text style={styles.fieldValueSecondary}>
-                        {order.deliveryPhoneSnapshot || order.contactNumber || 'No phone'}
-                      </Text>
+                      <Text style={styles.fieldValueSecondary}>{phoneDisplay}</Text>
                     </View>
 
-                    <View style={styles.gridColumn}>
+                    <View style={[styles.gridColumn, orderColumnStyle]}>
                       <Text style={styles.fieldLabel}>Fulfillment Branch</Text>
                       <Text style={styles.fieldValuePrimary}>{branchDisplay}</Text>
                       {order.initialBranchId && order.initialBranchId !== order.currentBranchId && (
@@ -467,15 +661,15 @@ export default function AdminRequestsPage() {
                       )}
                     </View>
 
-                    <View style={styles.gridColumn}>
+                    <View style={[styles.gridColumn, orderColumnStyle]}>
                       <Text style={styles.fieldLabel}>Order Summary</Text>
-                      <Text numberOfLines={2} style={styles.fieldValuePrimary}>{itemsList}</Text>
+                      <Text numberOfLines={3} style={styles.fieldValuePrimary}>{itemsList}</Text>
                       <Text style={styles.fieldPrice}>
                         {formatAmount(order.totalAtOrder || order.totalAmount)}
                       </Text>
                     </View>
 
-                    <View style={styles.gridColumn}>
+                    <View style={[styles.gridColumn, orderColumnStyle]}>
                       <Text style={styles.fieldLabel}>Dispatch & Schedule</Text>
                       <Text style={styles.fieldValuePrimary}>
                         {order.distributorNameSnapshot || order.distributorName || 'Not assigned'}
@@ -494,19 +688,59 @@ export default function AdminRequestsPage() {
                       Delivery: {order.deliveryAddressSnapshot || order.address || order.deliveryAddress || 'Address on file'}
                     </Text>
 
-                    <TouchableOpacity
+                    <Pressable
                       accessibilityRole="button"
                       accessibilityLabel={`View details for order ${orderId}`}
                       onPress={() => setSelectedOrder(order)}
-                      style={styles.detailsBtn}
+                      style={({ hovered, focused, pressed }) => [styles.detailsBtn, (hovered || focused) && styles.detailsBtnHover, pressed && styles.detailsBtnPressed]}
                     >
-                      <Text style={styles.detailsBtnText}>View Details</Text>
-                    </TouchableOpacity>
+                      {({ hovered, focused }) => (
+                        <Text style={[styles.detailsBtnText, (hovered || focused) && styles.detailsBtnTextActive]}>View Details</Text>
+                      )}
+                    </Pressable>
                   </View>
                 </View>
               );
             })}
           </View>
+          <View style={styles.paginationSection}>
+            <Text style={styles.paginationSummary}>Showing {pageStart}–{pageEnd} of {sortedOrders.length} orders</Text>
+            <View style={styles.paginationControls}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Previous page"
+                accessibilityState={{ disabled: visiblePage === 1 }}
+                disabled={visiblePage === 1}
+                onPress={() => setPage((current) => Math.max(1, current - 1))}
+                style={({ hovered, focused, pressed }) => [styles.pageButton, styles.pageNavButton, visiblePage === 1 && styles.pageButtonDisabled, visiblePage !== 1 && (hovered || focused || pressed) && styles.pageButtonInteractive]}
+              >
+                <Text style={[styles.pageButtonText, visiblePage === 1 && styles.pageButtonTextDisabled]}>Previous</Text>
+              </Pressable>
+              {pageItems.map((item) => typeof item === 'number' ? (
+                <Pressable
+                  key={item}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Page ${item}`}
+                  accessibilityState={{ selected: visiblePage === item }}
+                  onPress={() => setPage(item)}
+                  style={({ hovered, focused, pressed }) => [styles.pageButton, visiblePage === item && styles.pageButtonActive, visiblePage !== item && (hovered || focused || pressed) && styles.pageButtonInteractive]}
+                >
+                  <Text style={[styles.pageButtonText, visiblePage === item && styles.pageButtonTextActive]}>{item}</Text>
+                </Pressable>
+              ) : <Text key={item} style={styles.pageEllipsis}>…</Text>)}
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Next page"
+                accessibilityState={{ disabled: visiblePage === pageCount }}
+                disabled={visiblePage === pageCount}
+                onPress={() => setPage((current) => Math.min(pageCount, current + 1))}
+                style={({ hovered, focused, pressed }) => [styles.pageButton, styles.pageNavButton, visiblePage === pageCount && styles.pageButtonDisabled, visiblePage !== pageCount && (hovered || focused || pressed) && styles.pageButtonInteractive]}
+              >
+                <Text style={[styles.pageButtonText, visiblePage === pageCount && styles.pageButtonTextDisabled]}>Next</Text>
+              </Pressable>
+            </View>
+          </View>
+          </>
         )}
       </View>
 
@@ -575,7 +809,7 @@ export default function AdminRequestsPage() {
                   <View style={styles.modalGridItem}>
                     <Text style={styles.modalLabel}>Contact Phone</Text>
                     <Text style={styles.modalValue}>
-                      {selectedOrder?.deliveryPhoneSnapshot || selectedOrder?.contactNumber || 'Not provided'}
+                      {formatPhilippinePhone(selectedOrder?.deliveryPhoneSnapshot || selectedOrder?.contactNumber) || 'Not provided'}
                     </Text>
                   </View>
                   <View style={styles.modalGridItemFull}>
@@ -1000,11 +1234,26 @@ const createStyles = (colors) =>
     tab: {
       paddingHorizontal: 12,
       paddingVertical: 8,
+      minHeight: 38,
       borderRadius: 8,
+      borderWidth: 1,
+      borderColor: colors.border,
       backgroundColor: colors.surfaceAlt,
+      alignItems: 'center',
+      justifyContent: 'center',
+      ...Platform.select({ web: { transitionDuration: '150ms', transitionProperty: 'background-color, border-color, transform' }, default: {} }),
     },
     tabActive: {
       backgroundColor: colors.primary,
+      borderColor: colors.primary,
+    },
+    tabHover: {
+      backgroundColor: colors.primarySoft,
+      borderColor: colors.primary,
+    },
+    tabInteractive: {
+      borderColor: colors.primary,
+      transform: [{ translateY: -1 }],
     },
     tabText: {
       fontSize: 13,
@@ -1012,7 +1261,8 @@ const createStyles = (colors) =>
       color: colors.textSecondary,
     },
     tabTextActive: {
-      color: '#FFFFFF',
+      color: colors.white,
+      fontWeight: '900',
     },
     filtersRow: {
       gap: 12,
@@ -1027,32 +1277,122 @@ const createStyles = (colors) =>
     branchChip: {
       paddingHorizontal: 11,
       paddingVertical: 6,
+      minHeight: 34,
       borderRadius: 8,
       borderWidth: 1,
       borderColor: colors.inputBorder,
       backgroundColor: colors.surfaceAlt,
       marginRight: 8,
+      alignItems: 'center',
+      justifyContent: 'center',
+      ...Platform.select({ web: { transitionDuration: '150ms', transitionProperty: 'background-color, border-color, transform' }, default: {} }),
+    },
+    branchChipActive: {
+      backgroundColor: colors.primary,
+      borderColor: colors.primary,
+    },
+    branchChipHover: {
+      backgroundColor: colors.primarySoft,
+      borderColor: colors.primary,
+    },
+    branchChipInteractive: {
+      borderColor: colors.primary,
+      transform: [{ translateY: -1 }],
     },
     branchChipText: {
       fontSize: 12,
       fontWeight: '600',
       color: colors.textPrimary,
     },
-    searchInput: {
+    controlRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      alignItems: 'flex-start',
+      gap: 10,
+    },
+    searchWrap: {
+      flex: 1,
+      minWidth: 260,
+      minHeight: 42,
+      flexDirection: 'row',
+      alignItems: 'center',
       borderWidth: 1,
       borderColor: colors.inputBorder,
       borderRadius: 10,
+      backgroundColor: colors.input,
+    },
+    searchWrapFocused: {
+      borderColor: colors.primary,
+      shadowColor: colors.primary,
+      shadowOpacity: 0.12,
+      shadowRadius: 8,
+    },
+    searchInput: {
+      flex: 1,
+      minWidth: 0,
+      borderWidth: 0,
       paddingHorizontal: 14,
       paddingVertical: 10,
       color: colors.textPrimary,
-      backgroundColor: colors.input,
       fontSize: 13,
       outlineStyle: 'none',
     },
+    clearSearchButton: {
+      minHeight: 32,
+      justifyContent: 'center',
+      paddingHorizontal: 10,
+      marginRight: 5,
+      borderRadius: 7,
+    },
+    clearSearchButtonActive: { backgroundColor: colors.primarySoft },
+    clearSearchText: { color: colors.primary, fontSize: 12, fontWeight: '900' },
+    sortWrap: { width: 190, minWidth: 170, position: 'relative', zIndex: 5 },
+    sortButton: {
+      minHeight: 42,
+      borderWidth: 1,
+      borderColor: colors.inputBorder,
+      borderRadius: 10,
+      backgroundColor: colors.input,
+      paddingHorizontal: 12,
+      paddingVertical: 7,
+      justifyContent: 'center',
+    },
+    controlButtonInteractive: { borderColor: colors.primary, backgroundColor: colors.primarySoft },
+    sortButtonLabel: { color: colors.textSecondary, fontSize: 9, fontWeight: '900', letterSpacing: 0.5 },
+    sortButtonValue: { color: colors.textPrimary, fontSize: 12, fontWeight: '800', marginTop: 1 },
+    sortMenu: {
+      marginTop: 6,
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 10,
+      backgroundColor: colors.surface,
+      padding: 5,
+      shadowColor: colors.textPrimary,
+      shadowOpacity: 0.12,
+      shadowRadius: 12,
+      elevation: 5,
+    },
+    sortOption: {
+      minHeight: 34,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 8,
+      borderRadius: 7,
+      paddingHorizontal: 9,
+      paddingVertical: 7,
+    },
+    sortOptionActive: { backgroundColor: colors.primarySoft },
+    sortOptionInteractive: { backgroundColor: colors.primarySoft },
+    sortOptionText: { color: colors.textPrimary, fontSize: 12, fontWeight: '700' },
+    sortOptionTextActive: { color: colors.primary, fontWeight: '900' },
+    sortOptionCheck: { color: colors.primary, fontSize: 12, fontWeight: '900' },
     listHeaderRow: {
       flexDirection: 'row',
       justifyContent: 'space-between',
       alignItems: 'center',
+      flexWrap: 'wrap',
+      gap: 8,
       marginBottom: 12,
       paddingBottom: 8,
       borderBottomWidth: 1,
@@ -1067,6 +1407,13 @@ const createStyles = (colors) =>
       fontSize: 12,
       fontWeight: '800',
       color: colors.primary,
+    },
+    issueBreakdown: {
+      color: colors.textSecondary,
+      fontSize: 12,
+      fontWeight: '700',
+      marginTop: -4,
+      marginBottom: 12,
     },
     errorBox: {
       backgroundColor: colors.dangerSoft,
@@ -1100,11 +1447,25 @@ const createStyles = (colors) =>
       borderRadius: 12,
       backgroundColor: colors.surfaceAlt,
       padding: 16,
+      shadowColor: colors.textPrimary,
+      shadowOpacity: 0.03,
+      shadowRadius: 8,
+      shadowOffset: { width: 0, height: 3 },
+      ...Platform.select({ web: { transitionDuration: '160ms', transitionProperty: 'transform, box-shadow, border-color' }, default: {} }),
+    },
+    orderCardHover: {
+      transform: [{ translateY: -2 }],
+      borderColor: colors.primary,
+      shadowOpacity: 0.1,
+      shadowRadius: 14,
+      elevation: 3,
     },
     orderHeaderRow: {
       flexDirection: 'row',
       justifyContent: 'space-between',
       alignItems: 'flex-start',
+      flexWrap: 'wrap',
+      gap: 10,
       marginBottom: 12,
       paddingBottom: 10,
       borderBottomWidth: 1,
@@ -1112,26 +1473,20 @@ const createStyles = (colors) =>
     },
     orderIdGroup: {
       gap: 2,
+      flex: 1,
+      minWidth: 180,
     },
     orderIdText: {
       fontSize: 16,
       fontWeight: '900',
       color: colors.textPrimary,
+      flexWrap: 'wrap',
     },
     orderDateText: {
       fontSize: 12,
       color: colors.textSecondary,
     },
-    statusPill: {
-      paddingHorizontal: 10,
-      paddingVertical: 4,
-      borderRadius: 8,
-      borderWidth: 1,
-    },
-    statusPillText: {
-      fontSize: 12,
-      fontWeight: '800',
-    },
+    statusBadge: { maxWidth: '100%' },
     orderBodyGrid: {
       flexDirection: 'row',
       flexWrap: 'wrap',
@@ -1139,10 +1494,12 @@ const createStyles = (colors) =>
       marginBottom: 12,
     },
     gridColumn: {
-      flex: 1,
-      minWidth: 140,
+      minWidth: 0,
       gap: 2,
     },
+    gridColumnDesktop: { flexGrow: 1, flexBasis: '22%', minWidth: 170 },
+    gridColumnTablet: { flexGrow: 1, flexBasis: '46%', minWidth: 220 },
+    gridColumnMobile: { flexGrow: 1, flexBasis: '100%', minWidth: '100%' },
     fieldLabel: {
       fontSize: 11,
       fontWeight: '700',
@@ -1173,6 +1530,7 @@ const createStyles = (colors) =>
       borderTopColor: colors.border,
       paddingTop: 10,
       gap: 12,
+      flexWrap: 'wrap',
     },
     locationText: {
       flex: 1,
@@ -1186,12 +1544,50 @@ const createStyles = (colors) =>
       borderWidth: 1,
       borderColor: colors.primary,
       backgroundColor: colors.primarySoft,
+      minHeight: 34,
+      justifyContent: 'center',
+      ...Platform.select({ web: { transitionDuration: '140ms', transitionProperty: 'background-color, transform, border-color' }, default: {} }),
     },
+    detailsBtnHover: { backgroundColor: colors.primary, borderColor: colors.primary },
+    detailsBtnPressed: { transform: [{ scale: 0.98 }] },
     detailsBtnText: {
       color: colors.primary,
       fontWeight: '800',
       fontSize: 12,
     },
+    detailsBtnTextActive: { color: colors.white },
+    paginationSection: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 12,
+      marginTop: 18,
+      paddingTop: 16,
+      borderTopWidth: 1,
+      borderTopColor: colors.border,
+    },
+    paginationSummary: { color: colors.textSecondary, fontSize: 12, fontWeight: '700' },
+    paginationControls: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'flex-end', gap: 6 },
+    pageButton: {
+      minWidth: 36,
+      minHeight: 36,
+      paddingHorizontal: 9,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 8,
+      backgroundColor: colors.surfaceAlt,
+    },
+    pageNavButton: { minWidth: 76 },
+    pageButtonActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+    pageButtonInteractive: { backgroundColor: colors.primarySoft, borderColor: colors.primary, transform: [{ translateY: -1 }] },
+    pageButtonDisabled: { backgroundColor: colors.neutral, borderColor: colors.border, opacity: 0.62 },
+    pageButtonText: { color: colors.textPrimary, fontSize: 12, fontWeight: '800' },
+    pageButtonTextActive: { color: colors.white, fontWeight: '900' },
+    pageButtonTextDisabled: { color: colors.textSecondary },
+    pageEllipsis: { color: colors.textSecondary, minWidth: 18, textAlign: 'center', fontWeight: '800' },
     modalBackdrop: {
       flex: 1,
       backgroundColor: colors.overlay,

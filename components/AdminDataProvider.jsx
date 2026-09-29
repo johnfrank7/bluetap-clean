@@ -4,6 +4,8 @@ import { collection, limit, onSnapshot, orderBy, query } from 'firebase/firestor
 
 import { auth, db } from '../firebase';
 import { prefetchLikelyAdminDestinations } from '../services/adminPrefetch';
+import { ADMIN_CACHE_KEYS, useAdminData } from '../services/adminDataCache';
+import { getDistributors } from '../services/branchManagement';
 
 export const ADMIN_REQUEST_REALTIME_LIMIT = 500;
 const ACTIONABLE_STATUSES = new Set([
@@ -18,10 +20,17 @@ const AdminDataContext = React.createContext({
   initialLoading: true,
   error: '',
   actionableRequestsCount: 0,
+  distributors: [],
+  distributorsLoading: true,
+  distributorsRefreshing: false,
+  distributorsError: '',
+  refreshDistributors: async () => null,
+  pendingDistributorCount: 0,
 });
 
 export function AdminDataProvider({ children }) {
   const [state, setState] = React.useState({ requests: [], initialLoading: true, error: '', uid: '' });
+  const distributorState = useAdminData(ADMIN_CACHE_KEYS.distributors, getDistributors);
 
   React.useEffect(() => {
     let unsubscribeRequests = () => {};
@@ -72,7 +81,14 @@ export function AdminDataProvider({ children }) {
     error: state.error,
     actionableRequestsCount: state.requests.reduce((count, request) =>
       count + (ACTIONABLE_STATUSES.has(String(request.status || '').toLowerCase()) ? 1 : 0), 0),
-  }), [state.error, state.initialLoading, state.requests]);
+    distributors: distributorState.data || [],
+    distributorsLoading: distributorState.loading,
+    distributorsRefreshing: distributorState.refreshing,
+    distributorsError: distributorState.error,
+    refreshDistributors: distributorState.refresh,
+    pendingDistributorCount: (distributorState.data || []).reduce((count, distributor) =>
+      count + (String(distributor.approvalStatus || '').toLowerCase() === 'pending' ? 1 : 0), 0),
+  }), [distributorState.data, distributorState.error, distributorState.loading, distributorState.refresh, distributorState.refreshing, state.error, state.initialLoading, state.requests]);
 
   return <AdminDataContext.Provider value={value}>{children}</AdminDataContext.Provider>;
 }

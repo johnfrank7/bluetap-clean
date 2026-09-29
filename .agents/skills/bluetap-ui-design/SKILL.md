@@ -15,6 +15,10 @@ Admin Requests oversight (`/admin/requests`) provides a platform-wide read-only 
 
 Admin override actions must expose only one clear entry point per order-details context, and emergency override dialogs must use structured callouts, grouped context, and visible primary/secondary actions in both light and dark mode.
 
+Operational oversight lists should use clear filter states, compact sort and search controls, contextual empty states, bounded pagination, and readable semantic statuses without expanding role permissions.
+
+Administrative entity-management pages should use semantic status summaries, contextual empty states, compact search/filter/sort controls, bounded pagination, and responsive tables/cards without duplicating authoritative workflows.
+
 ProductCard discovery and ordering components adhere to shared theme tokens: high-contrast action buttons (`BLUETAP_COLORS.primary` with white text), surface styling, and contain-based image presentation that preserves packaging aspect ratios across light and dark modes. Pinned dashboard and portal headers must maintain opaque backgrounds to prevent scrollable content bleed-through. Toast notifications use `TopToastFeedback` for theme-aware, top-anchored alerts.
 
 BlueTap dark mode uses layered deep navy and blue-black surfaces, never pure black as the main background. Keep BlueTap blue as the primary accent; Admin and Manager share one dark palette through theme tokens, while the landing page remains the branding reference. Build premium card separation with subtle borders and restrained highlights. Do not introduce random hardcoded dark colors in screens: use the shared background, sidebar, surface, surfaceAlt, border, primary, text, muted, and semantic tokens.

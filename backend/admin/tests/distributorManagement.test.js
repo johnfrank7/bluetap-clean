@@ -5,7 +5,7 @@ const { createAdminDistributorsHandler } = require('../distributorManagementHand
 function fixture() {
   const records = new Map([
     ['users/admin-1', { role: 'admin', email: 'admin@example.test' }],
-    ['users/pending-distributor', { role: 'distributor', fullName: 'Pending Driver', distributorStatus: 'pending', approvalStatus: 'pending', status: 'Pending', requestedBranchId: 'north', requestedBranchNameSnapshot: 'North' }],
+    ['users/pending-distributor', { role: 'distributor', fullName: 'Pending Driver', publicUid: 'Dis001', distributorStatus: 'pending', approvalStatus: 'pending', status: 'Pending', requestedBranchId: 'north', requestedBranchNameSnapshot: 'North' }],
     ['users/other-pending', { role: 'distributor', fullName: 'Other Driver', distributorStatus: 'pending', approvalStatus: 'pending', status: 'Pending', requestedBranchId: 'inactive' }],
     ['branches/north', { name: 'North', status: 'active' }],
     ['branches/south', { name: 'South', status: 'active' }],
@@ -50,8 +50,9 @@ test('Admin rejection keeps requested-branch history and clears operational bran
   assert.ok([...f.records.values()].some((entry) => entry.action === 'DISTRIBUTOR_REJECTED' && entry.rejectionReason === 'Coverage is full.'));
 });
 
-test('Admin Distributor list returns requested and assigned branch display data only', async () => {
+test('Admin Distributor list returns public identity and requested/assigned branch display data', async () => {
   const f = fixture(); const res = response(); await f.handler({ method: 'GET', headers: { authorization: 'Bearer admin-token' } }, res);
   assert.equal(res.statusCode, 200); const pending = res.body.distributors.find((item) => item.uid === 'pending-distributor');
-  assert.equal(pending.requestedBranchName, 'North'); assert.equal(pending.branchId, '');
+  assert.equal(pending.publicUid, 'Dis001'); assert.equal(pending.requestedBranchName, 'North'); assert.equal(pending.branchId, '');
+  assert.equal(pending.uid, 'pending-distributor');
 });

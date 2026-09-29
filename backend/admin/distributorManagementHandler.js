@@ -12,6 +12,7 @@ const branchName = (data = {}, branchNames = new Map()) => branchNames.get(clean
 const requestedBranchName = (data = {}, branchNames = new Map()) => branchNames.get(clean(data.requestedBranchId, 80)) || clean(data.requestedBranchNameSnapshot);
 const safeDistributor = (uid, data = {}, branchNames = new Map()) => ({
   uid,
+  publicUid: clean(data.publicUid || data.displayUid || data.unique_id, 80) || null,
   fullName: clean(data.fullName || `${data.firstName || ''} ${data.lastName || ''}`),
   username: clean(data.username),
   email: clean(data.email).toLowerCase(),
@@ -24,6 +25,9 @@ const safeDistributor = (uid, data = {}, branchNames = new Map()) => ({
   requestedBranchName: requestedBranchName(data, branchNames),
   createdAt: data.createdAt || null,
   approvedAt: data.approvedAt || null,
+  rejectedAt: data.rejectedAt || null,
+  updatedAt: data.updatedAt || null,
+  rejectionReason: clean(data.rejectionReason, 240),
   approvalStatus: statusOf(data),
   distributorStatus: statusOf(data),
   faceVerification: data.faceVerification?.status === 'verified' ? 'verified' : data.faceVerification?.required === false ? 'not_required' : 'pending',
