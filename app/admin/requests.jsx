@@ -61,6 +61,34 @@ const SORT_OPTIONS = [
   { id: 'amount_desc', label: 'Highest amount' },
   { id: 'amount_asc', label: 'Lowest amount' },
 ];
+
+function RequestsFilterWebStyles({ colors }) {
+  if (Platform.OS !== 'web') return null;
+
+  const primary = colors.primaryAction;
+  const primaryStrong = colors.primaryDeep || colors.primaryAction;
+
+  return React.createElement('style', {
+    dangerouslySetInnerHTML: {
+      __html: `
+        button[data-admin-requests-filter-selected="true"] {
+          background-color: ${primary};
+          border-color: ${primary};
+        }
+        button[data-admin-requests-filter-selected="true"]:hover,
+        button[data-admin-requests-filter-selected="true"]:active {
+          background-color: ${primaryStrong};
+          border-color: ${primaryStrong};
+        }
+        button[data-admin-requests-filter-selected="false"]:hover {
+          background-color: ${colors.primarySoft};
+          border-color: ${colors.primary};
+        }
+      `,
+    },
+  });
+}
+
 const formatAmount = (val) => {
   if (val === undefined || val === null || val === '') return '₱0.00';
   const num = Number(val);
@@ -416,6 +444,7 @@ export default function AdminRequestsPage() {
         type={toast.type}
         onDismiss={() => setToast((prev) => ({ ...prev, visible: false }))}
       />
+      <RequestsFilterWebStyles colors={colors} />
       {/* Metrics Summary Row */}
       <View style={styles.metricsRow}>
         <View style={styles.metricCard}>
@@ -453,6 +482,7 @@ export default function AdminRequestsPage() {
             return (
               <Pressable
                 key={tab.id}
+                dataSet={{ adminRequestsFilterSelected: selected ? 'true' : 'false' }}
                 accessibilityRole="button"
                 accessibilityLabel={`${tab.label} (${tab.count})`}
                 accessibilityState={{ selected }}
@@ -477,6 +507,10 @@ export default function AdminRequestsPage() {
           <View style={styles.branchSelectWrap}>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.branchScroll}>
               <Pressable
+                dataSet={{
+                  adminRequestsFilterSelected:
+                    branchFilter === 'all' ? 'true' : 'false',
+                }}
                 accessibilityRole="button"
                 accessibilityState={{ selected: branchFilter === 'all' }}
                 onPress={() => setBranchFilter('all')}
@@ -499,6 +533,10 @@ export default function AdminRequestsPage() {
               {branches.map((b) => (
                 <Pressable
                   key={b.id}
+                  dataSet={{
+                    adminRequestsFilterSelected:
+                      branchFilter === b.id ? 'true' : 'false',
+                  }}
                   accessibilityRole="button"
                   accessibilityLabel={`Filter by ${b.name || b.code || b.id}, ${branchCounts.get(b.id) || 0} orders`}
                   accessibilityState={{ selected: branchFilter === b.id }}
