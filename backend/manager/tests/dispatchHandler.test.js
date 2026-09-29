@@ -83,9 +83,19 @@ test('current owning Branch Manager can assign and reassign only eligible same-b
   assert.equal((await call(handler, 'PATCH', 'manager-a-token', { orderId: 'order-a', action: 'assign-distributor', distributorUid: 'distributor-inactive', scheduledAt: defaultSchedule })).statusCode, 409);
   const assigned = await call(handler, 'PATCH', 'manager-a-token', { orderId: 'order-a', action: 'assign-distributor', distributorUid: 'distributor-a', scheduledAt: defaultSchedule });
   assert.equal(assigned.statusCode, 200); assert.equal(assigned.body.order.status, 'distributor_assigned'); assert.equal(f.records.get('requests/order-a').assignedDistributorUid, 'distributor-a');
+  assert.equal(f.records.get('requests/order-a').assignmentVersion, 2);
   assert.ok(f.records.get('requests/order-a').scheduledAt);
   const reassigned = await call(handler, 'PATCH', 'manager-a-token', { orderId: 'order-a', action: 'reassign-distributor', distributorUid: 'distributor-a2', scheduledAt: defaultSchedule });
   assert.equal(reassigned.statusCode, 200); assert.equal(f.records.get('requests/order-a').assignedDistributorUid, 'distributor-a2'); assert.equal(f.records.get('requests/order-a').assignmentHistory.length, 2);
+  assert.equal(f.records.get('requests/order-a').assignmentVersion, 3);
+});
+
+test('retrying the same authoritative Distributor does not advance the assignment epoch', async () => {
+  const f = fixture(); const handler = createManagerDispatchHandler(f.getAdmin);
+  assert.equal((await call(handler, 'PATCH', 'manager-a-token', { orderId: 'order-a', action: 'assign-distributor', distributorUid: 'distributor-a', scheduledAt: defaultSchedule })).statusCode, 200);
+  assert.equal(f.records.get('requests/order-a').assignmentVersion, 2);
+  assert.equal((await call(handler, 'PATCH', 'manager-a-token', { orderId: 'order-a', action: 'reassign-distributor', distributorUid: 'distributor-a', scheduledAt: defaultSchedule })).statusCode, 200);
+  assert.equal(f.records.get('requests/order-a').assignmentVersion, 2);
 });
 
 test('Manager schedule enforces the order weekday snapshot even after product settings change', async () => {
@@ -113,6 +123,7 @@ test('assigned Distributor receives only their own current-branch delivery', asy
 test('Distributor delivery scheduling and status changes are server-owned and assignment-scoped', async () => {
   const f = fixture(); const dispatch = createManagerDispatchHandler(f.getAdmin); const distributor = createDistributorAssignedOrdersHandler(f.getAdmin);
   await call(dispatch, 'PATCH', 'manager-a-token', { orderId: 'order-a', action: 'assign-distributor', distributorUid: 'distributor-a', scheduledAt: defaultSchedule });
+  const assignmentVersion = f.records.get('requests/order-a').assignmentVersion;
   const scheduledAt = new Date(Date.now() + (60 * 60 * 1000)).toISOString();
   const scheduled = await call(distributor, 'PATCH', 'distributor-a-token', { orderId: 'order-a', action: 'schedule-delivery', scheduledAt });
   assert.equal(scheduled.statusCode, 200); assert.equal(scheduled.body.order.status, 'scheduled'); assert.equal(f.records.get('requests/order-a').status, 'scheduled');
@@ -121,6 +132,7 @@ test('Distributor delivery scheduling and status changes are server-owned and as
   assert.equal(started.statusCode, 200); assert.equal(started.body.order.status, 'out_for_delivery');
   const delivered = await call(distributor, 'PATCH', 'distributor-a-token', { orderId: 'order-a', action: 'mark-delivered' });
   assert.equal(delivered.statusCode, 200); assert.equal(delivered.body.order.status, 'delivered');
+  assert.equal(f.records.get('requests/order-a').assignmentVersion, assignmentVersion);
   assert.deepEqual(f.records.get('requests/order-a').distributorDeliveryHistory.map((entry) => entry.event), ['DELIVERY_SCHEDULED', 'DELIVERY_STARTED', 'DELIVERY_COMPLETED']);
 });
 
@@ -129,6 +141,7 @@ test('transfer requires target review, changes ownership only on acceptance, and
   await call(handler, 'PATCH', 'manager-a-token', { orderId: 'order-a', action: 'assign-distributor', distributorUid: 'distributor-a', scheduledAt: defaultSchedule });
   const requested = await call(handler, 'PATCH', 'manager-a-token', { orderId: 'order-a', action: 'request-transfer', targetBranchId: 'branch-b', transferReason: 'Closer delivery coverage.' });
   assert.equal(requested.statusCode, 200); assert.equal(f.records.get('requests/order-a').status, 'branch_transfer_pending'); assert.equal(f.records.get('requests/order-a').assignedDistributorUid, null);
+  assert.equal(f.records.get('requests/order-a').assignmentVersion, 3);
   const targetQueue = await call(handler, 'GET', 'manager-b-token'); const sourceQueue = await call(handler, 'GET', 'manager-a-token');
   assert.deepEqual(targetQueue.body.incomingTransfers.map((order) => order.id), ['order-a']); assert.equal(sourceQueue.body.incomingTransfers.length, 0);
   assert.equal((await call(handler, 'PATCH', 'manager-a-token', { orderId: 'order-a', action: 'accept-transfer' })).statusCode, 403);
@@ -270,10 +283,12 @@ test('Distributor accept and decline lifecycle behaves correctly and decline ret
   assert.equal(declined.body.order.status, 'awaiting_distributor_assignment');
   assert.equal(f.records.get('requests/order-a').status, 'awaiting_distributor_assignment');
   assert.equal(f.records.get('requests/order-a').assignedDistributorUid, null);
+  assert.equal(f.records.get('requests/order-a').assignmentVersion, 3);
   assert.ok(f.records.get('requests/order-a').assignmentHistory.some((entry) => entry.event === 'ASSIGNMENT_DECLINED'));
 
   // Manager reassigns to distributor-a2
   await call(dispatch, 'PATCH', 'manager-a-token', { orderId: 'order-a', action: 'assign-distributor', distributorUid: 'distributor-a2', scheduledAt: defaultSchedule });
+  assert.equal(f.records.get('requests/order-a').assignmentVersion, 4);
 
   // Distributor A2 accepts
   const accepted = await call(distributor, 'PATCH', 'distributor-a2-token', { orderId: 'order-a', action: 'accept-assignment' });

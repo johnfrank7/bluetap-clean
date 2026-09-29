@@ -4,6 +4,7 @@ const { requireActiveManager, requireManagerBranch } = require('../auth/authoriz
 const { canonicalAccountStatus } = require('../auth/accountStatus');
 const { applyCors } = require('../utils/cors');
 const { OtpError } = require('../utils/otpError');
+const { assignmentVersionForTransition } = require('../utils/relationshipEpochs');
 const { effectiveDeliveryDays, isAllowedDeliveryDate, productLimit, productDeliveryDays, limitViolations } = require('../../services/productOrderPolicy');
 
 const AWAITING_ASSIGNMENT = 'awaiting_distributor_assignment';
@@ -381,6 +382,7 @@ function createManagerDispatchHandler(getAdmin = getFirebaseAdmin) {
           const allowedDays = Array.isArray(current.effectiveDeliveryDaysSnapshot) ? current.effectiveDeliveryDaysSnapshot : effectiveDeliveryDays(current.items || []);
           if (!isAllowedDeliveryDate(scheduledAt, allowedDays)) throw new OtpError(409, 'PRODUCT_DELIVERY_DAY_UNAVAILABLE', allowedDays.length ? 'Choose a delivery day allowed for every product in this order.' : 'These products have no common delivery day. Ask Admin to update the product schedules.');
           const event = assigning ? 'DISTRIBUTOR_ASSIGNED' : 'DISTRIBUTOR_REASSIGNED';
+          const assignmentEpoch = assignmentVersionForTransition(current, target.uid);
           const rawDistributorUid = clean(target.data?.publicUid || target.data?.displayUid || target.data?.unique_id, 80);
           const targetDistributorUniqueId = rawDistributorUid && !/^[a-zA-Z0-9]{20,}$/.test(rawDistributorUid) ? rawDistributorUid : '';
           const entry = assigning
@@ -388,6 +390,7 @@ function createManagerDispatchHandler(getAdmin = getFirebaseAdmin) {
             : { event, previousDistributorUid: assignedUid, previousDistributorNameSnapshot: clean(current.assignedDistributorNameSnapshot || current.distributor_name, 160), distributorUid: target.uid, distributorNameSnapshot: fullName(target.data), distributorUniqueIdSnapshot: targetDistributorUniqueId, assignedByManagerUid: manager.decoded.uid, assignedAt: now, scheduledAt };
           return updateWithEvent(current, event, manager.decoded.uid, managerBranchId, now, {
             status: DISTRIBUTOR_ASSIGNED,
+            assignmentVersion: assignmentEpoch.assignmentVersion,
             assignedDistributorUid: target.uid,
             assignedDistributorNameSnapshot: fullName(target.data),
             assignedDistributorUniqueIdSnapshot: targetDistributorUniqueId,
@@ -506,6 +509,7 @@ function createManagerDispatchHandler(getAdmin = getFirebaseAdmin) {
           requireOwningManager(manager, current);
           if (![AWAITING_ASSIGNMENT, DISTRIBUTOR_ASSIGNED].includes(clean(current.status, 80).toLowerCase())) throw new OtpError(409, 'ORDER_NOT_TRANSFERABLE', 'This order cannot be transferred in its current state.');
           const priorDistributorUid = clean(current.assignedDistributorUid || current.distributor_id, 128);
+          const assignmentEpoch = priorDistributorUid ? assignmentVersionForTransition(current, '') : null;
           const assignmentHistory = priorDistributorUid ? [...history(current.assignmentHistory), { event: 'DISTRIBUTOR_UNASSIGNED_FOR_TRANSFER', distributorUid: priorDistributorUid, distributorNameSnapshot: clean(current.assignedDistributorNameSnapshot || current.distributor_name, 160), assignedByManagerUid: manager.decoded.uid, assignedAt: now }] : history(current.assignmentHistory);
           const transferEntry = { event: 'BRANCH_TRANSFER_REQUESTED', transferRequestId, fromBranchId: managerBranchId, toBranchId: targetBranchId, sourceManagerUid: manager.decoded.uid, targetManagerUids: targetManagers.map((item) => item.uid), transferReason, requestedAt: now };
           return updateWithEvent(current, 'BRANCH_TRANSFER_REQUESTED', manager.decoded.uid, managerBranchId, now, {
@@ -521,6 +525,7 @@ function createManagerDispatchHandler(getAdmin = getFirebaseAdmin) {
             targetManagerUid: targetManagers[0]?.uid || '',
             targetManagerUids: targetManagers.map((item) => item.uid),
             assignedDistributorUid: null,
+            ...(assignmentEpoch ? { assignmentVersion: assignmentEpoch.assignmentVersion } : {}),
             assignedDistributorNameSnapshot: '',
             assignedDistributorUniqueIdSnapshot: '',
             assignedAt: null,

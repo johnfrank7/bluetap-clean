@@ -35,6 +35,9 @@ test('Requester and Distributor authority requires ownership, assignment, branch
   assert.throws(() => authorizeRequesterDistributor({ requester, distributor: { ...distributor, branchId: 'branch-b' }, branch: branchA, order, assignmentVersion: 4 }), (error) => error.reason === 'CHAT_BRANCH_MISMATCH');
   assert.throws(() => authorizeRequesterDistributor({ requester, distributor, branch: branchA, order, assignmentVersion: 3 }), (error) => error.reason === 'CHAT_ASSIGNMENT_VERSION_STALE');
   assert.throws(() => authorizeRequesterDistributor({ requester: { ...requester, accountStatus: 'terminated' }, distributor, branch: branchA, order, assignmentVersion: 4 }), (error) => error.reason === 'ACCOUNT_TERMINATED');
+  const { assignmentVersion: _legacyAssignmentVersion, ...legacyOrder } = order;
+  assert.equal(authorizeRequesterDistributor({ requester, distributor, branch: branchA, order: legacyOrder, assignmentVersion: 1 }).assignmentVersion, 1);
+  assert.throws(() => authorizeRequesterDistributor({ requester, distributor, branch: branchA, order: { ...order, assignmentVersion: 0 }, assignmentVersion: 1 }), (error) => error.reason === 'INVALID_ASSIGNMENT_VERSION');
 });
 
 test('Distributor branch authority is bound to current branch and membership epoch', () => {
@@ -42,6 +45,12 @@ test('Distributor branch authority is bound to current branch and membership epo
   assert.throws(() => authorizeDistributorBranch({ distributor, branch: branchB, branchMembershipVersion: 3 }), (error) => error.reason === 'CHAT_BRANCH_MISMATCH');
   assert.throws(() => authorizeDistributorBranch({ distributor, branch: branchA, branchMembershipVersion: 2 }), (error) => error.reason === 'CHAT_MEMBERSHIP_VERSION_STALE');
   assert.throws(() => authorizeDistributorBranch({ distributor: manager, branch: branchB, branchMembershipVersion: 3 }), (error) => error.reason === 'CHAT_ROLE_DENIED');
+  const { branchMembershipVersion: _legacyMembershipVersion, ...legacyDistributor } = distributor;
+  assert.equal(authorizeDistributorBranch({ distributor: legacyDistributor, branch: branchA, branchMembershipVersion: 1 }).branchMembershipVersion, 1);
+  assert.throws(() => authorizeDistributorBranch({ distributor: { ...distributor, branchMembershipVersion: 0 }, branch: branchA, branchMembershipVersion: 1 }), (error) => error.reason === 'INVALID_BRANCH_MEMBERSHIP_VERSION');
+  const movedDistributor = { ...distributor, branchId: 'branch-b', branchMembershipVersion: 4 };
+  assert.equal(authorizeDistributorBranch({ distributor: movedDistributor, branch: branchB, branchMembershipVersion: 4 }).branchId, 'branch-b');
+  assert.throws(() => authorizeDistributorBranch({ distributor: movedDistributor, branch: branchB, branchMembershipVersion: 3 }), (error) => error.reason === 'CHAT_MEMBERSHIP_VERSION_STALE');
 });
 
 test('Manager authority follows the current branch and never a former branch', () => {

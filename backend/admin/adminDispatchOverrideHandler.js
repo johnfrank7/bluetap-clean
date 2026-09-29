@@ -3,6 +3,7 @@ const { requireAdmin } = require('../auth/authorization');
 const { canonicalAccountStatus } = require('../auth/accountStatus');
 const { applyCors } = require('../utils/cors');
 const { OtpError } = require('../utils/otpError');
+const { assignmentVersionForTransition } = require('../utils/relationshipEpochs');
 const { effectiveDeliveryDays, isAllowedDeliveryDate } = require('../../services/productOrderPolicy');
 
 const clean = (value, max = 240) => String(value || '').trim().slice(0, max);
@@ -125,42 +126,6 @@ function createAdminDispatchOverrideHandler(getAdmin = getFirebaseAdmin) {
         throw new OtpError(400, 'INVALID_DELIVERY_SCHEDULE', 'Choose a current or future delivery time.');
       }
 
-      const orderRef = db.collection('requests').doc(orderId);
-      const orderSnap = await orderRef.get();
-      if (!orderSnap.exists) {
-        throw new OtpError(404, 'ORDER_NOT_FOUND', 'The order was not found.');
-      }
-
-      const orderData = orderSnap.data() || {};
-      requireOverrideEligible(orderData);
-      const allowedDays = Array.isArray(orderData.effectiveDeliveryDaysSnapshot) ? orderData.effectiveDeliveryDaysSnapshot : effectiveDeliveryDays(orderData.items || []);
-      if (!isAllowedDeliveryDate(scheduledAt, allowedDays)) throw new OtpError(409, 'PRODUCT_DELIVERY_DAY_UNAVAILABLE', allowedDays.length ? 'Choose a delivery day allowed for every product in this order.' : 'These products have no common delivery day. Ask Admin to update the product schedules.');
-      const branchId = clean(orderData.currentBranchId || orderData.branchId, 128);
-      if (!branchId) {
-        throw new OtpError(400, 'BRANCH_NOT_SET', 'This order has no owning branch.');
-      }
-
-      const targetSnap = await db.collection('users').doc(distributorUid).get();
-      if (!targetSnap.exists) {
-        throw new OtpError(404, 'DISTRIBUTOR_NOT_FOUND', 'The selected distributor account does not exist.');
-      }
-
-      const targetData = targetSnap.data() || {};
-      const targetBranchId = clean(targetData.branchId, 128);
-
-      // STRICT SAME-BRANCH SECURITY CHECK: Admin CANNOT cross-assign branches
-      if (targetBranchId !== branchId) {
-        throw new OtpError(
-          403,
-          'CROSS_BRANCH_ASSIGNMENT_FORBIDDEN',
-          'Admin override cannot assign a distributor from a different branch. The distributor must belong to the order\'s branch.'
-        );
-      }
-
-      if (!isEligibleDistributor(targetData, branchId)) {
-        throw new OtpError(409, 'DISTRIBUTOR_NOT_ELIGIBLE', 'The selected distributor is not active or approved for this branch.');
-      }
-
       if (typeof auth.getUser === 'function') {
         const account = await auth.getUser(distributorUid).catch(() => null);
         if (!account || account.disabled === true) {
@@ -168,76 +133,95 @@ function createAdminDispatchOverrideHandler(getAdmin = getFirebaseAdmin) {
         }
       }
 
-      const previousDistributorUid = clean(orderData.assignedDistributorUid || orderData.distributor_id, 128);
-      const previousDistributorName = clean(orderData.assignedDistributorNameSnapshot || orderData.distributor_name, 160);
-      const targetName = fullName(targetData);
-      const targetPublicUid = clean(targetData.publicUid || targetData.displayUid || targetData.unique_id, 80);
+      const orderRef = db.collection('requests').doc(orderId);
+      const targetRef = db.collection('users').doc(distributorUid);
+      const auditRef = db.collection('adminAuditLogs').doc();
+      let savedOrder;
+      await db.runTransaction(async (tx) => {
+        const [orderSnap, targetSnap] = await Promise.all([tx.get(orderRef), tx.get(targetRef)]);
+        if (!orderSnap.exists) throw new OtpError(404, 'ORDER_NOT_FOUND', 'The order was not found.');
+        if (!targetSnap.exists) throw new OtpError(404, 'DISTRIBUTOR_NOT_FOUND', 'The selected distributor account does not exist.');
 
-      const event = 'ADMIN_DISPATCH_OVERRIDE';
-      const historyEntry = {
-        event,
-        previousDistributorUid: previousDistributorUid || null,
-        previousDistributorNameSnapshot: previousDistributorName || null,
-        distributorUid,
-        distributorNameSnapshot: targetName,
-        distributorUniqueIdSnapshot: targetPublicUid,
-        assignedByAdminUid: admin.uid,
-        assignedAt: now,
-        scheduledAt,
-        adminOverride: true,
-        reason,
-      };
+        const orderData = orderSnap.data() || {};
+        const targetData = targetSnap.data() || {};
+        requireOverrideEligible(orderData);
+        const allowedDays = Array.isArray(orderData.effectiveDeliveryDaysSnapshot) ? orderData.effectiveDeliveryDaysSnapshot : effectiveDeliveryDays(orderData.items || []);
+        if (!isAllowedDeliveryDate(scheduledAt, allowedDays)) throw new OtpError(409, 'PRODUCT_DELIVERY_DAY_UNAVAILABLE', allowedDays.length ? 'Choose a delivery day allowed for every product in this order.' : 'These products have no common delivery day. Ask Admin to update the product schedules.');
+        const branchId = clean(orderData.currentBranchId || orderData.branchId, 128);
+        if (!branchId) throw new OtpError(400, 'BRANCH_NOT_SET', 'This order has no owning branch.');
 
-      const dispatchHistoryEntry = {
-        event,
-        actorUid: admin.uid,
-        role: 'admin',
-        branchId,
-        createdAt: now,
-      };
+        // STRICT SAME-BRANCH SECURITY CHECK: Admin CANNOT cross-assign branches.
+        if (clean(targetData.branchId, 128) !== branchId) {
+          throw new OtpError(403, 'CROSS_BRANCH_ASSIGNMENT_FORBIDDEN', 'Admin override cannot assign a distributor from a different branch. The distributor must belong to the order\'s branch.');
+        }
+        if (!isEligibleDistributor(targetData, branchId)) {
+          throw new OtpError(409, 'DISTRIBUTOR_NOT_ELIGIBLE', 'The selected distributor is not active or approved for this branch.');
+        }
 
-      const updatePayload = {
-        status: 'distributor_assigned',
-        assignedDistributorUid: distributorUid,
-        assignedDistributorNameSnapshot: targetName,
-        assignedDistributorUniqueIdSnapshot: targetPublicUid,
-        distributorUniqueId: targetPublicUid,
-        distributor_unique_id: targetPublicUid,
-        distributor_id: distributorUid,
-        distributor_name: targetName,
-        scheduledAt,
-        scheduled_at: scheduledAt,
-        expectedDeliveryDate: scheduledAt.toISOString(),
-        delivery_date: scheduledAt.toISOString(),
-        assignedByAdminUid: admin.uid,
-        adminOverride: true,
-        assignmentHistory: [...(Array.isArray(orderData.assignmentHistory) ? orderData.assignmentHistory : []), historyEntry],
-        dispatchEventHistory: [...(Array.isArray(orderData.dispatchEventHistory) ? orderData.dispatchEventHistory : []), dispatchHistoryEntry],
-        updatedAt: now,
-        updated_at: now,
-      };
+        const previousDistributorUid = clean(orderData.assignedDistributorUid || orderData.distributor_id, 128);
+        const previousDistributorName = clean(orderData.assignedDistributorNameSnapshot || orderData.distributor_name, 160);
+        const targetName = fullName(targetData);
+        const targetPublicUid = clean(targetData.publicUid || targetData.displayUid || targetData.unique_id, 80);
+        const assignmentEpoch = assignmentVersionForTransition(orderData, distributorUid);
+        const event = 'ADMIN_DISPATCH_OVERRIDE';
+        const updatePayload = {
+          status: 'distributor_assigned',
+          assignmentVersion: assignmentEpoch.assignmentVersion,
+          assignedDistributorUid: distributorUid,
+          assignedDistributorNameSnapshot: targetName,
+          assignedDistributorUniqueIdSnapshot: targetPublicUid,
+          distributorUniqueId: targetPublicUid,
+          distributor_unique_id: targetPublicUid,
+          distributor_id: distributorUid,
+          distributor_name: targetName,
+          scheduledAt,
+          scheduled_at: scheduledAt,
+          expectedDeliveryDate: scheduledAt.toISOString(),
+          delivery_date: scheduledAt.toISOString(),
+          assignedByAdminUid: admin.uid,
+          adminOverride: true,
+          assignmentHistory: [...(Array.isArray(orderData.assignmentHistory) ? orderData.assignmentHistory : []), {
+            event,
+            previousDistributorUid: previousDistributorUid || null,
+            previousDistributorNameSnapshot: previousDistributorName || null,
+            distributorUid,
+            distributorNameSnapshot: targetName,
+            distributorUniqueIdSnapshot: targetPublicUid,
+            assignedByAdminUid: admin.uid,
+            assignedAt: now,
+            scheduledAt,
+            adminOverride: true,
+            reason,
+          }],
+          dispatchEventHistory: [...(Array.isArray(orderData.dispatchEventHistory) ? orderData.dispatchEventHistory : []), {
+            event, actorUid: admin.uid, role: 'admin', branchId, createdAt: now,
+          }],
+          updatedAt: now,
+          updated_at: now,
+        };
 
-      await orderRef.update(updatePayload);
-
-      // Persist administrative audit log
-      await db.collection('adminAuditLogs').add({
-        action: 'ADMIN_DISTRIBUTOR_OVERRIDE',
-        adminUid: admin.uid,
-        orderId,
-        branchId,
-        previousDistributorUid: previousDistributorUid || null,
-        newDistributorUid: distributorUid,
-        newDistributorName: targetName,
-        scheduledAt: scheduledAt.toISOString(),
-        reason,
-        createdAt: now,
-        timestamp: now,
+        tx.update(orderRef, updatePayload);
+        tx.set(auditRef, {
+          action: 'ADMIN_DISTRIBUTOR_OVERRIDE',
+          adminUid: admin.uid,
+          orderId,
+          branchId,
+          previousDistributorUid: previousDistributorUid || null,
+          newDistributorUid: distributorUid,
+          newDistributorName: targetName,
+          assignmentVersion: assignmentEpoch.assignmentVersion,
+          scheduledAt: scheduledAt.toISOString(),
+          reason,
+          createdAt: now,
+          timestamp: now,
+        });
+        savedOrder = { ...orderData, ...updatePayload };
       });
 
       return res.status(200).json({
         success: true,
         message: 'Distributor reassigned successfully via Admin Override.',
-        order: { id: orderId, ...orderData, ...updatePayload },
+        order: { id: orderId, ...savedOrder },
       });
     } catch (error) {
       return responseError(res, error);

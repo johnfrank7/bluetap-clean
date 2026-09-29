@@ -12,16 +12,16 @@ function fixture() {
     ['users/distributor-inactive', { role: 'distributor', branchId: 'branch-a', distributorStatus: 'inactive', fullName: 'Inactive Driver' }],
     ['users/distributor-disabled', { role: 'distributor', branchId: 'branch-a', distributorStatus: 'active', fullName: 'Disabled Driver' }],
     ['branches/branch-a', { name: 'Branch A', status: 'active' }],
-    ['requests/order-a', { branchId: 'branch-a', currentBranchId: 'branch-a', status: 'awaiting_distributor_assignment', effectiveDeliveryDaysSnapshot: [scheduledWeekday(validDate)], items: [{ productId: 'refill', quantity: 1, deliveryDaysSnapshot: [scheduledWeekday(validDate)] }] }],
+    ['requests/order-a', { branchId: 'branch-a', currentBranchId: 'branch-a', assignmentVersion: 1, status: 'awaiting_distributor_assignment', effectiveDeliveryDaysSnapshot: [scheduledWeekday(validDate)], items: [{ productId: 'refill', quantity: 1, deliveryDaysSnapshot: [scheduledWeekday(validDate)] }] }],
     ['requests/terminal', { branchId: 'branch-a', status: 'delivered' }],
   ]);
   const snap = (path) => ({ id: path.split('/').pop(), exists: records.has(path), data: () => records.get(path) });
   let auditId = 0;
   const db = { collection(name) { return {
-    doc(id) { const path = `${name}/${id}`; return { get: async () => snap(path), update: async (update) => records.set(path, { ...records.get(path), ...update }) }; },
+    doc(id = `audit-${++auditId}`) { const path = `${name}/${id}`; return { id, path, get: async () => snap(path), update: async (update) => records.set(path, { ...records.get(path), ...update }), set: async (data) => records.set(path, data) }; },
     where(field, operator, value) { return { get: async () => ({ docs: [...records.keys()].filter((path) => path.startsWith(`${name}/`) && records.get(path)[field] === value).map(snap) }) }; },
     add: async (data) => { records.set(`${name}/audit-${++auditId}`, data); },
-  }; } };
+  }; }, runTransaction: async (run) => run({ get: async (ref) => snap(ref.path), update(ref, data) { records.set(ref.path, { ...records.get(ref.path), ...data }); }, set(ref, data) { records.set(ref.path, data); } }) };
   const auth = { async verifyIdToken(token) { if (token === 'admin-token') return { uid: 'admin-a', role: 'admin', admin: true }; throw new Error('bad token'); }, async getUser(uid) { return { disabled: uid === 'distributor-disabled' }; } };
   return { records, validDate, handler: createAdminDispatchOverrideHandler(() => ({ auth, db })) };
 }
@@ -62,8 +62,12 @@ test('Admin override persists selected distributor, delivery time, and mandatory
   assert.equal(order.assignedDistributorUid, 'distributor-a');
   assert.equal(order.assignedDistributorUniqueIdSnapshot, 'Dis001');
   assert.equal(order.distributor_unique_id, 'Dis001');
+  assert.equal(order.assignmentVersion, 2);
   assert.equal(order.assignmentHistory[0].event, 'ADMIN_DISPATCH_OVERRIDE');
   assert.equal(order.assignmentHistory[0].distributorUniqueIdSnapshot, 'Dis001');
   assert.equal(order.assignmentHistory[0].reason, 'Emergency capacity');
   assert.equal([...f.records.values()].find((value) => value.action === 'ADMIN_DISTRIBUTOR_OVERRIDE').reason, 'Emergency capacity');
+  const retried = await call(f.handler, 'POST', { orderId: 'order-a', distributorUid: 'distributor-a', scheduledAt: f.validDate.toISOString(), reason: 'Retry after timeout' });
+  assert.equal(retried.statusCode, 200);
+  assert.equal(f.records.get('requests/order-a').assignmentVersion, 2);
 });

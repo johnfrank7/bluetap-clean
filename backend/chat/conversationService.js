@@ -27,16 +27,23 @@ function required(value, name) {
   return normalized;
 }
 
+function requiredEpoch(value, name) {
+  if (!Number.isSafeInteger(value) || value < 1) {
+    throw new OtpError(400, 'CHAT_AUTHORITY_INCOMPLETE', `${name} must be a positive integer.`);
+  }
+  return value;
+}
+
 function canonicalAuthorityTuple(type, authority = {}) {
   if (!SUPPORTED_TYPES.has(type)) throw new OtpError(400, 'CHAT_TYPE_UNSUPPORTED', 'Choose a supported conversation type.');
   if (type === CONVERSATION_TYPES.REQUESTER_BRANCH) {
     return ['v1', type, required(authority.requesterUid, 'requesterUid'), required(authority.branchId, 'branchId')];
   }
   if (type === CONVERSATION_TYPES.REQUESTER_DISTRIBUTOR) {
-    return ['v1', type, required(authority.orderId, 'orderId'), required(authority.requesterUid, 'requesterUid'), required(authority.distributorUid, 'distributorUid'), required(authority.assignmentVersion, 'assignmentVersion')];
+    return ['v1', type, required(authority.orderId, 'orderId'), required(authority.requesterUid, 'requesterUid'), required(authority.distributorUid, 'distributorUid'), requiredEpoch(authority.assignmentVersion, 'assignmentVersion')];
   }
   if (type === CONVERSATION_TYPES.DISTRIBUTOR_BRANCH) {
-    return ['v1', type, required(authority.distributorUid, 'distributorUid'), required(authority.branchId, 'branchId'), required(authority.branchMembershipVersion, 'branchMembershipVersion')];
+    return ['v1', type, required(authority.distributorUid, 'distributorUid'), required(authority.branchId, 'branchId'), requiredEpoch(authority.branchMembershipVersion, 'branchMembershipVersion')];
   }
   const branchIds = [required(authority.branchIdA, 'branchIdA'), required(authority.branchIdB, 'branchIdB')].sort();
   if (branchIds[0] === branchIds[1]) throw new OtpError(400, 'CHAT_DISTINCT_BRANCH_REQUIRED', 'Branch coordination requires two different branches.');
@@ -101,7 +108,7 @@ function hasActiveAuthorityReason(reasons, now = Date.now()) {
 
 function requesterDistributorAssignmentIsCurrent({ order, requesterUid, distributorUid, distributorBranchId, assignmentVersion } = {}) {
   const version = orderAssignmentVersion(order);
-  return Boolean(order && version && version === clean(assignmentVersion) &&
+  return Boolean(order && Number.isSafeInteger(assignmentVersion) && version === assignmentVersion &&
     orderRequesterUid(order) === clean(requesterUid) &&
     clean(order.assignedDistributorUid) === clean(distributorUid) &&
     owningBranchId(order) === clean(distributorBranchId));
@@ -110,7 +117,7 @@ function requesterDistributorAssignmentIsCurrent({ order, requesterUid, distribu
 function distributorBranchMembershipIsCurrent({ distributor, branchId, branchMembershipVersion } = {}) {
   const version = profileMembershipVersion(distributor);
   const operational = normalizedStatus(distributor?.distributorStatus || distributor?.approvalStatus || distributor?.status);
-  return Boolean(version && version === clean(branchMembershipVersion) && clean(distributor?.branchId) === clean(branchId) && ['active', 'approved'].includes(operational));
+  return Boolean(Number.isSafeInteger(branchMembershipVersion) && version === branchMembershipVersion && clean(distributor?.branchId) === clean(branchId) && ['active', 'approved'].includes(operational));
 }
 
 function resolveConversationLifecycle(input = {}) {
@@ -139,6 +146,78 @@ function resolveConversationLifecycle(input = {}) {
       ? CONVERSATION_STATUS.ACTIVE : CONVERSATION_STATUS.READ_ONLY;
   }
   return CONVERSATION_STATUS.CLOSED;
+}
+
+function assignmentAuthority(order = {}) {
+  const distributorUid = clean(order.assignedDistributorUid || order.distributor_id);
+  if (!distributorUid) return null;
+  return {
+    type: CONVERSATION_TYPES.REQUESTER_DISTRIBUTOR,
+    orderId: clean(order.id || order.orderId || order.requestId || order.request_id),
+    requesterUid: orderRequesterUid(order),
+    distributorUid,
+    assignmentVersion: orderAssignmentVersion(order),
+  };
+}
+
+function requesterBranchAuthority(order = {}) {
+  const branchId = owningBranchId(order);
+  const requesterUid = orderRequesterUid(order);
+  return branchId && requesterUid
+    ? { type: CONVERSATION_TYPES.REQUESTER_BRANCH, requesterUid, branchId }
+    : null;
+}
+
+function reconcileOrderAuthorityTransition({ before = {}, after = {}, event = 'order_updated', accessEndsAt = null, now = Date.now() } = {}) {
+  const transitions = [];
+  const seen = new Set();
+  const append = (transition) => {
+    if (!transition) return;
+    const key = JSON.stringify(transition);
+    if (!seen.has(key)) { seen.add(key); transitions.push(transition); }
+  };
+  const beforeAssignment = assignmentAuthority(before);
+  const afterAssignment = assignmentAuthority(after);
+  const assignmentChanged = Boolean(beforeAssignment || afterAssignment) && (
+    beforeAssignment?.distributorUid !== afterAssignment?.distributorUid ||
+    beforeAssignment?.assignmentVersion !== afterAssignment?.assignmentVersion
+  );
+
+  if (assignmentChanged && beforeAssignment) append({ action: 'read_only', reason: clean(event), authority: beforeAssignment });
+  if (assignmentChanged && afterAssignment) append({ action: 'eligible', reason: clean(event), authority: afterAssignment });
+
+  const beforeBranch = requesterBranchAuthority(before);
+  const afterBranch = requesterBranchAuthority(after);
+  const branchChanged = beforeBranch?.branchId !== afterBranch?.branchId;
+  if (branchChanged && beforeBranch) append({ action: 'remove_authority_reason', authorityReason: AUTHORITY_REASONS.ACTIVE_ORDER, orderId: beforeAssignment?.orderId || clean(before.id || before.requestId), authority: beforeBranch });
+  if (branchChanged && afterBranch) append({ action: 'add_authority_reason', authorityReason: AUTHORITY_REASONS.ACTIVE_ORDER, orderId: afterAssignment?.orderId || clean(after.id || after.requestId), authority: afterBranch });
+
+  const afterStatus = normalizedStatus(after.status);
+  const delivered = ['delivered', 'completed'].includes(afterStatus);
+  const terminal = TERMINAL_ORDER_STATUSES.has(afterStatus);
+  if (terminal) {
+    const followupActive = delivered && timeOf(accessEndsAt) > Number(now);
+    if (afterAssignment) append({
+      action: followupActive ? 'eligible' : 'read_only',
+      reason: followupActive ? AUTHORITY_REASONS.POST_ORDER_FOLLOWUP : afterStatus,
+      ...(followupActive ? { accessEndsAt } : {}),
+      authority: afterAssignment,
+    });
+    if (afterBranch) {
+      append({ action: 'remove_authority_reason', authorityReason: AUTHORITY_REASONS.ACTIVE_ORDER, orderId: afterAssignment?.orderId || clean(after.id || after.requestId), authority: afterBranch });
+      if (followupActive) append({ action: 'add_authority_reason', authorityReason: AUTHORITY_REASONS.POST_ORDER_FOLLOWUP, orderId: afterAssignment?.orderId || clean(after.id || after.requestId), accessEndsAt, authority: afterBranch });
+    }
+  }
+
+  return {
+    event: clean(event),
+    assignmentChanged,
+    branchChanged,
+    sourceBranchRetained: Boolean(beforeBranch?.branchId && beforeBranch.branchId === afterBranch?.branchId),
+    targetBranchEligible: Boolean(branchChanged && afterBranch),
+    outcome: transitions.length ? 'authority_changed' : 'no_authority_change',
+    transitions,
+  };
 }
 
 function buildConversationFoundation({ type, authority, createdBy, authorityReasons = {}, now = new Date() } = {}) {
@@ -188,6 +267,7 @@ module.exports = {
   normalizeAuthorityReasons,
   participantState,
   removeAuthorityReason,
+  reconcileOrderAuthorityTransition,
   requesterDistributorAssignmentIsCurrent,
   resolveConversationLifecycle,
 };

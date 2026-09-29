@@ -140,6 +140,7 @@ service cloud.firestore {
           'emailOtpVerification', 'registrationCompleted', 'onboardingStatus', 'faceVerification',
           'registrationLimitKeys', 'registrationLimitReservation', 'admin', 'manager',
           'branchId', 'branchNameSnapshot', 'requestedBranchId', 'requestedBranchNameSnapshot',
+          'branchMembershipVersion',
           'managerStatus', 'approvedAt', 'approvedBy', 'rejectedAt', 'rejectedBy',
           'mustChangePassword', 'passwordChangedAt',
           'termsAcceptance', 'createdAt', 'restoredAt'
@@ -167,6 +168,8 @@ service cloud.firestore {
     }
 
     match /requests/{requestId} {
+      // assignmentVersion is server-owned relationship authority metadata.
+      // All request mutations remain backend-only, so clients cannot forge it.
       // Administrator read-only platform-wide oversight.
       allow read: if isAdmin();
       // Requester queries are scoped with requester_id == request.auth.uid.

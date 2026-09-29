@@ -173,6 +173,10 @@ test('Admin Distributor reassignment requires an active branch, records an audit
   const handler = createAdminAccountsHandler(fixture.getAdmin);
   const moved = await call(handler, 'PATCH', 'admin-token', { uid: 'distributor-1', action: 'updateAccount', fullName: 'Dina Driver', email: 'dina@example.test', role: 'distributor', branchId: 'south', active: true });
   assert.equal(moved.statusCode, 200); assert.equal(fixture.records.get('users/distributor-1').branchId, 'south');
+  assert.equal(fixture.records.get('users/distributor-1').branchMembershipVersion, 2);
+  const profileEdit = await call(handler, 'PATCH', 'admin-token', { uid: 'distributor-1', action: 'updateAccount', fullName: 'Dina Driver Updated', email: 'dina@example.test', role: 'distributor', branchId: 'south', active: true });
+  assert.equal(profileEdit.statusCode, 200);
+  assert.equal(fixture.records.get('users/distributor-1').branchMembershipVersion, 2);
   const audit = [...fixture.records.values()].find((value) => value.action === 'DISTRIBUTOR_BRANCH_CHANGED');
   assert.equal(audit.previousBranchId, 'north'); assert.equal(audit.newBranchId, 'south'); assert.equal(audit.changedByAdminUid, 'admin-1');
   fixture.records.set('requests/open-delivery', { assignedDistributorUid: 'distributor-1', status: 'out_for_delivery' });
@@ -187,6 +191,7 @@ test('Admin can manually assign an active branch to a legacy active Distributor 
   fixture.authUsers.set('legacy-distributor', { uid: 'legacy-distributor', email: 'legacy@example.test', customClaims: {}, metadata: {} });
   const assigned = await call(handler, 'PATCH', 'admin-token', { uid: 'legacy-distributor', action: 'updateAccount', fullName: 'Legacy Driver', email: 'legacy@example.test', role: 'distributor', branchId: 'north', active: true });
   assert.equal(assigned.statusCode, 200); assert.equal(fixture.records.get('users/legacy-distributor').branchId, 'north');
+  assert.equal(fixture.records.get('users/legacy-distributor').branchMembershipVersion, 2);
   assert.ok([...fixture.records.values()].some((value) => value.action === 'DISTRIBUTOR_BRANCH_CHANGED' && value.targetUid === 'legacy-distributor'));
 });
 
@@ -197,6 +202,7 @@ test('Admin-created active Distributor requires and receives an authoritative ac
   const created = await call(handler, 'POST', 'admin-token', { role: 'distributor', fullName: 'New Driver', email: 'new@example.test', username: 'new_driver', temporaryPassword: 'SafePassword2026', branchId: 'north' });
   assert.equal(created.statusCode, 201); assert.equal(created.body.account.status, 'active'); assert.equal(created.body.account.branchId, 'north');
   const profile = fixture.records.get(`users/${created.body.account.uid}`); assert.equal(profile.distributorStatus, 'active'); assert.equal(profile.branchId, 'north');
+  assert.equal(profile.branchMembershipVersion, 1);
 });
 
 test('backfillLegacyUids is idempotent, converts legacy hyphenated UIDs, and does not overwrite existing public UIDs', async () => {

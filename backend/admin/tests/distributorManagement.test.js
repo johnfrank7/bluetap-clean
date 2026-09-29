@@ -31,8 +31,12 @@ test('Admin approval atomically assigns the requested active branch and preserve
   assert.equal(result.statusCode, 200);
   const profile = f.records.get('users/pending-distributor');
   assert.equal(profile.distributorStatus, 'active'); assert.equal(profile.branchId, 'north'); assert.equal(profile.requestedBranchId, 'north');
+  assert.equal(profile.branchMembershipVersion, 2);
   assert.equal(profile.approvedBy, 'admin-1');
   assert.ok([...f.records.values()].some((entry) => entry.action === 'DISTRIBUTOR_APPROVED' && entry.branchId === 'north'));
+  const retried = await call(f.handler, { uid: 'pending-distributor', action: 'approve' });
+  assert.equal(retried.statusCode, 409);
+  assert.equal(f.records.get('users/pending-distributor').branchMembershipVersion, 2);
 });
 
 test('Admin can choose a different active branch at approval, but cannot approve to an inactive branch', async () => {

@@ -1,5 +1,6 @@
 const { OtpError } = require('../utils/otpError');
 const { requireActiveAccount } = require('../auth/accountStatus');
+const { getAssignmentVersion, getBranchMembershipVersion } = require('../utils/relationshipEpochs');
 
 const CONVERSATION_TYPES = Object.freeze({
   REQUESTER_BRANCH: 'requester_branch',
@@ -17,8 +18,8 @@ const clean = (value) => String(value || '').trim();
 const normalizedStatus = (value) => clean(value).toLowerCase().replace(/[\s-]+/g, '_');
 const owningBranchId = (order = {}) => clean(order.currentBranchId || order.branchId);
 const orderRequesterUid = (order = {}) => clean(order.requester_id || order.requesterUid);
-const orderAssignmentVersion = (order = {}) => clean(order.assignmentVersion ?? order.assignmentEpoch);
-const profileMembershipVersion = (profile = {}) => clean(profile.branchMembershipVersion ?? profile.membershipVersion);
+const orderAssignmentVersion = (order = {}) => getAssignmentVersion(order);
+const profileMembershipVersion = (profile = {}) => getBranchMembershipVersion(profile);
 
 function denied(reason, message) {
   throw new OtpError(403, reason, message);
@@ -94,7 +95,7 @@ function authorizeRequesterDistributor({ requester, distributor, branch, order, 
   if (!requesterUid || orderRequesterUid(order) !== requesterUid) denied('CHAT_ORDER_OWNER_MISMATCH', 'The Requester does not own this order.');
   if (!distributorUid || clean(order?.assignedDistributorUid) !== distributorUid) denied('CHAT_ASSIGNMENT_MISMATCH', 'The Distributor is not assigned to this order.');
   if (owningBranchId(order) !== branchId || clean(distributor.branchId) !== branchId) denied('CHAT_BRANCH_MISMATCH', 'The Distributor is outside the authoritative fulfillment branch.');
-  if (!expectedVersion || clean(assignmentVersion) !== expectedVersion) denied('CHAT_ASSIGNMENT_VERSION_STALE', 'The Distributor assignment epoch is stale.');
+  if (!Number.isSafeInteger(assignmentVersion) || assignmentVersion !== expectedVersion) denied('CHAT_ASSIGNMENT_VERSION_STALE', 'The Distributor assignment epoch is stale.');
   if (TERMINAL_ORDER_STATUSES.has(normalizedStatus(order?.status))) denied('CHAT_ASSIGNMENT_NOT_WRITABLE', 'This assignment no longer grants send authority.');
 
   return { requesterUid, distributorUid, branchId, orderId: clean(order.id || order.requestId), assignmentVersion: expectedVersion };
@@ -104,7 +105,7 @@ function authorizeDistributorBranch({ distributor, branch, branchMembershipVersi
   requireActiveDistributor(distributor);
   const branchId = requireActiveBranch(branch, distributor.branchId);
   const expectedVersion = profileMembershipVersion(distributor);
-  if (!expectedVersion || clean(branchMembershipVersion) !== expectedVersion) {
+  if (!Number.isSafeInteger(branchMembershipVersion) || branchMembershipVersion !== expectedVersion) {
     denied('CHAT_MEMBERSHIP_VERSION_STALE', 'The Distributor branch-membership epoch is stale.');
   }
   return { distributorUid: clean(distributor.uid || distributor.id), branchId, branchMembershipVersion: expectedVersion };

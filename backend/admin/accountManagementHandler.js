@@ -7,6 +7,12 @@ const { loadRegistrationSecurity, SESSION_ROLES } = require('../registration/reg
 const { generateNextPublicUid, formatPublicUid, parsePublicUidNumber } = require('../utils/publicUidGenerator');
 const { normalizePhilippinePhone } = require('../utils/phoneUtils');
 const { ACCOUNT_STATUS, canonicalAccountStatus } = require('../auth/accountStatus');
+const {
+  RELATIONSHIP_VERSION_BASELINE,
+  branchMembershipVersionForTransition,
+  distributorBranchMembershipKey,
+  getBranchMembershipVersion,
+} = require('../utils/relationshipEpochs');
 
 const ROLES = new Set(SESSION_ROLES);
 const ACTIONS = new Set(['deactivate', 'suspend', 'terminate', 'reactivate', 'resetPassword', 'updateProfile', 'reassignManager', 'signOutAllSessions', 'updateAccount', 'backfillUids']);
@@ -67,11 +73,24 @@ async function updateAccount({ auth, db, admin, uid, before, body }) {
   if (Object.prototype.hasOwnProperty.call(body, 'requirePasswordChange') && typeof body.requirePasswordChange === 'boolean' && body.requirePasswordChange !== (before.mustChangePassword === true)) changes.mustChangePassword = body.requirePasswordChange;
   if (clean(body.temporaryPassword, 128)) { authChanges.password = passwordFor(body.temporaryPassword); changes.mustChangePassword = true; revoke = true; audits.push('TEMP_PASSWORD_RESET'); }
   if (Object.prototype.hasOwnProperty.call(body, 'active') && typeof body.active === 'boolean') { const beforeStatus = statusOf(before); const currentStatus = statusOf({ ...before, ...changes, role: effectiveRole }); const active = body.active; if (before.role === 'distributor' && !['active', 'inactive', 'suspended'].includes(beforeStatus)) throw new OtpError(409, 'DISTRIBUTOR_WORKFLOW_REQUIRED', 'Pending and rejected distributors must be updated in Distributor Management.'); if (!active && currentStatus === 'active') { Object.assign(changes, statusChanges(effectiveRole, 'inactive')); authChanges.disabled = true; revoke = true; audits.push('ACCOUNT_DEACTIVATED'); } if (active && ['inactive', 'suspended'].includes(currentStatus)) { if (['manager', 'distributor'].includes(effectiveRole)) await activeBranch(db, changes.branchId || before.branchId); Object.assign(changes, statusChanges(effectiveRole, 'active')); authChanges.disabled = false; audits.push('ACCOUNT_REACTIVATED'); } }
+  const membershipEpoch = branchMembershipVersionForTransition(before, { ...before, ...changes, role: effectiveRole });
+  if (membershipEpoch.changed) changes.branchMembershipVersion = membershipEpoch.branchMembershipVersion;
   if (!Object.keys(changes).length && !Object.keys(authChanges).length) { const security = await loadRegistrationSecurity(db); return { account: safeAccount(uid, before, new Map(), await auth.getUser(uid), security.sessionSecurity[effectiveRole]), changed: false }; }
   if (Object.keys(authChanges).length) await auth.updateUser(uid, authChanges); if (revoke) await auth.revokeRefreshTokens(uid);
   const after = { ...before, ...changes, role: effectiveRole }; changes.updatedAt = now; changes.updatedBy = admin.uid;
   if (requestedRole !== before.role) audits.push('ACCOUNT_ROLE_CHANGED'); if (branch && branch.id !== before.branchId && effectiveRole === 'manager') audits.push('MANAGER_BRANCH_REASSIGNED'); if (Object.prototype.hasOwnProperty.call(changes, 'sessionIdleTimeoutOverrideMinutes')) audits.push('ACCOUNT_SESSION_POLICY_CHANGED'); if (Object.prototype.hasOwnProperty.call(changes, 'mustChangePassword') && !audits.includes('TEMP_PASSWORD_RESET')) audits.push('PASSWORD_CHANGE_REQUIRED'); if (Object.keys(changes).some((key) => !['updatedAt', 'updatedBy'].includes(key))) audits.unshift('ACCOUNT_UPDATED');
-  await db.runTransaction(async (tx) => { tx.update(db.collection('users').doc(uid), changes); audits.forEach((action) => tx.set(db.collection('adminAuditLogs').doc(), auditRecord(action, admin, uid, effectiveRole, before, after, now, branch?.id || after.branchId || null, action === 'DISTRIBUTOR_BRANCH_CHANGED' ? { previousBranchId: clean(before.branchId, 80), newBranchId: clean(after.branchId, 80), changedByAdminUid: admin.uid, changedAt: now } : {}))); });
+  await db.runTransaction(async (tx) => {
+    const targetRef = db.collection('users').doc(uid);
+    if (membershipEpoch.changed) {
+      const latestSnapshot = await tx.get(targetRef);
+      const latest = latestSnapshot.data() || {};
+      if (!latestSnapshot.exists || distributorBranchMembershipKey(latest) !== membershipEpoch.previousMembershipKey || getBranchMembershipVersion(latest) !== membershipEpoch.previousVersion) {
+        throw new OtpError(409, 'DISTRIBUTOR_MEMBERSHIP_CHANGED', 'The Distributor branch membership changed. Refresh and try again.');
+      }
+    }
+    tx.update(targetRef, changes);
+    audits.forEach((action) => tx.set(db.collection('adminAuditLogs').doc(), auditRecord(action, admin, uid, effectiveRole, before, after, now, branch?.id || after.branchId || null, action === 'DISTRIBUTOR_BRANCH_CHANGED' ? { previousBranchId: clean(before.branchId, 80), newBranchId: clean(after.branchId, 80), changedByAdminUid: admin.uid, changedAt: now } : {})));
+  });
   const security = await loadRegistrationSecurity(db); return { account: safeAccount(uid, after, new Map(branch ? [[branch.id, branch.name]] : []), await auth.getUser(uid), security.sessionSecurity[effectiveRole]), changed: true };
 }
 
@@ -218,7 +237,7 @@ function createAdminAccountsHandler(getAdmin = getFirebaseAdmin) { return async 
             emailVerificationRequired: false, emailVerified: false,
             faceVerification: { required: false, status: 'not_required', verificationSource: 'admin_created' },
             registrationCompleted: true, onboardingStatus: 'complete',
-            ...(role === 'manager' ? { branchId: branch.id, branchNameSnapshot: clean(branch.name), ...statusChanges(role, 'active'), ...activeOperationalStatus(role) } : role === 'distributor' ? { username, usernameNormalized, branchId: branch.id, branchNameSnapshot: clean(branch.name), ...statusChanges(role, 'active'), ...activeOperationalStatus(role) } : { username, usernameNormalized, ...statusChanges(role, 'active') })
+            ...(role === 'manager' ? { branchId: branch.id, branchNameSnapshot: clean(branch.name), ...statusChanges(role, 'active'), ...activeOperationalStatus(role) } : role === 'distributor' ? { username, usernameNormalized, branchId: branch.id, branchNameSnapshot: clean(branch.name), branchMembershipVersion: RELATIONSHIP_VERSION_BASELINE, ...statusChanges(role, 'active'), ...activeOperationalStatus(role) } : { username, usernameNormalized, ...statusChanges(role, 'active') })
           };
           tx.create(db.collection('users').doc(user.uid), createdProfile);
           tx.set(db.collection('adminAuditLogs').doc(), auditRecord(role === 'manager' ? 'MANAGER_ACCOUNT_CREATED' : 'ADMIN_ACCOUNT_CREATED', admin, user.uid, role, {}, createdProfile, now, branch?.id || null));

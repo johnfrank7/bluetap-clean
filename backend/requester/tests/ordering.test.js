@@ -79,6 +79,7 @@ test('Requester catalog requires a trusted requester identity', async () => {
 test('valid order uses authenticated UID and ignores a supplied target UID', async () => {
   const f = fixture(); const result = await call(createRequesterOrdersHandler(f.getAdmin), 'POST', 'requester-token', validOrder({ requesterUid: 'attacker-target' }));
   assert.equal(result.statusCode, 201); assert.equal(result.body.order.requesterUid, 'requester-1'); assert.equal(result.body.order.requester_id, 'requester-1');
+  assert.equal(f.records.get(`requests/${result.body.order.id}`).assignmentVersion, 1);
 });
 test('Requester order reads return only the authenticated UID records with creation timestamps', async () => {
   const f = fixture(); const handler = createRequesterOrdersHandler(f.getAdmin);

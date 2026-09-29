@@ -2,6 +2,7 @@ const { getFirebaseAdmin } = require('../firebase/firebaseAdmin');
 const { requireAdmin } = require('../auth/authorization');
 const { applyCors } = require('../utils/cors');
 const { OtpError } = require('../utils/otpError');
+const { branchMembershipVersionForTransition } = require('../utils/relationshipEpochs');
 
 const clean = (value, max = 240) => String(value || '').trim().slice(0, max);
 const statusOf = (data = {}) => {
@@ -73,6 +74,8 @@ function createAdminDistributorsHandler(getAdmin = getFirebaseAdmin) {
           ...(action === 'approve' ? { branchId: branch.id, branchNameSnapshot: clean(branch.name), approvedAt: now, approvedBy: admin.uid } : {}),
           ...(action === 'reject' ? { branchId: null, branchNameSnapshot: null, rejectedAt: now, rejectedBy: admin.uid, rejectionReason: clean(rejectionReason, 240) } : {}),
         };
+        const membershipEpoch = branchMembershipVersionForTransition(data, { ...data, ...changes });
+        if (membershipEpoch.changed) changes.branchMembershipVersion = membershipEpoch.branchMembershipVersion;
         tx.update(targetRef, changes);
         tx.set(db.collection('adminAuditLogs').doc(), {
           action: ({ approve: 'DISTRIBUTOR_APPROVED', reject: 'DISTRIBUTOR_REJECTED', deactivate: 'DISTRIBUTOR_DEACTIVATED', reactivate: 'DISTRIBUTOR_REACTIVATED' })[action], actorUid: admin.uid, targetUid: targetRef.id,

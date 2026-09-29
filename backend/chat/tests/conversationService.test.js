@@ -8,6 +8,7 @@ const {
   buildConversationFoundation,
   canonicalAuthorityTuple,
   createOpaqueConversationId,
+  reconcileOrderAuthorityTransition,
   removeAuthorityReason,
   resolveConversationLifecycle,
 } = require('../conversationService');
@@ -26,6 +27,8 @@ test('canonical authority tuples and hashes are stable while document IDs stay o
 test('assignment epoch is part of Requester-Distributor identity', () => {
   const base = { orderId: 'order-a', requesterUid: 'requester-a', distributorUid: 'distributor-a' };
   assert.notEqual(authorityKeyHash('requester_distributor', { ...base, assignmentVersion: 1 }), authorityKeyHash('requester_distributor', { ...base, assignmentVersion: 2 }));
+  const membership = { distributorUid: 'distributor-a', branchId: 'branch-a' };
+  assert.notEqual(authorityKeyHash('distributor_branch', { ...membership, branchMembershipVersion: 1 }), authorityKeyHash('distributor_branch', { ...membership, branchMembershipVersion: 2 }));
 });
 
 test('conversation foundations contain only type-appropriate server-derived identity', () => {
@@ -36,7 +39,7 @@ test('conversation foundations contain only type-appropriate server-derived iden
     now: new Date('2026-01-01T00:00:00Z'),
   });
   assert.deepEqual(conversation.participantUserUids, ['requester-a', 'distributor-a']);
-  assert.equal(conversation.assignmentVersion, '2');
+  assert.equal(conversation.assignmentVersion, 2);
   assert.equal('branchMembershipVersion' in conversation, false);
   assert.equal('lastMessageId' in conversation, false);
   assert.equal(conversation.participantState.length, 2);
@@ -79,4 +82,48 @@ test('delivered access deadline and branch membership drive lifecycle without me
   const membership = { uid: 'distributor-a', role: 'distributor', accountStatus: 'active', distributorStatus: 'active', branchId: 'branch-a', branchMembershipVersion: 5 };
   assert.equal(resolveConversationLifecycle({ type: 'distributor_branch', distributor: membership, branchId: 'branch-a', branchMembershipVersion: 5, accounts: [membership], branches: [{ id: 'branch-a', status: 'active' }] }), 'active');
   assert.equal(resolveConversationLifecycle({ type: 'distributor_branch', distributor: membership, branchId: 'branch-a', branchMembershipVersion: 4, accounts: [membership], branches: [{ id: 'branch-a', status: 'active' }] }), 'read_only');
+});
+
+test('reconciliation makes old assignment epochs read-only and new epochs eligible', () => {
+  const before = { id: 'order-a', requester_id: 'requester-a', currentBranchId: 'branch-a', assignedDistributorUid: 'distributor-a', assignmentVersion: 2, status: 'distributor_assigned' };
+  const after = { ...before, assignedDistributorUid: 'distributor-b', assignmentVersion: 3 };
+  const result = reconcileOrderAuthorityTransition({ before, after, event: 'DISTRIBUTOR_REASSIGNED' });
+  assert.equal(result.assignmentChanged, true);
+  assert.deepEqual(result.transitions.filter((item) => item.authority.type === 'requester_distributor').map((item) => [item.action, item.authority.distributorUid, item.authority.assignmentVersion]), [
+    ['read_only', 'distributor-a', 2],
+    ['eligible', 'distributor-b', 3],
+  ]);
+});
+
+test('transfer reconciliation retains source authority until acceptance and never grants the target early', () => {
+  const source = { id: 'order-a', requester_id: 'requester-a', currentBranchId: 'branch-a', branchId: 'branch-a', assignedDistributorUid: 'distributor-a', assignmentVersion: 2, status: 'distributor_assigned' };
+  const pending = { ...source, assignedDistributorUid: null, assignmentVersion: 3, status: 'branch_transfer_pending', transferToBranchId: 'branch-b' };
+  const requested = reconcileOrderAuthorityTransition({ before: source, after: pending, event: 'BRANCH_TRANSFER_REQUESTED' });
+  assert.equal(requested.sourceBranchRetained, true);
+  assert.equal(requested.targetBranchEligible, false);
+  assert.equal(requested.transitions.some((item) => item.authority?.branchId === 'branch-b'), false);
+  assert.ok(requested.transitions.some((item) => item.action === 'read_only' && item.authority?.assignmentVersion === 2));
+
+  const accepted = { ...pending, currentBranchId: 'branch-b', branchId: 'branch-b', status: 'awaiting_distributor_assignment' };
+  const acceptance = reconcileOrderAuthorityTransition({ before: pending, after: accepted, event: 'BRANCH_TRANSFER_ACCEPTED' });
+  assert.equal(acceptance.sourceBranchRetained, false);
+  assert.equal(acceptance.targetBranchEligible, true);
+  assert.ok(acceptance.transitions.some((item) => item.action === 'remove_authority_reason' && item.authority.branchId === 'branch-a'));
+  assert.ok(acceptance.transitions.some((item) => item.action === 'add_authority_reason' && item.authority.branchId === 'branch-b'));
+
+  const declined = reconcileOrderAuthorityTransition({ before: pending, after: { ...pending, status: 'awaiting_distributor_assignment' }, event: 'BRANCH_TRANSFER_DECLINED' });
+  assert.equal(declined.outcome, 'no_authority_change');
+  assert.equal(declined.sourceBranchRetained, true);
+});
+
+test('terminal reconciliation prepares read-only or bounded post-order follow-up without persistence', () => {
+  const before = { id: 'order-a', requester_id: 'requester-a', currentBranchId: 'branch-a', assignedDistributorUid: 'distributor-a', assignmentVersion: 2, status: 'out_for_delivery' };
+  const cancelled = reconcileOrderAuthorityTransition({ before, after: { ...before, status: 'cancelled' }, event: 'ORDER_CANCELLED' });
+  assert.ok(cancelled.transitions.some((item) => item.action === 'read_only' && item.authority.type === 'requester_distributor'));
+  assert.ok(cancelled.transitions.some((item) => item.action === 'remove_authority_reason' && item.authorityReason === 'active_order'));
+
+  const now = Date.parse('2026-01-01T00:00:00Z');
+  const accessEndsAt = new Date(now + 60_000);
+  const delivered = reconcileOrderAuthorityTransition({ before, after: { ...before, status: 'delivered' }, event: 'ORDER_DELIVERED', now, accessEndsAt });
+  assert.ok(delivered.transitions.some((item) => item.action === 'eligible' && item.reason === 'post_order_followup' && item.accessEndsAt === accessEndsAt));
 });

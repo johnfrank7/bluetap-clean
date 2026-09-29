@@ -104,7 +104,7 @@ test('Admin Request Oversight exposes one structured, theme-aware override entry
   assert.match(requests, /selectedOrderOverrideEligible/);
   assert.match(requests, /colors\.warningSoft/);
   assert.match(requests, /colors\.textPrimary/);
-  assert.match(override, /targetBranchId !== branchId/);
+  assert.match(override, /clean\(targetData\.branchId, 128\) !== branchId/);
   assert.match(override, /OVERRIDE_REASON_REQUIRED/);
   assert.match(override, /ADMIN_DISTRIBUTOR_OVERRIDE/);
   assert.match(requests, /requests\.find/);

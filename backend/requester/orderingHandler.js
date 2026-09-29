@@ -9,6 +9,7 @@ const { DEFAULT_SERVICE_RADIUS_KM } = require('../../constants/toledoBarangays.j
 const { isActiveRequesterOrderStatus } = require('../../constants/requesterOrderStatus');
 const { effectiveDeliveryDays, limitViolations } = require('../../services/productOrderPolicy');
 const { requestedDateNeedsApproval, resolveEffectiveProductPolicy } = require('../utils/effectiveProductPolicy');
+const { RELATIONSHIP_VERSION_BASELINE } = require('../utils/relationshipEpochs');
 
 const clean = (value, max = 240) => String(value || '').trim().slice(0, max);
 const coordinate = (value, minimum, maximum) => {
@@ -392,7 +393,7 @@ function createRequesterOrdersHandler(getAdmin = getFirebaseAdmin) {
         const ref = db.collection('requests').doc();
         const now = new Date();
         const requestNumber = `BT-${now.getFullYear()}-${randomUUID().slice(0, 8).toUpperCase()}`;
-        const saved = { ...trusted, requestId: requestNumber, request_id: requestNumber, createdAt: now, created_at: now, updatedAt: now, updated_at: now };
+        const saved = { ...trusted, assignmentVersion: RELATIONSHIP_VERSION_BASELINE, requestId: requestNumber, request_id: requestNumber, createdAt: now, created_at: now, updatedAt: now, updated_at: now };
 
         const shouldSaveDefault = !requester.profile.defaultDeliveryLocation || body.saveAsDefaultLocation === true;
         const defaultDeliveryLocation = shouldSaveDefault ? {

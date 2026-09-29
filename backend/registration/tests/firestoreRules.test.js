@@ -19,7 +19,7 @@ test('Firestore rules keep OTP and registration state private', () => {
 
 test('client profile updates cannot change trusted verification fields', () => {
   assert.match(rules, /allow create, delete:\s*if false;/);
-  for (const protectedField of ['role', 'distributorStatus', 'approvalStatus', 'approvedBy', 'requestedBranchId', 'emailVerified', 'registrationCompleted', 'faceVerification', 'termsAcceptance', 'branchId', 'managerStatus']) {
+  for (const protectedField of ['role', 'distributorStatus', 'approvalStatus', 'approvedBy', 'requestedBranchId', 'emailVerified', 'registrationCompleted', 'faceVerification', 'termsAcceptance', 'branchId', 'branchMembershipVersion', 'managerStatus']) {
     assert.match(rules, new RegExp(`['\"]${protectedField}['\"]`));
   }
 });
@@ -83,6 +83,7 @@ test('Manager may read branch-requested applications but cannot change Admin app
 test('request access stays bound to the authenticated requester', () => {
   assert.match(rules, /allow read:\s*if isRequester\(\) && resource\.data\.requester_id == request\.auth\.uid;/);
   assert.match(rules, /match \/requests\/\{requestId\}[\s\S]*allow create, update, delete:\s*if false;/);
+  assert.match(rules, /assignmentVersion is server-owned relationship authority metadata/);
 });
 
 test('dispatch reads stay scoped to current Branch ownership and assigned Distributors', () => {

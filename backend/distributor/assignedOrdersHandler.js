@@ -3,6 +3,7 @@ const { requireActiveDistributor } = require('../auth/authorization');
 const { applyCors } = require('../utils/cors');
 const { safeOrder, owningBranchId } = require('../manager/dispatchHandler');
 const { OtpError } = require('../utils/otpError');
+const { assignmentVersionForTransition } = require('../utils/relationshipEpochs');
 
 const clean = (value, max = 128) => String(value || '').trim().slice(0, max);
 const history = (value) => Array.isArray(value) ? value : [];
@@ -107,8 +108,10 @@ function createDistributorAssignedOrdersHandler(getAdmin = getFirebaseAdmin) {
           }
           declineReason = clean(body.declineReason || body.reason, 240);
           event = 'ASSIGNMENT_DECLINED';
+          const assignmentEpoch = assignmentVersionForTransition(current, '');
           update = {
             status: 'awaiting_distributor_assignment',
+            assignmentVersion: assignmentEpoch.assignmentVersion,
             assignedDistributorUid: null,
             assignedDistributorNameSnapshot: '',
             assignedDistributorUniqueIdSnapshot: '',
