@@ -9,18 +9,28 @@ import { useBlueTapTheme } from './BlueTapTheme';
 const BLUE = '#2563EB';
 
 const STATUS_META = {
+  active: {
+    backgroundColor: '#ECFDF5',
+    color: '#047857',
+    label: 'Active',
+  },
+  inactive: {
+    backgroundColor: '#F3F4F6',
+    color: '#4B5563',
+    label: 'Inactive',
+  },
   pending: {
     backgroundColor: '#FFF8E6',
-    color: '#F59E0B',
+    color: '#9A5B00',
     label: 'Pending',
   },
   'outside radius pending approval': {
     backgroundColor: '#FFF8E6',
-    color: '#B7791F',
+    color: '#9A5B00',
     label: 'Waiting for branch approval',
   },
   'manager approval pending': {
-    backgroundColor: '#FFF8E6', color: '#B7791F', label: 'Waiting for branch approval',
+    backgroundColor: '#FFF8E6', color: '#9A5B00', label: 'Waiting for branch approval',
   },
   'awaiting distributor assignment': {
     backgroundColor: '#EFF6FF',
@@ -29,12 +39,12 @@ const STATUS_META = {
   },
   'distributor assigned': {
     backgroundColor: '#ECFDF5',
-    color: '#059669',
+    color: '#047857',
     label: 'Distributor assigned',
   },
   assigned: {
     backgroundColor: '#ECFDF5',
-    color: '#059669',
+    color: '#047857',
     label: 'Distributor assigned',
   },
   'branch transfer pending': {
@@ -44,7 +54,7 @@ const STATUS_META = {
   },
   approved: {
     backgroundColor: '#ECFDF5',
-    color: '#059669',
+    color: '#047857',
     label: 'Approved',
   },
   'declined outside service area': {
@@ -59,12 +69,12 @@ const STATUS_META = {
   },
   scheduled: {
     backgroundColor: '#FFF3E6',
-    color: '#FB923C',
+    color: '#9A4D00',
     label: 'Scheduled',
   },
   processing: {
     backgroundColor: '#FFF3E6',
-    color: '#FB923C',
+    color: '#9A4D00',
     label: 'Processing',
   },
   'out for delivery': {
@@ -74,42 +84,44 @@ const STATUS_META = {
   },
   'delivery failed': {
     backgroundColor: '#FEF2F2',
-    color: '#EF4444',
+    color: '#B91C1C',
     label: 'Delivery Failed',
   },
   'delivery failed rescheduling': {
     backgroundColor: '#FEF2F2',
-    color: '#EF4444',
+    color: '#B91C1C',
     label: 'Delivery Failed (rescheduling)',
   },
   delivered: {
     backgroundColor: '#ECFDF5',
-    color: '#059669',
+    color: '#047857',
     label: 'Delivered',
   },
   cancelled: {
     backgroundColor: '#FEF2F2',
-    color: '#EF4444',
+    color: '#B91C1C',
     label: 'Cancelled',
   },
   canceled: {
     backgroundColor: '#FEF2F2',
-    color: '#EF4444',
+    color: '#B91C1C',
     label: 'Cancelled',
   },
   rejected: {
     backgroundColor: '#F3F4F6',
-    color: '#6B7280',
+    color: '#4B5563',
     label: 'Rejected',
   },
   declined: {
     backgroundColor: '#FEF2F2',
-    color: '#DC2626',
+    color: '#B91C1C',
     label: 'Declined',
   },
 };
 
 const DARK_STATUS_META = {
+  active: { backgroundColor: '#0F392B', color: '#34D399', label: 'Active' },
+  inactive: { backgroundColor: '#26333D', color: '#CBD5E1', label: 'Inactive' },
   pending: { backgroundColor: '#38280B', color: '#FBBF24', label: 'Pending' },
   'outside radius pending approval': { backgroundColor: '#38280B', color: '#FBBF24', label: 'Waiting for branch approval' },
   'manager approval pending': { backgroundColor: '#38280B', color: '#FBBF24', label: 'Waiting for branch approval' },

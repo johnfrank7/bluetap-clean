@@ -916,7 +916,7 @@ export default function DistributorRequests() {
               value={declineReason}
               onChangeText={setDeclineReason}
               placeholder="Reason for declining (optional)..."
-              placeholderTextColor="#95A6B8"
+              placeholderTextColor={colors.textSecondary}
               multiline
               style={styles.declineModalInput}
             />

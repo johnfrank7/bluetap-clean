@@ -216,7 +216,7 @@ export default function ManagerProfilePage() {
               <Text style={styles.cancelButtonText}>Cancel</Text>
             </TouchableOpacity>
             <TouchableOpacity accessibilityRole="button" disabled={saving} onPress={saveProfile} style={[styles.primaryButton, saving && styles.disabledButton]}>
-              {saving ? <ActivityIndicator color="#FFFFFF" size="small" /> : <Text style={styles.primaryButtonText}>Save Changes</Text>}
+              {saving ? <ActivityIndicator color={colors.onPrimary} size="small" /> : <Text style={styles.primaryButtonText}>Save Changes</Text>}
             </TouchableOpacity>
           </View>
         )}
@@ -239,8 +239,8 @@ const createStyles = (colors) => StyleSheet.create({
   profileName: { color: colors.textPrimary, fontSize: 21, fontWeight: '800' },
   profileMeta: { color: colors.textSecondary, fontSize: 13, marginTop: 5 },
   headerActions: { alignItems: 'flex-end', gap: 10 },
-  editButton: { backgroundColor: colors.primary, borderRadius: 10, minHeight: 40, justifyContent: 'center', paddingHorizontal: 16 },
-  editButtonText: { color: '#FFFFFF', fontSize: 13, fontWeight: '800' },
+  editButton: { backgroundColor: colors.primaryAction, borderRadius: 10, minHeight: 40, justifyContent: 'center', paddingHorizontal: 16 },
+  editButtonText: { color: colors.onPrimary, fontSize: 13, fontWeight: '800' },
   disabledButton: { opacity: 0.55 },
   errorBanner: { alignItems: 'center', backgroundColor: colors.dangerSoft, borderWidth: 1, borderColor: colors.danger, borderRadius: 12, flexDirection: 'row', gap: 12, justifyContent: 'space-between', marginTop: 16, padding: 12 },
   errorCopy: { flex: 1 },
@@ -259,7 +259,7 @@ const createStyles = (colors) => StyleSheet.create({
   formActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, justifyContent: 'flex-end', marginTop: 18 },
   cancelButton: { borderWidth: 1, borderColor: colors.border, borderRadius: 10, minHeight: 42, justifyContent: 'center', paddingHorizontal: 18 },
   cancelButtonText: { color: colors.textPrimary, fontSize: 13, fontWeight: '800' },
-  primaryButton: { alignItems: 'center', backgroundColor: colors.primary, borderRadius: 10, minHeight: 42, justifyContent: 'center', minWidth: 112, paddingHorizontal: 18 },
-  primaryButtonText: { color: '#FFFFFF', fontSize: 13, fontWeight: '800' },
+  primaryButton: { alignItems: 'center', backgroundColor: colors.primaryAction, borderRadius: 10, minHeight: 42, justifyContent: 'center', minWidth: 112, paddingHorizontal: 18 },
+  primaryButtonText: { color: colors.onPrimary, fontSize: 13, fontWeight: '800' },
   securityNote: { color: colors.textSecondary, fontSize: 12, lineHeight: 18, marginTop: 18, textAlign: 'center' },
 });

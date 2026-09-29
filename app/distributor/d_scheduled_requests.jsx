@@ -488,7 +488,7 @@ export default function DistributorScheduledRequests() {
               value={failureReason}
               onChangeText={setFailureReason}
               placeholder="e.g. Customer not at home, wrong address, gate locked..."
-              placeholderTextColor="#95A6B8"
+              placeholderTextColor={colors.textSecondary}
               multiline
               style={styles.dialogInput}
             />

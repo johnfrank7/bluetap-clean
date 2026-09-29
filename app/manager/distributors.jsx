@@ -766,12 +766,12 @@ const createStyles = (colors, width = 1200) =>
       minHeight: 38,
       paddingHorizontal: 14,
       borderRadius: 8,
-      backgroundColor: colors.primary,
+      backgroundColor: colors.primaryAction,
       alignItems: 'center',
       justifyContent: 'center',
     },
     assignButtonText: {
-      color: '#FFFFFF',
+      color: colors.onPrimary,
       fontSize: 12,
       fontWeight: '800',
     },
@@ -875,7 +875,7 @@ const createStyles = (colors, width = 1200) =>
     dateSelectorChevron: { color: colors.primary, fontSize: 11, fontWeight: '900' },
     dateOptions: { maxHeight: 190, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, borderRadius: 9, marginTop: 5 },
     dateOption: { minHeight: 40, justifyContent: 'center', paddingHorizontal: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
-    dateOptionActive: { backgroundColor: colors.primary },
+    dateOptionActive: { backgroundColor: colors.primaryAction },
     dateOptionText: { color: colors.textPrimary, fontSize: 12, fontWeight: '700' },
     quickDates: { flexDirection: 'row', flexWrap: 'wrap', gap: 7, marginTop: 7 },
     quickDate: { minHeight: 34, justifyContent: 'center', paddingHorizontal: 11, borderWidth: 1, borderColor: colors.primary, borderRadius: 8, backgroundColor: colors.primarySoft },
@@ -895,7 +895,7 @@ const createStyles = (colors, width = 1200) =>
     },
     schedulePillActive: {
       borderColor: colors.primary,
-      backgroundColor: colors.primary,
+      backgroundColor: colors.primaryAction,
     },
     schedulePillText: {
       color: colors.textPrimary,
@@ -903,7 +903,7 @@ const createStyles = (colors, width = 1200) =>
       fontWeight: '700',
     },
     schedulePillTextActive: {
-      color: '#FFFFFF',
+      color: colors.onPrimary,
     },
     scheduleErrorText: {
       color: colors.danger,
@@ -915,13 +915,13 @@ const createStyles = (colors, width = 1200) =>
       marginTop: 14,
       minHeight: 40,
       borderRadius: 8,
-      backgroundColor: colors.success,
+      backgroundColor: colors.successAction,
       alignItems: 'center',
       justifyContent: 'center',
       paddingHorizontal: 16,
     },
     confirmAssignmentText: {
-      color: '#FFFFFF',
+      color: colors.onSuccess,
       fontSize: 13,
       fontWeight: '800',
     },

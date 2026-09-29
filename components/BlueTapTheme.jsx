@@ -141,6 +141,10 @@ function mapDarkColor(value, property, colors) {
   }
 
   const token = DARK_COLOR_MAP[normalized];
+  if (token === 'primary') {
+    if (property === 'color') return colors.primaryLight;
+    if (property === 'backgroundColor' || property.toLowerCase().includes('border')) return colors.primaryAction;
+  }
   return token ? colors[token] : value;
 }
 

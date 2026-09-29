@@ -23,6 +23,8 @@ ProductCard discovery and ordering components adhere to shared theme tokens: hig
 
 BlueTap dark mode uses layered deep navy and blue-black surfaces, never pure black as the main background. Keep BlueTap blue as the primary accent; Admin and Manager share one dark palette through theme tokens, while the landing page remains the branding reference. Build premium card separation with subtle borders and restrained highlights. Do not introduce random hardcoded dark colors in screens: use the shared background, sidebar, surface, surfaceAlt, border, primary, text, muted, and semantic tokens.
 
+Every user-visible state must be verified in both BlueTap light and dark themes, including normal, hover, focus, pressed, selected, disabled, loading, modal, toast, badge, table, and empty-state variants. Theme-dependent text and surfaces must use semantic tokens rather than fixed light-only or dark-only colors, and filled semantic actions must use the matching `onPrimary`, `onSuccess`, `onWarning`, or `onDanger` foreground.
+
 Preserve these invariants:
 
 - Use shared tokens for the primary blue, surfaces, borders, text, semantic colors, spacing, radii, and shadows.

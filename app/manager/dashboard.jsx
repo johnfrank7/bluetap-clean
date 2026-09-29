@@ -1556,12 +1556,12 @@ const createStyles = (colors) => StyleSheet.create({
   },
   tableTabActive: {
     borderRadius: 20,
-    backgroundColor: colors.primary,
+    backgroundColor: colors.primaryAction,
     paddingHorizontal: 16,
     paddingVertical: 10,
   },
   tableTabActiveText: {
-    color: '#FFFFFF',
+    color: colors.onPrimary,
     fontSize: 12,
     fontWeight: 'bold',
   },

@@ -282,7 +282,7 @@ const createStyles = (colors, isDark) =>
       marginBottom: 16,
     },
     actionButton: {
-      backgroundColor: BLUETAP_COLORS.primary,
+      backgroundColor: colors.primaryAction || BLUETAP_COLORS.primaryAction,
       paddingHorizontal: 20,
       paddingVertical: 10,
       borderRadius: 10,
@@ -290,7 +290,7 @@ const createStyles = (colors, isDark) =>
       justifyContent: 'center',
     },
     actionButtonText: {
-      color: '#FFFFFF',
+      color: colors.onPrimary || BLUETAP_COLORS.onPrimary,
       fontSize: 13,
       fontWeight: '700',
     },

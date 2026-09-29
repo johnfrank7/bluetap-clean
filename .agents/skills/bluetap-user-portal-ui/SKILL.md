@@ -60,6 +60,7 @@ Preserve these invariants:
 2. **Contrast and Dark Mode Discipline**:
    - Text contrast must be maintained across both light and dark themes. Titles and values must use `TEXT_DARK` (`BLUETAP_COLORS.textPrimary`), which inverts to bright readable off-white (`#F5FAFF`) in dark mode, and `TEXT_MUTED` (`BLUETAP_COLORS.textSecondary`), which inverts to readable slate (`#9FB4C8`).
    - Never hardcode `#187BCD` or other blue shades directly onto text styles that should be primary or secondary content, as this degrades readability on dark navy card backgrounds.
+   - Filled controls use the theme's action background and matching on-color; dark-mode foreground accents may be brighter than action fills so both text-on-surface and label-on-button contrast remain readable.
 3. **Pinned Header Area Bleed Prevention**:
    - Any fixed or pinned header container (e.g. `fixedHeaderArea`) positioned above a `ScrollView` must declare `backgroundColor: BLUETAP_COLORS.background` and `zIndex: 10`. This prevents scrolled list cards from visibly bleeding or showing through beneath the header controls during scrolling.
 4. **SoftStatusBadge Semantic & Dark-Mode Mapping**:

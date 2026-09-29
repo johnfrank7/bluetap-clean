@@ -848,7 +848,7 @@ const createStyles = (colors) =>
       alignItems: 'center',
       justifyContent: 'space-between',
       gap: 20,
-      backgroundColor: colors.primary,
+      backgroundColor: colors.primaryAction,
       borderRadius: 20,
       padding: 24,
       marginBottom: 20,
@@ -976,8 +976,8 @@ const createStyles = (colors) =>
       alignItems: 'center',
     },
     pillActive: {
-      backgroundColor: colors.primary,
-      borderColor: colors.primary,
+      backgroundColor: colors.primaryAction,
+      borderColor: colors.primaryAction,
     },
     pillText: {
       color: colors.textPrimary,
@@ -985,7 +985,7 @@ const createStyles = (colors) =>
       fontWeight: '800',
     },
     pillTextActive: {
-      color: '#FFFFFF',
+      color: colors.onPrimary,
     },
     pillSpacing: {
       borderRadius: 999,

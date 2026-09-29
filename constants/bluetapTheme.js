@@ -1,5 +1,7 @@
 export const BLUETAP_COLORS = Object.freeze({
   primary: '#187BCD',
+  primaryAction: '#0B67AD',
+  onPrimary: '#FFFFFF',
   primaryHover: '#1565C0',
   primaryDark: '#1565C0',
   primaryDeep: '#0B5FA8',
@@ -11,6 +13,7 @@ export const BLUETAP_COLORS = Object.freeze({
   surface: '#FFFFFF', surfaceAlt: '#F8FCFF', border: '#D7ECFF',
   textPrimary: '#12304A', textSecondary: '#64748B',
   success: '#167347', successSoft: '#E3F7EC', warning: '#A96800', warningSoft: '#FFF7E5', danger: '#B52F2F', dangerSoft: '#FCE9E8', disabled: '#A8BBCB',
+  successAction: '#167347', onSuccess: '#FFFFFF', warningAction: '#A15F00', onWarning: '#FFFFFF', dangerAction: '#B52F2F', onDanger: '#FFFFFF', disabledText: '#526579',
   white: '#FFFFFF',
 });
 
@@ -38,6 +41,8 @@ export const BLUETAP_DARK_COLORS = Object.freeze({
   textSecondary: '#9FB4C8',
   muted: '#9FB4C8',
   primary: '#2186D9',
+  primaryAction: '#1565C0',
+  onPrimary: '#FFFFFF',
   primaryDark: '#1565C0',
   primaryLight: '#70BDF2',
   primarySoft: '#163B59',
@@ -48,6 +53,13 @@ export const BLUETAP_DARK_COLORS = Object.freeze({
   danger: '#EF4444',
   dangerSoft: '#48262A',
   disabled: '#6F879C',
+  successAction: '#22C55E',
+  onSuccess: '#07131F',
+  warningAction: '#F59E0B',
+  onWarning: '#07131F',
+  dangerAction: '#B91C1C',
+  onDanger: '#FFFFFF',
+  disabledText: '#9FB4C8',
   white: '#FFFFFF',
 });
 

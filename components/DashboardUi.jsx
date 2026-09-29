@@ -18,7 +18,7 @@ export function PrimaryButton({ children, style, disabled, ...props }) {
     <PortalButton
       variant="primary"
       disabled={disabled}
-      style={[{ backgroundColor: colors.primary }, style]}
+      style={[{ backgroundColor: colors.primaryAction }, style]}
       {...props}
     >
       {children}

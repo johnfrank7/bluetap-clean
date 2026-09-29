@@ -64,7 +64,7 @@ export default function BlueTapAIPage() {
             <TextInput
               style={styles.input}
               placeholder="Ask BlueTap AI..."
-              placeholderTextColor="#9BB7D7"
+              placeholderTextColor={colors.textSecondary}
             />
             <TouchableOpacity style={styles.sendButton}>
               <Text style={styles.sendIcon}>➤</Text>

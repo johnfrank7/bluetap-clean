@@ -490,7 +490,7 @@ export default function AdminRequestsPage() {
                 <Text
                   style={[
                     styles.branchChipText,
-                    branchFilter === 'all' && { color: colors.white, fontWeight: '800' },
+                    branchFilter === 'all' && { color: colors.onPrimary, fontWeight: '800' },
                   ]}
                 >
                   All Branches ({requests.length})
@@ -513,7 +513,7 @@ export default function AdminRequestsPage() {
                   <Text
                     style={[
                       styles.branchChipText,
-                      branchFilter === b.id && { color: colors.white, fontWeight: '800' },
+                      branchFilter === b.id && { color: colors.onPrimary, fontWeight: '800' },
                     ]}
                   >
                     {b.name || b.code || b.id} ({branchCounts.get(b.id) || 0})
@@ -1244,8 +1244,8 @@ const createStyles = (colors) =>
       ...Platform.select({ web: { transitionDuration: '150ms', transitionProperty: 'background-color, border-color, transform' }, default: {} }),
     },
     tabActive: {
-      backgroundColor: colors.primary,
-      borderColor: colors.primary,
+      backgroundColor: colors.primaryAction,
+      borderColor: colors.primaryAction,
     },
     tabHover: {
       backgroundColor: colors.primarySoft,
@@ -1261,7 +1261,7 @@ const createStyles = (colors) =>
       color: colors.textSecondary,
     },
     tabTextActive: {
-      color: colors.white,
+      color: colors.onPrimary,
       fontWeight: '900',
     },
     filtersRow: {
@@ -1288,8 +1288,8 @@ const createStyles = (colors) =>
       ...Platform.select({ web: { transitionDuration: '150ms', transitionProperty: 'background-color, border-color, transform' }, default: {} }),
     },
     branchChipActive: {
-      backgroundColor: colors.primary,
-      borderColor: colors.primary,
+      backgroundColor: colors.primaryAction,
+      borderColor: colors.primaryAction,
     },
     branchChipHover: {
       backgroundColor: colors.primarySoft,
@@ -1548,14 +1548,14 @@ const createStyles = (colors) =>
       justifyContent: 'center',
       ...Platform.select({ web: { transitionDuration: '140ms', transitionProperty: 'background-color, transform, border-color' }, default: {} }),
     },
-    detailsBtnHover: { backgroundColor: colors.primary, borderColor: colors.primary },
+    detailsBtnHover: { backgroundColor: colors.primaryAction, borderColor: colors.primaryAction },
     detailsBtnPressed: { transform: [{ scale: 0.98 }] },
     detailsBtnText: {
       color: colors.primary,
       fontWeight: '800',
       fontSize: 12,
     },
-    detailsBtnTextActive: { color: colors.white },
+    detailsBtnTextActive: { color: colors.onPrimary },
     paginationSection: {
       flexDirection: 'row',
       flexWrap: 'wrap',
@@ -1581,11 +1581,11 @@ const createStyles = (colors) =>
       backgroundColor: colors.surfaceAlt,
     },
     pageNavButton: { minWidth: 76 },
-    pageButtonActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+    pageButtonActive: { backgroundColor: colors.primaryAction, borderColor: colors.primaryAction },
     pageButtonInteractive: { backgroundColor: colors.primarySoft, borderColor: colors.primary, transform: [{ translateY: -1 }] },
     pageButtonDisabled: { backgroundColor: colors.neutral, borderColor: colors.border, opacity: 0.62 },
     pageButtonText: { color: colors.textPrimary, fontSize: 12, fontWeight: '800' },
-    pageButtonTextActive: { color: colors.white, fontWeight: '900' },
+    pageButtonTextActive: { color: colors.onPrimary, fontWeight: '900' },
     pageButtonTextDisabled: { color: colors.textSecondary },
     pageEllipsis: { color: colors.textSecondary, minWidth: 18, textAlign: 'center', fontWeight: '800' },
     modalBackdrop: {
@@ -1804,15 +1804,15 @@ const createStyles = (colors) =>
       paddingHorizontal: 16,
       paddingVertical: 10,
       borderRadius: 8,
-      backgroundColor: colors.primary,
+      backgroundColor: colors.primaryAction,
       borderWidth: 1,
-      borderColor: colors.primary,
+      borderColor: colors.primaryAction,
       alignItems: 'center',
       justifyContent: 'center',
     },
     overrideActionButtonText: {
       fontWeight: '800',
-      color: '#FFFFFF',
+      color: colors.onPrimary,
       fontSize: 13,
     },
     actionDisabled: {
@@ -2105,8 +2105,8 @@ const createStyles = (colors) =>
       justifyContent: 'center',
     },
     overridePillBtnSelected: {
-      backgroundColor: colors.primary,
-      borderColor: colors.primary,
+      backgroundColor: colors.primaryAction,
+      borderColor: colors.primaryAction,
     },
     overridePillText: {
       color: colors.textPrimary,
@@ -2114,7 +2114,7 @@ const createStyles = (colors) =>
       fontWeight: '800',
     },
     overridePillTextSelected: {
-      color: '#FFFFFF',
+      color: colors.onPrimary,
     },
     overrideScheduleWarning: {
       backgroundColor: colors.warningSoft,
@@ -2165,8 +2165,8 @@ const createStyles = (colors) =>
       paddingHorizontal: 16,
       borderRadius: 8,
       borderWidth: 1,
-      borderColor: colors.primary,
-      backgroundColor: colors.primary,
+      borderColor: colors.primaryAction,
+      backgroundColor: colors.primaryAction,
       alignItems: 'center',
       justifyContent: 'center',
     },
@@ -2175,7 +2175,7 @@ const createStyles = (colors) =>
       borderColor: colors.muted,
     },
     overrideSubmitBtnText: {
-      color: '#FFFFFF',
+      color: colors.onPrimary,
       fontSize: 13,
       fontWeight: '900',
     },

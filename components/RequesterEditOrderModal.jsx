@@ -268,12 +268,12 @@ export default function RequesterEditOrderModal({
             <TouchableOpacity
               onPress={handleSave}
               disabled={saving}
-              style={[styles.saveBtn, { backgroundColor: colors.primary }, saving && styles.btnDisabled]}
+              style={[styles.saveBtn, { backgroundColor: colors.primaryAction }, saving && styles.btnDisabled]}
             >
               {saving ? (
-                <ActivityIndicator color="#FFFFFF" size="small" />
+                <ActivityIndicator color={colors.onPrimary} size="small" />
               ) : (
-                <Text style={styles.saveBtnText}>Save Changes</Text>
+                <Text style={[styles.saveBtnText, { color: colors.onPrimary }]}>Save Changes</Text>
               )}
             </TouchableOpacity>
           </View>
@@ -468,7 +468,6 @@ const styles = createPortalStyleSheet({
     opacity: 0.6,
   },
   saveBtnText: {
-    color: '#FFFFFF',
     fontSize: 13,
     fontWeight: '700',
   },
