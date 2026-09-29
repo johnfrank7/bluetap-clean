@@ -2,6 +2,7 @@ import React from 'react';
 import {
   ActivityIndicator,
   Modal,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -351,16 +352,22 @@ export default function AdminProductsPage() {
               { id: 'active', label: 'Active' },
               { id: 'inactive', label: 'Inactive' },
             ].map((item) => (
-              <TouchableOpacity
+              <Pressable
                 key={item.id}
                 accessibilityRole="button"
                 accessibilityLabel={`Filter ${item.label} products`}
+                accessibilityState={{ selected: statusFilter === item.id }}
                 onPress={() => setStatusFilter(item.id)}
-                style={[
+                style={({ hovered, focused, pressed }) => [
                   styles.statusPill,
                   statusFilter === item.id && styles.statusPillActive,
+                  hovered &&
+                    (statusFilter === item.id
+                      ? styles.statusPillActiveHover
+                      : styles.statusPillHover),
+                  pressed && styles.toolbarControlPressed,
+                  focused && styles.toolbarControlFocus,
                 ]}
-                activeOpacity={0.8}
               >
                 <Text
                   style={[
@@ -370,19 +377,23 @@ export default function AdminProductsPage() {
                 >
                   {item.label}
                 </Text>
-              </TouchableOpacity>
+              </Pressable>
             ))}
           </View>
 
-          <TouchableOpacity
+          <Pressable
             accessibilityRole="button"
             accessibilityLabel="Add product"
             onPress={() => open()}
-            style={styles.primary}
-            activeOpacity={0.85}
+            style={({ hovered, focused, pressed }) => [
+              styles.primary,
+              hovered && styles.primaryHover,
+              pressed && styles.primaryPressed,
+              focused && styles.toolbarControlFocus,
+            ]}
           >
             <Text style={styles.primaryText}>Add product</Text>
-          </TouchableOpacity>
+          </Pressable>
         </View>
       </View>
 
@@ -845,9 +856,20 @@ const createStyles = (colors, compact, isMobile) =>
       paddingHorizontal: 10,
       paddingVertical: 6,
       borderRadius: 7,
+      borderWidth: 1,
+      borderColor: 'transparent',
     },
     statusPillActive: {
       backgroundColor: colors.primaryAction,
+      borderColor: colors.primaryAction,
+    },
+    statusPillHover: {
+      backgroundColor: colors.primarySoft,
+      borderColor: colors.primary,
+    },
+    statusPillActiveHover: {
+      backgroundColor: colors.primaryDeep || colors.primaryAction,
+      borderColor: colors.primaryDeep || colors.primaryAction,
     },
     statusPillText: {
       color: colors.textSecondary,
@@ -863,8 +885,30 @@ const createStyles = (colors, compact, isMobile) =>
       paddingHorizontal: 16,
       borderRadius: 10,
       backgroundColor: colors.primaryAction,
+      borderWidth: 1,
+      borderColor: colors.primaryAction,
       alignItems: 'center',
       justifyContent: 'center',
+    },
+    primaryHover: {
+      backgroundColor: colors.primaryDeep || colors.primaryAction,
+      borderColor: colors.primaryDeep || colors.primaryAction,
+    },
+    primaryPressed: {
+      backgroundColor: colors.primaryDeep || colors.primaryAction,
+      borderColor: colors.primaryDeep || colors.primaryAction,
+      opacity: 0.92,
+      transform: [{ scale: 0.98 }],
+    },
+    toolbarControlPressed: {
+      opacity: 0.88,
+      transform: [{ scale: 0.98 }],
+    },
+    toolbarControlFocus: {
+      outlineStyle: 'solid',
+      outlineWidth: 3,
+      outlineColor: colors.primary,
+      outlineOffset: 2,
     },
     primaryText: {
       color: colors.onPrimary,
