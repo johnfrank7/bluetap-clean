@@ -5,6 +5,7 @@ const { normalizeUsername } = require('./username');
 const { applyCors } = require('../utils/cors');
 const { getClientIp } = require('../utils/request');
 const firebaseWebConfig = require('../../firebase-web-config.json');
+const { ACCOUNT_STATUS, canonicalAccountStatus } = require('../auth/accountStatus');
 
 const genericLogin = () => new OtpError(401, 'invalid-credential', 'Invalid username or password.');
 const mappingError = () => new OtpError(409, 'account-mapping-invalid', 'Your account sign-in setup needs attention. Please contact support.');
@@ -358,6 +359,9 @@ function createUsernameHandler(action, getAdmin = getFirebaseAdmin, { now = Date
       stage('PROFILE_CHECK_STARTED');
       const profile = (await db.collection('users').doc(expectedUid).get()).data();
       if (!profile || !['requester', 'distributor', 'admin', 'manager'].includes(profile.role)) throw setupError();
+      if (canonicalAccountStatus(profile) !== ACCOUNT_STATUS.ACTIVE) {
+        throw new OtpError(403, 'account-disabled', 'This account is disabled. Please contact support.');
+      }
       if ((profile.uid && profile.uid !== expectedUid) ||
           (!isEmail && profile.usernameNormalized && profile.usernameNormalized !== normalized)) throw mappingError();
       loginDiagnostic('LOGIN_PROFILE_UID', { uid: expectedUid });

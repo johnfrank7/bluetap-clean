@@ -92,6 +92,8 @@ test('privileged route guard validates claims without forcing a second token ref
   assert.doesNotMatch(authSession, /currentUser\.getIdTokenResult\(true\)/);
   assert.match(authSession, /getCachedPrivilegedAccess\(currentUser, expected\)/);
   assert.match(login, /cacheValidatedPrivilegedAccess\(profile\)/);
+  assert.match(authSession, /getCanonicalAccountStatus\(profile\)/);
+  assert.match(authSession, /accountStatus !== 'active'/);
 });
 
 test('Manager context uses the current token after privileged validation', () => {

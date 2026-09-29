@@ -4,6 +4,7 @@ const { applyCors } = require('../utils/cors');
 const { OtpError } = require('../utils/otpError');
 const { loadRegistrationSecurity } = require('../registration/registrationSecurity');
 const { logDevelopmentTiming } = require('../utils/performanceLog');
+const { ACCOUNT_STATUS, canonicalAccountStatus } = require('../auth/accountStatus');
 
 const ACCOUNT_ROLES = new Set(['requester', 'distributor', 'manager']);
 const clean = (value, max = 160) => String(value || '').trim().slice(0, max);
@@ -16,6 +17,8 @@ async function timed(stage, operation) {
 }
 
 function accountStatus(data = {}) {
+  const globalStatus = canonicalAccountStatus(data);
+  if (globalStatus !== ACCOUNT_STATUS.ACTIVE) return globalStatus;
   if (data.role === 'manager') return clean(data.managerStatus || 'inactive', 30).toLowerCase();
   if (data.role === 'distributor') return clean(data.distributorStatus || data.approvalStatus || data.status || 'pending', 30).toLowerCase();
   return clean(data.accountStatus || data.status || 'active', 30).toLowerCase();

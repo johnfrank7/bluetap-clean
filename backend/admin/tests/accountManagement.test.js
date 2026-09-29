@@ -27,9 +27,51 @@ test('role-specific account status and audit DTO stay canonical and secret-free'
   assert.equal(statusOf({ role: 'manager', managerStatus: 'inactive' }), 'inactive');
   assert.equal(statusOf({ role: 'distributor', approvalStatus: 'active', status: 'Pending' }), 'active');
   assert.equal(statusOf({ role: 'requester', accountStatus: 'active' }), 'active');
+  assert.equal(statusOf({ role: 'manager', accountStatus: 'suspended', managerStatus: 'active' }), 'suspended');
+  assert.equal(statusOf({ role: 'distributor', accountStatus: 'terminated', distributorStatus: 'active' }), 'terminated');
   const audit = safeAudit('log-1', { action: 'TEMP_PASSWORD_RESET', actorUid: 'admin-1', targetUid: 'user-1', role: 'requester', temporaryPassword: 'secret' });
   assert.equal(audit.action, 'TEMP_PASSWORD_RESET');
   assert.equal('temporaryPassword' in audit, false);
+});
+
+test('Admin suspension and termination disable Auth, revoke sessions, preserve records, and are retry-safe', async () => {
+  const fixture = managementFixture(); const handler = createAdminAccountsHandler(fixture.getAdmin);
+  const suspended = await call(handler, 'PATCH', 'admin-token', { uid: 'manager-1', action: 'suspend' });
+  assert.equal(suspended.statusCode, 200);
+  assert.equal(fixture.records.get('users/manager-1').accountStatus, 'suspended');
+  assert.equal(fixture.records.get('users/manager-1').managerStatus, 'active');
+  assert.equal(fixture.authUsers.get('manager-1').disabled, true);
+
+  const reactivated = await call(handler, 'PATCH', 'admin-token', { uid: 'manager-1', action: 'reactivate' });
+  assert.equal(reactivated.statusCode, 200);
+  assert.equal(fixture.records.get('users/manager-1').accountStatus, 'active');
+  assert.equal(fixture.authUsers.get('manager-1').disabled, false);
+
+  const terminated = await call(handler, 'PATCH', 'admin-token', { uid: 'requester-1', action: 'terminate' });
+  assert.equal(terminated.statusCode, 200);
+  assert.equal(fixture.records.get('users/requester-1').accountStatus, 'terminated');
+  assert.equal(fixture.authUsers.get('requester-1').disabled, true);
+  assert.ok(fixture.records.has('users/requester-1'));
+  assert.ok([...fixture.records.values()].some((value) => value.action === 'ACCOUNT_TERMINATED'));
+
+  const retried = await call(handler, 'PATCH', 'admin-token', { uid: 'requester-1', action: 'terminate' });
+  assert.equal(retried.statusCode, 200);
+  assert.equal(retried.body.changed, false);
+  const reactivationDenied = await call(handler, 'PATCH', 'admin-token', { uid: 'requester-1', action: 'reactivate' });
+  assert.equal(reactivationDenied.statusCode, 409);
+  assert.equal(reactivationDenied.body.error.reason, 'ACCOUNT_NOT_REACTIVATABLE');
+});
+
+test('global account state changes do not grant Distributor operational approval', async () => {
+  const fixture = managementFixture(); const handler = createAdminAccountsHandler(fixture.getAdmin);
+  fixture.records.set('users/pending-distributor', { uid: 'pending-distributor', role: 'distributor', fullName: 'Pending Driver', email: 'pending@example.test', accountStatus: 'active', distributorStatus: 'pending', approvalStatus: 'pending', status: 'Pending' });
+  fixture.authUsers.set('pending-distributor', { uid: 'pending-distributor', email: 'pending@example.test', customClaims: {}, metadata: {} });
+  assert.equal((await call(handler, 'PATCH', 'admin-token', { uid: 'pending-distributor', action: 'deactivate' })).statusCode, 200);
+  assert.equal((await call(handler, 'PATCH', 'admin-token', { uid: 'pending-distributor', action: 'reactivate' })).statusCode, 200);
+  const profile = fixture.records.get('users/pending-distributor');
+  assert.equal(profile.accountStatus, 'active');
+  assert.equal(profile.distributorStatus, 'pending');
+  assert.equal(profile.approvalStatus, 'pending');
 });
 
 function managementFixture() {

@@ -1,4 +1,5 @@
 const { OtpError } = require('../utils/otpError');
+const { requireActiveAccount } = require('./accountStatus');
 
 function bearerToken(req) {
   const match = /^Bearer\s+(.+)$/i.exec(String(req.headers?.authorization || '').trim());
@@ -24,6 +25,7 @@ async function requireAdmin(req, auth, db) {
   if (profile.data()?.mustChangePassword === true) {
     throw new OtpError(403, 'PASSWORD_CHANGE_REQUIRED', 'You must change your temporary password before using Admin features.');
   }
+  requireActiveAccount(profile.data() || {});
   return decoded;
 }
 
@@ -37,9 +39,7 @@ async function requireRequester(req, auth, db) {
   if (profile.mustChangePassword === true) {
     throw new OtpError(403, 'PASSWORD_CHANGE_REQUIRED', 'You must change your temporary password before placing an order.');
   }
-  if (['inactive', 'disabled'].includes(String(profile.accountStatus || profile.status || '').toLowerCase())) {
-    throw new OtpError(403, 'ACCOUNT_INACTIVE', 'This Requester account is inactive.');
-  }
+  requireActiveAccount(profile, { inactiveMessage: 'This Requester account is inactive.' });
   return { decoded, profile: { ...profile, uid: decoded.uid } };
 }
 
@@ -52,7 +52,11 @@ async function requireActiveDistributor(req, auth, db) {
     throw new OtpError(403, 'DISTRIBUTOR_REQUIRED', 'Distributor access is required.');
   }
   if (profile.mustChangePassword === true) throw new OtpError(403, 'PASSWORD_CHANGE_REQUIRED', 'You must change your temporary password before accessing BlueTap.');
-  if (!['active', 'approved'].includes(distributorStatus) || ['inactive', 'disabled'].includes(String(profile.accountStatus || '').toLowerCase())) {
+  requireActiveAccount(profile, {
+    inactiveReason: 'DISTRIBUTOR_INACTIVE',
+    inactiveMessage: 'This Distributor account is not active.',
+  });
+  if (!['active', 'approved'].includes(distributorStatus)) {
     throw new OtpError(403, 'DISTRIBUTOR_INACTIVE', 'This Distributor account is not active.');
   }
   const branchId = String(profile.branchId || '').trim();
@@ -76,6 +80,10 @@ async function requireActiveManager(req, auth, db) {
     throw new OtpError(403, 'MANAGER_REQUIRED', 'Manager access is required.');
   }
   if (profile.mustChangePassword === true) throw new OtpError(403, 'PASSWORD_CHANGE_REQUIRED', 'You must change your temporary password before accessing BlueTap.');
+  requireActiveAccount(profile, {
+    inactiveReason: 'MANAGER_INACTIVE',
+    inactiveMessage: 'This Manager account is inactive. Please contact the BlueTap administrator.',
+  });
   if (profile.managerStatus !== 'active') {
     throw new OtpError(403, 'MANAGER_INACTIVE', 'This Manager account is inactive. Please contact the BlueTap administrator.');
   }

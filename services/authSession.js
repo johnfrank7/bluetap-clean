@@ -224,6 +224,7 @@ export const saveRoleSession = (profile = {}) => {
     branchId: (profile.branchId || '').toString().trim(),
     branchName: (profile.branchName || profile.branch?.name || '').toString().trim(),
     managerStatus: (profile.managerStatus || '').toString().trim().toLowerCase(),
+    accountStatus: (profile.accountStatus || '').toString().trim().toLowerCase(),
   };
   const hasSameIdentity =
     existingSession &&
@@ -231,7 +232,8 @@ export const saveRoleSession = (profile = {}) => {
     existingSession.email === nextSession.email &&
     existingSession.role === nextSession.role &&
     existingSession.branchId === nextSession.branchId &&
-    existingSession.managerStatus === nextSession.managerStatus;
+    existingSession.managerStatus === nextSession.managerStatus &&
+    existingSession.accountStatus === nextSession.accountStatus;
   const session = hasSameIdentity
     ? existingSession
     : {
@@ -322,6 +324,18 @@ export const getDistributorApplicationStatus = (profile = {}) =>
       profile.accountStatus ||
       'pending'
   );
+
+export const getCanonicalAccountStatus = (profile = {}) => {
+  const explicit = String(profile.accountStatus || '').trim().toLowerCase();
+  if (['active', 'inactive', 'suspended', 'terminated'].includes(explicit)) return explicit;
+  if (explicit) return 'inactive';
+  const legacy = [profile.status, profile.managerStatus, profile.distributorStatus, profile.approvalStatus]
+    .map((value) => String(value || '').trim().toLowerCase());
+  if (legacy.includes('terminated')) return 'terminated';
+  if (legacy.includes('suspended')) return 'suspended';
+  if (legacy.some((value) => ['inactive', 'disabled'].includes(value))) return 'inactive';
+  return 'active';
+};
 
 const buildFirestoreProfile = (user, data = {}) => ({
   ...data,
@@ -465,6 +479,18 @@ const validateRoleAccessOnce = async (expectedRole) => {
       status: 'unauthorized',
       message: 'Unauthorized Access',
       redirectTo: '/login',
+      shouldSignOut: true,
+      clearRole: expected,
+    };
+  }
+
+  const accountStatus = getCanonicalAccountStatus(profile);
+  if (accountStatus !== 'active') {
+    const label = accountStatus === 'terminated' ? 'terminated' : accountStatus === 'suspended' ? 'temporarily suspended' : 'inactive';
+    return {
+      status: `account-${accountStatus}`,
+      message: `Your account is ${label}. Please contact BlueTap support.`,
+      redirectTo: getRoleLoginPath(expected),
       shouldSignOut: true,
       clearRole: expected,
     };

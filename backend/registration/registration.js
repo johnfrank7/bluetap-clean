@@ -8,6 +8,7 @@ const { createRenderFaceClient } = require('../verification/renderFaceClient');
 const { createRegistrationLimitService } = require('./registrationLimits');
 const { normalizePhilippinePhone } = require('../utils/phoneUtils');
 const { generateNextPublicUid } = require('../utils/publicUidGenerator');
+const { canonicalAccountStatus } = require('../auth/accountStatus');
 
 const RESERVATION_TTL = 15 * 60 * 1000;
 
@@ -168,6 +169,7 @@ function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, render 
       const publicUid = existing?.publicUid || existing?.displayUid || recoveredPublicUid || `${publicPrefix}${String(number).padStart(3, '0')}`;
       const recoveryProfile = {
         ...profile, uid: user.uid, email: user.email,
+        accountStatus: existing ? canonicalAccountStatus(existing) : 'active',
         publicUid,
         displayUid: publicUid,
         unique_id: existing?.unique_id || `${profile.role === 'requester' ? 'REQ' : 'DIS'}-${String(number).padStart(6, '0')}`,
@@ -191,6 +193,7 @@ function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, render 
           throw new OtpError(409, 'account-exists', 'This account already exists. Please log in.');
         }
         tx.update(ref, { uid: user.uid, email: user.email, emailVerified: emailOtpVerified === true,
+          accountStatus: canonicalAccountStatus(existing),
           emailVerifiedAt: emailOtpVerified === true ? new Date(now()) : null,
           emailVerificationRequired: requiresOtp(session), emailOtpVerification: recoveryProfile.emailOtpVerification,
           registrationCompleted: false, onboardingStatus,
@@ -213,6 +216,7 @@ function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, render 
       }
       tx.set(ref, {
         ...profile, uid: user.uid, email: user.email,
+        accountStatus: 'active',
         publicUid,
         displayUid: publicUid,
         unique_id: `${prefix}-${String(number).padStart(6, '0')}`,

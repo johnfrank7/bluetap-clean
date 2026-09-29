@@ -1,5 +1,6 @@
 const { getFirebaseAdmin } = require('../firebase/firebaseAdmin');
 const { requireAdmin } = require('../auth/authorization');
+const { canonicalAccountStatus } = require('../auth/accountStatus');
 const { applyCors } = require('../utils/cors');
 const { OtpError } = require('../utils/otpError');
 const { effectiveDeliveryDays, isAllowedDeliveryDate } = require('../../services/productOrderPolicy');
@@ -13,7 +14,7 @@ const isEligibleDistributor = (data = {}, branchId = '') =>
   data.role === 'distributor' &&
   clean(data.branchId, 128) === branchId &&
   ['active', 'approved'].includes(distributorStatus(data)) &&
-  !['inactive', 'disabled'].includes(clean(data.accountStatus, 40).toLowerCase()) &&
+  canonicalAccountStatus(data) === 'active' &&
   data.mustChangePassword !== true;
 const OVERRIDE_ELIGIBLE_STATUSES = new Set(['awaiting_distributor_assignment', 'distributor_assigned', 'accepted', 'scheduled', 'delivery_failed']);
 const requireOverrideEligible = (data) => {

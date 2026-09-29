@@ -9,12 +9,28 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
     }
 
+    function legacyAccountStateBlocked() {
+      return currentUser().get('status', '') in ['inactive', 'Inactive', 'disabled', 'Disabled', 'suspended', 'Suspended', 'terminated', 'Terminated']
+        || currentUser().get('managerStatus', '') in ['inactive', 'disabled', 'suspended', 'terminated']
+        || currentUser().get('distributorStatus', '') in ['inactive', 'disabled', 'suspended', 'terminated']
+        || currentUser().get('approvalStatus', '') in ['inactive', 'disabled', 'suspended', 'terminated'];
+    }
+
+    // Canonical accountStatus is authoritative when present. Legacy profiles
+    // without it remain compatible unless an existing field explicitly blocks
+    // the account. Unknown explicit values fail closed.
+    function hasActiveGlobalAccount() {
+      return signedIn()
+        && (currentUser().get('accountStatus', '') == 'active'
+          || (currentUser().get('accountStatus', '') == '' && !legacyAccountStateBlocked()));
+    }
+
     function isRequester() {
-      return signedIn() && currentUser().role == 'requester' && currentUser().mustChangePassword != true;
+      return hasActiveGlobalAccount() && currentUser().role == 'requester' && currentUser().mustChangePassword != true;
     }
 
     function isManager() {
-      return signedIn()
+      return hasActiveGlobalAccount()
         && currentUser().role == 'manager'
         && currentUser().managerStatus == 'active'
         && currentUser().mustChangePassword != true
@@ -24,7 +40,7 @@ service cloud.firestore {
     }
 
     function isDistributor() {
-      return signedIn()
+      return hasActiveGlobalAccount()
         && currentUser().role == 'distributor'
         && currentUser().mustChangePassword != true
         && (currentUser().distributorStatus == 'active' || currentUser().distributorStatus == 'approved'
@@ -35,13 +51,28 @@ service cloud.firestore {
     }
 
     function isAdmin() {
-      return signedIn() && currentUser().role == 'admin'
+      return hasActiveGlobalAccount() && currentUser().role == 'admin'
         && currentUser().mustChangePassword != true
         && (request.auth.token.admin == true || request.auth.token.role == 'admin');
     }
 
     function isManagerBranch(branchId) {
       return isManager() && branchId == currentUser().branchId;
+    }
+
+    function isConversationUserParticipant(conversation) {
+      return conversation.participantUserUids is list
+        && request.auth.uid in conversation.participantUserUids;
+    }
+
+    function isConversationBranchParticipant(conversation) {
+      return conversation.participantBranchIds is list
+        && currentUser().branchId in conversation.participantBranchIds;
+    }
+
+    function canReadConversation(conversation) {
+      return ((isRequester() || isDistributor()) && isConversationUserParticipant(conversation))
+        || (isManager() && isConversationBranchParticipant(conversation));
     }
 
     // The registration backend is the sole writer for these protected records.
@@ -65,6 +96,9 @@ service cloud.firestore {
       allow list, create, update, delete: if false;
     }
     match /adminAuditLogs/{document=**} { allow read, write: if false; }
+    match /chatReports/{document=**} { allow read, write: if false; }
+    match /chatModerationActions/{document=**} { allow read, write: if false; }
+    match /chatRestrictions/{document=**} { allow read, write: if false; }
     // Manager operational events are written by Render Node. Source Managers
     // may read only their branch's transfer outcomes.
     match /managerOperationalEvents/{eventId} {
@@ -115,8 +149,21 @@ service cloud.firestore {
     // Catalog mutations are server-only. The backend validates Administrator
     // identity and writes audit records before using the Admin SDK.
     match /products/{productId} {
-      allow read: if signedIn();
+      allow read: if hasActiveGlobalAccount();
       allow create, update, delete: if false;
+    }
+
+    match /chatConversations/{conversationId} {
+      // Render creates membership and lifecycle metadata. Clients may query
+      // only their UID or current authoritative Manager branch.
+      allow get, list: if canReadConversation(resource.data);
+      allow create, update, delete: if false;
+
+      // Message reads and every client write remain closed until the Phase 2
+      // message contract is implemented and separately reviewed.
+      match /messages/{messageId} {
+        allow read, write: if false;
+      }
     }
 
     match /requests/{requestId} {

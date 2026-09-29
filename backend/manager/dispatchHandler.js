@@ -1,6 +1,7 @@
 const { getFirebaseAdmin } = require('../firebase/firebaseAdmin');
 const { randomUUID } = require('node:crypto');
 const { requireActiveManager, requireManagerBranch } = require('../auth/authorization');
+const { canonicalAccountStatus } = require('../auth/accountStatus');
 const { applyCors } = require('../utils/cors');
 const { OtpError } = require('../utils/otpError');
 const { effectiveDeliveryDays, isAllowedDeliveryDate, productLimit, productDeliveryDays, limitViolations } = require('../../services/productOrderPolicy');
@@ -19,10 +20,11 @@ const distributorStatus = (data = {}) => clean(data.distributorStatus || data.ap
 const isEligibleDistributor = (data = {}, branchId = '') => data.role === 'distributor'
   && clean(data.branchId, 128) === branchId
   && ['active', 'approved'].includes(distributorStatus(data))
-  && !['inactive', 'disabled'].includes(clean(data.accountStatus, 40).toLowerCase())
+  && canonicalAccountStatus(data) === 'active'
   && data.mustChangePassword !== true;
 const isEligibleManager = (data = {}, branchId = '') => data.role === 'manager'
   && clean(data.branchId, 128) === branchId
+  && canonicalAccountStatus(data) === 'active'
   && clean(data.managerStatus, 40).toLowerCase() === 'active'
   && data.mustChangePassword !== true;
 const activeBranch = (data = {}) => data.status === 'active' && safeNumber(data.latitude) !== null && safeNumber(data.longitude) !== null;
