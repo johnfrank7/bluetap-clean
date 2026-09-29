@@ -37,6 +37,9 @@ test('Requester and Distributor authority requires ownership, assignment, branch
   assert.throws(() => authorizeRequesterDistributor({ requester: { ...requester, accountStatus: 'terminated' }, distributor, branch: branchA, order, assignmentVersion: 4 }), (error) => error.reason === 'ACCOUNT_TERMINATED');
   const { assignmentVersion: _legacyAssignmentVersion, ...legacyOrder } = order;
   assert.equal(authorizeRequesterDistributor({ requester, distributor, branch: branchA, order: legacyOrder, assignmentVersion: 1 }).assignmentVersion, 1);
+  const { assignedDistributorUid: _modernAssignment, ...legacyFieldOrder } = legacyOrder;
+  legacyFieldOrder.distributor_id = 'distributor-a';
+  assert.equal(authorizeRequesterDistributor({ requester, distributor, branch: branchA, order: legacyFieldOrder, assignmentVersion: 1 }).distributorUid, 'distributor-a');
   assert.throws(() => authorizeRequesterDistributor({ requester, distributor, branch: branchA, order: { ...order, assignmentVersion: 0 }, assignmentVersion: 1 }), (error) => error.reason === 'INVALID_ASSIGNMENT_VERSION');
 });
 

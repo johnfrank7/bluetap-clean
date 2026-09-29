@@ -17,6 +17,7 @@ const AUTHORITY_REASONS = Object.freeze({
   ACTIVE_ORDER: 'active_order',
   POST_ORDER_FOLLOWUP: 'post_order_followup',
 });
+const MAX_AUTHORITY_REASON_ORDER_IDS = 20;
 const SUPPORTED_TYPES = new Set(Object.values(CONVERSATION_TYPES));
 const clean = (value) => String(value || '').trim();
 const timeOf = (value) => value?.toMillis?.() || Number(value?.seconds || 0) * 1000 || new Date(value || 0).getTime() || 0;
@@ -59,7 +60,17 @@ function createOpaqueConversationId() {
 }
 
 function participantState(principalType, principalId) {
-  return { principalType, principalId, lastReadSeq: 0, lastReadAt: null, lastIncomingSeq: 0, unreadCount: 0, accessState: 'active' };
+  return {
+    principalType,
+    principalId,
+    lastReadSeq: 0,
+    lastReadAt: null,
+    lastIncomingSeq: 0,
+    unreadCount: 0,
+    incomingCount: 0,
+    lastReadIncomingCount: 0,
+    accessState: 'active',
+  };
 }
 
 function normalizeAuthorityReasons(reasons = {}) {
@@ -67,7 +78,9 @@ function normalizeAuthorityReasons(reasons = {}) {
   for (const reason of Object.values(AUTHORITY_REASONS)) {
     const value = reasons?.[reason];
     if (!value || value.active === false) continue;
-    const orderIds = Array.isArray(value.orderIds) ? [...new Set(value.orderIds.map(clean).filter(Boolean))] : [];
+    const orderIds = Array.isArray(value.orderIds)
+      ? [...new Set(value.orderIds.map(clean).filter(Boolean))].slice(-MAX_AUTHORITY_REASON_ORDER_IDS)
+      : [];
     normalized[reason] = {
       active: true,
       ...(orderIds.length ? { orderIds } : {}),
@@ -82,9 +95,11 @@ function addAuthorityReason(reasons, reason, { orderId = '', grantedAt = new Dat
   if (!Object.values(AUTHORITY_REASONS).includes(reason)) throw new OtpError(400, 'CHAT_AUTHORITY_REASON_INVALID', 'Choose a supported authority reason.');
   const next = normalizeAuthorityReasons(reasons);
   const current = next[reason] || { active: true };
-  const orderIds = new Set(current.orderIds || []);
-  if (clean(orderId)) orderIds.add(clean(orderId));
-  next[reason] = { ...current, active: true, grantedAt: current.grantedAt || grantedAt, ...(orderIds.size ? { orderIds: [...orderIds].sort() } : {}), ...(accessEndsAt ? { accessEndsAt } : {}) };
+  const normalizedOrderId = clean(orderId);
+  const orderIds = (current.orderIds || []).filter((id) => id !== normalizedOrderId);
+  if (normalizedOrderId) orderIds.push(normalizedOrderId);
+  const boundedOrderIds = orderIds.slice(-MAX_AUTHORITY_REASON_ORDER_IDS);
+  next[reason] = { ...current, active: true, grantedAt: current.grantedAt || grantedAt, ...(boundedOrderIds.length ? { orderIds: boundedOrderIds } : {}), ...(accessEndsAt ? { accessEndsAt } : {}) };
   return next;
 }
 
@@ -110,7 +125,7 @@ function requesterDistributorAssignmentIsCurrent({ order, requesterUid, distribu
   const version = orderAssignmentVersion(order);
   return Boolean(order && Number.isSafeInteger(assignmentVersion) && version === assignmentVersion &&
     orderRequesterUid(order) === clean(requesterUid) &&
-    clean(order.assignedDistributorUid) === clean(distributorUid) &&
+    clean(order.assignedDistributorUid || order.distributor_id) === clean(distributorUid) &&
     owningBranchId(order) === clean(distributorBranchId));
 }
 
@@ -257,6 +272,7 @@ function buildConversationFoundation({ type, authority, createdBy, authorityReas
 module.exports = {
   AUTHORITY_REASONS,
   CONVERSATION_STATUS,
+  MAX_AUTHORITY_REASON_ORDER_IDS,
   addAuthorityReason,
   authorityKeyHash,
   buildConversationFoundation,

@@ -99,6 +99,11 @@ service cloud.firestore {
     match /chatReports/{document=**} { allow read, write: if false; }
     match /chatModerationActions/{document=**} { allow read, write: if false; }
     match /chatRestrictions/{document=**} { allow read, write: if false; }
+    // Render Node exclusively owns conversation uniqueness, idempotency, and
+    // persistent message-rate state.
+    match /chatAuthorityRegistry/{document=**} { allow read, write: if false; }
+    match /chatMutationIds/{document=**} { allow read, write: if false; }
+    match /chatRateLimits/{document=**} { allow read, write: if false; }
     // Manager operational events are written by Render Node. Source Managers
     // may read only their branch's transfer outcomes.
     match /managerOperationalEvents/{eventId} {
@@ -160,8 +165,10 @@ service cloud.firestore {
       allow get, list: if canReadConversation(resource.data);
       allow create, update, delete: if false;
 
-      // Message reads and every client write remain closed until the Phase 2
-      // message contract is implemented and separately reviewed.
+      // Phase 2 history is served through the bounded Render endpoint, which
+      // can revalidate relationship epochs and lifecycle state. Direct reads
+      // remain closed until an equally strict Phase 3 realtime rule exists.
+      // Every message write is always server-only.
       match /messages/{messageId} {
         allow read, write: if false;
       }

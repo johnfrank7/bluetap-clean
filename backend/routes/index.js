@@ -24,6 +24,7 @@ const { createAdminDashboardOverviewHandler } = require('../admin/dashboardOverv
 const { createAdminProductsHandler } = require('../admin/productManagementHandler');
 const { createAdminDispatchOverrideHandler } = require('../admin/adminDispatchOverrideHandler');
 const { createRequesterCatalogHandler, createRequesterOrdersHandler } = require('../requester/orderingHandler');
+const { createChatConversationsHandler, createChatMessagesHandler, createChatReadStateHandler } = require('../chat/chatHandler');
 
 const routes = new Map([
   ['/api/auth/check-username', createUsernameHandler('check')],
@@ -62,6 +63,9 @@ const routes = new Map([
   ['/api/auth/complete-required-password-change', createRequiredPasswordChangeHandler()],
   ['/api/auth/password-recovery', createPasswordRecoveryHandler()],
   ['/api/auth/session-policy', createSessionPolicyHandler()],
+  ['/api/chat/conversations', createChatConversationsHandler()],
+  ['/api/chat/messages', createChatMessagesHandler()],
+  ['/api/chat/read-state', createChatReadStateHandler()],
 ]);
 
 module.exports = { routes };

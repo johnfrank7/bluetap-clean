@@ -23,9 +23,18 @@ test('all authoritative chat, message, report, moderation, and restriction clien
   for (const collection of ['chatReports', 'chatModerationActions', 'chatRestrictions']) {
     assert.match(rules, new RegExp(`match \/${collection}\/\\{document=\\*\\*\\} \\{ allow read, write: if false; \\}`));
   }
+  for (const collection of ['chatAuthorityRegistry', 'chatMutationIds', 'chatRateLimits']) {
+    assert.match(rules, new RegExp(`match \/${collection}\/\\{document=\\*\\*\\} \\{ allow read, write: if false; \\}`));
+  }
 });
 
-test('Firebase config references only the two approved Phase 1 conversation indexes', () => {
+test('direct message reads stay closed until Phase 3 can enforce current lifecycle authority', () => {
+  const messageBlock = rules.slice(rules.indexOf('match /messages/{messageId}'), rules.indexOf('match /requests/{requestId}'));
+  assert.match(messageBlock, /allow read, write:\s*if false;/);
+  assert.match(rules, /Phase 2 history is served through the bounded Render endpoint/);
+});
+
+test('Firebase config keeps the two approved conversation summary indexes', () => {
   assert.equal(firebase.firestore.rules, 'firestore.rules');
   assert.equal(firebase.firestore.indexes, 'firestore.indexes.json');
   assert.equal(indexes.indexes.length, 2);

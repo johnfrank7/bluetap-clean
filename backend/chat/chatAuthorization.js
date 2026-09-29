@@ -1,6 +1,6 @@
 const { OtpError } = require('../utils/otpError');
 const { requireActiveAccount } = require('../auth/accountStatus');
-const { getAssignmentVersion, getBranchMembershipVersion } = require('../utils/relationshipEpochs');
+const { assignedDistributorUid, getAssignmentVersion, getBranchMembershipVersion } = require('../utils/relationshipEpochs');
 
 const CONVERSATION_TYPES = Object.freeze({
   REQUESTER_BRANCH: 'requester_branch',
@@ -93,7 +93,7 @@ function authorizeRequesterDistributor({ requester, distributor, branch, order, 
   const expectedVersion = orderAssignmentVersion(order);
 
   if (!requesterUid || orderRequesterUid(order) !== requesterUid) denied('CHAT_ORDER_OWNER_MISMATCH', 'The Requester does not own this order.');
-  if (!distributorUid || clean(order?.assignedDistributorUid) !== distributorUid) denied('CHAT_ASSIGNMENT_MISMATCH', 'The Distributor is not assigned to this order.');
+  if (!distributorUid || assignedDistributorUid(order) !== distributorUid) denied('CHAT_ASSIGNMENT_MISMATCH', 'The Distributor is not assigned to this order.');
   if (owningBranchId(order) !== branchId || clean(distributor.branchId) !== branchId) denied('CHAT_BRANCH_MISMATCH', 'The Distributor is outside the authoritative fulfillment branch.');
   if (!Number.isSafeInteger(assignmentVersion) || assignmentVersion !== expectedVersion) denied('CHAT_ASSIGNMENT_VERSION_STALE', 'The Distributor assignment epoch is stale.');
   if (TERMINAL_ORDER_STATUSES.has(normalizedStatus(order?.status))) denied('CHAT_ASSIGNMENT_NOT_WRITABLE', 'This assignment no longer grants send authority.');

@@ -62,6 +62,16 @@ test('independent Requester-Branch authority reasons survive selective removal',
   assert.equal(resolveConversationLifecycle({ type: 'requester_branch', authorityReasons: reasons, accounts: [{ accountStatus: 'active' }], branches: [{ id: 'branch-a', status: 'active' }] }), 'active');
 });
 
+test('Requester-Branch order authority metadata stays bounded', () => {
+  let reasons = {};
+  for (let index = 1; index <= 25; index += 1) {
+    reasons = addAuthorityReason(reasons, AUTHORITY_REASONS.ACTIVE_ORDER, { orderId: `order-${index}` });
+  }
+  assert.equal(reasons.active_order.orderIds.length, 20);
+  assert.deepEqual(reasons.active_order.orderIds.slice(0, 2), ['order-6', 'order-7']);
+  assert.equal(reasons.active_order.orderIds.at(-1), 'order-25');
+});
+
 test('lifecycle closes only after retention and otherwise becomes read-only when authority ends', () => {
   const activeOrder = { id: 'order-a', requester_id: 'requester-a', currentBranchId: 'branch-a', assignedDistributorUid: 'distributor-a', assignmentVersion: 2, status: 'accepted' };
   const base = { type: 'requester_distributor', order: activeOrder, requesterUid: 'requester-a', distributorUid: 'distributor-a', distributorBranchId: 'branch-a', assignmentVersion: 2, accounts: [{ accountStatus: 'active' }, { accountStatus: 'active' }], branches: [{ id: 'branch-a', status: 'active' }] };
