@@ -2,6 +2,7 @@ import React from 'react';
 import {
   ActivityIndicator,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -46,6 +47,36 @@ const empty = {
 
 const money = (value) => `₱${Number(value || 0).toFixed(2)}`;
 const PAGE_SIZE = 9;
+
+function ProductToolbarWebStyles({ colors }) {
+  if (Platform.OS !== 'web') return null;
+
+  const primary = colors.primaryAction;
+  const primaryStrong = colors.primaryDeep || colors.primaryAction;
+
+  return React.createElement('style', {
+    dangerouslySetInnerHTML: {
+      __html: `
+        button#admin-products-add-action,
+        button[data-admin-products-filter-selected="true"] {
+          background-color: ${primary};
+          border-color: ${primary};
+        }
+        button#admin-products-add-action:hover,
+        button#admin-products-add-action:active,
+        button[data-admin-products-filter-selected="true"]:hover,
+        button[data-admin-products-filter-selected="true"]:active {
+          background-color: ${primaryStrong};
+          border-color: ${primaryStrong};
+        }
+        button[data-admin-products-filter-selected="false"]:hover {
+          background-color: ${colors.primarySoft};
+          border-color: ${colors.primary};
+        }
+      `,
+    },
+  });
+}
 
 function ProductPolicyFields({ form, setForm, toggleDay, styles }) {
   return (
@@ -316,6 +347,7 @@ export default function AdminProductsPage() {
         type={toast.type}
         onDismiss={() => setToast((t) => ({ ...t, visible: false }))}
       />
+      <ProductToolbarWebStyles colors={colors} />
 
       {/* SUMMARY METRICS ROW */}
       <View style={styles.metricsRow}>
@@ -354,6 +386,10 @@ export default function AdminProductsPage() {
             ].map((item) => (
               <Pressable
                 key={item.id}
+                dataSet={{
+                  adminProductsFilterSelected:
+                    statusFilter === item.id ? 'true' : 'false',
+                }}
                 accessibilityRole="button"
                 accessibilityLabel={`Filter ${item.label} products`}
                 accessibilityState={{ selected: statusFilter === item.id }}
@@ -382,6 +418,7 @@ export default function AdminProductsPage() {
           </View>
 
           <Pressable
+            nativeID="admin-products-add-action"
             accessibilityRole="button"
             accessibilityLabel="Add product"
             onPress={() => open()}
