@@ -2,14 +2,11 @@ const { getFirebaseAdmin } = require('../firebase/firebaseAdmin');
 const { requireAdmin } = require('../auth/authorization');
 const { applyCors } = require('../utils/cors');
 const { OtpError } = require('../utils/otpError');
+const { activeBranchInTransaction, approveDistributorInTransaction, statusOf } = require('../utils/distributorApproval');
 const { branchMembershipVersionForTransition } = require('../utils/relationshipEpochs');
 const { reconcileDistributorMembershipInTransaction } = require('../chat/conversationLifecycleService');
 
 const clean = (value, max = 240) => String(value || '').trim().slice(0, max);
-const statusOf = (data = {}) => {
-  const status = String(data.distributorStatus || data.approvalStatus || data.status || 'pending').trim().toLowerCase();
-  return status === 'approved' ? 'active' : status;
-};
 const branchName = (data = {}, branchNames = new Map()) => branchNames.get(clean(data.branchId, 80)) || clean(data.branchNameSnapshot);
 const requestedBranchName = (data = {}, branchNames = new Map()) => branchNames.get(clean(data.requestedBranchId, 80)) || clean(data.requestedBranchNameSnapshot);
 const safeDistributor = (uid, data = {}, branchNames = new Map()) => ({
@@ -36,14 +33,6 @@ const safeDistributor = (uid, data = {}, branchNames = new Map()) => ({
   emailVerified: data.emailVerified === true,
 });
 function bodyOf(req) { if (req.body && typeof req.body === 'object') return req.body; try { return JSON.parse(String(req.body || '{}')); } catch { throw new OtpError(400, 'INVALID_REQUEST', 'The request body is invalid.'); } }
-async function activeBranchInTransaction(tx, db, branchId) {
-  const id = clean(branchId, 80);
-  const snapshot = id ? await tx.get(db.collection('branches').doc(id)) : null;
-  if (!snapshot?.exists) throw new OtpError(404, 'BRANCH_NOT_FOUND', 'Choose an active BlueTap branch before approving this Distributor.');
-  if (snapshot.data()?.status !== 'active') throw new OtpError(409, 'BRANCH_INACTIVE', 'The selected branch is inactive.');
-  return { id, ...snapshot.data() };
-}
-
 function createAdminDistributorsHandler(getAdmin = getFirebaseAdmin) {
   return async (req, res) => {
     res.setHeader('Cache-Control', 'no-store'); if (!applyCors(req, res)) return; if (req.method === 'OPTIONS') return res.status(204).end();
@@ -60,19 +49,22 @@ function createAdminDistributorsHandler(getAdmin = getFirebaseAdmin) {
       if (!expected[action]) throw new OtpError(400, 'INVALID_ACTION', 'Choose a valid distributor action.');
       let distributor;
       await db.runTransaction(async (tx) => {
+        if (action === 'approve') {
+          const result = await approveDistributorInTransaction({ actorRole: 'admin', actorUid: admin.uid, branchId, db, targetRef, tx });
+          distributor = safeDistributor(targetRef.id, { ...result.data, ...result.changes }, new Map([[result.branch.id, clean(result.branch.name)]]));
+          return;
+        }
         const snapshot = await tx.get(targetRef); if (!snapshot.exists) throw new OtpError(404, 'DISTRIBUTOR_NOT_FOUND', 'Distributor account not found.');
         const data = snapshot.data(); const previousStatus = statusOf(data);
         if (data.role !== 'distributor' || !expected[action].includes(previousStatus)) throw new OtpError(409, 'INVALID_STATUS_TRANSITION', 'This distributor status cannot be changed.');
         const now = new Date(); const nextStatus = action === 'approve' || action === 'reactivate' ? 'active' : action === 'deactivate' ? 'inactive' : 'rejected';
         let branch = null;
-        if (action === 'approve') branch = await activeBranchInTransaction(tx, db, branchId || data.requestedBranchId);
         if (action === 'reactivate') branch = await activeBranchInTransaction(tx, db, data.branchId);
         const changes = {
           distributorStatus: nextStatus,
           approvalStatus: nextStatus,
           status: nextStatus[0].toUpperCase() + nextStatus.slice(1),
           updatedAt: now,
-          ...(action === 'approve' ? { branchId: branch.id, branchNameSnapshot: clean(branch.name), approvedAt: now, approvedBy: admin.uid } : {}),
           ...(action === 'reject' ? { branchId: null, branchNameSnapshot: null, rejectedAt: now, rejectedBy: admin.uid, rejectionReason: clean(rejectionReason, 240) } : {}),
         };
         const membershipEpoch = branchMembershipVersionForTransition(data, { ...data, ...changes });

@@ -169,6 +169,9 @@ export function toDistributorScreenOrder(order = {}) {
 }
 
 const distributorOrderEntries = new Map();
+const distributorOrdersError = (error) => error?.code === 'permission-denied'
+  ? 'Your delivery access could not be verified. Please try again.'
+  : error?.message || 'Assigned deliveries are temporarily unavailable.';
 
 const getOrderId = (order = {}) => String(order.id || order.requestId || order.request_id || '').trim();
 const orderSignature = (orders) => orders.map((order) => [
@@ -222,7 +225,7 @@ const hydrateDistributorOrders = (uid, entry) => {
     })
     .catch((error) => {
       entry.loaded = true;
-      entry.error = error.message || 'Assigned deliveries are temporarily unavailable.';
+      entry.error = distributorOrdersError(error);
       emitDistributorOrders(entry, true);
     })
     .finally(() => {
@@ -258,7 +261,7 @@ const listenForDistributorOrders = (uid, branchId, entry) => {
     },
     (error) => {
       entry.loaded = true;
-      entry.error = error.message || 'Assigned deliveries are temporarily unavailable.';
+      entry.error = distributorOrdersError(error);
       emitDistributorOrders(entry, true);
     }
   );
@@ -270,11 +273,25 @@ const startDistributorOrders = (uid, entry) => {
     entry.stopTimer = null;
   }
   if (!entry.profileUnsubscribe) {
-    entry.profileUnsubscribe = subscribeDistributorProfile(uid, ({ profile }) => {
-      listenForDistributorOrders(uid, profile?.branchId || profile?.assignedBranchId, entry);
+    entry.profileUnsubscribe = subscribeDistributorProfile(uid, ({ profile, loading, error }) => {
+      if (loading) return;
+      if (error) {
+        entry.loaded = true;
+        entry.error = 'Your Distributor profile could not be verified. Please try again.';
+        emitDistributorOrders(entry, true);
+        return;
+      }
+      const branchId = String(profile?.branchId || '').trim();
+      if (!branchId) {
+        entry.loaded = true;
+        entry.error = profile ? 'Your Distributor account is not assigned to an active branch.' : '';
+        emitDistributorOrders(entry, true);
+        return;
+      }
+      listenForDistributorOrders(uid, branchId, entry);
+      hydrateDistributorOrders(uid, entry);
     });
   }
-  hydrateDistributorOrders(uid, entry);
 };
 
 const stopDistributorOrders = (uid, entry) => {
@@ -338,11 +355,7 @@ export function useAssignedDistributorOrders() {
   }, []);
 
   React.useEffect(() => {
-    let unsubscribeOrders = subscribeAssignedDistributorOrders(auth.currentUser?.uid, (state) => {
-      setOrders(state.orders);
-      setLoading(state.loading);
-      setError(state.error);
-    });
+    let unsubscribeOrders = null;
     const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
       unsubscribeOrders?.();
       unsubscribeOrders = subscribeAssignedDistributorOrders(user?.uid, (state) => {

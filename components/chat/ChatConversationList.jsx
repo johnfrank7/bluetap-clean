@@ -14,7 +14,7 @@ const formatTimestamp = (value) => {
 };
 
 export default function ChatConversationList() {
-  const { colors, conversations, error, loading, openConversation, resolveAndOpen, retrySummaries, role, threadError } = useChat();
+  const { colors, conversations, error, loading, openConversation, resolveAndOpen, resolveError, resolvingConversation, retrySummaries, role } = useChat();
   const [search, setSearch] = React.useState('');
   const needle = search.trim().toLowerCase();
   const filtered = conversations.filter((conversation) => !needle || [
@@ -41,12 +41,14 @@ export default function ChatConversationList() {
           style={[styles.search, { color: colors.textPrimary }]}
         />
       </View>
-      {!!threadError && <Text accessibilityRole="alert" style={[styles.inlineError, { color: colors.danger, backgroundColor: colors.dangerSoft }]}>{threadError}</Text>}
+      {!!resolveError && <Text accessibilityRole="alert" style={[styles.inlineError, { color: colors.danger, backgroundColor: colors.dangerSoft }]}>{resolveError}</Text>}
+      {resolvingConversation && <View style={styles.resolving}><ActivityIndicator size="small" color={colors.primary} /><Text style={[styles.helper, { color: colors.textSecondary }]}>Opening conversationâ€¦</Text></View>}
       {role === 'distributor' && (
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Message my BlueTap station"
-          onPress={() => resolveAndOpen({ type: 'distributor_branch' })}
+          disabled={resolvingConversation}
+          onPress={() => { resolveAndOpen({ type: 'distributor_branch' }).catch(() => {}); }}
           style={({ pressed }) => [styles.stationAction, { backgroundColor: colors.primarySoft, borderColor: colors.border }, pressed && styles.pressed]}
         >
           <BlueTapChatIcon size={21} color={colors.primary} />
@@ -95,6 +97,7 @@ const styles = StyleSheet.create({
   helper: { fontSize: 12, lineHeight: 18, textAlign: 'center', marginTop: 6 },
   retry: { marginTop: 12, fontWeight: '900' },
   inlineError: { marginHorizontal: 12, marginVertical: 5, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8, fontSize: 11, lineHeight: 16 },
+  resolving: { minHeight: 36, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
   list: { paddingVertical: 5 },
   row: { minHeight: 78, flexDirection: 'row', alignItems: 'center', gap: 11, paddingHorizontal: 13, paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth },
   avatar: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },

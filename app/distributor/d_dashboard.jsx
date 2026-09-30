@@ -6,6 +6,7 @@ import {
   StyleSheet,
   TouchableOpacity,
   ScrollView,
+  useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -178,6 +179,7 @@ class DistributorErrorBoundary extends React.Component {
 
 function DistributorDashboardContent() {
   const { colors } = useBlueTapTheme();
+  const { width } = useWindowDimensions();
   const router = useRouter();
   const liveGreeting = useLiveGreeting();
   const [detailsVisible, setDetailsVisible] = useState(false);
@@ -207,6 +209,8 @@ function DistributorDashboardContent() {
     );
   }, [activeRequest?.distributorUniqueId, activeRequest?.distributor_unique_id, distributorProfile]);
   const dashboardCounts = useMemo(() => getDistributorDashboardCounts(screenOrders), [screenOrders]);
+  const currentRequestCardWidth = Math.min(300, Math.max(1, Math.min(width, USER_PORTAL_LAYOUT.maxWidth) - (USER_PORTAL_LAYOUT.gutter * 2)));
+  const currentRequestSnap = currentRequestCardWidth + 12;
 
   const dashboardSummary = useMemo(() => [
     {
@@ -323,8 +327,8 @@ function DistributorDashboardContent() {
                 <View style={styles.emptyRequestCard}><Text style={styles.emptyRequestTitle}>Unable to load deliveries.</Text><Text style={styles.emptyRequestText}>{error}</Text><TouchableOpacity onPress={refresh} style={styles.viewDetailsButton}><Text style={styles.viewDetailsText}>Try Again</Text></TouchableOpacity></View>
               ) : activeRequest ? (
                 <PortalSwipeIgnore>
-                  <ScrollView horizontal pagingEnabled showsHorizontalScrollIndicator={false} snapToInterval={312} decelerationRate="fast" contentContainerStyle={styles.currentRequestsCarousel} onMomentumScrollEnd={(event) => setActiveRequestIndex(Math.round(event.nativeEvent.contentOffset.x / 312))}>
-                    {activeRequests.map((request, index) => <View key={request.sourceId || request.requestId || index} style={styles.currentRequestSlide}><CurrentRequestCard request={request} distributorProfile={distributorProfile} onDetails={() => { setActiveRequestIndex(index); setDetailsVisible(true); }} onAction={() => { setActiveRequestIndex(index); handleCurrentRequestAction(request); }} /></View>)}
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} snapToInterval={currentRequestSnap} decelerationRate="fast" contentContainerStyle={styles.currentRequestsCarousel} onMomentumScrollEnd={(event) => setActiveRequestIndex(Math.round(event.nativeEvent.contentOffset.x / currentRequestSnap))}>
+                    {activeRequests.map((request, index) => <View key={request.sourceId || request.requestId || index} style={[styles.currentRequestSlide, { width: currentRequestCardWidth }]}><CurrentRequestCard request={request} distributorProfile={distributorProfile} onDetails={() => { setActiveRequestIndex(index); setDetailsVisible(true); }} onAction={() => { setActiveRequestIndex(index); handleCurrentRequestAction(request); }} /></View>)}
                   </ScrollView>
                   {activeRequests.length > 1 && <View style={styles.carouselIndicators}>{activeRequests.map((request, index) => <View key={`${request.sourceId || request.requestId}-${index}`} style={[styles.carouselIndicator, index === activeRequestIndex && styles.carouselIndicatorActive]} />)}</View>}
                 </PortalSwipeIgnore>
@@ -499,7 +503,6 @@ const styles = createPortalStyleSheet({
     paddingRight: 20,
   },
   currentRequestSlide: {
-    width: 300,
     maxWidth: '100%',
   },
   carouselIndicators: {
@@ -580,11 +583,14 @@ const styles = createPortalStyleSheet({
   },
   cardActionsRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 10,
     marginTop: 4,
   },
   viewDetailsButton: {
-    flex: 1,
+    flexGrow: 1,
+    flexBasis: 118,
+    minWidth: 0,
     height: 44,
     backgroundColor: BLUETAP_COLORS.surface,
     borderWidth: 1.5,
@@ -599,7 +605,9 @@ const styles = createPortalStyleSheet({
     fontWeight: '600',
   },
   primaryActionButton: {
-    flex: 1,
+    flexGrow: 1,
+    flexBasis: 118,
+    minWidth: 0,
     height: 44,
     backgroundColor: BLUE,
     borderRadius: 16,

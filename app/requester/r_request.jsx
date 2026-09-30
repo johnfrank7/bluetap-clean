@@ -806,11 +806,14 @@ const styles = createPortalStyleSheet({
   },
   cardActionsRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 10,
     marginTop: 16,
   },
   secondaryActionButton: {
-    flex: 1,
+    flexGrow: 1,
+    flexBasis: 118,
+    minWidth: 0,
     minHeight: 44,
     borderWidth: 1.5,
     borderColor: '#2563EB',
@@ -825,7 +828,9 @@ const styles = createPortalStyleSheet({
     fontWeight: '600',
   },
   editActionButton: {
-    flex: 1,
+    flexGrow: 1,
+    flexBasis: 118,
+    minWidth: 0,
     minHeight: 44,
     borderRadius: 12,
     alignItems: 'center',
@@ -840,7 +845,9 @@ const styles = createPortalStyleSheet({
     fontWeight: '700',
   },
   cancelActionButton: {
-    flex: 1,
+    flexGrow: 1,
+    flexBasis: 118,
+    minWidth: 0,
     minHeight: 44,
     backgroundColor: '#EF4444',
     borderRadius: 16,

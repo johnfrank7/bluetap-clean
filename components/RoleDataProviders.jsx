@@ -20,7 +20,7 @@ export function RequesterDataProvider({ children }) {
         (error) => setState((current) => ({ ...current, loading: false, error: error?.message || 'Orders are temporarily unavailable.' }))
       );
     };
-    let unsubscribeRequests = subscribe(auth.currentUser?.uid);
+    let unsubscribeRequests = null;
     const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
       unsubscribeRequests?.();
       unsubscribeRequests = subscribe(user?.uid);
@@ -42,7 +42,9 @@ export function DistributorDataProvider({ children }) {
     orders: orderState.orders,
     profile: profileState.profile,
     loading: profileState.loading || orderState.loading,
+    profileLoading: profileState.loading,
     error: profileState.error || orderState.error,
+    profileError: profileState.error,
   }), [orderState.error, orderState.loading, orderState.orders, profileState.error, profileState.loading, profileState.profile]);
   return <DistributorDataContext.Provider value={value}>{children}</DistributorDataContext.Provider>;
 }

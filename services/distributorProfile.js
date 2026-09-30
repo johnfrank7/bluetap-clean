@@ -103,11 +103,7 @@ export function useDistributorProfile() {
   const [error, setError] = useState('');
 
   useEffect(() => {
-    let unsubscribeProfile = subscribeDistributorProfile(auth.currentUser?.uid, (state) => {
-      setProfile(state.profile);
-      setLoading(state.loading);
-      setError(state.error);
-    });
+    let unsubscribeProfile = null;
 
     const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
       unsubscribeProfile?.();

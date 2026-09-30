@@ -32,7 +32,7 @@ export default function ChatFloatingLauncher() {
             pressed && styles.pressed,
           ]}
         >
-          <BlueTapChatIcon size={29} />
+          <BlueTapChatIcon size={24} />
           {totalUnread > 0 && <View style={[styles.badge, { backgroundColor: colors.danger, borderColor: colors.surface }]}><Text style={styles.badgeText}>{totalUnreadLabel}</Text></View>}
         </Pressable>
       )}
@@ -42,10 +42,10 @@ export default function ChatFloatingLauncher() {
 }
 
 const styles = StyleSheet.create({
-  launcher: { position: 'absolute', width: 58, height: 58, borderRadius: 29, borderWidth: 2, alignItems: 'center', justifyContent: 'center', zIndex: 90, shadowColor: '#07131F', shadowOpacity: 0.25, shadowRadius: 12, shadowOffset: { width: 0, height: 6 }, elevation: 12 },
-  hovered: { transform: [{ translateY: -2 }] },
+  launcher: { position: 'absolute', width: 54, height: 54, borderRadius: 27, borderWidth: 2, alignItems: 'center', justifyContent: 'center', zIndex: 90, shadowColor: '#07131F', shadowOpacity: 0.22, shadowRadius: 10, shadowOffset: { width: 0, height: 5 }, elevation: 10 },
+  hovered: { opacity: 0.94 },
   focused: { borderWidth: 3 },
-  pressed: { opacity: 0.86, transform: [{ scale: 0.97 }] },
+  pressed: { opacity: 0.82 },
   badge: { position: 'absolute', top: -5, right: -5, minWidth: 23, height: 23, paddingHorizontal: 5, borderRadius: 12, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
   badgeText: { color: '#FFFFFF', fontSize: 10, fontWeight: '950' },
 });

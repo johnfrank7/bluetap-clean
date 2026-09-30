@@ -6,6 +6,8 @@ const { createManagerWorkspaceHandler } = require('../workspaceHandler');
 function fixture() {
   const records = new Map([
     ['users/manager-north', { role: 'manager', managerStatus: 'active', branchId: 'north', fullName: 'North Manager' }],
+    ['users/pending-north', { role: 'distributor', distributorStatus: 'pending', approvalStatus: 'pending', status: 'Pending', requestedBranchId: 'north', fullName: 'North Applicant' }],
+    ['users/pending-south', { role: 'distributor', distributorStatus: 'pending', approvalStatus: 'pending', status: 'Pending', requestedBranchId: 'south', fullName: 'South Applicant' }],
     ['branches/north', { name: 'North', status: 'active' }],
     ['branches/south', { name: 'South', status: 'active' }],
     ['products/refill', { product_name: 'Refill', price: 35, active: true, deliveryDays: ['monday'], maxQuantityPerRequester: 10 }],
@@ -88,4 +90,62 @@ test('Manager workspace analytics and product policy are scoped to the own branc
   assert.deepEqual(result.body.orders.map((order) => order.requestId), ['BT-N']);
   assert.deepEqual(result.body.products[0].effectivePolicy.deliveryDays, ['friday']);
   assert.equal(result.body.products[0].effectivePolicy.maxQuantityPerRequester, 4);
+});
+
+test('Manager approval activates only a pending Distributor requesting the authoritative Manager branch', async () => {
+  const f = fixture();
+  const result = await call(createManagerWorkspaceHandler(f.getAdmin), 'POST', {
+    action: 'approveDistributor',
+    distributorUid: 'pending-north',
+    branchId: 'south',
+  });
+
+  assert.equal(result.statusCode, 200);
+  assert.equal(result.body.idempotent, false);
+  const profile = f.records.get('users/pending-north');
+  assert.equal(profile.distributorStatus, 'active');
+  assert.equal(profile.branchId, 'north');
+  assert.equal(profile.requestedBranchId, 'north');
+  assert.equal(profile.branchMembershipVersion, 2);
+  assert.equal(profile.approvedBy, 'manager-north');
+  assert.ok([...f.records.values()].some((record) => record.action === 'MANAGER_DISTRIBUTOR_APPROVED' && record.branchId === 'north'));
+});
+
+test('Manager Distributor approval safely returns the existing own-branch approval on retry', async () => {
+  const f = fixture();
+  const handler = createManagerWorkspaceHandler(f.getAdmin);
+  const body = { action: 'approveDistributor', distributorUid: 'pending-north' };
+  assert.equal((await call(handler, 'POST', body)).statusCode, 200);
+  const retried = await call(handler, 'POST', body);
+
+  assert.equal(retried.statusCode, 200);
+  assert.equal(retried.body.idempotent, true);
+  assert.equal(f.records.get('users/pending-north').branchMembershipVersion, 2);
+  assert.equal([...f.records.values()].filter((record) => record.action === 'MANAGER_DISTRIBUTOR_APPROVED').length, 1);
+});
+
+test('Manager Distributor approval rejects another branch and inactive Manager or branch authority', async () => {
+  const f = fixture();
+  const handler = createManagerWorkspaceHandler(f.getAdmin);
+  const outsideBranch = await call(handler, 'POST', { action: 'approveDistributor', distributorUid: 'pending-south' });
+  assert.equal(outsideBranch.statusCode, 403);
+  assert.equal(outsideBranch.body.error.reason, 'BRANCH_ACCESS_DENIED');
+  assert.equal(f.records.get('users/pending-south').distributorStatus, 'pending');
+
+  f.records.set('users/manager-north', { ...f.records.get('users/manager-north'), accountStatus: 'inactive' });
+  const inactiveAccount = await call(handler, 'POST', { action: 'approveDistributor', distributorUid: 'pending-north' });
+  assert.equal(inactiveAccount.statusCode, 403);
+  assert.equal(inactiveAccount.body.error.reason, 'MANAGER_INACTIVE');
+
+  f.records.set('users/manager-north', { ...f.records.get('users/manager-north'), accountStatus: 'active' });
+  f.records.set('users/manager-north', { ...f.records.get('users/manager-north'), managerStatus: 'inactive' });
+  const inactiveManager = await call(handler, 'POST', { action: 'approveDistributor', distributorUid: 'pending-north' });
+  assert.equal(inactiveManager.statusCode, 403);
+  assert.equal(inactiveManager.body.error.reason, 'MANAGER_INACTIVE');
+
+  f.records.set('users/manager-north', { ...f.records.get('users/manager-north'), managerStatus: 'active' });
+  f.records.set('branches/north', { ...f.records.get('branches/north'), status: 'inactive' });
+  const inactiveBranch = await call(handler, 'POST', { action: 'approveDistributor', distributorUid: 'pending-north' });
+  assert.equal(inactiveBranch.statusCode, 403);
+  assert.equal(inactiveBranch.body.error.reason, 'BRANCH_INACTIVE');
 });

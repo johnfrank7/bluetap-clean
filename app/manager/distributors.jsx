@@ -20,6 +20,7 @@ import TopToastFeedback from '../../components/TopToastFeedback';
 import ManagerShell, { MANAGER_COLORS, ManagerPill } from '../../components/ManagerShell';
 import { useManagerRealtimeData } from '../../components/ManagerRealtimeData';
 import { parseTimestamp } from '../../services/notificationTimestamp';
+import { approveManagerDistributor } from '../../services/managerWorkspace';
 const { getManagerQueues, toManagerOrder } = require('../../services/managerOperational');
 const { effectiveDeliveryDays, isAllowedDeliveryDate, manilaScheduleDate } = require('../../services/productOrderPolicy');
 
@@ -463,10 +464,25 @@ export default function ManagerDistributorsPage() {
   const [loadError, setLoadError] = useState('');
   const [search, setSearch] = useState('');
   const [applicationsVisible, setApplicationsVisible] = useState(false);
+  const [approvingUid, setApprovingUid] = useState('');
   const [toast, setToast] = useState({ visible: false, message: '', type: 'info' });
 
   const showToast = (message, type = 'info') => {
     setToast({ visible: true, message, type });
+  };
+
+  const approveApplication = async (applicant) => {
+    const uid = applicant?.uid || applicant?.id;
+    if (!uid || approvingUid) return;
+    setApprovingUid(uid);
+    try {
+      const result = await approveManagerDistributor(uid);
+      showToast(result?.idempotent ? 'Distributor was already approved for your branch.' : 'Distributor approved for your branch.', 'success');
+    } catch (error) {
+      showToast(error.message || 'Unable to approve this Distributor application.', 'error');
+    } finally {
+      setApprovingUid('');
+    }
   };
 
   useEffect(() => {
@@ -536,7 +552,7 @@ export default function ManagerDistributorsPage() {
         </View>
 
         {applicationsVisible && <View style={styles.applicationsPanel}>
-          <Text style={styles.approvalHelper}>Branch applications are view only. Admin reviews and approves distributor accounts.</Text>
+          <Text style={styles.approvalHelper}>Approve only verified Distributor applications requesting your assigned branch.</Text>
           {pendingApplications.length === 0 ? (
             <BlueTapEmptyState
               compact
@@ -549,10 +565,23 @@ export default function ManagerDistributorsPage() {
             />
           ) : pendingApplications.map((applicant) =>
             <View key={applicant.uid || applicant.id} style={styles.applicationRow}>
+              <View style={styles.applicationDetails}>
               <Text style={styles.distributorName}>{getFullName(applicant)}</Text>
               <Text style={styles.distributorSub}>{getProfileUniqueId(applicant) || applicant.email || 'ID pending'}</Text>
               <Text style={styles.distributorSub}>{applicant.email || applicant.phone || 'Contact not set'} · {getBarangay(applicant)}</Text>
-              <Text style={styles.distributorSub}>Applied {getJoinedLabel(applicant)} · Awaiting Admin Approval</Text>
+              <Text style={styles.distributorSub}>Applied {getJoinedLabel(applicant)} · Pending branch review</Text>
+              </View>
+              <TouchableOpacity
+                accessibilityRole="button"
+                accessibilityLabel={`Approve ${getFullName(applicant)}`}
+                disabled={Boolean(approvingUid)}
+                onPress={() => approveApplication(applicant)}
+                style={[styles.approveApplicationButton, Boolean(approvingUid) && styles.actionDisabled]}
+              >
+                {approvingUid === (applicant.uid || applicant.id)
+                  ? <ActivityIndicator size="small" color={colors.onPrimary || '#FFFFFF'} />
+                  : <Text style={styles.approveApplicationText}>Approve</Text>}
+              </TouchableOpacity>
             </View>
           )}
         </View>}
@@ -646,7 +675,10 @@ const createStyles = (colors, width = 1200) =>
     applicationsButton: { minHeight: 38, paddingHorizontal: 12, borderRadius: 9, borderWidth: 1, borderColor: colors.primary, backgroundColor: colors.primarySoft, justifyContent: 'center' },
     applicationsButtonText: { color: colors.primary, fontSize: 12, fontWeight: '800' },
     applicationsPanel: { borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceAlt, borderRadius: 12, padding: 12, marginBottom: 12, gap: 8 },
-    applicationRow: { paddingVertical: 7, borderTopWidth: 1, borderTopColor: colors.border },
+    applicationRow: { paddingVertical: 9, borderTopWidth: 1, borderTopColor: colors.border, flexDirection: 'row', alignItems: 'center', gap: 12 },
+    applicationDetails: { flex: 1, minWidth: 0 },
+    approveApplicationButton: { minHeight: 38, minWidth: 92, paddingHorizontal: 14, borderRadius: 9, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
+    approveApplicationText: { color: colors.onPrimary || '#FFFFFF', fontSize: 12, fontWeight: '900' },
     cardHeaderRow: {
       flexDirection: 'row',
       alignItems: 'flex-start',

@@ -6,6 +6,7 @@ const test = require('node:test');
 const root = path.resolve(__dirname, '..', '..', '..');
 const read = (file) => fs.readFileSync(path.join(root, file), 'utf8');
 const model = require('../../../components/chat/chatModel');
+const { chatAccessReadiness } = require('../../../components/chat/chatAccessReadiness');
 
 test('user and Manager branch unread totals use logical principal state', () => {
   const conversations = [{ participantState: [
@@ -51,7 +52,54 @@ test('one visible open thread listener is bounded to forty and cleaned up on cha
   assert.match(realtime, /CHAT_REALTIME_MESSAGE_LIMIT = 40/);
   assert.match(realtime, /orderBy\('seq', 'desc'\)[\s\S]*limit\(CHAT_REALTIME_MESSAGE_LIMIT\)/);
   assert.match(provider, /threadUnsubscribeRef\.current\?\.\(\)/);
-  assert.match(provider, /if \(!panelOpen \|\| !currentConversation\?\.id\) return undefined/);
+  assert.match(provider, /if \(!panelOpen \|\| !currentConversation\?\.id \|\| accessReadiness !== 'ready'\) return undefined/);
+  assert.match(provider, /threadVersion/);
+});
+
+test('chat listeners distinguish identity hydration from verified access denial', () => {
+  assert.equal(chatAccessReadiness({ authReady: false, role: 'requester', uid: '' }), 'pending');
+  assert.equal(chatAccessReadiness({ authReady: true, role: 'requester', uid: 'requester-a' }), 'ready');
+  assert.equal(chatAccessReadiness({ authReady: true, role: 'distributor', uid: 'distributor-a', roleData: { profileLoading: true } }), 'pending');
+  assert.equal(chatAccessReadiness({
+    authReady: true,
+    role: 'distributor',
+    uid: 'distributor-a',
+    roleData: { profileLoading: false, profile: { uid: 'distributor-a', role: 'distributor', distributorStatus: 'active', branchId: 'branch-a' } },
+  }), 'ready');
+  assert.equal(chatAccessReadiness({
+    authReady: true,
+    role: 'distributor',
+    uid: 'distributor-a',
+    roleData: { profileLoading: false, profile: { uid: 'distributor-a', role: 'distributor', accountStatus: 'suspended', distributorStatus: 'active', branchId: 'branch-a' } },
+  }), 'denied');
+  assert.equal(chatAccessReadiness({
+    authReady: true,
+    branchId: 'branch-a',
+    role: 'manager',
+    uid: 'manager-a',
+    roleData: { profileLoading: true, branchLoading: true },
+  }), 'pending');
+  assert.equal(chatAccessReadiness({
+    authReady: true,
+    branchId: 'branch-a',
+    role: 'manager',
+    uid: 'manager-a',
+    roleData: {
+      profileLoading: false,
+      branchLoading: false,
+      profile: { uid: 'manager-a', role: 'manager', managerStatus: 'active', branchId: 'branch-a' },
+      branch: { id: 'branch-a', status: 'active' },
+    },
+  }), 'ready');
+});
+
+test('conversation resolution clears stale thread state and localizes resolve errors', () => {
+  const provider = read('components/chat/ChatDataProvider.jsx');
+  const list = read('components/chat/ChatConversationList.jsx');
+  assert.match(provider, /setSelectedSeed\(null\)[\s\S]*resolveConversation\(intent\)/);
+  assert.match(provider, /setResolveError\(resolveError\.message/);
+  assert.doesNotMatch(provider, /catch \(resolveError\) \{[\s\S]{0,160}setThreadError/);
+  assert.match(list, /resolveError/);
 });
 
 test('read state advances only after a visible thread presents incoming messages', () => {

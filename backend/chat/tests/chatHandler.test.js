@@ -184,6 +184,24 @@ test('Requester conversation intents derive participants and reject client-owned
   assert.equal((await call(f.messages, 'POST', 'requester-a-token', { conversationId: inquiry.body.conversation.id, clientMutationId: 'general-inquiry', body: 'General question' })).statusCode, 201);
 });
 
+test('an active-order Follow Up remains an active requester-branch conversation and accepts messages', async () => {
+  const f = fixture();
+  const followup = await resolve(f, 'requester-a-token', { type: 'requester_branch', intent: 'order_followup', orderId: 'order-a' });
+  assert.equal(followup.statusCode, 201);
+  assert.equal(followup.body.conversation.type, 'requester_branch');
+  assert.equal(followup.body.conversation.status, 'active');
+  assert.deepEqual(followup.body.conversation.authorityReasons.active_order.orderIds, ['order-a']);
+
+  const sent = await call(f.messages, 'POST', 'requester-a-token', {
+    conversationId: followup.body.conversation.id,
+    clientMutationId: 'active-followup-send',
+    body: 'Please check my active request.',
+    orderId: 'order-a',
+  });
+  assert.equal(sent.statusCode, 201);
+  assert.equal(sent.body.message.body, 'Please check my active request.');
+});
+
 test('a delivered assignment can resolve on demand only during its trusted follow-up window', async () => {
   const f = fixture();
   const accessEndsAt = new Date('2026-01-08T00:00:00Z');

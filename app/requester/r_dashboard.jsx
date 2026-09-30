@@ -1141,11 +1141,14 @@ const styles = createPortalStyleSheet({
   },
   cardActionsRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 10,
     marginTop: 16,
   },
   viewDetailsButton: {
-    flex: 1,
+    flexGrow: 1,
+    flexBasis: 118,
+    minWidth: 0,
     minHeight: 42,
     backgroundColor: '#FFFFFF',
     borderWidth: 1.5,
@@ -1162,7 +1165,9 @@ const styles = createPortalStyleSheet({
     textAlign: 'center',
   },
   cancelRequestButton: {
-    flex: 1,
+    flexGrow: 1,
+    flexBasis: 118,
+    minWidth: 0,
     minHeight: 42,
     backgroundColor: '#EF4444',
     borderRadius: 16,

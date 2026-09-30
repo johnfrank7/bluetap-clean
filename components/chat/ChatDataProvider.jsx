@@ -3,7 +3,6 @@ import { onAuthStateChanged } from 'firebase/auth';
 import { StyleSheet, View } from 'react-native';
 
 import { auth } from '../../firebase';
-import { getModuleSession } from '../../services/authSession';
 import { loadMessageHistory, markRead, resolveConversation, sendMessage } from '../../services/chatApi';
 import { subscribeConversationSummaries, subscribeOpenConversationMessages } from '../../services/chatRealtime';
 import { useAdminTheme } from '../AdminTheme';
@@ -14,6 +13,7 @@ import { ChatContext } from './ChatContext';
 import ChatFloatingLauncher from './ChatFloatingLauncher';
 
 const chatModel = require('./chatModel');
+const { chatAccessReadiness } = require('./chatAccessReadiness');
 const { createClientMutationId, formatBadge, isOwnMessage, mergeMessages, principalStateFor, receiptFor, totalUnread, unreadForConversation } = chatModel;
 
 const clean = (value) => String(value || '').trim();
@@ -69,9 +69,9 @@ export default function ChatDataProvider({ children, role }) {
   const managerData = useManagerRealtimeData();
   const roleData = role === 'requester' ? requesterData : role === 'distributor' ? distributorData : managerData;
   const colors = role === 'manager' ? managerTheme.colors : portalTheme.colors;
-  const [uid, setUid] = React.useState(() => auth.currentUser?.uid || '');
-  const managerSession = role === 'manager' ? getModuleSession('manager') : null;
-  const branchId = role === 'manager' ? clean(managerData.branchId || managerSession?.branchId) : '';
+  const [uid, setUid] = React.useState('');
+  const [authReady, setAuthReady] = React.useState(false);
+  const branchId = role === 'manager' ? clean(managerData.branchId) : '';
   const [summaries, setSummaries] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState('');
@@ -84,18 +84,32 @@ export default function ChatDataProvider({ children, role }) {
   const [hasEarlierMessages, setHasEarlierMessages] = React.useState(false);
   const [loadingEarlier, setLoadingEarlier] = React.useState(false);
   const [threadError, setThreadError] = React.useState('');
+  const [resolvingConversation, setResolvingConversation] = React.useState(false);
+  const [resolveError, setResolveError] = React.useState('');
+  const [threadVersion, setThreadVersion] = React.useState(0);
   const summaryUnsubscribeRef = React.useRef(null);
   const threadUnsubscribeRef = React.useRef(null);
   const readCursorRef = React.useRef(new Map());
 
-  React.useEffect(() => onAuthStateChanged(auth, (user) => setUid(user?.uid || '')), []);
+  React.useEffect(() => onAuthStateChanged(auth, (user) => {
+    setUid(user?.uid || '');
+    setAuthReady(true);
+  }), []);
+
+  const accessReadiness = chatAccessReadiness({ authReady, branchId, role, roleData, uid });
 
   React.useEffect(() => {
     summaryUnsubscribeRef.current?.();
     summaryUnsubscribeRef.current = null;
-    if (!uid || role === 'admin' || (role === 'manager' && !branchId)) {
+    if (accessReadiness === 'pending') {
+      setLoading(true);
+      setError('');
+      return undefined;
+    }
+    if (accessReadiness !== 'ready') {
       setSummaries([]);
       setLoading(false);
+      setError(uid && role !== 'admin' ? 'Your message access could not be verified.' : '');
       return undefined;
     }
     setLoading(true);
@@ -116,7 +130,7 @@ export default function ChatDataProvider({ children, role }) {
       if (summaryUnsubscribeRef.current === unsubscribe) summaryUnsubscribeRef.current = null;
       unsubscribe?.();
     };
-  }, [branchId, retryVersion, role, uid]);
+  }, [accessReadiness, branchId, retryVersion, role, uid]);
 
   const conversations = React.useMemo(() => summaries.map((conversation) => {
     const presented = presentationFor(conversation, role, roleData);
@@ -137,7 +151,7 @@ export default function ChatDataProvider({ children, role }) {
     setOlderMessages([]);
     setLocalMessages([]);
     setThreadError('');
-    if (!panelOpen || !currentConversation?.id) return undefined;
+    if (!panelOpen || !currentConversation?.id || accessReadiness !== 'ready') return undefined;
     const unsubscribe = subscribeOpenConversationMessages({
       conversationId: currentConversation.id,
       onData: (items) => {
@@ -155,7 +169,7 @@ export default function ChatDataProvider({ children, role }) {
       if (threadUnsubscribeRef.current === unsubscribe) threadUnsubscribeRef.current = null;
       unsubscribe?.();
     };
-  }, [currentConversation?.id, panelOpen]);
+  }, [accessReadiness, currentConversation?.id, panelOpen, threadVersion]);
 
   const messages = React.useMemo(() => mergeMessages(olderMessages, liveMessages, localMessages), [liveMessages, localMessages, olderMessages]);
 
@@ -181,21 +195,30 @@ export default function ChatDataProvider({ children, role }) {
   }, [branchId, currentConversation, messages, panelOpen, role, uid]);
 
   const openConversation = React.useCallback((conversation) => {
+    setResolveError('');
+    setThreadError('');
     setSelectedSeed(conversation);
+    setThreadVersion((version) => version + 1);
     setPanelOpen(true);
   }, []);
   const resolveAndOpen = React.useCallback(async (intent, orderContextLocal = null) => {
     setThreadError('');
+    setResolveError('');
+    setResolvingConversation(true);
+    setSelectedSeed(null);
     setPanelOpen(true);
     try {
       const conversation = await resolveConversation(intent);
       const next = { ...conversation, ...(orderContextLocal ? { orderContextLocal } : {}) };
       setSummaries((items) => [conversation, ...items.filter((item) => item.id !== conversation.id)]);
       setSelectedSeed(next);
+      setThreadVersion((version) => version + 1);
       return conversation;
     } catch (resolveError) {
-      setThreadError(resolveError.message || 'This conversation could not be opened.');
+      setResolveError(resolveError.message || 'This conversation could not be opened.');
       throw resolveError;
+    } finally {
+      setResolvingConversation(false);
     }
   }, []);
 
@@ -251,12 +274,12 @@ export default function ChatDataProvider({ children, role }) {
 
   const value = React.useMemo(() => ({
     role, colors, conversations, loading, error, panelOpen, currentConversation, messages,
-    hasEarlierMessages, loadingEarlier, threadError,
+    hasEarlierMessages, loadingEarlier, threadError, resolvingConversation, resolveError,
     totalUnread: totalUnread(conversations, role, uid, branchId),
     totalUnreadLabel: formatBadge(totalUnread(conversations, role, uid, branchId)),
     openChat: () => setPanelOpen(true),
     closeChat: () => setPanelOpen(false),
-    backToList: () => setSelectedSeed(null),
+    backToList: () => { setSelectedSeed(null); setThreadError(''); },
     openConversation,
     resolveAndOpen,
     retrySummaries: () => setRetryVersion((version) => version + 1),
@@ -265,7 +288,7 @@ export default function ChatDataProvider({ children, role }) {
     loadEarlierMessages,
     isOwnMessage: (message) => isOwnMessage(message, role, uid, branchId),
     receiptForMessage: (message) => receiptFor(message, currentConversation, role, uid, branchId),
-  }), [branchId, colors, conversations, currentConversation, error, hasEarlierMessages, liveMessages, loading, loadingEarlier, messages, openConversation, panelOpen, resolveAndOpen, retryMessage, role, sendCurrentMessage, threadError, uid, loadEarlierMessages]);
+  }), [branchId, colors, conversations, currentConversation, error, hasEarlierMessages, loading, loadingEarlier, messages, openConversation, panelOpen, resolveAndOpen, resolveError, resolvingConversation, retryMessage, role, sendCurrentMessage, threadError, uid, loadEarlierMessages]);
 
   return (
     <ChatContext.Provider value={value}>

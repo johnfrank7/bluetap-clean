@@ -5,6 +5,7 @@ const { OtpError } = require('../utils/otpError');
 const { safeProduct } = require('../admin/productManagementHandler');
 const { productDeliveryDays, productLimit } = require('../../services/productOrderPolicy');
 const { resolveEffectiveProductPolicy } = require('../utils/effectiveProductPolicy');
+const { approveDistributorInTransaction } = require('../utils/distributorApproval');
 
 const clean = (value, max = 240) => String(value || '').trim().slice(0, max);
 const number = (value) => Number.isFinite(Number(value)) ? Number(value) : 0;
@@ -74,6 +75,28 @@ function createManagerWorkspaceHandler(getAdmin = getFirebaseAdmin) {
       const branchId = manager.branch.id;
       if (req.method === 'POST') {
         const body = req.body && typeof req.body === 'object' ? req.body : {};
+        if (body.action === 'approveDistributor') {
+          const distributorUid = clean(body.distributorUid, 128);
+          if (!distributorUid) throw new OtpError(400, 'DISTRIBUTOR_REQUIRED', 'Choose a Distributor application to approve.');
+          const targetRef = db.collection('users').doc(distributorUid);
+          let approval;
+          await db.runTransaction(async (tx) => {
+            approval = await approveDistributorInTransaction({
+              actorRole: 'manager',
+              actorUid: manager.decoded.uid,
+              branchId,
+              db,
+              enforceRequestedBranch: true,
+              idempotent: true,
+              targetRef,
+              tx,
+            });
+          });
+          return res.status(200).json({
+            distributor: safeAccount(distributorUid, { ...approval.data, ...approval.changes }),
+            idempotent: approval.idempotent,
+          });
+        }
         if (body.action !== 'updateProductPolicy') throw new OtpError(400, 'INVALID_MANAGER_ACTION', 'Choose a valid Manager action.');
         const productId = clean(body.productId, 128);
         const productSnapshot = productId ? await db.collection('products').doc(productId).get() : null;

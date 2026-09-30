@@ -83,7 +83,7 @@ export function DistributorOrderChatAction({ order }) {
 const styles = StyleSheet.create({
   wrap: { width: '100%', flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginTop: 10 },
   compact: { marginTop: 8 },
-  button: { minHeight: 40, paddingHorizontal: 12, borderWidth: 1, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  button: { flexGrow: 1, flexBasis: 124, minWidth: 0, minHeight: 42, paddingHorizontal: 10, borderWidth: 1, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   label: { fontSize: 12, fontWeight: '900' },
   pressed: { opacity: 0.82, transform: [{ scale: 0.98 }] },
   disabled: { opacity: 0.7 },
