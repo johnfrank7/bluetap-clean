@@ -19,6 +19,7 @@ import { useRouter } from 'expo-router';
 import { auth } from '../../firebase';
 import { findLocalUserForAuthRole } from '../../localUsers';
 import RequestDetailsModal from '../../components/RequestDetailsModal';
+import { useRequesterData } from '../../components/RoleDataProviders';
 import RequesterEditOrderModal from '../../components/RequesterEditOrderModal';
 import SoftStatusBadge, { normalizeStatus } from '../../components/SoftStatusBadge';
 import { createShadow } from '../../components/shadowStyles';
@@ -215,6 +216,7 @@ const getDetailsRequestData = (request) =>
         distributorUniqueId: request.distributor_unique_id || '',
         contactNumber: request.contact_number || 'Not set',
         deliveryAddress: request.address || 'Not set',
+        deliveryLocation: request.deliveryLocation,
         items: getRequestItems(request),
         grandTotalAmount: getTotalAmount(request),
       }
@@ -349,41 +351,14 @@ export default function RequesterRequests() {
   const [toast, setToast] = useState({ visible: false, message: '', type: 'info' });
   const [ordersLoading, setOrdersLoading] = useState(true);
   const [ordersError, setOrdersError] = useState('');
+  const requesterData = useRequesterData();
   const isActiveOrdersTab = activeTab === ACTIVE_TAB;
 
   useEffect(() => {
-    let unsubscribeRequests = () => {};
-
-    const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
-      unsubscribeRequests();
-      setRequests([]);
-      setOrdersError('');
-
-      if (!user?.uid) {
-        setOrdersLoading(false);
-        setOrdersError('Requester authentication is required.');
-        return;
-      }
-
-      setOrdersLoading(true);
-      unsubscribeRequests = subscribeRequesterRequests(
-        user.uid,
-        (nextRequests) => {
-          setRequests(nextRequests);
-          setOrdersLoading(false);
-        },
-        (error) => {
-          setOrdersError(error?.message || 'Unable to load orders right now.');
-          setOrdersLoading(false);
-        }
-      );
-    });
-
-    return () => {
-      unsubscribeAuth();
-      unsubscribeRequests();
-    };
-  }, []);
+    setRequests(requesterData.orders);
+    setOrdersLoading(requesterData.loading);
+    setOrdersError(requesterData.error);
+  }, [requesterData.orders, requesterData.loading, requesterData.error]);
 
   const displayedRequests = useMemo(
     () =>
@@ -395,7 +370,7 @@ export default function RequesterRequests() {
     [isActiveOrdersTab, requests]
   );
   const liveSelectedRequest = selectedRequest
-    ? requests.find((request) => request.id === selectedRequest.id) || selectedRequest
+    ? requests.find((request) => request.id === selectedRequest.id) || null
     : null;
   const selectedDetailsRequest = getDetailsRequestData(liveSelectedRequest);
 

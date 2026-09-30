@@ -3,6 +3,10 @@ const normalized = (value) => clean(value).toLowerCase();
 const activeAccount = (value) => !clean(value) || normalized(value) === 'active';
 
 function chatAccessReadiness({ authReady, branchId, role, roleData = {}, uid }) {
+  if (roleData.readiness) {
+    if (!authReady || (roleData.uid && roleData.uid !== uid)) return 'pending';
+    return roleData.readiness === 'READY' ? 'ready' : roleData.readiness === 'GENUINE_DENIED' ? 'denied' : 'pending';
+  }
   if (!authReady) return 'pending';
   if (!uid || role === 'admin') return 'denied';
   if (role === 'requester') return 'ready';

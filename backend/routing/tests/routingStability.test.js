@@ -40,9 +40,10 @@ test('floating chat and station chat remain overlay actions without route naviga
 test('Distributor refresh waits for auth and authoritative branch profile before order listeners', () => {
   const orders = read('services/distributorOrders.js');
   const profile = read('services/distributorProfile.js');
-  assert.match(orders, /let unsubscribeOrders = null;[\s\S]*onAuthStateChanged/);
+  assert.match(orders, /useProtectedReadSession\('distributor'\)/);
+  assert.match(orders, /session.readiness !== 'READY'/);
   assert.match(profile, /let unsubscribeProfile = null;[\s\S]*onAuthStateChanged/);
-  assert.match(orders, /if \(loading\) return;[\s\S]*profile\?\.branchId[\s\S]*listenForDistributorOrders[\s\S]*hydrateDistributorOrders/);
+  assert.match(orders, /readiness !== 'READY'[\s\S]*profile\?\.branchId[\s\S]*listenForDistributorOrders[\s\S]*hydrateDistributorOrders/);
   assert.doesNotMatch(orders, /profile\?\.branchId \|\| profile\?\.assignedBranchId/);
 });
 

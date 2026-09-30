@@ -4,7 +4,8 @@ import { onAuthStateChanged } from 'firebase/auth';
 import { auth, db } from '../firebase';
 import { getApiUrl } from './apiClient';
 import { formatDisplayUniqueId, isPublicOrFormattedUniqueId } from './uniqueIds';
-import { subscribeDistributorProfile } from './distributorProfile';
+import { subscribeProtectedReadSession, useProtectedReadSession } from './useProtectedReadSession';
+const { protectedReadReadiness } = require('./protectedReadReadiness');
 
 export async function getAssignedDistributorOrders() {
   const token = await auth.currentUser?.getIdToken();
@@ -273,11 +274,16 @@ const startDistributorOrders = (uid, entry) => {
     entry.stopTimer = null;
   }
   if (!entry.profileUnsubscribe) {
-    entry.profileUnsubscribe = subscribeDistributorProfile(uid, ({ profile, loading, error }) => {
-      if (loading) return;
-      if (error) {
-        entry.loaded = true;
-        entry.error = 'Your Distributor profile could not be verified. Please try again.';
+    entry.profileUnsubscribe = subscribeProtectedReadSession('distributor', (session) => {
+      const { profile } = session;
+      const readiness = protectedReadReadiness({ ...session, role: 'distributor' });
+      if (session.uid !== uid || readiness !== 'READY') {
+        entry.ordersUnsubscribe?.();
+        entry.ordersUnsubscribe = null;
+        entry.orders = [];
+        entry.branchId = '';
+        entry.loaded = readiness === 'GENUINE_DENIED';
+        entry.error = entry.loaded ? 'Your delivery access could not be verified.' : '';
         emitDistributorOrders(entry, true);
         return;
       }
@@ -344,6 +350,7 @@ export const clearAssignedDistributorOrdersCache = (uid) => {
 };
 
 export function useAssignedDistributorOrders() {
+  const session = useProtectedReadSession('distributor');
   const [orders, setOrders] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState('');
@@ -355,21 +362,18 @@ export function useAssignedDistributorOrders() {
   }, []);
 
   React.useEffect(() => {
-    let unsubscribeOrders = null;
-    const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
-      unsubscribeOrders?.();
-      unsubscribeOrders = subscribeAssignedDistributorOrders(user?.uid, (state) => {
+    if (session.readiness !== 'READY') {
+      setOrders([]);
+      setLoading(session.readiness !== 'GENUINE_DENIED');
+      setError(session.readiness === 'GENUINE_DENIED' ? session.error || 'Your delivery access could not be verified.' : '');
+      return undefined;
+    }
+    return subscribeAssignedDistributorOrders(session.uid, (state) => {
         setOrders(state.orders);
         setLoading(state.loading);
         setError(state.error);
       });
-    });
-
-    return () => {
-      unsubscribeAuth();
-      unsubscribeOrders?.();
-    };
-  }, [refresh]);
+  }, [session.readiness, session.uid, session.profile?.branchId, session.error]);
 
   return { orders, loading, error, refresh };
 }

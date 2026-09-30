@@ -5,7 +5,7 @@ const normalizeDashboardStatus = (status) => String(status || '')
   .replace(/\s+/g, ' ');
 
 const CURRENT_DISTRIBUTOR_STATUSES = new Set([
-  'distributor assigned', 'pending', 'accepted', 'scheduled', 'out for delivery', 'delivery failed',
+  'out for delivery',
 ]);
 
 const getCurrentDistributorRequests = (orders = []) => orders.filter((order) =>
@@ -36,7 +36,7 @@ const getDistributorDashboardCounts = (orders = [], now = new Date()) => ({
     ['distributor assigned', 'pending'].includes(normalizeDashboardStatus(order?.status))
   ).length,
   scheduledToday: orders.filter((order) =>
-    ['accepted', 'scheduled', 'out for delivery'].includes(normalizeDashboardStatus(order?.status)) &&
+    ['accepted', 'scheduled'].includes(normalizeDashboardStatus(order?.status)) &&
     occursOnDay(order?.rawScheduledAt || order?.scheduledDateTime || order?.scheduledAt, now)
   ).length,
   deliveredToday: orders.filter((order) =>

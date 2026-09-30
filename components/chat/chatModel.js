@@ -3,6 +3,7 @@ const clean = (value) => String(value || '').trim();
 const timeOf = (value) => value?.toMillis?.()
   || value?.getTime?.()
   || Number(value?.seconds || 0) * 1000
+  || Number(value?._seconds || 0) * 1000
   || new Date(value || 0).getTime()
   || 0;
 
@@ -97,7 +98,18 @@ function formatBadge(count) {
   return value > 99 ? '99+' : String(value);
 }
 
+function conversationAvailability(conversation, role, uid, branchId, now = Date.now()) {
+  const state = principalStateFor(conversation, role, uid, branchId);
+  const deadline = timeOf(conversation?.accessEndsAt);
+  const readable = Boolean(conversation && ['active', 'read_only'].includes(conversation.status)
+    && ['active', 'read_only'].includes(state?.accessState)
+    && (!deadline || deadline > now)
+    && (conversation.status !== 'read_only' || deadline > now));
+  return { readable, sendable: readable && conversation.status === 'active' && state.accessState === 'active' };
+}
+
 module.exports = {
+  conversationAvailability,
   createClientMutationId,
   formatBadge,
   isOwnMessage,

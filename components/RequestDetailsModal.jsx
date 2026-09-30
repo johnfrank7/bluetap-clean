@@ -175,7 +175,7 @@ export default function RequestDetailsModal({
               </View>
             </View>
 
-            {request?.deliveryLocation?.latitude && request?.deliveryLocation?.longitude ? (
+            {Number.isFinite(request?.deliveryLocation?.latitude) && Number.isFinite(request?.deliveryLocation?.longitude) ? (
               <View style={styles.section}>
                 <Text style={styles.sectionTitle}>Delivery Location Map</Text>
                 <View style={styles.mapContainer}>

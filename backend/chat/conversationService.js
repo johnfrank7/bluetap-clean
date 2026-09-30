@@ -254,7 +254,9 @@ function buildConversationFoundation({ type, authority, createdBy, authorityReas
   if (type === CONVERSATION_TYPES.REQUESTER_BRANCH) {
     const requesterUid = tuple[2]; const branchId = tuple[3];
     const normalizedReasons = normalizeAuthorityReasons(authorityReasons);
-    return { ...base, status: hasActiveAuthorityReason(normalizedReasons, timeOf(now)) ? CONVERSATION_STATUS.ACTIVE : CONVERSATION_STATUS.READ_ONLY, participantUserUids: [requesterUid], participantBranchIds: [branchId], participantUserAccess: { [requesterUid]: 'active' }, participantBranchAccess: { [branchId]: 'active' }, requesterUid, branchIds: [branchId], authorityReasons: normalizedReasons, participantState: [participantState('user', requesterUid), participantState('branch', branchId)] };
+    const reasons = Object.values(normalizedReasons);
+    const accessEndsAt = reasons.some((reason) => !reason.accessEndsAt) ? null : new Date(Math.max(timeOf(now), ...reasons.map((reason) => timeOf(reason.accessEndsAt))));
+    return { ...base, accessEndsAt, readAccessEndsAt: accessEndsAt, status: hasActiveAuthorityReason(normalizedReasons, timeOf(now)) ? CONVERSATION_STATUS.ACTIVE : CONVERSATION_STATUS.READ_ONLY, participantUserUids: [requesterUid], participantBranchIds: [branchId], participantUserAccess: { [requesterUid]: 'active' }, participantBranchAccess: { [branchId]: 'active' }, requesterUid, branchIds: [branchId], authorityReasons: normalizedReasons, participantState: [participantState('user', requesterUid), participantState('branch', branchId)] };
   }
   if (type === CONVERSATION_TYPES.REQUESTER_DISTRIBUTOR) {
     const [, , orderId, requesterUid, distributorUid, assignmentVersion] = tuple;

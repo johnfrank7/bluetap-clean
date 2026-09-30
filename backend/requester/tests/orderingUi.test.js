@@ -104,7 +104,7 @@ test('Requester catalog is short-cached, deduplicated, and exposes shared querie
   for (const method of ['getActiveBranches', 'getActiveProducts', 'getProductsForBranch', 'getRequesterOrders']) assert.match(ordering, new RegExp(method));
 });
 test('notifications are order-derived and contain no demo request numbers', () => {
-  assert.match(notifications, /subscribeRequesterRequests/); assert.doesNotMatch(notifications, /BT-01245|BT-01212|Toledo Pure Water Station/);
+  assert.match(notifications, /useRequesterData/); assert.doesNotMatch(notifications, /BT-01245|BT-01212|Toledo Pure Water Station/);
 });
 test('Requester order surfaces share API-backed UID ownership, canonical lifecycle classification, and a post-submit cache prime', () => {
   assert.match(requesterOrderStatus, /isActiveRequesterOrderStatus/);
@@ -121,11 +121,11 @@ test('Requester order surfaces share API-backed UID ownership, canonical lifecyc
   assert.match(requesterRequestService, /where\('requester_id', '==', requesterId\)/);
   assert.match(requesterRequestService, /entry\.unsubscribe/);
   assert.match(layout, /RequesterDataProvider/);
-  assert.match(requesterRequests, /user\.uid/);
+  assert.match(requesterRequests, /useRequesterData\(\)/);
   assert.match(requesterRequests, /ordersLoading/);
   assert.match(requesterRequests, /ordersError/);
   assert.match(form, /createRequest/);
-  assert.match(dashboard, /subscribeRequesterCurrentRequests/);
+  assert.match(dashboard, /requesterData.orders.filter\(isCurrentRequesterRequest\)/);
   assert.match(dashboard, /normalizeRequesterOrderStatus/);
   assert.match(notifications, /requesterOrderStatusLabel/);
 });
@@ -255,6 +255,8 @@ test('order details use live selected records and canonical COD/public UID prese
   assert.match(requesterRequests, /liveSelectedRequest/);
   assert.match(dashboard, /liveDetailsRequest/);
   assert.match(requesterNotification, /orders\.find/);
+  assert.match(requesterNotification, /useRequesterData\(\)/);
+  assert.doesNotMatch(requesterNotification, /onAuthStateChanged|subscribeRequesterRequests/);
   assert.match(distributorNotification, /events\.find/);
   assert.match(requestDetailsModal, /Cash on Delivery/);
   assert.match(requestDetailsModal, /formatDisplayUniqueId/);

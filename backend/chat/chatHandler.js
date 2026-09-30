@@ -1,4 +1,5 @@
 const { randomUUID } = require('node:crypto');
+const { publishChatActivity } = require('./chatActivity');
 const { getFirebaseAdmin } = require('../firebase/firebaseAdmin');
 const { canonicalAccountStatus } = require('../auth/accountStatus');
 const { verifiedIdentity } = require('../auth/authorization');
@@ -259,10 +260,18 @@ async function resolveConversationIntent(tx, db, callerUid, callerClaims, body, 
   }
 
   if (type === CONVERSATION_TYPES.DISTRIBUTOR_BRANCH) {
-    requireOnlyFields(body, new Set(['type']));
-    const distributor = activeDistributor(caller, callerUid);
+    requireOnlyFields(body, new Set(['type', 'distributorId']));
+    const managerInitiated = caller.role === 'manager';
+    const distributorId = managerInitiated
+      ? requiredId(body.distributorId, 'CHAT_DISTRIBUTOR_REQUIRED', 'Choose a branch Distributor.')
+      : callerUid;
+    if (!managerInitiated && body.distributorId) throw new OtpError(403, 'CHAT_NOT_AUTHORIZED', 'Use your own branch relationship.');
+    const distributor = managerInitiated
+      ? activeDistributor(await readRequired(tx, db.collection('users').doc(distributorId), 'CHAT_NOT_AUTHORIZED', 'The Distributor is unavailable.'), distributorId)
+      : activeDistributor(caller, callerUid);
     const branchId = clean(distributor.branchId, 128);
     const branch = activeBranch(await readRequired(tx, db.collection('branches').doc(branchId), 'CHAT_NOT_AUTHORIZED', 'The branch is unavailable.'), branchId);
+    if (managerInitiated) activeManager(caller, callerUid, branch, callerClaims);
     let authority;
     try {
       const branchMembershipVersion = getBranchMembershipVersion(distributor);
@@ -337,13 +346,16 @@ async function resolveOrCreateConversation({ db, callerUid, callerClaims, body, 
       const authorityReasons = addAuthorityReason(conversation.authorityReasons, resolved.reason, resolved.reasonOptions);
       const status = hasActiveAuthorityReason(authorityReasons, timeOf(now)) ? CONVERSATION_STATUS.ACTIVE : conversation.status;
       const projection = participantAccessProjection(conversation, status === CONVERSATION_STATUS.ACTIVE ? 'active' : 'read_only');
-      tx.update(conversationRef, { authorityReasons, status, ...projection, updatedAt: now });
-      conversation = { ...conversation, authorityReasons, status, ...projection, updatedAt: now };
+      const reasons = Object.values(normalizeAuthorityReasons(authorityReasons));
+      const accessEndsAt = reasons.some((reason) => !reason.accessEndsAt) ? null : new Date(Math.max(...reasons.map((reason) => timeOf(reason.accessEndsAt))));
+      tx.update(conversationRef, { authorityReasons, status, accessEndsAt, readAccessEndsAt: accessEndsAt, ...projection, updatedAt: now });
+      conversation = { ...conversation, authorityReasons, status, accessEndsAt, readAccessEndsAt: accessEndsAt, ...projection, updatedAt: now };
     } else if (!created) {
       const projection = participantAccessProjection(conversation, conversation.status === CONVERSATION_STATUS.ACTIVE ? 'active' : 'read_only');
       tx.update(conversationRef, { ...projection, updatedAt: now });
       conversation = { ...conversation, ...projection, updatedAt: now };
     }
+    publishChatActivity(tx, db, conversation, now);
     return { created, conversation };
   });
 }
@@ -382,6 +394,9 @@ async function requesterBranchAuthorityCurrent(tx, db, conversation, nowMs) {
 async function authorizeConversation(tx, db, conversation, callerUid, callerClaims, mode, nowMs) {
   if (!conversation) throw new OtpError(404, 'CHAT_CONVERSATION_NOT_FOUND', 'The conversation was not found.');
   if (conversation.status === CONVERSATION_STATUS.CLOSED) throw new OtpError(409, 'CHAT_CLOSED', 'This conversation is closed.');
+  if (isAccessExpired(conversation.accessEndsAt, nowMs) || (conversation.status === CONVERSATION_STATUS.READ_ONLY && !hasBoundedHistoricalRead(conversation, nowMs))) {
+    throw new OtpError(mode === 'send' ? 409 : 403, mode === 'send' ? 'CHAT_READ_ONLY' : 'CHAT_NOT_AUTHORIZED', 'Conversation access has ended.');
+  }
   const caller = requireChatProfile(await readRequired(tx, db.collection('users').doc(callerUid), 'CHAT_NOT_AUTHORIZED', 'Chat access is not authorized.'), callerUid);
   let principal;
   let senderBranchId = '';
@@ -573,6 +588,7 @@ async function sendMessage({ db, callerUid, callerClaims, body, now, createMessa
     };
     tx.create(conversationRef.collection('messages').doc(messageId), message);
     tx.update(conversationRef, summary);
+    publishChatActivity(tx, db, conversation, now);
     tx.create(mutationRef, {
       conversationId,
       messageId,
@@ -616,7 +632,10 @@ async function advanceReadState({ db, callerUid, callerClaims, body, now }) {
     );
     const previous = (conversation.participantState || []).find((state) => principalKey(state) === principalKey(authorization.principal));
     const advanced = lastReadSeq > Number(previous?.lastReadSeq || 0);
-    if (advanced) tx.update(conversationRef, { participantState });
+    if (advanced) {
+      tx.update(conversationRef, { participantState });
+      publishChatActivity(tx, db, conversation, now);
+    }
     return { advanced, conversation: { ...conversation, participantState } };
   });
 }
@@ -640,6 +659,32 @@ async function listMessages({ db, callerUid, callerClaims, conversationId, page,
   });
 }
 
+async function listConversations({ db, callerUid, callerClaims, now }) {
+  return db.runTransaction(async (tx) => {
+    const caller = requireChatProfile(await readRequired(tx, db.collection('users').doc(callerUid), 'CHAT_NOT_AUTHORIZED', 'Chat access is not authorized.'), callerUid);
+    const manager = caller.role === 'manager';
+    if (manager) {
+      const branch = await readRequired(tx, db.collection('branches').doc(caller.branchId), 'CHAT_NOT_AUTHORIZED', 'Your branch is unavailable.');
+      activeManager(caller, callerUid, branch, callerClaims);
+    } else if (caller.role === 'distributor') activeDistributor(caller, callerUid);
+    const query = db.collection('chatConversations')
+      .where(manager ? 'participantBranchIds' : 'participantUserUids', 'array-contains', manager ? caller.branchId : callerUid)
+      .orderBy('updatedAt', 'desc').limit(50);
+    const snapshot = await tx.get(query);
+    const conversations = [];
+    for (const item of snapshot.docs) {
+      const conversation = withId(item);
+      try {
+        await authorizeConversation(tx, db, conversation, callerUid, callerClaims, 'read', timeOf(now));
+        conversations.push(conversation);
+      } catch (error) {
+        if (!(error instanceof OtpError) || ![403, 404, 409].includes(error.status)) throw error;
+      }
+    }
+    return { conversations };
+  });
+}
+
 function errorResponse(res, error) {
   const known = error instanceof OtpError;
   const details = known && error.details && typeof error.details === 'object' ? error.details : {};
@@ -660,13 +705,14 @@ function createChatHandler(mode, getAdmin = getFirebaseAdmin, dependencies = {})
     res.setHeader('Cache-Control', 'no-store');
     if (!applyCors(req, res)) return;
     if (req.method === 'OPTIONS') return res.status(204).end();
-    const allowed = mode === 'messages' ? ['GET', 'POST'] : ['POST'];
+    const allowed = mode === 'messages' || mode === 'conversations' ? ['GET', 'POST'] : ['POST'];
     if (!allowed.includes(req.method)) return res.status(405).json({ error: { reason: 'method-not-allowed', message: `Use ${allowed.join(' or ')}.` } });
     try {
       const { auth, db } = getAdmin();
       const decoded = await verifyChatIdentity(req, auth);
       const timestamp = now();
       if (mode === 'conversations') {
+        if (req.method === 'GET') return res.status(200).json(await listConversations({ db, callerUid: decoded.uid, callerClaims: decoded, now: timestamp }));
         const result = await resolveOrCreateConversation({ db, callerUid: decoded.uid, callerClaims: decoded, body: parseBody(req), now: timestamp, createConversationId });
         return res.status(result.created ? 201 : 200).json(result);
       }
@@ -699,6 +745,7 @@ module.exports = {
   createChatMessagesHandler,
   createChatReadStateHandler,
   listMessages,
+  listConversations,
   resolveOrCreateConversation,
   sendMessage,
 };

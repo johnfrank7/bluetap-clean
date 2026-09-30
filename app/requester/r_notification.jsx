@@ -1,9 +1,8 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { onAuthStateChanged } from 'firebase/auth';
-import { auth } from '../../firebase';
+import { useRequesterData } from '../../components/RoleDataProviders';
 import { BLUETAP_COLORS, BLUETAP_LAYOUT } from '../../constants/bluetapTheme';
 import { createPortalStyleSheet, useBlueTapTheme } from '../../components/BlueTapTheme';
 import SoftStatusBadge from '../../components/SoftStatusBadge';
@@ -11,7 +10,7 @@ import BlueTapEmptyState from '../../components/BlueTapEmptyState';
 import RequestDetailsModal from '../../components/RequestDetailsModal';
 import { USER_PORTAL_BOTTOM_CONTENT_INSET, USER_PORTAL_LAYOUT } from '../../constants/userPortalLayout';
 import { normalizeRequesterOrderStatus, requesterOrderStatusLabel } from '../../constants/requesterOrderStatus';
-import { refreshRequesterRequests, subscribeRequesterRequests } from '../../services/requests';
+import { refreshRequesterRequests } from '../../services/requests';
 import { formatNotificationTime, getOrderLifecycleTimestamp, parseTimestamp } from '../../services/notificationTimestamp';
 
 const NOTIFICATION_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
@@ -53,47 +52,19 @@ const messageFor = (order) => {
 export default function RequesterNotification() {
   useBlueTapTheme();
   const router = useRouter();
-  const [orders, setOrders] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
+  const { orders, loading, error: orderError, uid, readiness } = useRequesterData();
+  const [retryError, setRetryError] = useState('');
+  const error = orderError || retryError;
   const [selectedOrder, setSelectedOrder] = useState(null);
 
-  useEffect(() => {
-    let unsubscribeOrders = () => {};
-    const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
-      unsubscribeOrders();
-      setOrders([]);
-      setError('');
-      if (!user?.uid) {
-        setLoading(false);
-        setError('Requester authentication is required.');
-        return;
-      }
-      setLoading(true);
-      unsubscribeOrders = subscribeRequesterRequests(
-        user.uid,
-        (next) => {
-          setOrders(next);
-          setLoading(false);
-        },
-        (nextError) => {
-          setError(nextError.message);
-          setLoading(false);
-        }
-      );
-    });
-    return () => {
-      unsubscribeAuth();
-      unsubscribeOrders();
-    };
-  }, []);
-
-  const retry = () => {
-    const uid = auth.currentUser?.uid;
-    if (!uid) return;
-    setError('');
-    setLoading(true);
-    refreshRequesterRequests(uid);
+  const retry = async () => {
+    if (!uid || readiness !== 'READY') return;
+    setRetryError('');
+    try {
+      await refreshRequesterRequests(uid);
+    } catch (nextError) {
+      setRetryError(nextError.message || 'Orders are temporarily unavailable.');
+    }
   };
 
   const events = useMemo(
@@ -108,7 +79,7 @@ export default function RequesterNotification() {
     [orders]
   );
   const liveSelectedOrder = selectedOrder
-    ? orders.find((order) => order.id === selectedOrder.id) || selectedOrder
+    ? orders.find((order) => order.id === selectedOrder.id) || null
     : null;
 
   return (

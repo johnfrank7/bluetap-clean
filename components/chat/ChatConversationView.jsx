@@ -10,7 +10,7 @@ export default function ChatConversationView() {
   const {
     backToList, closeChat, colors, currentConversation, hasEarlierMessages, loadEarlierMessages,
     loadingEarlier, messages, retryMessage, role, sendCurrentMessage, threadError,
-    isOwnMessage, receiptForMessage,
+    isOwnMessage, receiptForMessage, canSend,
   } = useChat();
   const scrollRef = React.useRef(null);
   const didInitialScroll = React.useRef(false);
@@ -59,8 +59,8 @@ export default function ChatConversationView() {
           />
         ))}
       </ScrollView>
-      <ChatComposer colors={colors} disabled={currentConversation.status !== 'active'} onSend={sendCurrentMessage} />
-      {currentConversation.status !== 'active' && <Text style={[styles.readOnly, { color: colors.textSecondary, backgroundColor: colors.surfaceAlt }]}>This conversation is read-only.</Text>}
+      <ChatComposer colors={colors} disabled={!canSend} onSend={sendCurrentMessage} />
+      {!canSend && !threadError && <Text style={[styles.readOnly, { color: colors.textSecondary, backgroundColor: colors.surfaceAlt }]}>Sending is unavailable for this conversation.</Text>}
     </View>
   );
 }

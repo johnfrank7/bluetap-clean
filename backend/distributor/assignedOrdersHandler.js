@@ -115,7 +115,9 @@ function createDistributorAssignedOrdersHandler(getAdmin = getFirebaseAdmin) {
             throw new OtpError(409, 'ORDER_NOT_ACCEPTABLE', 'Only newly assigned deliveries can be accepted.');
           }
           event = 'ASSIGNMENT_ACCEPTED';
-          update = { status: 'accepted', acceptedAt: current.acceptedAt || now };
+          const scheduledTime = current.scheduledAt?.toDate?.() || new Date(current.scheduledAt || current.scheduled_at || 0);
+          const hasSchedule = Number.isFinite(scheduledTime.getTime()) && scheduledTime.getTime() > 0;
+          update = { status: hasSchedule ? 'scheduled' : 'accepted', acceptedAt: current.acceptedAt || now };
         } else if (action === 'decline-assignment') {
           if (!['distributor_assigned', 'accepted', 'scheduled'].includes(currentStatus)) {
             throw new OtpError(409, 'ORDER_NOT_DECLINABLE', 'Orders currently out for delivery cannot be declined.');
@@ -147,22 +149,7 @@ function createDistributorAssignedOrdersHandler(getAdmin = getFirebaseAdmin) {
             }],
           };
         } else if (action === 'schedule-delivery') {
-          scheduledAt = body.scheduledAt ? new Date(body.scheduledAt) : null;
-          if (!scheduledAt || Number.isNaN(scheduledAt.getTime()) || scheduledAt.getTime() < now.getTime() - (5 * 60 * 1000)) {
-            throw new OtpError(400, 'INVALID_DELIVERY_SCHEDULE', 'Choose a current or future delivery time.');
-          }
-          if (!['distributor_assigned', 'accepted'].includes(currentStatus)) {
-            throw new OtpError(409, 'ORDER_NOT_SCHEDULABLE', 'This delivery is not ready to schedule.');
-          }
-          event = 'DELIVERY_SCHEDULED';
-          update = {
-            status: 'scheduled',
-            scheduledAt,
-            scheduled_at: scheduledAt,
-            expectedDeliveryDate: scheduledAt.toISOString(),
-            delivery_date: scheduledAt.toISOString(),
-            acceptedAt: current.acceptedAt || now,
-          };
+          throw new OtpError(409, 'MANAGER_SCHEDULE_REQUIRED', 'Initial scheduling belongs to your Manager. Accept the assignment, then start delivery when ready.');
         } else if (action === 'start-delivery') {
           if (!['accepted', 'scheduled'].includes(currentStatus)) {
             throw new OtpError(409, 'ORDER_NOT_STARTABLE', 'This delivery is not ready to start.');

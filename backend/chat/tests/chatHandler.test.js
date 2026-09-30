@@ -37,7 +37,7 @@ function fixture() {
       .filter(([path]) => path.startsWith(prefix) && !path.slice(prefix.length).includes('/'))
       .map(([path]) => ({ path, data: clone(store.get(path)) }));
     for (const [field, operator, expected] of query.filters) {
-      docs = docs.filter(({ data }) => operator === '==' ? data?.[field] === expected : operator === '<' ? data?.[field] < expected : false);
+      docs = docs.filter(({ data }) => operator === 'array-contains' ? data?.[field]?.includes(expected) : operator === '==' ? data?.[field] === expected : operator === '<' ? data?.[field] < expected : false);
     }
     if (query.order) {
       const [field, direction] = query.order;
@@ -157,6 +157,44 @@ async function directConversation(f) {
   assert.ok([200, 201].includes(response.statusCode));
   return response.body.conversation.id;
 }
+
+test('cold summary discovery returns the same authorized conversation to both users without resolve', async () => {
+  const f = fixture();
+  const id = await directConversation(f);
+  await call(f.messages, 'POST', 'requester-a-token', { conversationId: id, clientMutationId: 'cold-summary', body: 'hello' });
+  for (const token of ['requester-a-token', 'distributor-a-token']) {
+    const result = await call(f.conversations, 'GET', token);
+    assert.equal(result.statusCode, 200);
+    assert.equal(result.body.conversations[0].id, id);
+    assert.equal(result.body.conversations[0].lastMessageSeq, 1);
+  }
+  assert.ok(f.records.has('chatUserActivity/distributor-a'));
+  assert.equal((await call(f.conversations, 'GET', 'requester-b-token')).body.conversations.length, 0);
+  const read = await call(f.readState, 'POST', 'distributor-a-token', { conversationId: id, lastReadSeq: 1 });
+  assert.equal(read.statusCode, 200);
+  assert.equal(read.body.conversation.participantState.find((state) => state.principalId === 'distributor-a').unreadCount, 0);
+  const { receiptFor } = require('../../../components/chat/chatModel');
+  assert.equal(receiptFor({ seq: 1, senderUid: 'requester-a' }, read.body.conversation, 'requester', 'requester-a'), 'seen');
+  f.records.get('requests/order-a').assignmentVersion++;
+  assert.equal((await call(f.conversations, 'GET', 'distributor-a-token')).body.conversations.length, 0);
+});
+
+test('Manager cold summaries and pinned Distributor resolution enforce own active branch and membership', async () => {
+  const f = fixture();
+  const followup = await resolve(f, 'requester-a-token', { type: 'requester_branch', intent: 'order_followup', orderId: 'order-a' });
+  assert.equal((await call(f.conversations, 'GET', 'manager-a-token')).body.conversations[0].id, followup.body.conversation.id);
+  assert.equal((await call(f.conversations, 'GET', 'manager-b-token')).body.conversations.length, 0);
+  const pinned = await resolve(f, 'manager-a-token', { type: 'distributor_branch', distributorId: 'distributor-a' });
+  assert.equal(pinned.statusCode, 201);
+  const own = await resolve(f, 'distributor-a-token', { type: 'distributor_branch' });
+  assert.equal(own.body.conversation.id, pinned.body.conversation.id);
+  assert.equal((await resolve(f, 'manager-b-token', { type: 'distributor_branch', distributorId: 'distributor-a' })).statusCode, 403);
+  assert.equal((await resolve(f, 'manager-no-claim-token', { type: 'distributor_branch', distributorId: 'distributor-a' })).statusCode, 403);
+  f.records.get('users/distributor-a').branchMembershipVersion++;
+  assert.equal((await call(f.messages, 'POST', 'manager-a-token', { conversationId: pinned.body.conversation.id, clientMutationId: 'old-membership', body: 'no' })).statusCode, 409);
+  f.records.get('users/distributor-a').distributorStatus = 'inactive';
+  assert.equal((await resolve(f, 'manager-a-token', { type: 'distributor_branch', distributorId: 'distributor-a' })).statusCode, 403);
+});
 
 test('Requester conversation intents derive participants and reject client-owned authority', async () => {
   const f = fixture();

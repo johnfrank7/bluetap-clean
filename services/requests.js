@@ -80,7 +80,10 @@ const normalizeRequest = (id, data = {}) => {
     distributor_name: data.distributor_name || data.distributorName || data.branchNameSnapshot || '',
     assignedDistributorName: data.assignedDistributorNameSnapshot || data.distributor_name || data.distributorName || '',
     contact_number: data.contact_number || '',
-    address: data.address || data.addressSnapshot || '',
+    address: data.address || data.addressSnapshot || data.deliveryLocation?.address || '',
+    deliveryLocation: data.deliveryLocation || null,
+    assignedDistributorUid: data.assignedDistributorUid || '',
+    assignmentVersion: data.assignmentVersion,
     product_id: data.product_id || items[0]?.product_id || '',
     product_name:
       data.product_name ||
@@ -314,6 +317,7 @@ const startRequesterRequestSubscription = (requesterId, entry) => {
       emitRequesterRequests(requesterId, entry, true);
     },
     (error) => {
+      entry.unsubscribe = null;
       entry.subscribers.forEach(({ onError }) => onError?.(error));
     }
   );

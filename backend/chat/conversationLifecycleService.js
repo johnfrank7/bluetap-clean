@@ -1,4 +1,5 @@
 const { OtpError } = require('../utils/otpError');
+const { publishChatActivity } = require('./chatActivity');
 const { getBranchMembershipVersion } = require('../utils/relationshipEpochs');
 const {
   CONVERSATION_TYPES,
@@ -187,6 +188,7 @@ async function reconcileOrderLifecycleInTransaction({ tx, db, before = {}, after
     if (!entry?.changed) continue;
     const { id: _id, ...update } = entry.conversation;
     tx.update(entry.ref, update);
+    publishChatActivity(tx, db, update, timestamp);
     reconciled += 1;
   }
   return { ...plan, accessEndsAt, reconciled };
@@ -220,6 +222,7 @@ async function reconcileDistributorMembershipInTransaction({ tx, db, distributor
   };
   const { id: _id, ...update } = conversation;
   tx.update(entry.ref, update);
+  publishChatActivity(tx, db, update, timestamp);
   return { changed: true, reconciled: 1 };
 }
 

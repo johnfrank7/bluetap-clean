@@ -44,8 +44,6 @@ const TEXT_DARK = BLUETAP_COLORS.textPrimary;
 const UPCOMING_STATUSES = new Set([
   'accepted',
   'scheduled',
-  'out for delivery',
-  'out_for_delivery',
   'delivery failed',
   'delivery_failed',
 ]);
@@ -166,9 +164,9 @@ const ScheduledRequestCard = ({
           {request.address}
         </Text>
 
-        <Text style={[styles.compactLabel, styles.compactLabelGap]}>Scheduled Delivery Date & Time</Text>
+        <Text style={[styles.compactLabel, styles.compactLabelGap]}>{statusNorm === 'accepted' ? 'Ready to Start' : 'Scheduled Delivery Date & Time'}</Text>
         <Text style={styles.compactValue} numberOfLines={1}>
-          {request.scheduledDateTime || 'Not set'}
+          {statusNorm === 'accepted' ? 'Accepted — start delivery when ready.' : request.scheduledDateTime || 'Not set'}
         </Text>
 
         {isDeliveryFailed && (

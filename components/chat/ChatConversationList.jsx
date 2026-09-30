@@ -3,9 +3,10 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, 
 
 import BlueTapChatIcon from './BlueTapChatIcon';
 import { useChat } from './ChatContext';
+const { timeOf } = require('./chatModel');
 
 const formatTimestamp = (value) => {
-  const date = value?.toDate?.() || (value?.seconds ? new Date(value.seconds * 1000) : value ? new Date(value) : null);
+  const date = timeOf(value) ? new Date(timeOf(value)) : null;
   if (!date || Number.isNaN(date.getTime())) return '';
   const today = new Date();
   return date.toDateString() === today.toDateString()
@@ -14,7 +15,7 @@ const formatTimestamp = (value) => {
 };
 
 export default function ChatConversationList() {
-  const { colors, conversations, error, loading, openConversation, resolveAndOpen, resolveError, resolvingConversation, retrySummaries, role } = useChat();
+  const { colors, conversations, branchDistributors = [], error, loading, openConversation, resolveAndOpen, resolveError, resolvingConversation, retrySummaries, role } = useChat();
   const [search, setSearch] = React.useState('');
   const needle = search.trim().toLowerCase();
   const filtered = conversations.filter((conversation) => !needle || [
@@ -42,6 +43,10 @@ export default function ChatConversationList() {
         />
       </View>
       {!!resolveError && <Text accessibilityRole="alert" style={[styles.inlineError, { color: colors.danger, backgroundColor: colors.dangerSoft }]}>{resolveError}</Text>}
+      {role === 'manager' && branchDistributors.length > 0 && <View style={{ maxHeight: 180 }}>
+        <Text style={[styles.stationTitle, { color: colors.textPrimary, margin: 12 }]}>Branch Distributors</Text>
+        <ScrollView>{branchDistributors.filter((user) => !needle || String(user.fullName || '').toLowerCase().includes(needle)).map((user) => <Pressable key={user.uid || user.id} accessibilityRole="button" disabled={loading || resolvingConversation} onPress={() => { resolveAndOpen({ type: 'distributor_branch', distributorId: user.uid || user.id }).catch(() => {}); }} style={styles.stationAction}><Text style={{ color: colors.textPrimary }}>{user.fullName || 'Branch Distributor'}</Text></Pressable>)}</ScrollView>
+      </View>}
       {resolvingConversation && <View style={styles.resolving}><ActivityIndicator size="small" color={colors.primary} /><Text style={[styles.helper, { color: colors.textSecondary }]}>Opening conversationâ€¦</Text></View>}
       {role === 'distributor' && (
         <Pressable

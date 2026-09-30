@@ -3,12 +3,12 @@ const test = require('node:test');
 
 const { getCurrentDistributorRequests, getDistributorDashboardCounts } = require('../../../services/distributorDashboardMetrics');
 
-test('Current Requests keeps every active assignment and removes terminal orders after realtime updates', () => {
+test('Current Requests contains only started delivery work', () => {
   const active = getCurrentDistributorRequests([
-    { id: 'assigned', status: 'distributor_assigned' }, { id: 'accepted', status: 'accepted' },
+    { id: 'assigned', status: 'distributor_assigned' }, { id: 'accepted', status: 'accepted' }, { id: 'started', status: 'out_for_delivery' },
     { id: 'failed', status: 'delivery_failed' }, { id: 'delivered', status: 'delivered' }, { id: 'cancelled', status: 'cancelled' },
   ]);
-  assert.deepEqual(active.map((order) => order.id), ['assigned', 'accepted', 'failed']);
+  assert.deepEqual(active.map((order) => order.id), ['started']);
   assert.deepEqual(getCurrentDistributorRequests([{ id: 'assigned', status: 'delivered' }]), []);
 });
 
@@ -27,7 +27,7 @@ test('Distributor dashboard counts use assignment, schedule, and delivered times
 
   assert.deepEqual(getDistributorDashboardCounts(orders, today), {
     pending: 2,
-    scheduledToday: 2,
+    scheduledToday: 1,
     deliveredToday: 1,
   });
 });

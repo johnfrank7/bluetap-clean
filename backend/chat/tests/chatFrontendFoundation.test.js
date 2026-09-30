@@ -43,7 +43,8 @@ test('summary listeners are role scoped and bounded to fifty', () => {
   assert.match(source, /role === 'manager'[\s\S]*participantBranchIds/);
   assert.match(source, /\['requester', 'distributor'\][\s\S]*participantUserUids/);
   assert.match(source, /CHAT_SUMMARY_LIMIT = 50/);
-  assert.match(source, /limit\(CHAT_SUMMARY_LIMIT\)/);
+  assert.match(source, /chatBranchActivity.*chatUserActivity/);
+  assert.match(read('backend/chat/chatHandler.js'), /orderBy\('updatedAt', 'desc'\).limit\(50\)/);
 });
 
 test('one visible open thread listener is bounded to forty and cleaned up on change', () => {
@@ -52,7 +53,7 @@ test('one visible open thread listener is bounded to forty and cleaned up on cha
   assert.match(realtime, /CHAT_REALTIME_MESSAGE_LIMIT = 40/);
   assert.match(realtime, /orderBy\('seq', 'desc'\)[\s\S]*limit\(CHAT_REALTIME_MESSAGE_LIMIT\)/);
   assert.match(provider, /threadUnsubscribeRef\.current\?\.\(\)/);
-  assert.match(provider, /if \(!panelOpen \|\| !currentConversation\?\.id \|\| accessReadiness !== 'ready'\) return undefined/);
+  assert.match(provider, /if \(!panelOpen \|\| !currentConversation\?\.id \|\| accessReadiness !== 'ready' \|\| !availability.readable\) return undefined/);
   assert.match(provider, /threadVersion/);
 });
 
@@ -104,7 +105,7 @@ test('conversation resolution clears stale thread state and localizes resolve er
 
 test('read state advances only after a visible thread presents incoming messages', () => {
   const provider = read('components/chat/ChatDataProvider.jsx');
-  assert.match(provider, /if \(!panelOpen \|\| !currentConversation\?\.id \|\| messages\.length === 0\)/);
+  assert.match(provider, /if \(!panelOpen \|\| !currentConversation\?\.id \|\| messages\.length === 0 \|\| accessReadiness !== 'ready' \|\| !availability\.readable\)/);
   assert.match(provider, /incoming = messages\.filter/);
   assert.match(provider, /markRead\(\{ conversationId: currentConversation\.id, lastReadSeq: newestIncomingSeq \}\)/);
 });

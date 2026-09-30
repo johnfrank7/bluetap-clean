@@ -126,7 +126,9 @@ test('Distributor delivery scheduling and status changes are server-owned and as
   const assignmentVersion = f.records.get('requests/order-a').assignmentVersion;
   const scheduledAt = new Date(Date.now() + (60 * 60 * 1000)).toISOString();
   const scheduled = await call(distributor, 'PATCH', 'distributor-a-token', { orderId: 'order-a', action: 'schedule-delivery', scheduledAt });
-  assert.equal(scheduled.statusCode, 200); assert.equal(scheduled.body.order.status, 'scheduled'); assert.equal(f.records.get('requests/order-a').status, 'scheduled');
+  assert.equal(scheduled.statusCode, 409);
+  const accepted = await call(distributor, 'PATCH', 'distributor-a-token', { orderId: 'order-a', action: 'accept-assignment' });
+  assert.equal(accepted.statusCode, 200); assert.equal(accepted.body.order.status, 'scheduled');
   assert.equal((await call(distributor, 'PATCH', 'distributor-b-token', { orderId: 'order-a', action: 'start-delivery' })).statusCode, 404);
   const started = await call(distributor, 'PATCH', 'distributor-a-token', { orderId: 'order-a', action: 'start-delivery' });
   assert.equal(started.statusCode, 200); assert.equal(started.body.order.status, 'out_for_delivery');
@@ -134,7 +136,28 @@ test('Distributor delivery scheduling and status changes are server-owned and as
   assert.equal(delivered.statusCode, 200); assert.equal(delivered.body.order.status, 'delivered');
   assert.equal(f.records.get('requests/order-a').assignmentVersion, assignmentVersion);
   assert.equal(f.records.get('requests/order-a').chatAccessEndsAt.getTime() - f.records.get('requests/order-a').deliveredAt.getTime(), 7 * 24 * 60 * 60 * 1000);
-  assert.deepEqual(f.records.get('requests/order-a').distributorDeliveryHistory.map((entry) => entry.event), ['DELIVERY_SCHEDULED', 'DELIVERY_STARTED', 'DELIVERY_COMPLETED']);
+  assert.deepEqual(f.records.get('requests/order-a').distributorDeliveryHistory.map((entry) => entry.event), ['ASSIGNMENT_ACCEPTED', 'DELIVERY_STARTED', 'DELIVERY_COMPLETED']);
+});
+
+test('unscheduled acceptance stays ready and only explicit start enters Dashboard Current Requests', async () => {
+  const f = fixture();
+  const handler = createDistributorAssignedOrdersHandler(f.getAdmin);
+  const { getCurrentDistributorRequests } = require('../../../services/distributorDashboardMetrics');
+  const order = { ...f.records.get('requests/order-a'), assignedDistributorUid: 'distributor-a', assignmentVersion: 1, status: 'distributor_assigned' };
+  f.records.set('requests/order-a', order);
+  assert.equal(getCurrentDistributorRequests([order]).length, 0);
+  const accepted = await call(handler, 'PATCH', 'distributor-a-token', { orderId: 'order-a', action: 'accept-assignment' });
+  assert.equal(accepted.statusCode, 200);
+  assert.equal(accepted.body.order.status, 'accepted');
+  assert.equal(getCurrentDistributorRequests([accepted.body.order]).length, 0);
+  const started = await call(handler, 'PATCH', 'distributor-a-token', { orderId: 'order-a', action: 'start-delivery' });
+  assert.equal(getCurrentDistributorRequests([started.body.order]).length, 1);
+  const failed = await call(handler, 'PATCH', 'distributor-a-token', { orderId: 'order-a', action: 'fail-delivery', failureReason: 'Unavailable' });
+  assert.equal(getCurrentDistributorRequests([failed.body.order]).length, 0);
+  const retry = await call(handler, 'PATCH', 'distributor-a-token', { orderId: 'order-a', action: 'reschedule-delivery', scheduledAt: defaultSchedule });
+  assert.equal(retry.body.order.status, 'scheduled');
+  assert.equal(getCurrentDistributorRequests([retry.body.order]).length, 0);
+  assert.equal((await call(handler, 'PATCH', 'distributor-a-token', { orderId: 'order-a', action: 'start-delivery' })).body.order.status, 'out_for_delivery');
 });
 
 test('transfer requires target review, changes ownership only on acceptance, and preserves assignment and transfer history', async () => {
@@ -294,8 +317,8 @@ test('Distributor accept and decline lifecycle behaves correctly and decline ret
   // Distributor A2 accepts
   const accepted = await call(distributor, 'PATCH', 'distributor-a2-token', { orderId: 'order-a', action: 'accept-assignment' });
   assert.equal(accepted.statusCode, 200);
-  assert.equal(accepted.body.order.status, 'accepted');
-  assert.equal(f.records.get('requests/order-a').status, 'accepted');
+  assert.equal(accepted.body.order.status, 'scheduled');
+  assert.equal(f.records.get('requests/order-a').status, 'scheduled');
 });
 
 test('Distributor failed delivery and reschedule workflow strictly enforces state machine', async () => {
@@ -370,7 +393,7 @@ test('Distributor profile completeness blocks mutation actions with 409 PROFILE_
   // Now accept succeeds
   const acceptSuccess = await call(distributor, 'PATCH', 'distributor-a-token', { orderId: 'order-a', action: 'accept-assignment' });
   assert.equal(acceptSuccess.statusCode, 200);
-  assert.equal(acceptSuccess.body.order.status, 'accepted');
+  assert.equal(acceptSuccess.body.order.status, 'scheduled');
 });
 
 test('Manager assignment enforces distributor eligibility: rejects cross-branch and unapproved distributors', async () => {

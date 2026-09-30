@@ -26,34 +26,32 @@ service cloud.firestore {
     }
 
     function isRequester() {
-      return hasActiveGlobalAccount() && currentUser().role == 'requester' && currentUser().mustChangePassword != true;
+      return hasActiveGlobalAccount() && currentUser().role == 'requester' && currentUser().get('mustChangePassword', false) != true;
     }
 
     function isManager() {
       return hasActiveGlobalAccount()
         && currentUser().role == 'manager'
         && currentUser().managerStatus == 'active'
-        && currentUser().mustChangePassword != true
+        && currentUser().get('mustChangePassword', false) != true
         && currentUser().branchId is string
-        && (request.auth.token.manager == true || request.auth.token.role == 'manager')
+        && (request.auth.token.get('manager', false) == true || request.auth.token.get('role', '') == 'manager')
         && get(/databases/$(database)/documents/branches/$(currentUser().branchId)).data.status == 'active';
     }
 
     function isDistributor() {
       return hasActiveGlobalAccount()
         && currentUser().role == 'distributor'
-        && currentUser().mustChangePassword != true
-        && (currentUser().distributorStatus == 'active' || currentUser().distributorStatus == 'approved'
-          || currentUser().approvalStatus == 'active' || currentUser().approvalStatus == 'approved'
-          || currentUser().status == 'active' || currentUser().status == 'approved')
+        && currentUser().get('mustChangePassword', false) != true
+        && currentUser().get('distributorStatus', currentUser().get('approvalStatus', currentUser().get('status', ''))) in ['active', 'approved', 'Active', 'Approved']
         && currentUser().branchId is string
         && get(/databases/$(database)/documents/branches/$(currentUser().branchId)).data.status == 'active';
     }
 
     function isAdmin() {
       return hasActiveGlobalAccount() && currentUser().role == 'admin'
-        && currentUser().mustChangePassword != true
-        && (request.auth.token.admin == true || request.auth.token.role == 'admin');
+        && currentUser().get('mustChangePassword', false) != true
+        && (request.auth.token.get('admin', false) == true || request.auth.token.get('role', '') == 'admin');
     }
 
     function isManagerBranch(branchId) {
@@ -116,6 +114,16 @@ service cloud.firestore {
     match /chatAuthorityRegistry/{document=**} { allow read, write: if false; }
     match /chatMutationIds/{document=**} { allow read, write: if false; }
     match /chatRateLimits/{document=**} { allow read, write: if false; }
+    // A private change signal triggers a bounded, server-authorized summary read.
+    // No conversation content is stored here; clients cannot publish signals.
+    match /chatUserActivity/{uid} {
+      allow get: if (isRequester() || isDistributor()) && request.auth.uid == uid;
+      allow list, create, update, delete: if false;
+    }
+    match /chatBranchActivity/{branchId} {
+      allow get: if isManagerBranch(branchId);
+      allow list, create, update, delete: if false;
+    }
     // Manager operational events are written by Render Node. Source Managers
     // may read only their branch's transfer outcomes.
     match /managerOperationalEvents/{eventId} {

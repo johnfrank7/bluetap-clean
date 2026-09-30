@@ -50,8 +50,10 @@ const startProfileListener = (uid, entry) => {
 
   entry.unsubscribe = onSnapshot(
     doc(db, 'users', uid),
+    { includeMetadataChanges: true },
     (snapshot) => {
-      entry.profile = snapshot.exists() ? { uid: snapshot.id, ...snapshot.data() } : null;
+      if (snapshot.metadata.fromCache) return;
+      entry.profile = snapshot.exists() ? { ...snapshot.data(), uid: snapshot.id } : null;
       entry.loaded = true;
       entry.error = '';
       emitProfile(entry);

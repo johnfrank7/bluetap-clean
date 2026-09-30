@@ -1,7 +1,9 @@
 import { auth } from '../firebase';
 import { getApiUrl } from './apiClient';
+import { ensureAuthStateReady } from './authSession';
 
 async function chatRequest(path, { method = 'GET', body } = {}) {
+  await ensureAuthStateReady();
   const token = await auth.currentUser?.getIdToken();
   if (!token) {
     const error = new Error('Sign in again to use BlueTap messages.');
@@ -31,6 +33,10 @@ async function chatRequest(path, { method = 'GET', body } = {}) {
 export const resolveConversation = async (intent) => (
   await chatRequest('/api/chat/conversations', { method: 'POST', body: intent })
 ).conversation;
+
+export const loadConversationSummaries = async () => (
+  await chatRequest('/api/chat/conversations')
+).conversations || [];
 
 export const sendMessage = async ({ conversationId, clientMutationId, body, orderId }) => (
   await chatRequest('/api/chat/messages', {

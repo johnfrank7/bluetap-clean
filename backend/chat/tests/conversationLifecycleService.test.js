@@ -26,6 +26,7 @@ function fixture() {
   });
   const db = { collection };
   const tx = {
+    set(ref, value) { records.set(ref.path, value); },
     get: async (ref) => snapshot(ref.path),
     update(ref, update) { records.set(ref.path, { ...records.get(ref.path), ...update }); },
   };

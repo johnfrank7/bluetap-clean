@@ -20,6 +20,7 @@ import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from '../../firebase';
 import { findLocalUserForAuthRole } from '../../localUsers';
 import RequestDetailsModal from '../../components/RequestDetailsModal';
+import { useRequesterData } from '../../components/RoleDataProviders';
 import SoftStatusBadge from '../../components/SoftStatusBadge';
 import { createShadow } from '../../components/shadowStyles';
 import ProductCard from '../../components/ProductCard';
@@ -35,7 +36,7 @@ import { useLiveGreeting } from '../../services/liveTime';
 import {
   cancelRequest,
   refreshRequesterRequests,
-  subscribeRequesterCurrentRequests,
+  isCurrentRequesterRequest,
 } from '../../services/requests';
 
 const REQUESTER_APP_MAX_WIDTH = USER_PORTAL_LAYOUT.maxWidth;
@@ -290,6 +291,7 @@ export default function RequesterDashboard() {
   const [currentRequests, setCurrentRequests] = useState([]);
   const [currentRequestsLoading, setCurrentRequestsLoading] = useState(true);
   const [currentRequestsError, setCurrentRequestsError] = useState('');
+  const requesterData = useRequesterData();
   const [cancellingRequestId, setCancellingRequestId] = useState('');
   const [requestToCancel, setRequestToCancel] = useState(null);
   const [detailsRequest, setDetailsRequest] = useState(null);
@@ -365,55 +367,11 @@ export default function RequesterDashboard() {
   }, [activeProductIndex, products.length]);
 
   useEffect(() => {
-    let activeRequesterId = '';
-    let unsubscribeRequests = () => {};
-
-    const getRequesterId = (user) => {
-      return user?.uid || '';
-    };
-
-    const subscribeForRequester = (requesterId) => {
-      const normalizedRequesterId = (requesterId || '').toString().trim();
-
-      if (normalizedRequesterId === activeRequesterId) return;
-
-      unsubscribeRequests();
-      activeRequesterId = normalizedRequesterId;
-
-      if (!normalizedRequesterId) {
-        setCurrentRequests([]);
-        setCurrentRequestsLoading(false);
-        setCurrentRequestsError('Requester authentication is required.');
-        return;
-      }
-
-      setCurrentRequestsLoading(true);
-      setCurrentRequestsError('');
-      unsubscribeRequests = subscribeRequesterCurrentRequests(
-        normalizedRequesterId,
-        (nextRequests) => {
-          setCurrentRequests(nextRequests);
-          setCurrentRequestsLoading(false);
-        },
-        (error) => {
-          setCurrentRequestsError(error?.message || 'Unable to load current orders right now.');
-          setCurrentRequestsLoading(false);
-        }
-      );
-    };
-
-    const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
-      const localRequester = user ? findLocalUserForAuthRole(user, 'requester') : null;
-      const displayName = localRequester?.fullName || localRequester?.firstName || user?.displayName || 'Requester';
-      setRequesterName(String(displayName).trim().split(/\s+/)[0] || 'Requester');
-      subscribeForRequester(getRequesterId(user));
-    });
-
-    return () => {
-      unsubscribeAuth();
-      unsubscribeRequests();
-    };
-  }, []);
+    setCurrentRequests(requesterData.orders.filter(isCurrentRequesterRequest));
+    setCurrentRequestsLoading(requesterData.loading);
+    setCurrentRequestsError(requesterData.error);
+    setRequesterName(String(requesterData.profile?.fullName || 'Requester').trim().split(/\s+/)[0]);
+  }, [requesterData.orders, requesterData.loading, requesterData.error, requesterData.profile]);
 
   const retryCurrentRequests = () => {
     const requesterId = auth.currentUser?.uid;
@@ -508,7 +466,7 @@ export default function RequesterDashboard() {
     [productCarouselItemWidth, productCarouselSideInset]
   );
   const liveDetailsRequest = detailsRequest
-    ? currentRequests.find((request) => request.id === detailsRequest.id) || detailsRequest
+    ? requesterData.orders.find((request) => request.id === detailsRequest.id) || null
     : null;
   const detailsRequestData = liveDetailsRequest
     ? {
@@ -536,6 +494,7 @@ export default function RequesterDashboard() {
         distributorUniqueId: liveDetailsRequest.distributorPublicUidSnapshot || liveDetailsRequest.distributor_unique_id || '',
         contactNumber: liveDetailsRequest.contactNumberSnapshot || liveDetailsRequest.contact_number || 'Not set',
         deliveryAddress: liveDetailsRequest.addressSnapshot || liveDetailsRequest.address || 'Not set',
+        deliveryLocation: liveDetailsRequest.deliveryLocation,
         items: getRequestItems(liveDetailsRequest),
         subtotalAtOrder: liveDetailsRequest.subtotalAtOrder,
         deliveryFeeAtOrder: liveDetailsRequest.deliveryFeeAtOrder,

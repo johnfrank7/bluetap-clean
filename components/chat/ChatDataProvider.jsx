@@ -17,15 +17,15 @@ const { chatAccessReadiness } = require('./chatAccessReadiness');
 const { createClientMutationId, formatBadge, isOwnMessage, mergeMessages, principalStateFor, receiptFor, totalUnread, unreadForConversation } = chatModel;
 
 const clean = (value) => String(value || '').trim();
-const orderIdOf = (order = {}) => clean(order.id || order.sourceId || order.requestId || order.request_id);
-const orderReferenceOf = (order = {}) => clean(order.requestId || order.request_id || order.publicOrderReference || order.id || order.sourceId);
+const orderIdOf = (order) => clean(order?.id || order?.sourceId || order?.requestId || order?.request_id);
+const orderReferenceOf = (order) => clean(order?.requestId || order?.request_id || order?.publicOrderReference);
 const orderIdsForConversation = (conversation = {}) => {
   const ids = [conversation.orderId];
   Object.values(conversation.authorityReasons || {}).forEach((reason) => ids.push(...(reason?.orderIds || [])));
   return ids.map(clean).filter(Boolean);
 };
 
-function presentationFor(conversation, role, roleData) {
+export function presentationFor(conversation, role, roleData) {
   const orders = roleData.orders || [];
   const orderIds = new Set(orderIdsForConversation(conversation));
   const order = orders.find((candidate) => orderIds.has(orderIdOf(candidate)) || orderIds.has(orderReferenceOf(candidate)))
@@ -87,6 +87,7 @@ export default function ChatDataProvider({ children, role }) {
   const [resolvingConversation, setResolvingConversation] = React.useState(false);
   const [resolveError, setResolveError] = React.useState('');
   const [threadVersion, setThreadVersion] = React.useState(0);
+  const [clock, setClock] = React.useState(Date.now);
   const summaryUnsubscribeRef = React.useRef(null);
   const threadUnsubscribeRef = React.useRef(null);
   const readCursorRef = React.useRef(new Map());
@@ -95,6 +96,13 @@ export default function ChatDataProvider({ children, role }) {
     setUid(user?.uid || '');
     setAuthReady(true);
   }), []);
+
+  React.useEffect(() => {
+    setSelectedSeed(null);
+    setPanelOpen(false);
+    setSummaries([]);
+    readCursorRef.current.clear();
+  }, [uid, branchId]);
 
   const accessReadiness = chatAccessReadiness({ authReady, branchId, role, roleData, uid });
 
@@ -144,6 +152,15 @@ export default function ChatDataProvider({ children, role }) {
     return presentationFor({ ...selectedSeed, ...(live || {}), orderContextLocal: selectedSeed.orderContextLocal || live?.orderContextLocal }, role, roleData);
   }, [conversations, role, roleData, selectedSeed]);
 
+  const availability = chatModel.conversationAvailability(currentConversation, role, uid, branchId, clock);
+  React.useEffect(() => {
+    setClock(Date.now());
+    const deadline = chatModel.timeOf(currentConversation?.accessEndsAt);
+    if (!deadline || deadline <= Date.now()) return undefined;
+    const timer = setTimeout(() => setClock(Date.now()), Math.min(2147483647, deadline - Date.now() + 25));
+    return () => clearTimeout(timer);
+  }, [currentConversation?.accessEndsAt]);
+
   React.useEffect(() => {
     threadUnsubscribeRef.current?.();
     threadUnsubscribeRef.current = null;
@@ -151,7 +168,7 @@ export default function ChatDataProvider({ children, role }) {
     setOlderMessages([]);
     setLocalMessages([]);
     setThreadError('');
-    if (!panelOpen || !currentConversation?.id || accessReadiness !== 'ready') return undefined;
+    if (!panelOpen || !currentConversation?.id || accessReadiness !== 'ready' || !availability.readable) return undefined;
     const unsubscribe = subscribeOpenConversationMessages({
       conversationId: currentConversation.id,
       onData: (items) => {
@@ -169,12 +186,12 @@ export default function ChatDataProvider({ children, role }) {
       if (threadUnsubscribeRef.current === unsubscribe) threadUnsubscribeRef.current = null;
       unsubscribe?.();
     };
-  }, [accessReadiness, currentConversation?.id, panelOpen, threadVersion]);
+  }, [accessReadiness, availability.readable, currentConversation?.id, panelOpen, threadVersion]);
 
   const messages = React.useMemo(() => mergeMessages(olderMessages, liveMessages, localMessages), [liveMessages, localMessages, olderMessages]);
 
   React.useEffect(() => {
-    if (!panelOpen || !currentConversation?.id || messages.length === 0) return undefined;
+    if (!panelOpen || !currentConversation?.id || messages.length === 0 || accessReadiness !== 'ready' || !availability.readable) return undefined;
     const incoming = messages.filter((message) => Number.isSafeInteger(Number(message.seq)) && !isOwnMessage(message, role, uid, branchId));
     const newestIncomingSeq = incoming.reduce((maximum, message) => Math.max(maximum, Number(message.seq)), 0);
     const existingRead = Number(principalStateFor(currentConversation, role, uid, branchId)?.lastReadSeq || 0);
@@ -192,7 +209,7 @@ export default function ChatDataProvider({ children, role }) {
       }
     }, 260);
     return () => clearTimeout(timer);
-  }, [branchId, currentConversation, messages, panelOpen, role, uid]);
+  }, [accessReadiness, availability.readable, branchId, currentConversation, messages, panelOpen, role, uid]);
 
   const openConversation = React.useCallback((conversation) => {
     setResolveError('');
@@ -238,7 +255,7 @@ export default function ChatDataProvider({ children, role }) {
   }, [currentConversation]);
 
   const sendCurrentMessage = React.useCallback((body) => {
-    if (!currentConversation?.id) return;
+    if (!currentConversation?.id || !availability.sendable || accessReadiness !== 'ready') return;
     const clientMutationId = createClientMutationId();
     const optimistic = {
       id: '', clientMutationId, body, createdAt: new Date(), pending: true, failed: false,
@@ -246,7 +263,7 @@ export default function ChatDataProvider({ children, role }) {
     };
     setLocalMessages((items) => mergeMessages(items, optimistic));
     commitMessage(optimistic);
-  }, [branchId, commitMessage, currentConversation?.id, role, uid]);
+  }, [accessReadiness, availability.sendable, branchId, commitMessage, currentConversation?.id, role, uid]);
 
   const retryMessage = React.useCallback((message) => {
     if (!message?.clientMutationId || !message?.failed) return;
@@ -273,7 +290,9 @@ export default function ChatDataProvider({ children, role }) {
   }, [currentConversation?.id, loadingEarlier, messages]);
 
   const value = React.useMemo(() => ({
+    branchDistributors: role === 'manager' && accessReadiness === 'ready' ? (roleData.users || []).filter((user) => user.role === 'distributor' && user.branchId === branchId && ['active', 'approved'].includes(String(user.distributorStatus || user.approvalStatus || user.status || '').toLowerCase()) && (!user.accountStatus || user.accountStatus === 'active') && user.mustChangePassword !== true) : [],
     role, colors, conversations, loading, error, panelOpen, currentConversation, messages,
+    canSend: availability.sendable && accessReadiness === 'ready' && !threadError,
     hasEarlierMessages, loadingEarlier, threadError, resolvingConversation, resolveError,
     totalUnread: totalUnread(conversations, role, uid, branchId),
     totalUnreadLabel: formatBadge(totalUnread(conversations, role, uid, branchId)),
@@ -288,7 +307,7 @@ export default function ChatDataProvider({ children, role }) {
     loadEarlierMessages,
     isOwnMessage: (message) => isOwnMessage(message, role, uid, branchId),
     receiptForMessage: (message) => receiptFor(message, currentConversation, role, uid, branchId),
-  }), [branchId, colors, conversations, currentConversation, error, hasEarlierMessages, loading, loadingEarlier, messages, openConversation, panelOpen, resolveAndOpen, resolveError, resolvingConversation, retryMessage, role, sendCurrentMessage, threadError, uid, loadEarlierMessages]);
+  }), [accessReadiness, roleData.users, branchId, colors, conversations, currentConversation, error, hasEarlierMessages, loading, loadingEarlier, messages, openConversation, panelOpen, resolveAndOpen, resolveError, resolvingConversation, retryMessage, role, sendCurrentMessage, threadError, uid, loadEarlierMessages]);
 
   return (
     <ChatContext.Provider value={value}>

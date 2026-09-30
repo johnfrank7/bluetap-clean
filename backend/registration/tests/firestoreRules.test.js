@@ -95,8 +95,8 @@ test('dispatch reads stay scoped to current Branch ownership and assigned Distri
 
 test('branch definitions and Admin audit logs are backend-write-only', () => {
   assert.match(rules, /match \/branches\/\{branchId\}[\s\S]*allow list, create, update, delete:\s*if false;/);
-  assert.match(rules, /request\.auth\.token\.manager == true/);
-  assert.match(rules, /request\.auth\.token\.admin == true/);
+  assert.match(rules, /request\.auth\.token\.get\('manager', false\) == true/);
+  assert.match(rules, /request\.auth\.token\.get\('admin', false\) == true/);
 });
 
 test('approved Distributor may get only their own authoritative assigned branch', () => {
@@ -115,7 +115,7 @@ test('Distributor branch rule never references requestedBranchId for access', ()
 
 test('isDistributor() requires approval status — branchless and pending Distributors are blocked', () => {
   // isDistributor() checks distributorStatus/approvalStatus/status and branchId is string.
-  assert.match(rules, /function isDistributor\(\)[\s\S]*distributorStatus == 'active' \|\| currentUser\(\)\.distributorStatus == 'approved'/);
+  assert.match(rules, /function isDistributor\(\)[\s\S]*get\('distributorStatus'[\s\S]*\['active', 'approved', 'Active', 'Approved'\]/);
   assert.match(rules, /function isDistributor\(\)[\s\S]*currentUser\(\)\.branchId is string/);
 });
 

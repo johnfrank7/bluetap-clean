@@ -38,7 +38,8 @@ test('Manager operational queues use shared BlueTap visual empty states with con
 });
 
 test('Manager Profile uses the persistent shared profile and branch cache with scoped retry errors', () => {
-  assert.match(managerRealtime, /watch\(doc\(db, 'users', managerUid\), 'profile'/);
+  assert.match(managerRealtime, /useProtectedReadSession\('manager'\)/);
+  assert.match(managerRealtime, /profile: session.profile/);
   assert.match(managerRealtime, /const cached = stateRef\.current/);
   assert.match(managerRealtime, /primeProfile/);
   assert.match(managerProfile, /const manager = realtime\.profile/);
