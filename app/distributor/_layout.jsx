@@ -4,12 +4,15 @@ import { DistributorBottomNav } from '../../components/AppBottomNav';
 import RoleGate from '../../components/RoleGate';
 import UserPortalShell from '../../components/UserPortalShell';
 import { DistributorDataProvider } from '../../components/RoleDataProviders';
+import ChatDataProvider from '../../components/chat/ChatDataProvider';
 
 export default function DistributorLayout() {
   return (
     <RoleGate role="distributor">
       <DistributorDataProvider>
-        <UserPortalShell navigation={<DistributorBottomNav />} />
+        <ChatDataProvider role="distributor">
+          <UserPortalShell navigation={<DistributorBottomNav />} />
+        </ChatDataProvider>
       </DistributorDataProvider>
     </RoleGate>
   );

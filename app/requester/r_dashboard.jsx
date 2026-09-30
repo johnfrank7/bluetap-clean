@@ -26,6 +26,7 @@ import ProductCard from '../../components/ProductCard';
 import BlueTapEmptyState from '../../components/BlueTapEmptyState';
 import PortalSwipeContainer, { PortalSwipeIgnore, REQUESTER_TABS } from '../../components/PortalSwipeContainer';
 import { createPortalStyleSheet, useBlueTapTheme } from '../../components/BlueTapTheme';
+import { RequesterOrderChatActions } from '../../components/chat/ChatOrderActions';
 import { USER_PORTAL_BOTTOM_CONTENT_INSET, USER_PORTAL_LAYOUT } from '../../constants/userPortalLayout';
 import { BLUETAP_COLORS } from '../../constants/bluetapTheme';
 import { normalizeRequesterOrderStatus } from '../../constants/requesterOrderStatus';
@@ -754,6 +755,7 @@ export default function RequesterDashboard() {
                           </TouchableOpacity>
                         )}
                       </View>
+                      <RequesterOrderChatActions order={request} compact />
                     </View>
                   );
                 })

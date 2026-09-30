@@ -60,6 +60,19 @@ There is no Requester-to-Requester chat, personal Manager-to-Manager direct mess
 - Lifecycle reconciliation updates only existing conversations. New valid assignment, membership, and branch relationships remain eligible for the normal on-demand resolve/create path.
 - Terminal order context is a minimal sanitized snapshot only; never copy delivery coordinates or the entire order into chat.
 
+## Realtime frontend
+
+- Requester, Distributor, and Manager role layouts mount one shared `ChatDataProvider` and a floating BlueTap messenger launcher. Chat is not a bottom-navigation or Manager-sidebar destination, and Admin has no general launcher or conversation-summary listener.
+- Each mounted operational role owns exactly one bounded conversation-summary listener. Requester and Distributor query their authenticated UID through `participantUserUids`; Manager queries the trusted current Branch through `participantBranchIds`. Summaries are ordered by `updatedAt` descending and limited to 50.
+- Only the visibly open thread owns a realtime message listener. It reads the newest 40 messages ordered by descending sequence, unsubscribes when the panel closes or the thread changes, and never attaches listeners for every conversation or older page.
+- Older history uses the authenticated bounded Render endpoint in pages of 40. Merge realtime, paginated, and optimistic messages by committed ID and sender-scoped `clientMutationId`, preserving stable sequence order without adding historical listeners.
+- Firestore is used only for authorized conversation-summary and open-thread reads. Resolve, send, retry, and read-cursor mutations always use the Render chat API.
+- Read state advances only while the thread UI is visible and incoming committed messages are presented. Loading summaries, rendering the launcher, or fetching a preview never marks a conversation read; repeated cursor updates are coalesced and never regress.
+- Launcher and row unread counts come from the current logical principal's `participantState`, never from scanning message subcollections. Manager unread belongs to the Branch principal, not an individual Manager.
+- Optimistic messages retain one `clientMutationId` through failure and retry. Pending shows a spinner, a committed message shows `✓` (sent), and `✓✓` appears only when every other active logical recipient has `lastReadSeq >= message.seq` (seen). These marks never claim physical device delivery.
+- Requester order surfaces may open an authoritative `requester_branch` order follow-up and, only while a current assignment exists, a separate `requester_distributor` thread. Distributor order actions may resolve only their currently assigned Requester, while the launcher may resolve the Distributor's current Branch relationship. Manager discovery stays within already authorized operational conversations; there is no global Requester picker.
+- Desktop uses an anchored overlay panel without route navigation. Narrow web and native use a safe-area full-height modal. Both presentations use BlueTap semantic light/dark tokens, accessible controls, a compact coordinate-free order context, and the custom water-drop/chat-bubble mark.
+
 ## Current V1 exclusions
 
-Do not add message editing, deletion, unsend, attachments, images, files, voice, reactions, forwarding, typing indicators, presence, push notifications, search/export, reports, moderation, retention cleanup, unrestricted discovery, or chat UI under this backend contract unless a later approved phase explicitly implements them.
+Do not add message editing, deletion, unsend, attachments, images, files, voice, reactions, forwarding, typing indicators, presence, push notifications, global search/export, reports, moderation, retention cleanup, unrestricted discovery, or an Admin chat inbox unless a later approved phase explicitly implements them.

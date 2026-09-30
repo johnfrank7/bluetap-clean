@@ -18,6 +18,7 @@ import BlueTapEmptyState from '../../components/BlueTapEmptyState';
 import DistributorProfileBanner from '../../components/DistributorProfileBanner';
 import PortalSwipeContainer, { DISTRIBUTOR_TABS, PortalSwipeIgnore } from '../../components/PortalSwipeContainer';
 import { createPortalStyleSheet, useBlueTapTheme } from '../../components/BlueTapTheme';
+import { DistributorOrderChatAction } from '../../components/chat/ChatOrderActions';
 import { USER_PORTAL_BOTTOM_CONTENT_INSET, USER_PORTAL_LAYOUT } from '../../constants/userPortalLayout';
 import { BLUETAP_COLORS } from '../../constants/bluetapTheme';
 import {
@@ -140,6 +141,7 @@ function CurrentRequestCard({ request, distributorProfile, onDetails, onAction }
       <View style={styles.infoGridRow}><View style={styles.infoGridColumn}><Text style={styles.infoGridLabel}>Address</Text><Text style={styles.infoGridValue} numberOfLines={2}>{request.deliveryAddress}</Text><Text style={[styles.infoGridLabel, styles.infoGridLabelGap]}>Scheduled delivery</Text><Text style={styles.infoGridValue} numberOfLines={1}>{request.scheduledDateTime || request.deliveryDate || 'Not set'}</Text></View><View style={styles.infoGridColumn}><Text style={styles.infoGridLabel}>Product Ordered</Text><Text style={styles.infoGridPrimaryValue} numberOfLines={2}>{request.productsOrdered}</Text><Text style={styles.infoGridSubValue} numberOfLines={1}>{request.quantity} | {request.containerType}</Text></View></View>
     </View>
     <View style={styles.cardActionsRow}><TouchableOpacity style={styles.viewDetailsButton} activeOpacity={0.75} onPress={onDetails}><Text style={styles.viewDetailsText}>View Details</Text></TouchableOpacity>{hasAction && <TouchableOpacity style={styles.primaryActionButton} activeOpacity={0.85} onPress={onAction}><Text style={styles.primaryActionText}>{actionLabel}</Text></TouchableOpacity>}</View>
+    <View style={{ marginTop: 8 }}><DistributorOrderChatAction order={request} /></View>
   </View>;
 }
 

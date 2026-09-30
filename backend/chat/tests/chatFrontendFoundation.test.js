@@ -1,0 +1,104 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const test = require('node:test');
+
+const root = path.resolve(__dirname, '..', '..', '..');
+const read = (file) => fs.readFileSync(path.join(root, file), 'utf8');
+const model = require('../../../components/chat/chatModel');
+
+test('user and Manager branch unread totals use logical principal state', () => {
+  const conversations = [{ participantState: [
+    { principalType: 'user', principalId: 'requester-a', unreadCount: 2 },
+    { principalType: 'branch', principalId: 'branch-a', unreadCount: 3 },
+  ] }];
+  assert.equal(model.totalUnread(conversations, 'requester', 'requester-a', ''), 2);
+  assert.equal(model.totalUnread(conversations, 'manager', 'manager-a', 'branch-a'), 3);
+});
+
+test('receipt semantics move from pending to sent to seen', () => {
+  const conversation = { participantState: [
+    { principalType: 'user', principalId: 'requester-a', lastReadSeq: 8 },
+    { principalType: 'user', principalId: 'distributor-a', lastReadSeq: 6 },
+  ] };
+  const message = { seq: 7, senderUid: 'requester-a' };
+  assert.equal(model.receiptFor({ ...message, pending: true }, conversation, 'requester', 'requester-a', ''), 'pending');
+  assert.equal(model.receiptFor(message, conversation, 'requester', 'requester-a', ''), 'sent');
+  conversation.participantState[1].lastReadSeq = 7;
+  assert.equal(model.receiptFor(message, conversation, 'requester', 'requester-a', ''), 'seen');
+});
+
+test('optimistic reconciliation deduplicates the committed mutation', () => {
+  const optimistic = { clientMutationId: 'same-id', senderUid: 'requester-a', body: 'Hello', pending: true };
+  const committed = { id: 'message-a', seq: 2, clientMutationId: 'same-id', senderUid: 'requester-a', body: 'Hello' };
+  const merged = model.mergeMessages([optimistic], [committed]);
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0].id, 'message-a');
+  assert.equal(merged[0].pending, false);
+});
+
+test('summary listeners are role scoped and bounded to fifty', () => {
+  const source = read('services/chatRealtime.js');
+  assert.match(source, /role === 'manager'[\s\S]*participantBranchIds/);
+  assert.match(source, /\['requester', 'distributor'\][\s\S]*participantUserUids/);
+  assert.match(source, /CHAT_SUMMARY_LIMIT = 50/);
+  assert.match(source, /limit\(CHAT_SUMMARY_LIMIT\)/);
+});
+
+test('one visible open thread listener is bounded to forty and cleaned up on change', () => {
+  const realtime = read('services/chatRealtime.js');
+  const provider = read('components/chat/ChatDataProvider.jsx');
+  assert.match(realtime, /CHAT_REALTIME_MESSAGE_LIMIT = 40/);
+  assert.match(realtime, /orderBy\('seq', 'desc'\)[\s\S]*limit\(CHAT_REALTIME_MESSAGE_LIMIT\)/);
+  assert.match(provider, /threadUnsubscribeRef\.current\?\.\(\)/);
+  assert.match(provider, /if \(!panelOpen \|\| !currentConversation\?\.id\) return undefined/);
+});
+
+test('read state advances only after a visible thread presents incoming messages', () => {
+  const provider = read('components/chat/ChatDataProvider.jsx');
+  assert.match(provider, /if \(!panelOpen \|\| !currentConversation\?\.id \|\| messages\.length === 0\)/);
+  assert.match(provider, /incoming = messages\.filter/);
+  assert.match(provider, /markRead\(\{ conversationId: currentConversation\.id, lastReadSeq: newestIncomingSeq \}\)/);
+});
+
+test('retry preserves the original client mutation identifier', () => {
+  const provider = read('components/chat/ChatDataProvider.jsx');
+  assert.match(provider, /const retry = \{ \.\.\.message, pending: true, failed: false \}/);
+  assert.match(provider, /clientMutationId: optimistic\.clientMutationId/);
+});
+
+test('operational layouts mount chat while Admin stays excluded', () => {
+  for (const role of ['requester', 'distributor', 'manager']) {
+    assert.match(read(`app/${role}/_layout.jsx`), new RegExp(`ChatDataProvider role="${role}"`));
+  }
+  assert.doesNotMatch(read('app/admin/_layout.jsx'), /ChatDataProvider|ChatFloatingLauncher/);
+});
+
+test('order entry points resolve only server-authorized conversation intents', () => {
+  const source = read('components/chat/ChatOrderActions.jsx');
+  assert.match(source, /type: 'requester_branch', intent: 'order_followup', orderId/);
+  assert.match(source, /type: 'requester_distributor', orderId/);
+  assert.doesNotMatch(source, /requesterUid\s*:|distributorUid\s*:|participantUserUids\s*:/);
+});
+
+test('message bubbles keep incoming and outgoing alignment with semantic theme surfaces', () => {
+  const source = read('components/chat/ChatMessageBubble.jsx');
+  assert.match(source, /own \? styles\.outgoingRow : styles\.incomingRow/);
+  assert.match(source, /colors\.primaryAction/);
+  assert.match(source, /colors\.surfaceAlt/);
+});
+
+test('desktop and mobile messenger presentations remain overlay based', () => {
+  const source = read('components/chat/ChatPanel.jsx');
+  assert.match(source, /const mobile = width < 720/);
+  assert.match(source, /<Modal visible transparent=\{false\}/);
+  assert.match(source, /styles\.desktopAnchor/);
+});
+
+test('older history uses one bounded API page and merges without duplicate realtime listeners', () => {
+  const provider = read('components/chat/ChatDataProvider.jsx');
+  const api = read('services/chatApi.js');
+  assert.match(provider, /loadMessageHistory\(\{ conversationId: currentConversation\.id, beforeSeq, limit: 40 \}\)/);
+  assert.match(provider, /setOlderMessages\(\(items\) => mergeMessages\(items, page\.messages \|\| \[\]\)\)/);
+  assert.match(api, /beforeSeq/);
+});

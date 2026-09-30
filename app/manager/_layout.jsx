@@ -4,6 +4,7 @@ import { Stack, usePathname } from 'expo-router';
 import RoleGate from '../../components/RoleGate';
 import { AdminThemeProvider } from '../../components/AdminTheme';
 import { ManagerRealtimeDataProvider } from '../../components/ManagerRealtimeData';
+import ChatDataProvider from '../../components/chat/ChatDataProvider';
 
 export default function ManagerLayout() {
   const pathname = usePathname();
@@ -11,7 +12,9 @@ export default function ManagerLayout() {
     <AdminThemeProvider>
       <RoleGate allowedRoles={["manager"]} bypass={pathname === '/manager/login'}>
         <ManagerRealtimeDataProvider>
-          <Stack screenOptions={{ headerShown: false, animation: 'none' }} />
+          <ChatDataProvider role="manager">
+            <Stack screenOptions={{ headerShown: false, animation: 'none' }} />
+          </ChatDataProvider>
         </ManagerRealtimeDataProvider>
       </RoleGate>
     </AdminThemeProvider>

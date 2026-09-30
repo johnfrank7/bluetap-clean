@@ -26,6 +26,7 @@ import BlueTapEmptyState from '../../components/BlueTapEmptyState';
 import PortalSwipeContainer, { REQUESTER_TABS } from '../../components/PortalSwipeContainer';
 import { createPortalStyleSheet, useBlueTapTheme } from '../../components/BlueTapTheme';
 import TopToastFeedback from '../../components/TopToastFeedback';
+import { RequesterOrderChatActions } from '../../components/chat/ChatOrderActions';
 import { canBuyAgain as isBuyAgainEligible } from '../../services/buyAgain';
 import { USER_PORTAL_BOTTOM_CONTENT_INSET, USER_PORTAL_LAYOUT } from '../../constants/userPortalLayout';
 import { BLUETAP_COLORS } from '../../constants/bluetapTheme';
@@ -332,6 +333,7 @@ const RequestCard = ({
           </TouchableOpacity>
         )}
       </View>
+      {!isHistory && <RequesterOrderChatActions order={request} compact />}
     </View>
   );
 };
