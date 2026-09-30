@@ -21,8 +21,11 @@ test('verified Distributor navigation destinations exist as Expo Router files', 
 
 test('Review Assignment and Requests use the verified existing Distributor request route', () => {
   const dashboard = read('app/distributor/d_dashboard.jsx');
+  const requests = read('app/distributor/d_requests.jsx');
   assert.match(dashboard, /\['pending', 'distributor assigned'\][\s\S]*router\.replace\('\/distributor\/d_requests'\)/);
   assert.doesNotMatch(dashboard, /\/distributor\/(?:assignment|review|ballot)(?:['"/?]|$)/);
+  assert.match(requests, /export default function DistributorRequests\(\) \{\s*const \{ colors \} = useBlueTapTheme\(\);/);
+  assert.match(requests, /placeholderTextColor=\{colors\.textSecondary\}/);
 });
 
 test('floating chat and station chat remain overlay actions without route navigation', () => {

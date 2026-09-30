@@ -370,7 +370,7 @@ const ScheduleOption = memo(function ScheduleOption({
 });
 
 export default function DistributorRequests() {
-  useBlueTapTheme();
+  const { colors } = useBlueTapTheme();
   const router = useRouter();
   const sheetAnim = useRef(new Animated.Value(0)).current;
   const toastAnim = useRef(new Animated.Value(0)).current;
