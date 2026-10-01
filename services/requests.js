@@ -6,6 +6,7 @@ import {
   normalizeRequesterOrderStatus,
 } from '../constants/requesterOrderStatus';
 import { parseTimestamp } from './notificationTimestamp';
+const { formatDeliveryFailureReason } = require('../constants/deliveryFailureReasons');
 
 export const REQUESTS_COLLECTION = 'requests';
 
@@ -82,6 +83,7 @@ const normalizeRequest = (id, data = {}) => {
     contact_number: data.contact_number || '',
     address: data.address || data.addressSnapshot || data.deliveryLocation?.address || '',
     deliveryLocation: data.deliveryLocation || null,
+    branchLocation: data.branchLocation || null,
     assignedDistributorUid: data.assignedDistributorUid || '',
     assignmentVersion: data.assignmentVersion,
     product_id: data.product_id || items[0]?.product_id || '',
@@ -119,6 +121,10 @@ const normalizeRequest = (id, data = {}) => {
     assigned_at: data.assigned_at || data.assignedAt || null,
     deliveryFailedAt: data.deliveryFailedAt || data.delivery_failed_at || null,
     delivery_failed_at: data.delivery_failed_at || data.deliveryFailedAt || null,
+    failureReason: formatDeliveryFailureReason(data, ''),
+    failureReasonCode: data.failureReasonCode || '',
+    failureReasonLabel: data.failureReasonLabel || '',
+    failureReasonNote: data.failureReasonNote || '',
     isLocal: !!data.isLocal,
   };
 };

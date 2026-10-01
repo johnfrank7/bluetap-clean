@@ -7,8 +7,6 @@ import {
   TouchableOpacity,
   ScrollView,
   useWindowDimensions,
-  Modal,
-  TextInput,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -20,6 +18,7 @@ import { createShadow } from '../../components/shadowStyles';
 import BlueTapEmptyState from '../../components/BlueTapEmptyState';
 import DistributorProfileBanner from '../../components/DistributorProfileBanner';
 import TopToastFeedback from '../../components/TopToastFeedback';
+import DeliveryActionDialog from '../../components/DeliveryActionDialog';
 import PortalSwipeContainer, { DISTRIBUTOR_TABS, PortalSwipeIgnore } from '../../components/PortalSwipeContainer';
 import { createPortalStyleSheet, useBlueTapTheme } from '../../components/BlueTapTheme';
 import { DistributorOrderChatAction } from '../../components/chat/ChatOrderActions';
@@ -147,8 +146,10 @@ function CurrentRequestCard({ request, distributorProfile, onDetails, onAction, 
       <View style={styles.infoGridRow}><View style={styles.infoGridColumn}><Text style={styles.infoGridLabel}>Address</Text><Text style={styles.infoGridValue} numberOfLines={2}>{request.deliveryAddress}</Text><Text style={[styles.infoGridLabel, styles.infoGridLabelGap]}>Scheduled delivery</Text><Text style={styles.infoGridValue} numberOfLines={1}>{request.scheduledDateTime || request.deliveryDate || 'Not set'}</Text></View><View style={styles.infoGridColumn}><Text style={styles.infoGridLabel}>Product Ordered</Text><Text style={styles.infoGridPrimaryValue} numberOfLines={2}>{request.productsOrdered}</Text><Text style={styles.infoGridSubValue} numberOfLines={1}>{request.quantity} | {request.containerType}</Text></View></View>
     </View>
     <View style={styles.cardActionsRow}><TouchableOpacity style={styles.viewDetailsButton} activeOpacity={0.75} onPress={onDetails}><Text style={styles.viewDetailsText}>View Details</Text></TouchableOpacity>{hasAction && <TouchableOpacity style={styles.primaryActionButton} activeOpacity={0.85} onPress={onAction}><Text style={styles.primaryActionText}>{actionLabel}</Text></TouchableOpacity>}</View>
-    <View style={{ marginTop: 8 }}><DistributorOrderChatAction order={request} /></View>
-    <TouchableOpacity disabled={processing} accessibilityRole="button" onPress={onFailure} style={styles.viewDetailsButton}><Text style={styles.viewDetailsText}>Delivery Failed</Text></TouchableOpacity>
+    <View style={styles.cardActionsRow}>
+      <View style={styles.secondaryActionItem}><DistributorOrderChatAction order={request} /></View>
+      <TouchableOpacity disabled={processing} accessibilityRole="button" onPress={onFailure} style={[styles.viewDetailsButton, styles.failureActionButton]}><Text style={styles.failureActionText}>Delivery Failed</Text></TouchableOpacity>
+    </View>
   </View>;
 }
 
@@ -190,7 +191,6 @@ function DistributorDashboardContent() {
   const liveGreeting = useLiveGreeting();
   const [detailsVisible, setDetailsVisible] = useState(false);
   const [deliveryAction, setDeliveryAction] = useState(null);
-  const [failureReason, setFailureReason] = useState('');
   const [processing, setProcessing] = useState(false);
   const [toast, setToast] = useState({ visible: false, message: '', type: 'info' });
   const [activeRequestIndex, setActiveRequestIndex] = useState(0);
@@ -219,7 +219,7 @@ function DistributorDashboardContent() {
     );
   }, [activeRequest?.distributorUniqueId, activeRequest?.distributor_unique_id, distributorProfile]);
   const dashboardCounts = useMemo(() => getDistributorDashboardCounts(screenOrders), [screenOrders]);
-  const currentRequestCardWidth = Math.min(300, Math.max(1, Math.min(width, USER_PORTAL_LAYOUT.maxWidth) - (USER_PORTAL_LAYOUT.gutter * 2)));
+  const currentRequestCardWidth = Math.min(560, Math.max(1, Math.min(width, USER_PORTAL_LAYOUT.maxWidth) - (USER_PORTAL_LAYOUT.gutter * 2)));
   const currentRequestSnap = currentRequestCardWidth + 12;
 
   const dashboardSummary = useMemo(() => [
@@ -284,7 +284,7 @@ function DistributorDashboardContent() {
     }
     if (!request) return;
     if (normalizeStatus(request.status) === 'out for delivery') {
-      setDeliveryAction({ id: request.sourceId, type: 'delivered' });
+      setDeliveryAction({ id: request.sourceId, reference: request.requestId, type: 'delivered' });
       return;
     }
 
@@ -296,17 +296,13 @@ function DistributorDashboardContent() {
     router.replace('/distributor/d_scheduled_requests');
   };
 
-  const submitDeliveryAction = async () => {
+  const submitDeliveryAction = async (failure = {}) => {
     if (!deliveryAction || processing) return;
-    if (deliveryAction.type === 'failed' && !failureReason.trim()) {
-      setToast({ visible: true, type: 'error', message: 'Please provide a failure reason.' });
-      return;
-    }
     setProcessing(true);
     try {
-      if (deliveryAction.type === 'failed') await failAssignedDelivery(deliveryAction.id, failureReason.trim());
+      if (deliveryAction.type === 'failed') await failAssignedDelivery(deliveryAction.id, failure);
       else await completeAssignedDelivery(deliveryAction.id);
-      setDeliveryAction(null); setFailureReason('');
+      setDeliveryAction(null);
       setToast({ visible: true, type: 'success', message: 'Delivery status updated.' });
     } catch (error) { setToast({ visible: true, type: 'error', message: error.message || 'Delivery could not be updated.' }); }
     finally { setProcessing(false); }
@@ -361,7 +357,7 @@ function DistributorDashboardContent() {
               ) : activeRequest ? (
                 <PortalSwipeIgnore>
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} snapToInterval={currentRequestSnap} decelerationRate="fast" contentContainerStyle={styles.currentRequestsCarousel} onMomentumScrollEnd={(event) => setActiveRequestIndex(Math.round(event.nativeEvent.contentOffset.x / currentRequestSnap))}>
-                    {activeRequests.map((request, index) => <View key={request.sourceId || request.requestId || index} style={[styles.currentRequestSlide, { width: currentRequestCardWidth }]}><CurrentRequestCard request={request} distributorProfile={distributorProfile} processing={processing} onFailure={() => { setFailureReason(''); setDeliveryAction({ id: request.sourceId, type: 'failed' }); }} onDetails={() => { setActiveRequestIndex(index); setDetailsVisible(true); }} onAction={() => { setActiveRequestIndex(index); handleCurrentRequestAction(request); }} /></View>)}
+                    {activeRequests.map((request, index) => <View key={request.sourceId || request.requestId || index} style={[styles.currentRequestSlide, { width: currentRequestCardWidth }]}><CurrentRequestCard request={request} distributorProfile={distributorProfile} processing={processing} onFailure={() => setDeliveryAction({ id: request.sourceId, reference: request.requestId, type: 'failed' })} onDetails={() => { setActiveRequestIndex(index); setDetailsVisible(true); }} onAction={() => { setActiveRequestIndex(index); handleCurrentRequestAction(request); }} /></View>)}
                   </ScrollView>
                   {activeRequests.length > 1 && <View style={styles.carouselIndicators}>{activeRequests.map((request, index) => <View key={`${request.sourceId || request.requestId}-${index}`} style={[styles.carouselIndicator, index === activeRequestIndex && styles.carouselIndicatorActive]} />)}</View>}
                 </PortalSwipeIgnore>
@@ -413,16 +409,14 @@ function DistributorDashboardContent() {
         onClose={() => setDetailsVisible(false)}
         request={detailsRequestData}
       />
-      <Modal visible={Boolean(deliveryAction)} transparent animationType="fade" onRequestClose={() => !processing && setDeliveryAction(null)}>
-        <View style={{ flex: 1, justifyContent: 'center', padding: 24, backgroundColor: colors.overlay }}>
-          <View style={{ backgroundColor: colors.surface, padding: 20, borderRadius: 16, gap: 16 }}>
-            <Text style={{ color: colors.textPrimary, fontWeight: 'bold' }}>{deliveryAction?.type === 'failed' ? 'Report delivery failure' : 'Confirm delivered'}</Text>
-            {deliveryAction?.type === 'failed' && <TextInput accessibilityLabel="Delivery failure reason" value={failureReason} onChangeText={setFailureReason} maxLength={240} multiline style={{ color: colors.textPrimary, borderColor: colors.border, borderWidth: 1, padding: 12 }} />}
-            <TouchableOpacity disabled={processing} onPress={submitDeliveryAction}><Text style={{ color: colors.primary }}>{processing ? 'Saving...' : 'Confirm'}</Text></TouchableOpacity>
-            <TouchableOpacity disabled={processing} onPress={() => setDeliveryAction(null)}><Text style={{ color: colors.textSecondary }}>Cancel</Text></TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
+      <DeliveryActionDialog
+        visible={Boolean(deliveryAction)}
+        action={deliveryAction?.type}
+        orderReference={deliveryAction?.reference || activeRequest?.requestId}
+        busy={processing}
+        onCancel={() => !processing && setDeliveryAction(null)}
+        onConfirm={submitDeliveryAction}
+      />
       <TopToastFeedback {...toast} onDismiss={() => setToast((value) => ({ ...value, visible: false }))} />
     </SafeAreaView>
     </DistributorPortalBackground>
@@ -544,7 +538,7 @@ const styles = createPortalStyleSheet({
   },
   currentRequestsCarousel: {
     gap: 12,
-    paddingRight: 20,
+    paddingRight: 0,
   },
   currentRequestSlide: {
     maxWidth: '100%',
@@ -647,6 +641,19 @@ const styles = createPortalStyleSheet({
     color: BLUE,
     fontSize: 13,
     fontWeight: '600',
+  },
+  secondaryActionItem: {
+    flexGrow: 1,
+    flexBasis: 118,
+    minWidth: 0,
+  },
+  failureActionButton: {
+    borderColor: BLUETAP_COLORS.danger,
+  },
+  failureActionText: {
+    color: BLUETAP_COLORS.danger,
+    fontSize: 13,
+    fontWeight: '700',
   },
   primaryActionButton: {
     flexGrow: 1,

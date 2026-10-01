@@ -77,6 +77,13 @@ const getDetailsRequestData = (request) => {
     ),
     contactNumber: request.contact,
     deliveryAddress: request.address,
+    deliveryLocation: request.deliveryLocation,
+    branchLocation: request.branchLocation,
+    branchId: request.branchId,
+    failureReason: request.failureReason,
+    failureReasonCode: request.failureReasonCode,
+    failureReasonLabel: request.failureReasonLabel,
+    failureReasonNote: request.failureReasonNote,
     items: [
       {
         id: request.id,

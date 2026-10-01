@@ -184,6 +184,9 @@ const getDetailsRequestData = (request) => {
     distributorUniqueId: formatDisplayUniqueId(distributorUniqueId, ''),
     contactNumber: request.contact || request.contact_number,
     deliveryAddress: request.address || request.deliveryAddress,
+    deliveryLocation: request.deliveryLocation,
+    branchLocation: request.branchLocation,
+    branchId: request.branchId,
     items: [
       {
         id: request.id,

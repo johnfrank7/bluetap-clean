@@ -1,5 +1,5 @@
 import React from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import ChatReceipt from './ChatReceipt';
 import chatModel from './chatModel';
@@ -38,8 +38,8 @@ const styles = StyleSheet.create({
   row: { width: '100%', marginVertical: 4 },
   outgoingRow: { alignItems: 'flex-end' },
   incomingRow: { alignItems: 'flex-start' },
-  bubble: { maxWidth: '82%', minWidth: 76, borderRadius: 17, paddingHorizontal: 12, paddingTop: 9, paddingBottom: 7 },
-  body: { fontSize: 14, lineHeight: 20 },
+  bubble: { maxWidth: '76%', minWidth: 44, flexShrink: 1, borderRadius: 17, paddingHorizontal: 12, paddingTop: 8, paddingBottom: 6 },
+  body: { fontSize: 14, lineHeight: 20, flexShrink: 1, ...Platform.select({ web: { overflowWrap: 'anywhere', wordBreak: 'break-word' }, default: {} }) },
   meta: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 5, marginTop: 3 },
   time: { fontSize: 10, fontWeight: '600' },
   retry: { fontSize: 11, fontWeight: '800', marginTop: 5, textDecorationLine: 'underline' },

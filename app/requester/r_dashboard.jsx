@@ -495,10 +495,16 @@ export default function RequesterDashboard() {
         contactNumber: liveDetailsRequest.contactNumberSnapshot || liveDetailsRequest.contact_number || 'Not set',
         deliveryAddress: liveDetailsRequest.addressSnapshot || liveDetailsRequest.address || 'Not set',
         deliveryLocation: liveDetailsRequest.deliveryLocation,
+        branchLocation: liveDetailsRequest.branchLocation,
+        branchId: liveDetailsRequest.currentBranchId || liveDetailsRequest.branchId,
         items: getRequestItems(liveDetailsRequest),
         subtotalAtOrder: liveDetailsRequest.subtotalAtOrder,
         deliveryFeeAtOrder: liveDetailsRequest.deliveryFeeAtOrder,
         grandTotalAmount: getRequestTotalAmount(liveDetailsRequest),
+        failureReason: liveDetailsRequest.failureReason,
+        failureReasonCode: liveDetailsRequest.failureReasonCode,
+        failureReasonLabel: liveDetailsRequest.failureReasonLabel,
+        failureReasonNote: liveDetailsRequest.failureReasonNote,
       }
     : null;
 

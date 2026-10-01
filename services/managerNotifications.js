@@ -1,5 +1,7 @@
 ﻿const { belongsToBranch, statusOf } = require('./managerOperational');
 
+const { formatDeliveryFailureReason } = require('../constants/deliveryFailureReasons');
+
 const deliveryMessages = {
   ASSIGNMENT_ACCEPTED: ['Distributor accepted the assignment.', 'accepted', '/manager/distributors'],
   ASSIGNMENT_DECLINED: ['Distributor declined the assignment. Reassignment is needed.', 'delivery_failed', '/manager/distributors'],
@@ -15,11 +17,11 @@ const NOTIFICATION_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 function getManagerNotifications(orders = [], incomingTransfers = [], decisions = [], branchId = '', parseTimestamp, now = Date.now()) {
   if (!branchId || typeof parseTimestamp !== 'function') return [];
   const events = [];
-  const add = (id, order, message, status, at, path) => {
+  const add = (id, order, message, status, at, path, navigable = true) => {
     const date = parseTimestamp(at);
     if (!date || date.getTime() < now - NOTIFICATION_RETENTION_MS) return;
     events.push({ id, orderId: order.id, requestId: order.requestId || order.request_id || order.id,
-      requesterName: order.requesterNameSnapshot || order.requesterName || 'Requester', message, status, at: date, path, order });
+      requesterName: order.requesterNameSnapshot || order.requesterName || 'Requester', message, status, at: date, path, navigable, order });
   };
   for (const order of orders.filter((item) => belongsToBranch(item, branchId))) {
     const status = statusOf(order.status);
@@ -45,7 +47,10 @@ function getManagerNotifications(orders = [], incomingTransfers = [], decisions 
     for (const [index, entry] of (Array.isArray(order.distributorDeliveryHistory) ? order.distributorDeliveryHistory : []).entries()) {
       const definition = deliveryMessages[entry.event];
       if (definition && entry.branchId === branchId && entry.event !== 'ASSIGNMENT_DECLINED') {
-        add(`${order.id}:delivery:${index}`, order, definition[0], definition[1], entry.createdAt, definition[2]);
+        const message = entry.event === 'DELIVERY_FAILED'
+          ? `Delivery failed. Reason: ${formatDeliveryFailureReason(entry, formatDeliveryFailureReason(order, 'Delivery issue reported'))}.`
+          : definition[0];
+        add(`${order.id}:delivery:${index}`, order, message, definition[1], entry.createdAt, definition[2]);
       }
     }
   }
@@ -58,7 +63,7 @@ function getManagerNotifications(orders = [], incomingTransfers = [], decisions 
     events.push({ id: `transfer-decision:${decision.id}`, orderId: decision.orderId,
       requestId: decision.requestIdSnapshot || decision.orderId, requesterName: '',
       message: `Branch transfer ${decision.decision === 'accepted' ? 'accepted' : 'declined'} by ${decision.targetBranchNameSnapshot || 'target branch'}.`,
-      status: decision.decision === 'accepted' ? 'accepted' : 'declined', at: date, path: '/manager/request',
+      status: decision.decision === 'accepted' ? 'accepted' : 'declined', at: date, path: '/manager/request', navigable: false,
       order: {
         id: decision.orderId,
         requestId: decision.requestIdSnapshot || decision.orderId,

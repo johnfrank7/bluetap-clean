@@ -6,6 +6,7 @@ import { getApiUrl } from './apiClient';
 import { formatDisplayUniqueId, isPublicOrFormattedUniqueId } from './uniqueIds';
 import { subscribeProtectedReadSession, useProtectedReadSession } from './useProtectedReadSession';
 const { protectedReadReadiness } = require('./protectedReadReadiness');
+const { formatDeliveryFailureReason } = require('../constants/deliveryFailureReasons');
 
 export async function getAssignedDistributorOrders() {
   const token = await auth.currentUser?.getIdToken();
@@ -42,7 +43,10 @@ export async function updateAssignedDistributorOrder(orderId, action, payload = 
 export const acceptAssignedOrder = (orderId) => updateAssignedDistributorOrder(orderId, 'accept-assignment');
 export const declineAssignedOrder = (orderId, declineReason = '') => updateAssignedDistributorOrder(orderId, 'decline-assignment', { declineReason });
 export const startAssignedDelivery = (orderId) => updateAssignedDistributorOrder(orderId, 'start-delivery');
-export const failAssignedDelivery = (orderId, failureReason) => updateAssignedDistributorOrder(orderId, 'fail-delivery', { failureReason });
+export const failAssignedDelivery = (orderId, reason = {}) => updateAssignedDistributorOrder(orderId, 'fail-delivery', {
+  failureReasonCode: reason.failureReasonCode,
+  failureReasonNote: reason.failureReasonNote || '',
+});
 export const rescheduleAssignedDelivery = (orderId, scheduledAt) => updateAssignedDistributorOrder(orderId, 'reschedule-delivery', { scheduledAt });
 export const completeAssignedDelivery = (orderId) => updateAssignedDistributorOrder(orderId, 'mark-delivered');
 
@@ -151,7 +155,10 @@ export function toDistributorScreenOrder(order = {}) {
     distributorUniqueId: formattedDistributorId,
     items: mappedItems,
     grandTotalAmount: totalAmount,
-    failureReason: safeString(order.failureReason, ''),
+    failureReason: formatDeliveryFailureReason(order, ''),
+    failureReasonCode: safeString(order.failureReasonCode, ''),
+    failureReasonLabel: safeString(order.failureReasonLabel, ''),
+    failureReasonNote: safeString(order.failureReasonNote, ''),
     notes: safeString(order.notes || order.specialInstructions, ''),
     specialInstructions: safeString(order.notes || order.specialInstructions, ''),
     deliveryLocation: order.deliveryLocation || null,

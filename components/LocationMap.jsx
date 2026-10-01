@@ -50,11 +50,13 @@ export default function LocationMap({
   serviceRadiusKm,
   markerLabel = 'Your delivery location',
   themed = false,
+  themeColors = null,
   readOnly = false,
   height = DEFAULT_MAP_HEIGHT,
 }) {
-  const { colors, isDark } = useBlueTapTheme();
-  const useDarkSurface = themed && isDark;
+  const portalTheme = useBlueTapTheme();
+  const colors = themeColors || portalTheme.colors;
+  const useDarkSurface = themed && (Boolean(themeColors) || portalTheme.isDark);
   const [width, setWidth] = React.useState(0);
   const [viewport, setViewport] = React.useState({ center: DEFAULT_CENTER, zoom: 13 });
   const requester = normalizeLocation(location);
@@ -241,7 +243,7 @@ export default function LocationMap({
     const midY = (reqPos.top + stationPos.top) / 2;
     return {
       left: reqPos.left,
-      top: reqPos.top,
+      top: reqPos.top - 1.5,
       width: length,
       angle,
       midX,
@@ -314,7 +316,11 @@ export default function LocationMap({
                   transform: [{ rotate: `${lineDetails.angle}deg` }],
                 },
               ]}
-            />
+            >
+              {Array.from({ length: Math.max(1, Math.ceil(lineDetails.width / 12)) }, (_, index) => (
+                <View key={`distance-dash-${index}`} style={styles.distanceDash} />
+              ))}
+            </View>
             {distanceKmValue !== null && (
               <View
                 pointerEvents="none"
@@ -413,7 +419,7 @@ export default function LocationMap({
       <View style={styles.mapFooter}>
         <Text style={[styles.help, useDarkSurface && { color: colors.textSecondary }]}>
           {readOnly
-            ? 'Drag or zoom to inspect distance and stations.'
+            ? 'Dashed line shows straight-line distance estimate, not driving distance.'
             : onLocationChange
             ? 'Tap to place, drag the pin to refine, or drag the map to pan.'
             : 'Drag or zoom to inspect the branch location.'}
@@ -516,11 +522,11 @@ const styles = StyleSheet.create({
     position: 'absolute',
     alignItems: 'center',
     zIndex: 4,
-    transform: [{ translateX: -14 }, { translateY: -30 }],
+    transform: [{ translateX: -14 }, { translateY: -34 }],
   },
   stationPinSelected: {
     zIndex: 6,
-    transform: [{ translateX: -17 }, { translateY: -36 }],
+    transform: [{ translateX: -17 }, { translateY: -42 }],
   },
   stationPinHead: {
     width: 28,
@@ -596,10 +602,18 @@ const styles = StyleSheet.create({
   distanceLine: {
     position: 'absolute',
     height: 3,
-    backgroundColor: '#EF4444',
     zIndex: 2,
-    borderRadius: 1.5,
     opacity: 0.85,
+    overflow: 'hidden',
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  distanceDash: {
+    width: 7,
+    height: 3,
+    marginRight: 5,
+    borderRadius: 1.5,
+    backgroundColor: '#EF4444',
   },
   distanceBadge: {
     position: 'absolute',

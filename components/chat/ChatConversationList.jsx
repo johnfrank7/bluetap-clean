@@ -14,16 +14,86 @@ const formatTimestamp = (value) => {
     : date.toLocaleDateString([], { month: 'short', day: 'numeric' });
 };
 
+const matchesSearch = (item, needle) => !needle || [
+  item.displayName,
+  item.contextLabel,
+  item.orderReference,
+  item.lastMessagePreview,
+].some((value) => String(value || '').toLowerCase().includes(needle));
+
+function ConversationRow({ colors, conversation, onPress }) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`${conversation.displayName}${conversation.unreadCount ? `, ${conversation.unreadCount} unread` : ''}`}
+      onPress={onPress}
+      style={({ pressed, hovered }) => [styles.row, { borderBottomColor: colors.border }, (pressed || hovered) && { backgroundColor: colors.surfaceAlt }]}
+    >
+      <View style={[styles.avatar, { backgroundColor: colors.primarySoft }]}><BlueTapChatIcon size={23} color={colors.primary} /></View>
+      <View style={styles.rowText}>
+        <View style={styles.rowTop}><Text style={[styles.name, { color: colors.textPrimary }, conversation.unreadCount > 0 && styles.unreadName]} numberOfLines={1}>{conversation.displayName}</Text><Text style={[styles.timestamp, { color: colors.textSecondary }]}>{formatTimestamp(conversation.lastMessageAt || conversation.updatedAt)}</Text></View>
+        {!!conversation.contextLabel && <Text style={[styles.context, { color: colors.textSecondary }]} numberOfLines={1}>{conversation.contextLabel}</Text>}
+        <View style={styles.previewRow}><Text style={[styles.preview, { color: conversation.unreadCount ? colors.textPrimary : colors.textSecondary }]} numberOfLines={1}>{conversation.lastMessagePreview || conversation.emptyPreview || 'Start the conversation'}</Text>{conversation.unreadCount > 0 && <View style={[styles.badge, { backgroundColor: colors.danger }]}><Text style={styles.badgeText}>{conversation.unreadLabel}</Text></View>}</View>
+      </View>
+    </Pressable>
+  );
+}
+
+function ConversationSection({ colors, label, rows, openConversation, resolveAndOpen }) {
+  if (!rows.length) return null;
+  return (
+    <View style={styles.section}>
+      <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>{label}</Text>
+      <View style={[styles.sectionRows, { borderColor: colors.border }]}>
+        {rows.map((row) => (
+          <ConversationRow
+            key={row.key || row.id}
+            colors={colors}
+            conversation={row}
+            onPress={() => row.resolveIntent
+              ? resolveAndOpen(row.resolveIntent).catch(() => {})
+              : openConversation(row)}
+          />
+        ))}
+      </View>
+    </View>
+  );
+}
+
 export default function ChatConversationList() {
-  const { colors, conversations, branchDistributors = [], error, loading, openConversation, resolveAndOpen, resolveError, resolvingConversation, retrySummaries, role } = useChat();
+  const { colors, conversations, branchDistributors = [], error, loading, openConversation, resolveAndOpen, resolveError, resolvingConversation, retrySummaries, role, stationName } = useChat();
   const [search, setSearch] = React.useState('');
   const needle = search.trim().toLowerCase();
-  const filtered = conversations.filter((conversation) => !needle || [
-    conversation.displayName,
-    conversation.contextLabel,
-    conversation.orderReference,
-    conversation.lastMessagePreview,
-  ].some((value) => String(value || '').toLowerCase().includes(needle)));
+  const filtered = conversations.filter((conversation) => matchesSearch(conversation, needle));
+  const managerDistributorRows = role === 'manager' ? branchDistributors.map((user) => {
+    const distributorId = user.uid || user.id;
+    const existing = conversations.find((conversation) => conversation.type === 'distributor_branch' && conversation.distributorUid === distributorId);
+    return {
+      ...(existing || {}),
+      key: existing?.id || `pinned-${distributorId}`,
+      displayName: user.fullName || existing?.displayName || 'Branch Distributor',
+      contextLabel: existing?.contextLabel || 'Distributor · Your branch',
+      emptyPreview: 'Message this Distributor',
+      ...(existing ? {} : { resolveIntent: { type: 'distributor_branch', distributorId }, unreadCount: 0 }),
+    };
+  }).filter((row) => matchesSearch(row, needle)) : [];
+  const managerRequesterRows = role === 'manager' ? filtered.filter((conversation) => conversation.type === 'requester_branch') : [];
+  const managerCoordinationRows = role === 'manager' ? filtered.filter((conversation) => conversation.type === 'branch_coordination') : [];
+  const stationConversation = role === 'distributor' ? conversations.find((conversation) => conversation.type === 'distributor_branch') : null;
+  const distributorStationRows = role === 'distributor' ? [{
+    ...(stationConversation || {}),
+    key: stationConversation?.id || 'message-station',
+    displayName: stationConversation?.displayName || stationName || 'Your BlueTap Station',
+    contextLabel: stationConversation?.contextLabel || 'Your current station',
+    emptyPreview: 'Message your station',
+    ...(stationConversation ? {} : { resolveIntent: { type: 'distributor_branch' }, unreadCount: 0 }),
+  }].filter((row) => matchesSearch(row, needle)) : [];
+  const distributorRequesterRows = role === 'distributor' ? filtered.filter((conversation) => conversation.type === 'requester_distributor') : [];
+  const groupedCount = role === 'manager'
+    ? managerDistributorRows.length + managerRequesterRows.length + managerCoordinationRows.length
+    : role === 'distributor'
+      ? distributorStationRows.length + distributorRequesterRows.length
+      : filtered.length;
   const emptyCopy = {
     requester: 'Use Follow Up on an active request to contact your station.',
     distributor: 'Chats with your branch and assigned requesters will appear here.',
@@ -43,47 +113,25 @@ export default function ChatConversationList() {
         />
       </View>
       {!!resolveError && <Text accessibilityRole="alert" style={[styles.inlineError, { color: colors.danger, backgroundColor: colors.dangerSoft }]}>{resolveError}</Text>}
-      {role === 'manager' && branchDistributors.length > 0 && <View style={{ maxHeight: 180 }}>
-        <Text style={[styles.stationTitle, { color: colors.textPrimary, margin: 12 }]}>Branch Distributors</Text>
-        <ScrollView>{branchDistributors.filter((user) => !needle || String(user.fullName || '').toLowerCase().includes(needle)).map((user) => <Pressable key={user.uid || user.id} accessibilityRole="button" disabled={loading || resolvingConversation} onPress={() => { resolveAndOpen({ type: 'distributor_branch', distributorId: user.uid || user.id }).catch(() => {}); }} style={styles.stationAction}><Text style={{ color: colors.textPrimary }}>{user.fullName || 'Branch Distributor'}</Text></Pressable>)}</ScrollView>
-      </View>}
       {resolvingConversation && <View style={styles.resolving}><ActivityIndicator size="small" color={colors.primary} /><Text style={[styles.helper, { color: colors.textSecondary }]}>Opening conversationâ€¦</Text></View>}
-      {role === 'distributor' && (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Message my BlueTap station"
-          disabled={resolvingConversation}
-          onPress={() => { resolveAndOpen({ type: 'distributor_branch' }).catch(() => {}); }}
-          style={({ pressed }) => [styles.stationAction, { backgroundColor: colors.primarySoft, borderColor: colors.border }, pressed && styles.pressed]}
-        >
-          <BlueTapChatIcon size={21} color={colors.primary} />
-          <View style={{ flex: 1 }}><Text style={[styles.stationTitle, { color: colors.textPrimary }]}>Message your station</Text><Text style={[styles.stationSubtitle, { color: colors.textSecondary }]}>Contact your current BlueTap branch</Text></View>
-        </Pressable>
-      )}
       {loading && conversations.length === 0 ? (
         <View style={styles.center}><ActivityIndicator color={colors.primary} /><Text style={[styles.helper, { color: colors.textSecondary }]}>Loading conversations…</Text></View>
       ) : error && conversations.length === 0 ? (
         <View style={styles.center}><Text style={[styles.emptyTitle, { color: colors.textPrimary }]}>Messages unavailable</Text><Text style={[styles.helper, { color: colors.textSecondary }]}>{error}</Text><Pressable accessibilityRole="button" onPress={retrySummaries}><Text style={[styles.retry, { color: colors.primary }]}>Try again</Text></Pressable></View>
-      ) : filtered.length === 0 ? (
+      ) : groupedCount === 0 ? (
         <View style={styles.center}><BlueTapChatIcon size={34} color={colors.primary} /><Text style={[styles.emptyTitle, { color: colors.textPrimary }]}>{needle ? 'No matching conversations' : 'Your BlueTap conversations will appear here.'}</Text><Text style={[styles.helper, { color: colors.textSecondary }]}>{needle ? 'Try another name or order reference.' : emptyCopy}</Text></View>
       ) : (
         <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.list}>
-          {filtered.map((conversation) => (
-            <Pressable
-              key={conversation.id}
-              accessibilityRole="button"
-              accessibilityLabel={`${conversation.displayName}${conversation.unreadCount ? `, ${conversation.unreadCount} unread` : ''}`}
-              onPress={() => openConversation(conversation)}
-              style={({ pressed, hovered }) => [styles.row, { borderBottomColor: colors.border }, (pressed || hovered) && { backgroundColor: colors.surfaceAlt }]}
-            >
-              <View style={[styles.avatar, { backgroundColor: colors.primarySoft }]}><BlueTapChatIcon size={23} color={colors.primary} /></View>
-              <View style={styles.rowText}>
-                <View style={styles.rowTop}><Text style={[styles.name, { color: colors.textPrimary }, conversation.unreadCount > 0 && styles.unreadName]} numberOfLines={1}>{conversation.displayName}</Text><Text style={[styles.timestamp, { color: colors.textSecondary }]}>{formatTimestamp(conversation.lastMessageAt || conversation.updatedAt)}</Text></View>
-                <Text style={[styles.context, { color: colors.textSecondary }]} numberOfLines={1}>{conversation.contextLabel}</Text>
-                <View style={styles.previewRow}><Text style={[styles.preview, { color: conversation.unreadCount ? colors.textPrimary : colors.textSecondary }]} numberOfLines={1}>{conversation.lastMessagePreview || 'Start the conversation'}</Text>{conversation.unreadCount > 0 && <View style={[styles.badge, { backgroundColor: colors.danger }]}><Text style={styles.badgeText}>{conversation.unreadLabel}</Text></View>}</View>
-              </View>
-            </Pressable>
-          ))}
+          {role === 'manager' && <>
+            <ConversationSection colors={colors} label="BRANCH DISTRIBUTORS" rows={managerDistributorRows} openConversation={openConversation} resolveAndOpen={resolveAndOpen} />
+            <ConversationSection colors={colors} label="REQUESTERS" rows={managerRequesterRows} openConversation={openConversation} resolveAndOpen={resolveAndOpen} />
+            <ConversationSection colors={colors} label="BRANCH COORDINATION" rows={managerCoordinationRows} openConversation={openConversation} resolveAndOpen={resolveAndOpen} />
+          </>}
+          {role === 'distributor' && <>
+            <ConversationSection colors={colors} label="YOUR STATION" rows={distributorStationRows} openConversation={openConversation} resolveAndOpen={resolveAndOpen} />
+            <ConversationSection colors={colors} label="REQUESTERS" rows={distributorRequesterRows} openConversation={openConversation} resolveAndOpen={resolveAndOpen} />
+          </>}
+          {role === 'requester' && filtered.map((conversation) => <ConversationRow key={conversation.id} colors={colors} conversation={conversation} onPress={() => openConversation(conversation)} />)}
         </ScrollView>
       )}
     </View>
@@ -94,16 +142,16 @@ const styles = StyleSheet.create({
   root: { flex: 1 },
   searchWrap: { marginHorizontal: 12, marginTop: 12, marginBottom: 5, minHeight: 42, borderRadius: 13, borderWidth: 1, justifyContent: 'center' },
   search: { paddingHorizontal: 12, paddingVertical: 9, fontSize: 14 },
-  stationAction: { marginHorizontal: 12, marginVertical: 7, minHeight: 58, borderWidth: 1, borderRadius: 14, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', gap: 10 },
-  stationTitle: { fontSize: 13, fontWeight: '900' },
-  stationSubtitle: { fontSize: 11, marginTop: 2 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 30 },
   emptyTitle: { fontSize: 15, fontWeight: '900', textAlign: 'center', marginTop: 12 },
   helper: { fontSize: 12, lineHeight: 18, textAlign: 'center', marginTop: 6 },
   retry: { marginTop: 12, fontWeight: '900' },
   inlineError: { marginHorizontal: 12, marginVertical: 5, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8, fontSize: 11, lineHeight: 16 },
   resolving: { minHeight: 36, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
-  list: { paddingVertical: 5 },
+  list: { paddingHorizontal: 12, paddingTop: 7, paddingBottom: 12 },
+  section: { marginTop: 10 },
+  sectionLabel: { fontSize: 10, fontWeight: '900', letterSpacing: 0.8, marginBottom: 6, paddingHorizontal: 2 },
+  sectionRows: { borderWidth: 1, borderRadius: 14, overflow: 'hidden' },
   row: { minHeight: 78, flexDirection: 'row', alignItems: 'center', gap: 11, paddingHorizontal: 13, paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth },
   avatar: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
   rowText: { flex: 1, minWidth: 0 },
@@ -116,5 +164,4 @@ const styles = StyleSheet.create({
   preview: { flex: 1, fontSize: 12 },
   badge: { minWidth: 20, height: 20, paddingHorizontal: 5, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   badgeText: { color: '#FFFFFF', fontSize: 10, fontWeight: '900' },
-  pressed: { opacity: 0.82 },
 });

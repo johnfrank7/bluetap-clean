@@ -2,7 +2,9 @@
 import { getModuleSession } from '../services/authSession';
 import { parseTimestamp } from '../services/notificationTimestamp';
 import { useManagerRealtimeData } from './ManagerRealtimeData';
+import { useChat } from './chat/ChatContext';
 const { getManagerNotifications, unreadManagerNotifications } = require('../services/managerNotifications');
+const { getChatFollowupNotifications } = require('../services/orderNotifications');
 
 const memorySeen = new Map();
 const listeners = new Set();
@@ -25,6 +27,7 @@ const writeSeen = (key, ids) => {
 
 export function useManagerNotifications() {
   const realtime = useManagerRealtimeData();
+  const chat = useChat();
   const session = getModuleSession('manager');
   const key = session?.uid && realtime.branchId ? keyFor(session.uid, realtime.branchId) : '';
   const [seen, setSeen] = React.useState(() => readSeen(key));
@@ -35,9 +38,12 @@ export function useManagerNotifications() {
     globalThis.addEventListener?.('storage', sync);
     return () => { listeners.delete(sync); globalThis.removeEventListener?.('storage', sync); };
   }, [key]);
-  const events = React.useMemo(() => getManagerNotifications(realtime.requests, realtime.incomingTransfers,
-    realtime.sourceDecisionEvents, realtime.branchId, parseTimestamp),
-  [realtime.requests, realtime.incomingTransfers, realtime.sourceDecisionEvents, realtime.branchId]);
+  const events = React.useMemo(() => [
+    ...getManagerNotifications(realtime.requests, realtime.incomingTransfers,
+      realtime.sourceDecisionEvents, realtime.branchId, parseTimestamp),
+    ...getChatFollowupNotifications(chat.conversations, 'manager'),
+  ].sort((left, right) => right.at.getTime() - left.at.getTime()).slice(0, 150),
+  [chat.conversations, realtime.requests, realtime.incomingTransfers, realtime.sourceDecisionEvents, realtime.branchId]);
   const unread = React.useMemo(() => unreadManagerNotifications(events, seen), [events, seen]);
   const markRead = React.useCallback((ids) => {
     const next = new Set([...readSeen(key), ...ids]);

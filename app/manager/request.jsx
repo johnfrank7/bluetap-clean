@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useLocalSearchParams } from 'expo-router';
 import {
   ActivityIndicator,
   Modal,
@@ -24,6 +25,7 @@ import TopToastFeedback from '../../components/TopToastFeedback';
 import ManagerShell, { MANAGER_COLORS, ManagerPill } from '../../components/ManagerShell';
 import { useManagerRealtimeData } from '../../components/ManagerRealtimeData';
 import { parseTimestamp } from '../../services/notificationTimestamp';
+import LocationMap from '../../components/LocationMap';
 const { getManagerQueues, toManagerOrder } = require('../../services/managerOperational');
 
 
@@ -34,6 +36,13 @@ const approvalLabel = (order = {}) => {
   if (reasons.includes('NON_STANDARD_DELIVERY_DAY')) return 'Delivery Day Review';
   if (reasons.includes('PRODUCT_LIMIT_EXCEEDED')) return 'High Quantity';
   return 'Outside Radius';
+};
+const approvalReasonLabel = (order = {}) => {
+  const status = String(order.status || '').toLowerCase();
+  if (status === 'branch_transfer_pending') return `Branch transfer from ${order.transferFromBranchName || 'another branch'}`;
+  if (status === 'pending' && order.outsideServiceArea !== true) return 'New branch order review';
+  if (['outside_radius_pending_approval', 'manager_approval_pending'].includes(status)) return approvalLabel(order);
+  return 'Operational order review';
 };
 
 const EDITABLE_STATUSES = new Set([
@@ -54,7 +63,7 @@ const orderProducts = (order) =>
 const orderDistance = (order) =>
   order.distanceKmSnapshot == null ? 'Distance unavailable' : `Approx. ${Number(order.distanceKmSnapshot).toFixed(1)} km`;
 
-function OutsideRadiusApprovalQueue({ orders, loading, styles, colors, isDark, onShowToast }) {
+function OutsideRadiusApprovalQueue({ orders, loading, styles, colors, isDark, onShowToast, onOpenOrder }) {
   const [error, setError] = useState('');
   const [updatingId, setUpdatingId] = useState('');
 
@@ -145,6 +154,9 @@ function OutsideRadiusApprovalQueue({ orders, loading, styles, colors, isDark, o
               </View>
 
               <View style={styles.actionRow}>
+                <TouchableOpacity onPress={() => onOpenOrder(order)} style={styles.viewDetailsBtn}>
+                  <Text style={styles.viewDetailsBtnText}>View Details</Text>
+                </TouchableOpacity>
                 <TouchableOpacity
                   disabled={isUpdating}
                   onPress={() => decide(order, 'approve')}
@@ -291,6 +303,46 @@ function EditOrderModal({ visible, order, onClose, onSaveSuccess, colors, styles
           </View>
 
           <ScrollView style={{ maxHeight: 420 }} showsVerticalScrollIndicator={false}>
+            <View style={styles.modalSection}>
+              <Text style={styles.modalSectionTitle}>Request Information</Text>
+              <View style={styles.detailGrid}>
+                {[
+                  ['Public order ID', order.requestId || order.id],
+                  ['Requester', order.requesterName || 'Requester'],
+                  ['Requester public ID', order.requesterUniqueId || 'Not available'],
+                  ['Container type', order.container || 'Not set'],
+                  ['Total', formatAmount(order.totalAtOrder)],
+                  ['Requested branch', order.initialBranchName || order.initialBranchNameSnapshot || order.transferFromBranchName || order.currentBranchName || 'Not available'],
+                  ['Current branch', order.currentBranchName || order.branchNameSnapshot || 'Not available'],
+                  ['Delivery address', order.address || 'Not available'],
+                  ['Distance / radius', order.distanceKmSnapshot == null ? 'Not available' : `${Number(order.distanceKmSnapshot).toFixed(1)} km / ${Number(order.serviceRadiusKmSnapshot || 0).toFixed(1)} km`],
+                  ['Schedule', scheduleLabel(order.scheduledAt || order.expectedDeliveryDate) || 'Not scheduled'],
+                  ['Current status', String(order.status || '').replace(/_/g, ' ') || 'Not available'],
+                  ['Approval reason', approvalReasonLabel(order)],
+                ].map(([label, value]) => (
+                  <View key={label} style={styles.detailGridRow}>
+                    <Text style={styles.detailGridLabel}>{label}</Text>
+                    <Text style={styles.detailGridValue}>{value}</Text>
+                  </View>
+                ))}
+              </View>
+            </View>
+
+            <View style={styles.modalSection}>
+              <Text style={styles.modalSectionTitle}>Delivery Location Map</Text>
+              {Number.isFinite(order.deliveryLocation?.latitude) && Number.isFinite(order.deliveryLocation?.longitude) ? (
+                <LocationMap
+                  location={order.deliveryLocation}
+                  branches={Number.isFinite(order.branchLocation?.latitude) && Number.isFinite(order.branchLocation?.longitude) ? [{ id: order.branchId || 'station', name: order.currentBranchName || 'Water Station', location: order.branchLocation }] : []}
+                  selectedBranchId={order.branchId || 'station'}
+                  readOnly
+                  themed
+                  themeColors={colors}
+                  height={190}
+                />
+              ) : <View style={styles.locationUnavailable}><Text style={styles.locationUnavailableText}>Location unavailable</Text></View>}
+            </View>
+
             {!isEditable && (
               <View style={styles.lockedNotice}>
                 <Text style={styles.lockedNoticeText}>
@@ -408,7 +460,7 @@ function EditOrderModal({ visible, order, onClose, onSaveSuccess, colors, styles
   );
 }
 
-function BranchTransfersQueue({ data, styles, colors, isDark, onShowToast }) {
+function BranchTransfersQueue({ data, styles, colors, isDark, onShowToast, onOpenOrder }) {
   const [updatingId, setUpdatingId] = useState('');
   const [decliningOrderId, setDecliningOrderId] = useState('');
   const [declineReason, setDeclineReason] = useState('');
@@ -488,6 +540,9 @@ function BranchTransfersQueue({ data, styles, colors, isDark, onShowToast }) {
               </Text>
 
               <View style={styles.actionRow}>
+                <TouchableOpacity onPress={() => onOpenOrder(order)} style={styles.viewDetailsBtn}>
+                  <Text style={styles.viewDetailsBtnText}>View Details</Text>
+                </TouchableOpacity>
                 <TouchableOpacity
                   disabled={isUpdating}
                   onPress={() => act(order.id, 'accept-transfer')}
@@ -564,7 +619,7 @@ function BranchTransfersQueue({ data, styles, colors, isDark, onShowToast }) {
   );
 }
 
-function ReceivedRequestsQueue({ orders, loading, styles, colors, isDark, onShowToast }) {
+function ReceivedRequestsQueue({ orders, loading, styles, colors, isDark, onShowToast, onOpenOrder }) {
   const [updatingId, setUpdatingId] = useState('');
   const [rejectingId, setRejectingId] = useState('');
   const [reason, setReason] = useState('');
@@ -626,6 +681,9 @@ function ReceivedRequestsQueue({ orders, loading, styles, colors, isDark, onShow
             <Text style={styles.detailLine}>Distance: {orderDistance(order)}</Text>
             <Text style={styles.amountText}>{formatAmount(order.totalAtOrder)}</Text>
             <View style={styles.actionRow}>
+              <TouchableOpacity onPress={() => onOpenOrder(order)} style={styles.viewDetailsBtn}>
+                <Text style={styles.viewDetailsBtnText}>View Details</Text>
+              </TouchableOpacity>
               <TouchableOpacity disabled={!!updatingId} onPress={() => decide(order, 'accept-order')} style={[styles.approveButton, !!updatingId && styles.actionDisabled]}>
                 <Text style={styles.approveButtonText}>{updatingId === order.id ? 'Saving?' : 'Accept'}</Text>
               </TouchableOpacity>
@@ -728,16 +786,21 @@ function BranchOrdersOverview({ data, loading, styles, colors, isDark, onOpenOrd
 }
 
 export default function ManagerRequestPage() {
+  const params = useLocalSearchParams();
   const { colors, resolvedTheme } = useAdminTheme();
   const { width } = useWindowDimensions();
   const styles = createStyles(colors, width);
   const [toast, setToast] = useState({ visible: false, message: '', type: 'success' });
   const [selectedOrderSnapshot, setSelectedOrder] = useState(null);
   const [modalVisible, setModalVisible] = useState(false);
+  const openedParamRef = useRef('');
   const realtime = useManagerRealtimeData();
   const dispatchData = useMemo(() => {
     const queues = getManagerQueues(realtime.requests, realtime.incomingTransfers, realtime.branchId);
-    const mapOrder = (order) => toManagerOrder(order.id, order, realtime.branch?.name || '');
+    const branchLocation = Number.isFinite(Number(realtime.branch?.latitude)) && Number.isFinite(Number(realtime.branch?.longitude))
+      ? { latitude: Number(realtime.branch.latitude), longitude: Number(realtime.branch.longitude) }
+      : null;
+    const mapOrder = (order) => ({ ...toManagerOrder(order.id, order, realtime.branch?.name || ''), branchLocation });
     return {
       orders: queues.editable.map(mapOrder),
       review: queues.review.map(mapOrder),
@@ -753,7 +816,10 @@ export default function ManagerRequestPage() {
   const selectedOrder = useMemo(() => {
     if (!selectedOrderSnapshot) return null;
     const live = realtime.requests.find((order) => String(order.id || order.requestId) === String(selectedOrderSnapshot.id || selectedOrderSnapshot.requestId));
-    return live ? toManagerOrder(live.id, live, realtime.branch?.name || '') : selectedOrderSnapshot;
+    const branchLocation = Number.isFinite(Number(realtime.branch?.latitude)) && Number.isFinite(Number(realtime.branch?.longitude))
+      ? { latitude: Number(realtime.branch.latitude), longitude: Number(realtime.branch.longitude) }
+      : null;
+    return live ? { ...toManagerOrder(live.id, live, realtime.branch?.name || ''), branchLocation } : selectedOrderSnapshot;
   }, [realtime.branch?.name, realtime.requests, selectedOrderSnapshot]);
 
   const showToast = (message, type = 'success') => {
@@ -764,6 +830,24 @@ export default function ManagerRequestPage() {
     setSelectedOrder(order);
     setModalVisible(true);
   };
+
+  useEffect(() => {
+    const requestedOrderId = Array.isArray(params.orderId) ? params.orderId[0] : params.orderId;
+    if (!requestedOrderId || openedParamRef.current === String(requestedOrderId)) return;
+    const authorizedSource = [...realtime.requests, ...realtime.incomingTransfers].find((order) => {
+      const matchesId = String(order.id || order.requestId) === String(requestedOrderId);
+      const branchId = String(order.currentBranchId || order.branchId || '');
+      const incomingBranchId = String(order.transferToBranchId || '');
+      return matchesId && (branchId === String(realtime.branchId) || incomingBranchId === String(realtime.branchId));
+    });
+    if (authorizedSource) {
+      const branchLocation = Number.isFinite(Number(realtime.branch?.latitude)) && Number.isFinite(Number(realtime.branch?.longitude))
+        ? { latitude: Number(realtime.branch.latitude), longitude: Number(realtime.branch.longitude) }
+        : null;
+      openedParamRef.current = String(requestedOrderId);
+      handleOpenOrder({ ...toManagerOrder(authorizedSource.id, authorizedSource, realtime.branch?.name || ''), branchLocation });
+    }
+  }, [params.orderId, realtime.branch, realtime.branchId, realtime.incomingTransfers, realtime.requests]);
 
   return (
     <ManagerShell
@@ -785,16 +869,17 @@ export default function ManagerRequestPage() {
         colors={colors}
         isDark={resolvedTheme === 'dark'}
         onShowToast={showToast}
+        onOpenOrder={handleOpenOrder}
       />
 
       {/* 2. Outside Radius Approvals */}
-      <OutsideRadiusApprovalQueue orders={dispatchData.exceptions} loading={realtime.loading} styles={styles} colors={colors} isDark={resolvedTheme === 'dark'} onShowToast={showToast} />
+      <OutsideRadiusApprovalQueue orders={dispatchData.exceptions} loading={realtime.loading} styles={styles} colors={colors} isDark={resolvedTheme === 'dark'} onShowToast={showToast} onOpenOrder={handleOpenOrder} />
 
       {/* 3. Branch Orders Overview & Situational Order Edit */}
       <BranchOrdersOverview data={dispatchData} loading={realtime.loading} styles={styles} colors={colors} isDark={resolvedTheme === 'dark'} onOpenOrder={handleOpenOrder} />
 
       {/* 4. Branch Transfers Queue */}
-      <BranchTransfersQueue data={dispatchData} styles={styles} colors={colors} isDark={resolvedTheme === 'dark'} onShowToast={showToast} />
+      <BranchTransfersQueue data={dispatchData} styles={styles} colors={colors} isDark={resolvedTheme === 'dark'} onShowToast={showToast} onOpenOrder={handleOpenOrder} />
 
       {/* Shared Order Details, Items Edit, and Distributor Assignment Modal */}
       <EditOrderModal
@@ -956,6 +1041,19 @@ const createStyles = (colors, width = 1200) =>
       gap: 8,
       marginTop: 10,
     },
+    viewDetailsBtn: {
+      minHeight: 42,
+      paddingHorizontal: 14,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: colors.primary,
+      backgroundColor: colors.surface,
+      alignItems: 'center',
+      justifyContent: 'center',
+      flexGrow: 1,
+      flexBasis: 118,
+    },
+    viewDetailsBtnText: { color: colors.primary, fontSize: 12, fontWeight: '900' },
     approveButton: {
       minHeight: 36,
       paddingHorizontal: 14,
@@ -1123,6 +1221,7 @@ const createStyles = (colors, width = 1200) =>
     editModalCard: {
       width: '100%',
       maxWidth: 520,
+      maxHeight: '92%',
       backgroundColor: colors.surface,
       borderRadius: 16,
       borderWidth: 1,
@@ -1173,6 +1272,33 @@ const createStyles = (colors, width = 1200) =>
       fontWeight: '800',
       marginBottom: 6,
     },
+    detailGrid: {
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 12,
+      overflow: 'hidden',
+    },
+    detailGridRow: {
+      flexDirection: width < 520 ? 'column' : 'row',
+      justifyContent: 'space-between',
+      gap: 4,
+      paddingHorizontal: 12,
+      paddingVertical: 9,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: colors.border,
+    },
+    detailGridLabel: { color: colors.textSecondary, fontSize: 11, fontWeight: '700' },
+    detailGridValue: { flexShrink: 1, color: colors.textPrimary, fontSize: 12, fontWeight: '800', textAlign: width < 520 ? 'left' : 'right' },
+    locationUnavailable: {
+      minHeight: 120,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 12,
+      backgroundColor: colors.surfaceAlt,
+    },
+    locationUnavailableText: { color: colors.textSecondary, fontSize: 12, fontWeight: '700' },
     itemEditRow: {
       flexDirection: 'row',
       alignItems: 'center',

@@ -1,4 +1,5 @@
 ﻿import React from 'react';
+import { useRouter } from 'expo-router';
 import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useAdminTheme } from '../../components/AdminTheme';
 import BlueTapEmptyState from '../../components/BlueTapEmptyState';
@@ -9,6 +10,7 @@ import { useManagerNotifications } from '../../components/ManagerNotifications';
 import { formatNotificationTime } from '../../services/notificationTimestamp';
 
 export default function ManagerNotificationsPage() {
+  const router = useRouter();
   const { colors, resolvedTheme } = useAdminTheme();
   const styles = React.useMemo(() => createStyles(colors), [colors]);
   const { events, markRead, loading, error } = useManagerNotifications();
@@ -42,7 +44,11 @@ export default function ManagerNotificationsPage() {
       />
     ) : null}
     <View style={styles.list}>
-      {events.map((event) => <TouchableOpacity key={event.id} accessibilityRole="button" accessibilityLabel={`${event.message} Order ${event.requestId}`} onPress={() => { markRead([event.id]); setSelectedEventId(event.id); }} style={styles.card}>
+      {events.map((event) => <TouchableOpacity key={event.id} accessibilityRole="button" accessibilityLabel={`${event.message} Order ${event.requestId}`} onPress={() => {
+        markRead([event.id]);
+        if (event.navigable !== false && event.orderId) router.push({ pathname: '/manager/request', params: { orderId: event.orderId } });
+        else setSelectedEventId(event.id);
+      }} style={styles.card}>
         <View style={styles.meta}><SoftStatusBadge status={event.status} dark={resolvedTheme === 'dark'} /><Text style={styles.time}>{formatNotificationTime(event.at)}</Text></View>
         <Text style={styles.message}>{event.message}</Text>
         <Text style={styles.context}>Order #{event.requestId}{event.requesterName ? ` · ${event.requesterName}` : ''}</Text>

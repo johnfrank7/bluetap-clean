@@ -25,7 +25,6 @@ import TopToastFeedback from '../../components/TopToastFeedback';
 import { USER_PORTAL_BOTTOM_CONTENT_INSET, USER_PORTAL_LAYOUT } from '../../constants/userPortalLayout';
 import { BLUETAP_COLORS } from '../../constants/bluetapTheme';
 import {
-  failAssignedDelivery,
   normalizeDistributorOrderStatus,
   rescheduleAssignedDelivery,
   toDistributorScreenOrder,
@@ -89,6 +88,13 @@ const getDetailsRequestData = (request) => {
     distributorUniqueId: formatDisplayUniqueId(request.distributorId || request.distributor_unique_id || request.distributorUniqueId, ''),
     contactNumber: request.contact,
     deliveryAddress: request.address,
+    deliveryLocation: request.deliveryLocation,
+    branchLocation: request.branchLocation,
+    branchId: request.branchId,
+    failureReason: request.failureReason,
+    failureReasonCode: request.failureReasonCode,
+    failureReasonLabel: request.failureReasonLabel,
+    failureReasonNote: request.failureReasonNote,
     items: [
       {
         id: request.id,
@@ -105,13 +111,11 @@ const getDetailsRequestData = (request) => {
 const ScheduledRequestCard = ({
   request,
   onAdvance,
-  onOpenFailModal,
   onOpenRescheduleModal,
   onViewDetails,
   processing,
 }) => {
   const statusNorm = normalizeDistributorOrderStatus(request.status);
-  const isOutForDelivery = statusNorm === 'out for delivery';
   const isDeliveryFailed = statusNorm === 'delivery failed';
   const isScheduledOrAccepted = statusNorm === 'accepted' || statusNorm === 'scheduled';
 
@@ -198,28 +202,6 @@ const ScheduledRequestCard = ({
           </TouchableOpacity>
         )}
 
-        {isOutForDelivery && (
-          <>
-            <TouchableOpacity
-              activeOpacity={0.85}
-              disabled={processing}
-              onPress={() => onOpenFailModal(request)}
-              style={styles.failActionButton}
-            >
-              <Text style={styles.failActionText}>Delivery Failed</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              activeOpacity={0.85}
-              disabled={processing}
-              onPress={() => onAdvance(request, 'mark-delivered')}
-              style={[styles.primaryActionButton, processing && styles.actionButtonDisabled]}
-            >
-              {processing ? <ActivityIndicator color="#FFFFFF" size="small" /> : <Text style={styles.primaryActionText}>Mark Delivered</Text>}
-            </TouchableOpacity>
-          </>
-        )}
-
         {isDeliveryFailed && (
           <TouchableOpacity
             activeOpacity={0.85}
@@ -241,11 +223,6 @@ export default function DistributorScheduledRequests() {
   const [selectedRequestId, setSelectedRequestId] = useState(null);
   const [processingRequestId, setProcessingRequestId] = useState('');
   const [actionError, setActionError] = useState('');
-
-  // Failure Modal State
-  const [failingRequest, setFailingRequest] = useState(null);
-  const [failureReason, setFailureReason] = useState('');
-  const [failError, setFailError] = useState('');
 
   // Reschedule Modal State
   const [reschedulingRequest, setReschedulingRequest] = useState(null);
@@ -289,32 +266,6 @@ export default function DistributorScheduledRequests() {
     } catch (updateError) {
       setActionError(updateError.message || 'The delivery could not be updated.');
       setToast({ visible: true, message: updateError.message || 'The delivery could not be updated.', type: 'error' });
-    } finally {
-      setProcessingRequestId('');
-    }
-  };
-
-  const submitFailure = async () => {
-    if (!failingRequest) return;
-    if (!isComplete) {
-      Alert.alert('Profile Incomplete', 'Please complete your distributor profile before updating deliveries.');
-      return;
-    }
-    if (!failureReason.trim()) {
-      setFailError('Please explain why the delivery failed (e.g., customer unreachable, address closed).');
-      return;
-    }
-    setProcessingRequestId(failingRequest.sourceId);
-    setFailError('');
-    try {
-      await failAssignedDelivery(failingRequest.sourceId, failureReason.trim());
-      await refresh();
-      setFailingRequest(null);
-      setFailureReason('');
-      setToast({ visible: true, message: 'Delivery marked as failed.', type: 'warning' });
-    } catch (err) {
-      setFailError(err.message || 'Failed to report delivery failure.');
-      setToast({ visible: true, message: err.message || 'Failed to report delivery failure.', type: 'error' });
     } finally {
       setProcessingRequestId('');
     }
@@ -422,22 +373,6 @@ export default function DistributorScheduledRequests() {
                   request={request}
                   processing={processingRequestId === request.sourceId}
                   onAdvance={advanceDelivery}
-                  onOpenFailModal={(req) => {
-                    if (!isComplete) {
-                      Alert.alert(
-                        'Profile Incomplete',
-                        'Please complete your distributor profile before updating deliveries.',
-                        [
-                          { text: 'Cancel', style: 'cancel' },
-                          { text: 'Complete Profile', onPress: () => router.push('/distributor/d_profile') },
-                        ]
-                      );
-                      return;
-                    }
-                    setFailingRequest(req);
-                    setFailureReason('');
-                    setFailError('');
-                  }}
                   onOpenRescheduleModal={(req) => {
                     if (!isComplete) {
                       Alert.alert(
@@ -468,52 +403,6 @@ export default function DistributorScheduledRequests() {
         onClose={() => setSelectedRequestId(null)}
         request={selectedDetailsRequest}
       />
-
-      {/* Delivery Failed Modal */}
-      <Modal
-        visible={!!failingRequest}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setFailingRequest(null)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.dialogCard}>
-            <Text style={styles.dialogTitle}>Report Failed Delivery</Text>
-            <Text style={styles.dialogBody}>
-              Order #{failingRequest?.id}. Please state the reason the delivery could not be completed.
-            </Text>
-            <TextInput
-              value={failureReason}
-              onChangeText={setFailureReason}
-              placeholder="e.g. Customer not at home, wrong address, gate locked..."
-              placeholderTextColor={colors.textSecondary}
-              multiline
-              style={styles.dialogInput}
-            />
-            {!!failError && <Text style={styles.dialogError}>{failError}</Text>}
-            <View style={styles.dialogActions}>
-              <TouchableOpacity
-                disabled={!!processingRequestId}
-                onPress={() => setFailingRequest(null)}
-                style={styles.dialogCancelBtn}
-              >
-                <Text style={styles.dialogCancelText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                disabled={!!processingRequestId}
-                onPress={submitFailure}
-                style={styles.dialogDangerBtn}
-              >
-                {processingRequestId ? (
-                  <ActivityIndicator color="#FFFFFF" size="small" />
-                ) : (
-                  <Text style={styles.dialogDangerText}>Report Failed</Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
 
       {/* Reschedule Delivery Modal */}
       <Modal

@@ -73,6 +73,9 @@ function safeOrder(id, data = {}, branchNames = new Map()) {
     deliveryLocation: data.deliveryLocation && safeNumber(data.deliveryLocation.latitude) !== null && safeNumber(data.deliveryLocation.longitude) !== null
       ? { latitude: safeNumber(data.deliveryLocation.latitude), longitude: safeNumber(data.deliveryLocation.longitude) }
       : null,
+    branchLocation: data.branchLocation && safeNumber(data.branchLocation.latitude) !== null && safeNumber(data.branchLocation.longitude) !== null
+      ? { latitude: safeNumber(data.branchLocation.latitude), longitude: safeNumber(data.branchLocation.longitude) }
+      : null,
     items: Array.isArray(data.items) ? data.items.map((item) => ({
       productId: clean(item.productId || item.product_id || item.id, 128),
       productNameSnapshot: clean(item.productNameSnapshot || item.product_name || item.name, 160),
@@ -115,6 +118,9 @@ function safeOrder(id, data = {}, branchNames = new Map()) {
     notes: clean(data.notes || data.specialInstructions, 500),
     specialInstructions: clean(data.notes || data.specialInstructions, 500),
     failureReason: clean(data.failureReason, 240),
+    failureReasonCode: clean(data.failureReasonCode, 48),
+    failureReasonLabel: clean(data.failureReasonLabel, 160),
+    failureReasonNote: clean(data.failureReasonNote, 240),
     createdAt: data.createdAt || data.created_at || null,
     updatedAt: data.updatedAt || data.updated_at || null,
   };
@@ -548,6 +554,7 @@ function createManagerDispatchHandler(getAdmin = getFirebaseAdmin) {
             currentBranchId: managerBranchId,
             branchNameSnapshot: branchNames.get(managerBranchId) || clean(manager.branch.name, 160),
             currentBranchNameSnapshot: branchNames.get(managerBranchId) || clean(manager.branch.name, 160),
+            branchLocation: { latitude: safeNumber(manager.branch.latitude), longitude: safeNumber(manager.branch.longitude) },
             initialBranchId: clean(current.initialBranchId || fromBranchId, 128),
             transferState: 'accepted',
             transferAcceptedAt: now,

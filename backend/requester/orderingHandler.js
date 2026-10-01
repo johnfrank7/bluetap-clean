@@ -222,6 +222,7 @@ async function buildTrustedOrder(db, requester, body) {
     branchNameSnapshot: branch.name,
     initialBranchNameSnapshot: branch.name,
     branchAddressSnapshot: [branch.address, branch.barangay, branch.city].filter(Boolean).join(', '),
+    branchLocation: { latitude: branch.latitude, longitude: branch.longitude },
     water_station: branch.name,
     deliveryLocation,
     distanceKmSnapshot,

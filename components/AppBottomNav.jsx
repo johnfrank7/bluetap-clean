@@ -15,6 +15,8 @@ import { BLUETAP_COLORS } from '../constants/bluetapTheme';
 import { USER_PORTAL_LAYOUT } from '../constants/userPortalLayout';
 import { createShadow } from './shadowStyles';
 import { useBlueTapTheme } from './BlueTapTheme';
+import { useRoleNotifications } from './RoleNotifications';
+const { formatNotificationBadge } = require('../services/orderNotifications');
 
 const BLUE = BLUETAP_COLORS.primary;
 const ICON_SIZE = 26;
@@ -209,6 +211,7 @@ function BottomNav({ items, floating = true }) {
   const segments = useSegments();
   const reduceMotion = useReduceMotion();
   const { colors } = useBlueTapTheme();
+  const { attentionCounts } = useRoleNotifications();
   const insets = useSafeAreaInsets();
   const navSurface = colors.navSurface;
   const navBorder = colors.border;
@@ -232,13 +235,14 @@ function BottomNav({ items, floating = true }) {
       {items.map((item, index) => {
         const isActive = index === activeIndex;
         const isPrimaryAction = item.key === 'add';
+        const badgeCount = item.key === 'requests' ? attentionCounts.requests : item.key === 'schedule' ? attentionCounts.schedule : 0;
 
         return (
           <TouchableOpacity
             key={item.key}
             accessibilityRole="button"
             accessibilityState={{ selected: isActive }}
-            accessibilityLabel={item.label}
+            accessibilityLabel={badgeCount > 0 ? `${item.label}, ${badgeCount} items require attention` : item.label}
             activeOpacity={0.78}
             onPress={() => router.replace(item.route)}
             style={[
@@ -248,16 +252,19 @@ function BottomNav({ items, floating = true }) {
               isPrimaryAction && isActive && styles.primaryNavButtonActive,
             ]}
           >
-            <NavIcon
-              activeIcon={item.activeIcon}
-              icon={item.icon}
-              inactiveScale={item.inactiveScale}
-              isActive={isActive}
-              keepIconFixed={item.keepIconFixed}
-              reduceMotion={reduceMotion}
-              tintColor={isPrimaryAction ? BLUETAP_COLORS.white : navIconColor}
-              primaryAction={isPrimaryAction}
-            />
+            <View style={styles.navIconWrap}>
+              <NavIcon
+                activeIcon={item.activeIcon}
+                icon={item.icon}
+                inactiveScale={item.inactiveScale}
+                isActive={isActive}
+                keepIconFixed={item.keepIconFixed}
+                reduceMotion={reduceMotion}
+                tintColor={isPrimaryAction ? BLUETAP_COLORS.white : navIconColor}
+                primaryAction={isPrimaryAction}
+              />
+              {badgeCount > 0 && <View style={[styles.navBadge, { borderColor: navSurface }]}><Text style={styles.navBadgeText}>{formatNotificationBadge(badgeCount)}</Text></View>}
+            </View>
           </TouchableOpacity>
         );
       })}
@@ -333,6 +340,9 @@ const styles = StyleSheet.create({
     width: ICON_SIZE,
     height: ICON_SIZE,
   },
+  navIconWrap: { position: 'relative', alignItems: 'center', justifyContent: 'center' },
+  navBadge: { position: 'absolute', top: -9, right: -12, minWidth: 18, height: 18, paddingHorizontal: 4, borderRadius: 9, borderWidth: 1.5, backgroundColor: '#EF4444', alignItems: 'center', justifyContent: 'center' },
+  navBadgeText: { color: '#FFFFFF', fontSize: 9, fontWeight: '900' },
   primaryActionIcon: {
     color: BLUETAP_COLORS.white,
     fontSize: 32,

@@ -29,3 +29,11 @@ Use these rules for every BlueTap route, navigation action, authenticated refres
 - Profile: `/distributor/d_profile`
 
 The floating messenger and “Message your station” open the role-level chat panel. They are not routes.
+
+## Verified order-detail destinations
+
+- Requester order context: `/requester/r_notification?orderId=<authorized-order-id>`
+- Distributor order context: `/distributor/d_notification?orderId=<authorized-order-id>`
+- Manager order context: `/manager/request?orderId=<branch-authorized-order-id>`
+
+These routes resolve the ID against the current role-scoped live collection before opening details. Order-linked chat cards and notifications may use them; generic chat launchers and station resolution remain overlays.

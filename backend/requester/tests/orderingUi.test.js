@@ -257,7 +257,7 @@ test('order details use live selected records and canonical COD/public UID prese
   assert.match(requesterNotification, /orders\.find/);
   assert.match(requesterNotification, /useRequesterData\(\)/);
   assert.doesNotMatch(requesterNotification, /onAuthStateChanged|subscribeRequesterRequests/);
-  assert.match(distributorNotification, /events\.find/);
+  assert.match(distributorNotification, /orders\.find/);
   assert.match(requestDetailsModal, /Cash on Delivery/);
   assert.match(requestDetailsModal, /formatDisplayUniqueId/);
   assert.match(requestDetailsModal, /Ordered Products/);

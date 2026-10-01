@@ -66,7 +66,8 @@ test('Manager notification control reuses the canonical BlueTap bell asset and k
   assert.doesNotMatch(managerShell, /AdminIcon name="bell"/);
 });
 
-test('notification cards open read-only context details with no operational actions', () => {
+test('notification cards navigate to authorized order context with a read-only fallback for non-order events', () => {
+  assert.match(notifications, /router\.push\(\{ pathname: '\/manager\/request', params: \{ orderId: event\.orderId \} \}\)/);
   assert.match(notifications, /setSelectedEventId\(event\.id\)/);
   assert.match(notifications, /events\.find/);
   assert.match(notifications, /ManagerNotificationDetailsModal/);
@@ -74,6 +75,18 @@ test('notification cards open read-only context details with no operational acti
     assert.match(notificationModal, new RegExp(label));
   }
   assert.doesNotMatch(notificationModal, /dispatchManagerOrder|onEdit|onCancel|Accept Transfer|Reject Order|Assign Distributor|Schedule Delivery/);
+});
+
+test('Requests and Exceptions expose responsive branch-authorized detail maps without raw Firebase UIDs', () => {
+  for (const label of ['View Details', 'Request Information', 'Requester public ID', 'Container type', 'Distance / radius', 'Schedule', 'Approval reason', 'Delivery Location Map']) {
+    assert.match(requests, new RegExp(label));
+  }
+  assert.match(requests, /<LocationMap/);
+  assert.match(requests, /Location unavailable/);
+  assert.match(requests, /useLocalSearchParams/);
+  assert.match(requests, /authorizedSource/);
+  assert.match(requests, /branchId === String\(realtime\.branchId\)/);
+  assert.doesNotMatch(requests, /Firebase UID|requesterUid/);
 });
 
 test('notification errors are sanitized and raw Firestore permission text is never rendered', () => {

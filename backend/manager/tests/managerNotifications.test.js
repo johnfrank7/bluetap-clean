@@ -73,3 +73,19 @@ test('Manager notifications are limited to the recent 30-day retention window', 
   ], [], [], 'branch-a', parse, now);
   assert.deepEqual(events.map((item) => item.id), ['recent:received']);
 });
+
+test('Manager delivery-failure notification includes the controlled reason and remains order navigable', () => {
+  const order = {
+    id: 'failed-one', branchId: 'branch-a', initialBranchId: 'branch-a', requestId: 'BT-FAILED',
+    status: 'delivery_failed', createdAt: at,
+    distributorDeliveryHistory: [{
+      event: 'DELIVERY_FAILED', branchId: 'branch-a', createdAt: at,
+      failureReasonCode: 'ADDRESS_ISSUE', failureReasonLabel: 'Incorrect or incomplete address',
+    }],
+  };
+  const event = getManagerNotifications([order], [], [], 'branch-a', parse, now)
+    .find((item) => item.id === 'failed-one:delivery:0');
+  assert.equal(event.message, 'Delivery failed. Reason: Incorrect or incomplete address.');
+  assert.equal(event.orderId, 'failed-one');
+  assert.equal(event.navigable, true);
+});

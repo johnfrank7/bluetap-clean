@@ -33,7 +33,8 @@ test('floating chat and station chat remain overlay actions without route naviga
   const list = read('components/chat/ChatConversationList.jsx');
   assert.doesNotMatch(launcher, /useRouter|router\.(?:push|replace)/);
   assert.match(launcher, /onPress=\{openChat\}/);
-  assert.match(list, /resolveAndOpen\(\{ type: 'distributor_branch' \}\)/);
+  assert.match(list, /resolveIntent: \{ type: 'distributor_branch' \}/);
+  assert.match(list, /resolveAndOpen\(row\.resolveIntent\)/);
   assert.doesNotMatch(list, /router\.(?:push|replace)/);
 });
 
@@ -53,7 +54,7 @@ test('critical order-card action rows wrap and the Distributor carousel is viewp
   const requesterDashboard = read('app/requester/r_dashboard.jsx');
   const requesterRequests = read('app/requester/r_request.jsx');
   const chatActions = read('components/chat/ChatOrderActions.jsx');
-  assert.match(distributorDashboard, /currentRequestCardWidth = Math\.min\(300/);
+  assert.match(distributorDashboard, /currentRequestCardWidth = Math\.min\(560/);
   assert.match(distributorDashboard, /cardActionsRow:[\s\S]{0,100}flexWrap: 'wrap'/);
   assert.match(distributorRequests, /cardActionsRow:[\s\S]{0,100}flexWrap: 'wrap'/);
   assert.match(requesterDashboard, /cardActionsRow:[\s\S]{0,100}flexWrap: 'wrap'/);

@@ -170,11 +170,13 @@ test('cold summary discovery returns the same authorized conversation to both us
   }
   assert.ok(f.records.has('chatUserActivity/distributor-a'));
   assert.equal((await call(f.conversations, 'GET', 'requester-b-token')).body.conversations.length, 0);
+  const senderActivityBeforeRead = f.records.get('chatUserActivity/requester-a').revision;
   const read = await call(f.readState, 'POST', 'distributor-a-token', { conversationId: id, lastReadSeq: 1 });
   assert.equal(read.statusCode, 200);
   assert.equal(read.body.conversation.participantState.find((state) => state.principalId === 'distributor-a').unreadCount, 0);
   const { receiptFor } = require('../../../components/chat/chatModel');
   assert.equal(receiptFor({ seq: 1, senderUid: 'requester-a' }, read.body.conversation, 'requester', 'requester-a'), 'seen');
+  assert.notEqual(f.records.get('chatUserActivity/requester-a').revision, senderActivityBeforeRead);
   f.records.get('requests/order-a').assignmentVersion++;
   assert.equal((await call(f.conversations, 'GET', 'distributor-a-token')).body.conversations.length, 0);
 });
@@ -302,6 +304,8 @@ test('branch coordination is sorted, branch-authored, claim-protected, and requi
   assert.deepEqual(first.body.conversation.participantBranchIds, ['branch-a', 'branch-b']);
   assert.deepEqual(first.body.conversation.participantUserUids, undefined);
   assert.equal((await resolve(f, 'manager-no-claim-token', { type: 'branch_coordination', targetBranchId: 'branch-b' })).statusCode, 403);
+  const summaries = await call(f.conversations, 'GET', 'manager-a-token');
+  assert.equal(summaries.body.conversations[0].branchNameSnapshots['branch-b'], 'B');
   f.records.set('branches/branch-c', { ...f.records.get('branches/branch-c'), status: 'inactive' });
   assert.equal((await resolve(f, 'manager-a-token', { type: 'branch_coordination', targetBranchId: 'branch-c' })).statusCode, 403);
 });
@@ -406,6 +410,37 @@ test('a current Manager advances the shared branch cursor and another branch can
   assert.equal(branchState.principalId, 'branch-a');
   assert.equal(branchState.lastReadSeq, 1);
   assert.equal((await call(f.readState, 'POST', 'manager-b-token', { conversationId, lastReadSeq: 1 })).statusCode, 403);
+});
+
+test('recipient reads publish receipt activity in both direct directions without a reply', async () => {
+  const f = fixture();
+  const conversationId = await directConversation(f);
+  await call(f.messages, 'POST', 'distributor-a-token', {
+    conversationId, clientMutationId: 'reverse-receipt-1', body: 'On the way',
+  });
+  const before = f.records.get('chatUserActivity/distributor-a').revision;
+  const read = await call(f.readState, 'POST', 'requester-a-token', { conversationId, lastReadSeq: 1 });
+  assert.equal(read.statusCode, 200);
+  const { receiptFor } = require('../../../components/chat/chatModel');
+  assert.equal(receiptFor({ seq: 1, senderUid: 'distributor-a' }, read.body.conversation, 'distributor', 'distributor-a'), 'seen');
+  assert.notEqual(f.records.get('chatUserActivity/distributor-a').revision, before);
+  assert.equal(read.body.conversation.lastMessageSeq, 1);
+});
+
+test('Manager opening a Requester-Branch thread publishes a branch read receipt without replying', async () => {
+  const f = fixture();
+  const resolved = await resolve(f, 'requester-a-token', { type: 'requester_branch', intent: 'order_followup', orderId: 'order-a' });
+  const conversationId = resolved.body.conversation.id;
+  await call(f.messages, 'POST', 'requester-a-token', {
+    conversationId, clientMutationId: 'branch-receipt-1', body: 'Can I get an update?',
+  });
+  const before = f.records.get('chatUserActivity/requester-a').revision;
+  const read = await call(f.readState, 'POST', 'manager-a-token', { conversationId, lastReadSeq: 1 });
+  assert.equal(read.statusCode, 200);
+  const { receiptFor } = require('../../../components/chat/chatModel');
+  assert.equal(receiptFor({ seq: 1, senderUid: 'requester-a' }, read.body.conversation, 'requester', 'requester-a'), 'seen');
+  assert.notEqual(f.records.get('chatUserActivity/requester-a').revision, before);
+  assert.equal(read.body.conversation.lastMessageSeq, 1);
 });
 
 test('terminal direct-order history requires an explicit bounded read deadline', async () => {

@@ -1,17 +1,29 @@
 import React from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useRouter } from 'expo-router';
+const { orderDetailTarget } = require('../../services/orderNavigation');
 
 const clean = (value) => String(value || '').trim();
 
-export default function ChatOrderContextCard({ order, colors }) {
+export default function ChatOrderContextCard({ order, colors, role, onNavigate }) {
+  const router = useRouter();
   if (!order) return null;
   const items = Array.isArray(order.items) ? order.items : [];
   const productSummary = items.slice(0, 2).map((item) => clean(item.productNameSnapshot || item.productName || item.name)).filter(Boolean).join(', ');
   const reference = clean(order.requestId || order.request_id || order.publicOrderReference || order.id);
   const branch = clean(order.currentBranchName || order.currentBranchNameSnapshot || order.branchNameSnapshot || order.branchDisplayName || order.water_station);
   const total = Number(order.totalAtOrder ?? order.totalSnapshot ?? order.total_cost ?? order.totalAmount);
+  const target = orderDetailTarget(role, order);
+  const Card = target ? Pressable : View;
   return (
-    <View style={[styles.card, { backgroundColor: colors.primarySoft, borderColor: colors.border }]}>
+    <Card
+      accessibilityRole={target ? 'button' : undefined}
+      accessibilityLabel={target && reference ? `Open Order ${reference} details` : undefined}
+      onPress={target ? () => { onNavigate?.(); router.push(target); } : undefined}
+      style={target
+        ? ({ pressed }) => [styles.card, { backgroundColor: colors.primarySoft, borderColor: colors.border }, pressed && styles.pressed]
+        : [styles.card, { backgroundColor: colors.primarySoft, borderColor: colors.border }]}
+    >
       <View style={styles.topRow}>
         <Text style={[styles.reference, { color: colors.textPrimary }]} numberOfLines={1}>{reference ? `Order ${reference}` : 'Order context'}</Text>
         {!!clean(order.status || order.finalStatus) && <Text style={[styles.status, { color: colors.primary }]}>{clean(order.status || order.finalStatus).replace(/_/g, ' ')}</Text>}
@@ -20,7 +32,8 @@ export default function ChatOrderContextCard({ order, colors }) {
       <Text style={[styles.detail, { color: colors.textSecondary }]} numberOfLines={2}>
         {[branch, Number.isFinite(total) ? `₱${total.toFixed(2)}` : ''].filter(Boolean).join(' · ')}
       </Text>
-    </View>
+      {target && <Text style={[styles.openLabel, { color: colors.primary }]}>View details ›</Text>}
+    </Card>
   );
 }
 
@@ -30,4 +43,6 @@ const styles = StyleSheet.create({
   reference: { flex: 1, fontSize: 13, fontWeight: '900' },
   status: { fontSize: 10, fontWeight: '900', textTransform: 'capitalize' },
   detail: { fontSize: 11, lineHeight: 16, marginTop: 3 },
+  openLabel: { fontSize: 11, fontWeight: '900', marginTop: 6 },
+  pressed: { opacity: 0.82 },
 });

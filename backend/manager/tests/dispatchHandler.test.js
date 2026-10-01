@@ -4,6 +4,7 @@ const test = require('node:test');
 const { createDistributorAssignedOrdersHandler } = require('../../distributor/assignedOrdersHandler');
 const { createManagerDispatchHandler } = require('../dispatchHandler');
 const { manilaScheduleDate, scheduledWeekday } = require('../../../services/productOrderPolicy');
+const { DELIVERY_FAILURE_REASONS } = require('../../../constants/deliveryFailureReasons');
 
 function fixture() {
   const records = new Map([
@@ -152,7 +153,7 @@ test('unscheduled acceptance stays ready and only explicit start enters Dashboar
   assert.equal(getCurrentDistributorRequests([accepted.body.order]).length, 0);
   const started = await call(handler, 'PATCH', 'distributor-a-token', { orderId: 'order-a', action: 'start-delivery' });
   assert.equal(getCurrentDistributorRequests([started.body.order]).length, 1);
-  const failed = await call(handler, 'PATCH', 'distributor-a-token', { orderId: 'order-a', action: 'fail-delivery', failureReason: 'Unavailable' });
+  const failed = await call(handler, 'PATCH', 'distributor-a-token', { orderId: 'order-a', action: 'fail-delivery', failureReasonCode: 'CUSTOMER_UNAVAILABLE' });
   assert.equal(getCurrentDistributorRequests([failed.body.order]).length, 0);
   const retry = await call(handler, 'PATCH', 'distributor-a-token', { orderId: 'order-a', action: 'reschedule-delivery', scheduledAt: defaultSchedule });
   assert.equal(retry.body.order.status, 'scheduled');
@@ -343,13 +344,16 @@ test('Distributor failed delivery and reschedule workflow strictly enforces stat
   // Fail delivery without reason is blocked
   const failNoReason = await call(distributor, 'PATCH', 'distributor-a-token', { orderId: 'order-a', action: 'fail-delivery' });
   assert.equal(failNoReason.statusCode, 400);
-  assert.equal(failNoReason.body.error.reason, 'FAILURE_REASON_REQUIRED');
+  assert.equal(failNoReason.body.error.reason, 'FAILURE_REASON_INVALID');
 
   // Report delivery failed with reason
-  const failed = await call(distributor, 'PATCH', 'distributor-a-token', { orderId: 'order-a', action: 'fail-delivery', failureReason: 'Customer unreachable at location' });
+  const failed = await call(distributor, 'PATCH', 'distributor-a-token', { orderId: 'order-a', action: 'fail-delivery', failureReasonCode: 'NO_RESPONSE', failureReasonNote: 'Called twice at the gate.' });
   assert.equal(failed.statusCode, 200);
   assert.equal(failed.body.order.status, 'delivery_failed');
   assert.equal(f.records.get('requests/order-a').status, 'delivery_failed');
+  assert.equal(f.records.get('requests/order-a').failureReasonCode, 'NO_RESPONSE');
+  assert.equal(f.records.get('requests/order-a').failureReasonLabel, 'Customer did not respond');
+  assert.equal(f.records.get('requests/order-a').failureReasonNote, 'Called twice at the gate.');
 
   // Now distributor can reschedule
   const rescheduled = await call(distributor, 'PATCH', 'distributor-a-token', { orderId: 'order-a', action: 'reschedule-delivery', scheduledAt: defaultSchedule });
@@ -365,6 +369,38 @@ test('Distributor failed delivery and reschedule workflow strictly enforces stat
 
   // requesterActiveOrders guard is removed
   assert.equal(f.records.has('requesterActiveOrders/requester-1'), false);
+});
+
+test('delivery failure codes are allowlisted and OTHER requires a short explanation', async () => {
+  for (const reason of DELIVERY_FAILURE_REASONS) {
+    const f = fixture();
+    f.records.set('requests/order-a', {
+      ...f.records.get('requests/order-a'),
+      assignedDistributorUid: 'distributor-a',
+      assignmentVersion: 1,
+      status: 'out_for_delivery',
+    });
+    const handler = createDistributorAssignedOrdersHandler(f.getAdmin);
+    const response = await call(handler, 'PATCH', 'distributor-a-token', {
+      orderId: 'order-a',
+      action: 'fail-delivery',
+      failureReasonCode: reason.code,
+      ...(reason.code === 'OTHER' ? { failureReasonNote: 'Customer requested another arrangement.' } : {}),
+    });
+    assert.equal(response.statusCode, 200, reason.code);
+    assert.equal(response.body.order.failureReasonCode, reason.code);
+    assert.equal(response.body.order.failureReasonLabel, reason.label);
+  }
+
+  const invalidFixture = fixture();
+  invalidFixture.records.set('requests/order-a', { ...invalidFixture.records.get('requests/order-a'), assignedDistributorUid: 'distributor-a', assignmentVersion: 1, status: 'out_for_delivery' });
+  const invalidHandler = createDistributorAssignedOrdersHandler(invalidFixture.getAdmin);
+  const invalid = await call(invalidHandler, 'PATCH', 'distributor-a-token', { orderId: 'order-a', action: 'fail-delivery', failureReasonCode: 'INVENTED_REASON' });
+  assert.equal(invalid.statusCode, 400);
+  assert.equal(invalid.body.error.reason, 'FAILURE_REASON_INVALID');
+  const otherWithoutNote = await call(invalidHandler, 'PATCH', 'distributor-a-token', { orderId: 'order-a', action: 'fail-delivery', failureReasonCode: 'OTHER' });
+  assert.equal(otherWithoutNote.statusCode, 400);
+  assert.equal(otherWithoutNote.body.error.reason, 'FAILURE_REASON_NOTE_REQUIRED');
 });
 
 test('Distributor profile completeness blocks mutation actions with 409 PROFILE_INCOMPLETE while GET is allowed', async () => {

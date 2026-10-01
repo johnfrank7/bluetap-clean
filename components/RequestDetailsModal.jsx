@@ -5,12 +5,14 @@ import {
   StyleSheet,
   Text,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import SoftStatusBadge from './SoftStatusBadge';
 import { createShadow } from './shadowStyles';
 import { createPortalStyleSheet, useBlueTapTheme } from './BlueTapTheme';
 import { formatDisplayUniqueId } from '../services/uniqueIds';
+const { formatDeliveryFailureReason } = require('../constants/deliveryFailureReasons');
 
 const BLUE = '#187BCD';
 const BLUE_LIGHT = '#E3F2FD';
@@ -56,7 +58,14 @@ export default function RequestDetailsModal({
   onCancel,
   onEdit,
 }) {
-  useBlueTapTheme();
+  const { colors } = useBlueTapTheme();
+  const { width } = useWindowDimensions();
+  const compact = width < 600;
+  const requestReference = request?.requestId || request?.request_id || request?.id;
+  const waterStation = request?.waterStation || request?.currentBranchName || request?.currentBranchNameSnapshot || request?.branchNameSnapshot || request?.water_station;
+  const deliveryAddress = request?.deliveryAddress || request?.addressSnapshot || request?.address || request?.deliveryLocation?.address;
+  const branchLocation = request?.branchLocation || request?.currentBranchLocation || null;
+  const failureReason = formatDeliveryFailureReason(request, '');
   const requesterUniqueId = formatDisplayUniqueId(
     request?.requesterUniqueId || request?.requester_unique_id || request?.requesterId,
     'Not assigned'
@@ -72,7 +81,7 @@ export default function RequestDetailsModal({
     : [];
   const topRows = [
     [
-      { label: 'Request ID', value: request?.requestId },
+      { label: 'Request ID', value: requestReference },
       { label: 'Status', status: request?.status },
     ],
     [
@@ -80,7 +89,7 @@ export default function RequestDetailsModal({
       { label: 'Delivery Date', value: request?.deliveryDate },
     ],
     [
-      { label: 'Water Station', value: request?.waterStation },
+      { label: 'Water Station', value: waterStation },
       { label: 'Payment Method', value: 'Cash on Delivery' },
     ],
   ];
@@ -103,8 +112,8 @@ export default function RequestDetailsModal({
       animationType="fade"
       onRequestClose={onClose}
     >
-      <View style={styles.backdrop}>
-        <View style={styles.modal}>
+      <View style={[styles.backdrop, !compact && styles.desktopBackdrop, { backgroundColor: colors.overlay }]}>
+        <View style={[styles.modal, !compact && styles.desktopModal]}>
           <View style={styles.header}>
             <Text style={styles.title}>Request Details</Text>
             <TouchableOpacity activeOpacity={0.75} onPress={onClose}>
@@ -169,26 +178,36 @@ export default function RequestDetailsModal({
                 <View style={[styles.customerCell, styles.addressCell]}>
                   <Text style={styles.summaryLabel}>Delivery Address</Text>
                   <Text style={styles.summaryValue}>
-                    {displayValue(request?.deliveryAddress)}
+                    {displayValue(deliveryAddress)}
                   </Text>
                 </View>
               </View>
             </View>
 
-            {Number.isFinite(request?.deliveryLocation?.latitude) && Number.isFinite(request?.deliveryLocation?.longitude) ? (
+            {!!failureReason && (
               <View style={styles.section}>
-                <Text style={styles.sectionTitle}>Delivery Location Map</Text>
+                <Text style={styles.sectionTitle}>Delivery Attempt</Text>
+                <View style={styles.failureCard}>
+                  <Text style={styles.summaryLabel}>Failure reason</Text>
+                  <Text style={styles.failureValue}>{failureReason}</Text>
+                </View>
+              </View>
+            )}
+
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Delivery Location Map</Text>
+              {Number.isFinite(request?.deliveryLocation?.latitude) && Number.isFinite(request?.deliveryLocation?.longitude) ? (
                 <View style={styles.mapContainer}>
                   <React.Suspense fallback={<View style={styles.mapLoading}><Text style={styles.mapLoadingText}>Loading delivery map…</Text></View>}>
                     <LazyLocationMap
                       location={request.deliveryLocation}
                       branches={
-                        request.branchLocation?.latitude
+                        Number.isFinite(branchLocation?.latitude) && Number.isFinite(branchLocation?.longitude)
                           ? [
                               {
                                 id: request.branchId || 'station',
                                 name: request.waterStation || 'Water Station',
-                                location: request.branchLocation,
+                                location: branchLocation,
                               },
                             ]
                           : []
@@ -200,8 +219,10 @@ export default function RequestDetailsModal({
                     />
                   </React.Suspense>
                 </View>
-              </View>
-            ) : null}
+              ) : (
+                <View style={styles.locationUnavailable}><Text style={styles.locationUnavailableText}>Location unavailable</Text></View>
+              )}
+            </View>
 
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>Ordered Products</Text>
@@ -296,6 +317,10 @@ const styles = createPortalStyleSheet({
     justifyContent: 'flex-end',
     alignItems: 'center',
   },
+  desktopBackdrop: {
+    justifyContent: 'center',
+    padding: 20,
+  },
   modal: {
     width: '100%',
     maxWidth: 430,
@@ -313,6 +338,10 @@ const styles = createPortalStyleSheet({
       radius: 14,
       offset: { width: 0, height: 6 },
     }),
+  },
+  desktopModal: {
+    maxWidth: 720,
+    borderRadius: 22,
   },
   header: {
     flexDirection: 'row',
@@ -367,13 +396,13 @@ const styles = createPortalStyleSheet({
   summaryLabel: {
     color: TEXT_MUTED,
     fontSize: 10,
-    fontWeight: 'bold',
+    fontWeight: '600',
     marginBottom: 4,
   },
   summaryValue: {
     color: TEXT_DARK,
     fontSize: 13,
-    fontWeight: '700',
+    fontWeight: '800',
     lineHeight: 17,
   },
   section: {
@@ -548,5 +577,32 @@ const styles = createPortalStyleSheet({
     color: TEXT_MUTED,
     fontSize: 12,
     fontWeight: '600',
+  },
+  locationUnavailable: {
+    minHeight: 110,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: CARD_BORDER,
+    borderRadius: 16,
+    backgroundColor: '#F7FBFF',
+  },
+  locationUnavailableText: {
+    color: TEXT_MUTED,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  failureCard: {
+    borderWidth: 1,
+    borderColor: '#FCA5A5',
+    borderRadius: 14,
+    padding: 12,
+    backgroundColor: '#FEF2F2',
+  },
+  failureValue: {
+    color: TEXT_DARK,
+    fontSize: 13,
+    lineHeight: 19,
+    fontWeight: '800',
   },
 });

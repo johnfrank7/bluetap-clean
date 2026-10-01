@@ -53,7 +53,9 @@ export function presentationFor(conversation, role, roleData) {
       : clean(roleData.profile?.branchName || roleData.branch?.name) || 'Your BlueTap Station';
     contextLabel = role === 'manager' ? 'Distributor · Your branch' : 'Branch operations';
   } else if (conversation.type === 'branch_coordination') {
-    displayName = 'Partner BlueTap Station';
+    const ownBranchId = clean(roleData.branchId || roleData.branch?.id);
+    const otherBranchId = (conversation.branchIds || conversation.participantBranchIds || []).find((id) => clean(id) !== ownBranchId);
+    displayName = clean(conversation.branchNameSnapshots?.[otherBranchId]) || 'Partner BlueTap Station';
     contextLabel = 'Branch coordination';
   }
 
@@ -143,7 +145,9 @@ export default function ChatDataProvider({ children, role }) {
   const conversations = React.useMemo(() => summaries.map((conversation) => {
     const presented = presentationFor(conversation, role, roleData);
     const unreadCount = unreadForConversation(presented, role, uid, branchId);
-    return { ...presented, unreadCount, unreadLabel: formatBadge(unreadCount) };
+    const principalState = principalStateFor(presented, role, uid, branchId);
+    const notificationEpoch = Math.max(1, Number(principalState?.lastIncomingSeq || 0) - unreadCount + 1);
+    return { ...presented, unreadCount, unreadLabel: formatBadge(unreadCount), notificationEpoch };
   }), [branchId, role, roleData, summaries, uid]);
 
   const currentConversation = React.useMemo(() => {
@@ -291,6 +295,7 @@ export default function ChatDataProvider({ children, role }) {
 
   const value = React.useMemo(() => ({
     branchDistributors: role === 'manager' && accessReadiness === 'ready' ? (roleData.users || []).filter((user) => user.role === 'distributor' && user.branchId === branchId && ['active', 'approved'].includes(String(user.distributorStatus || user.approvalStatus || user.status || '').toLowerCase()) && (!user.accountStatus || user.accountStatus === 'active') && user.mustChangePassword !== true) : [],
+    stationName: clean(roleData.branch?.name || roleData.profile?.branchName || roleData.profile?.branchNameSnapshot) || 'Your BlueTap Station',
     role, colors, conversations, loading, error, panelOpen, currentConversation, messages,
     canSend: availability.sendable && accessReadiness === 'ready' && !threadError,
     hasEarlierMessages, loadingEarlier, threadError, resolvingConversation, resolveError,

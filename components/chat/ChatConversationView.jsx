@@ -29,7 +29,7 @@ export default function ChatConversationView() {
         <View style={{ flex: 1 }}><Text style={[styles.title, { color: colors.textPrimary }]} numberOfLines={1}>{currentConversation.displayName}</Text><Text style={[styles.subtitle, { color: colors.textSecondary }]} numberOfLines={1}>{currentConversation.contextLabel}</Text></View>
         <Pressable accessibilityRole="button" accessibilityLabel="Close messages" onPress={closeChat} style={styles.close}><Text style={[styles.closeText, { color: colors.textPrimary }]}>×</Text></Pressable>
       </View>
-      <ChatOrderContextCard order={currentConversation.orderContextLocal} colors={colors} />
+      <ChatOrderContextCard order={currentConversation.orderContextLocal} colors={colors} role={role} onNavigate={closeChat} />
       <ScrollView
         ref={scrollRef}
         keyboardShouldPersistTaps="handled"

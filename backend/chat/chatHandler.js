@@ -676,7 +676,14 @@ async function listConversations({ db, callerUid, callerClaims, now }) {
       const conversation = withId(item);
       try {
         await authorizeConversation(tx, db, conversation, callerUid, callerClaims, 'read', timeOf(now));
-        conversations.push(conversation);
+        if (conversation.type === CONVERSATION_TYPES.BRANCH_COORDINATION) {
+          const branchNameSnapshots = {};
+          for (const branchId of conversation.participantBranchIds || []) {
+            const branchSnapshot = await tx.get(db.collection('branches').doc(branchId));
+            if (branchSnapshot.exists) branchNameSnapshots[branchId] = clean(branchSnapshot.data()?.name, 160);
+          }
+          conversations.push({ ...conversation, branchNameSnapshots });
+        } else conversations.push(conversation);
       } catch (error) {
         if (!(error instanceof OtpError) || ![403, 404, 409].includes(error.status)) throw error;
       }

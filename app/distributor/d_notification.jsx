@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { BLUETAP_COLORS, BLUETAP_LAYOUT } from '../../constants/bluetapTheme';
 import { createPortalStyleSheet, useBlueTapTheme } from '../../components/BlueTapTheme';
 import SoftStatusBadge from '../../components/SoftStatusBadge';
@@ -16,6 +16,7 @@ import {
   useAssignedDistributorOrders,
 } from '../../services/distributorOrders';
 import { formatNotificationTime, getOrderLifecycleTimestamp, parseTimestamp } from '../../services/notificationTimestamp';
+import { useRoleNotifications } from '../../components/RoleNotifications';
 
 const NOTIFICATION_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -70,24 +71,22 @@ const messageFor = (order) => {
 export default function DistributorNotification() {
   useBlueTapTheme();
   const router = useRouter();
+  const params = useLocalSearchParams();
   const { orders, loading, error, refresh } = useAssignedDistributorOrders();
+  const { events, markAllSeen, markSeen } = useRoleNotifications();
   const [selectedOrderId, setSelectedOrderId] = React.useState(null);
+  const openedParamRef = React.useRef('');
 
-  const events = useMemo(
-    () =>
-      orders.filter((order) => {
-        const timestamp = parseTimestamp(getOrderLifecycleTimestamp(order));
-        return timestamp && timestamp.getTime() >= Date.now() - NOTIFICATION_RETENTION_MS;
-      }).slice(0, 150).map((order) => ({
-        ...order,
-        message: messageFor(order),
-        when: formatWhen(order),
-      })),
-    [orders]
-  );
+  React.useEffect(() => { if (events.length) markAllSeen(); }, [events, markAllSeen]);
+  React.useEffect(() => {
+    const orderId = Array.isArray(params.orderId) ? params.orderId[0] : params.orderId;
+    if (!orderId || openedParamRef.current === orderId || !orders.some((order) => String(order.id || order.sourceId) === String(orderId))) return;
+    openedParamRef.current = String(orderId);
+    setSelectedOrderId(String(orderId));
+  }, [orders, params.orderId]);
   const selectedOrder = useMemo(
-    () => events.find((event) => String(event.sourceId || event.id) === String(selectedOrderId)) || null,
-    [events, selectedOrderId]
+    () => orders.find((order) => String(order.id || order.sourceId) === String(selectedOrderId)) || null,
+    [orders, selectedOrderId]
   );
 
   return (
@@ -131,14 +130,14 @@ export default function DistributorNotification() {
               return (
                 <TouchableOpacity
                   key={event.id}
-                  onPress={() => setSelectedOrderId(event.sourceId || event.id)}
+                  onPress={() => { markSeen([event.id]); setSelectedOrderId(event.orderId); }}
                   style={[styles.card, { borderLeftWidth: 4, borderLeftColor: tone.dot }]}
                 >
                   <View style={[styles.dot, { backgroundColor: tone.dot }]} />
                   <View style={styles.cardBody}>
                     <View style={styles.cardHeaderRow}>
                       <SoftStatusBadge status={event.status} />
-                      <Text style={styles.time}>{event.when}</Text>
+                      <Text style={styles.time}>{formatNotificationTime(event.at)}</Text>
                     </View>
                     <Text style={styles.message}>{event.message}</Text>
                   </View>

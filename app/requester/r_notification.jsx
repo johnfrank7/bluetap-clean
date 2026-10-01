@@ -1,7 +1,7 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useRequesterData } from '../../components/RoleDataProviders';
 import { BLUETAP_COLORS, BLUETAP_LAYOUT } from '../../constants/bluetapTheme';
 import { createPortalStyleSheet, useBlueTapTheme } from '../../components/BlueTapTheme';
@@ -12,6 +12,7 @@ import { USER_PORTAL_BOTTOM_CONTENT_INSET, USER_PORTAL_LAYOUT } from '../../cons
 import { normalizeRequesterOrderStatus, requesterOrderStatusLabel } from '../../constants/requesterOrderStatus';
 import { refreshRequesterRequests } from '../../services/requests';
 import { formatNotificationTime, getOrderLifecycleTimestamp, parseTimestamp } from '../../services/notificationTimestamp';
+import { useRoleNotifications } from '../../components/RoleNotifications';
 
 const NOTIFICATION_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -52,10 +53,13 @@ const messageFor = (order) => {
 export default function RequesterNotification() {
   useBlueTapTheme();
   const router = useRouter();
+  const params = useLocalSearchParams();
   const { orders, loading, error: orderError, uid, readiness } = useRequesterData();
+  const { events, markAllSeen, markSeen } = useRoleNotifications();
   const [retryError, setRetryError] = useState('');
   const error = orderError || retryError;
-  const [selectedOrder, setSelectedOrder] = useState(null);
+  const [selectedOrderId, setSelectedOrderId] = useState(null);
+  const openedParamRef = useRef('');
 
   const retry = async () => {
     if (!uid || readiness !== 'READY') return;
@@ -67,20 +71,14 @@ export default function RequesterNotification() {
     }
   };
 
-  const events = useMemo(
-    () =>
-      orders.filter((order) => {
-        const timestamp = parseTimestamp(getOrderLifecycleTimestamp(order));
-        return timestamp && timestamp.getTime() >= Date.now() - NOTIFICATION_RETENTION_MS;
-      }).slice(0, 150).map((order) => ({
-        ...order,
-        when: formatWhen(order),
-      })),
-    [orders]
-  );
-  const liveSelectedOrder = selectedOrder
-    ? orders.find((order) => order.id === selectedOrder.id) || null
-    : null;
+  useEffect(() => { if (events.length) markAllSeen(); }, [events, markAllSeen]);
+  useEffect(() => {
+    const orderId = Array.isArray(params.orderId) ? params.orderId[0] : params.orderId;
+    if (!orderId || openedParamRef.current === orderId || !orders.some((order) => String(order.id) === String(orderId))) return;
+    openedParamRef.current = String(orderId);
+    setSelectedOrderId(String(orderId));
+  }, [orders, params.orderId]);
+  const liveSelectedOrder = selectedOrderId ? orders.find((order) => String(order.id) === String(selectedOrderId)) || null : null;
 
   return (
     <SafeAreaView edges={['left', 'right', 'bottom']} style={styles.safe}>
@@ -120,8 +118,9 @@ export default function RequesterNotification() {
                 <TouchableOpacity
                   key={event.id}
                   onPress={() => {
-                    if (event.id) {
-                      setSelectedOrder(event);
+                    markSeen([event.id]);
+                    if (event.orderId) {
+                      setSelectedOrderId(event.orderId);
                     } else {
                       // Graceful fallback: no order data resolvable
                       router.push('/requester/r_request');
@@ -133,9 +132,9 @@ export default function RequesterNotification() {
                   <View style={styles.cardBody}>
                     <View style={styles.cardHeaderRow}>
                       <SoftStatusBadge status={event.status} />
-                      <Text style={styles.time}>{event.when}</Text>
+                      <Text style={styles.time}>{formatNotificationTime(event.at)}</Text>
                     </View>
-                    <Text style={styles.message}>{messageFor(event)}</Text>
+                    <Text style={styles.message}>{event.message}</Text>
                   </View>
                   <Text style={styles.chevron}>›</Text>
                 </TouchableOpacity>
@@ -145,8 +144,8 @@ export default function RequesterNotification() {
         )}
       </ScrollView>
       <RequestDetailsModal
-        visible={selectedOrder !== null}
-        onClose={() => setSelectedOrder(null)}
+        visible={liveSelectedOrder !== null}
+        onClose={() => setSelectedOrderId(null)}
         request={liveSelectedOrder}
       />
     </SafeAreaView>

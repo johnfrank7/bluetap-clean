@@ -7,6 +7,8 @@ import { USER_PORTAL_LAYOUT } from '../constants/userPortalLayout';
 import { UserPortalFrame } from './UserPortalFrame';
 import { useBlueTapTheme } from './BlueTapTheme';
 import ThemeIconButton from './ThemeIconButton';
+import { useRoleNotifications } from './RoleNotifications';
+const { formatNotificationBadge } = require('../services/orderNotifications');
 
 const BlueTapHeader = memo(function BlueTapHeader({
   notificationPath,
@@ -14,6 +16,7 @@ const BlueTapHeader = memo(function BlueTapHeader({
 }) {
   const router = useRouter();
   const { colors, isDark } = useBlueTapTheme();
+  const { unseenCount } = useRoleNotifications();
 
   const openHome = useCallback(() => {
     router.replace(notificationPath?.startsWith('/distributor') ? '/distributor/d_dashboard' : '/requester/r_dashboard');
@@ -51,17 +54,19 @@ const BlueTapHeader = memo(function BlueTapHeader({
             <ThemeIconButton inverse={!isDark} />
 
             <TouchableOpacity
-              accessibilityLabel="Open notifications"
+              accessibilityLabel={unseenCount > 0 ? `Open notifications, ${unseenCount} unseen` : 'Open notifications'}
               accessibilityRole="button"
               activeOpacity={0.85}
               hitSlop={8}
               onPress={openNotifications}
+              style={styles.notificationButton}
             >
               <Image
                 source={require('../assets/icons/notif.png')}
                 style={styles.notifIcon}
                 tintColor="#FFFFFF"
               />
+              {unseenCount > 0 && <View style={styles.notificationBadge}><Text style={styles.notificationBadgeText}>{formatNotificationBadge(unseenCount)}</Text></View>}
             </TouchableOpacity>
           </View>
         </View>
@@ -112,4 +117,7 @@ const styles = StyleSheet.create({
     width: 22,
     height: 22,
   },
+  notificationButton: { width: 28, height: 28, alignItems: 'center', justifyContent: 'center', position: 'relative' },
+  notificationBadge: { position: 'absolute', top: -6, right: -8, minWidth: 18, height: 18, paddingHorizontal: 4, borderRadius: 9, backgroundColor: '#EF4444', borderWidth: 1.5, borderColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center' },
+  notificationBadgeText: { color: '#FFFFFF', fontSize: 9, fontWeight: '900' },
 });

@@ -217,8 +217,14 @@ const getDetailsRequestData = (request) =>
         contactNumber: request.contact_number || 'Not set',
         deliveryAddress: request.address || 'Not set',
         deliveryLocation: request.deliveryLocation,
+        branchLocation: request.branchLocation,
+        branchId: request.currentBranchId || request.branchId,
         items: getRequestItems(request),
         grandTotalAmount: getTotalAmount(request),
+        failureReason: request.failureReason,
+        failureReasonCode: request.failureReasonCode,
+        failureReasonLabel: request.failureReasonLabel,
+        failureReasonNote: request.failureReasonNote,
       }
     : null;
 

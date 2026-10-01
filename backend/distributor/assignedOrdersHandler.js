@@ -5,6 +5,7 @@ const { safeOrder, owningBranchId } = require('../manager/dispatchHandler');
 const { OtpError } = require('../utils/otpError');
 const { assignmentVersionForTransition } = require('../utils/relationshipEpochs');
 const { postOrderAccessEndsAt, reconcileOrderLifecycleInTransaction } = require('../chat/conversationLifecycleService');
+const { deliveryFailureReasonForCode } = require('../../constants/deliveryFailureReasons');
 
 const clean = (value, max = 128) => String(value || '').trim().slice(0, max);
 const history = (value) => Array.isArray(value) ? value : [];
@@ -81,8 +82,17 @@ function createDistributorAssignedOrdersHandler(getAdmin = getFirebaseAdmin) {
           db.collection('branches').get(),
         ]);
         const branchNames = new Map(branchesSnapshot.docs.map((item) => [item.id, String(item.data()?.name || '').trim()]));
+        const branchLocations = new Map(branchesSnapshot.docs.map((item) => {
+          const data = item.data() || {};
+          const latitude = Number(data.latitude);
+          const longitude = Number(data.longitude);
+          return [item.id, Number.isFinite(latitude) && Number.isFinite(longitude) ? { latitude, longitude } : null];
+        }));
         const orders = ordersSnapshot.docs
-          .map((item) => safeOrder(item.id, item.data(), branchNames))
+          .map((item) => {
+            const order = safeOrder(item.id, item.data(), branchNames);
+            return { ...order, branchLocation: order.branchLocation || branchLocations.get(owningBranchId(order)) || null };
+          })
           .filter((order) => order.assignedDistributorUid === distributor.decoded.uid && owningBranchId(order) === distributor.branch.id)
           .sort((left, right) => String(right.updatedAt || right.createdAt || '').localeCompare(String(left.updatedAt || left.createdAt || '')));
         return res.status(200).json({ orders });
@@ -107,6 +117,9 @@ function createDistributorAssignedOrdersHandler(getAdmin = getFirebaseAdmin) {
         let update;
         let event;
         let failureReason = '';
+        let failureReasonCode = '';
+        let failureReasonLabel = '';
+        let failureReasonNote = '';
         let declineReason = '';
         let scheduledAt = null;
 
@@ -160,12 +173,17 @@ function createDistributorAssignedOrdersHandler(getAdmin = getFirebaseAdmin) {
           if (currentStatus !== 'out_for_delivery') {
             throw new OtpError(409, 'ORDER_NOT_FAILABLE', 'Only deliveries that are out for delivery can be reported as failed.');
           }
-          failureReason = clean(body.failureReason || body.reason, 240);
-          if (!failureReason) {
-            throw new OtpError(400, 'FAILURE_REASON_REQUIRED', 'Provide a reason for the delivery failure.');
+          failureReasonCode = clean(body.failureReasonCode, 48).toUpperCase();
+          const allowedReason = deliveryFailureReasonForCode(failureReasonCode);
+          if (!allowedReason) throw new OtpError(400, 'FAILURE_REASON_INVALID', 'Choose a supported delivery failure reason.');
+          failureReasonLabel = allowedReason.label;
+          failureReasonNote = clean(body.failureReasonNote, 240);
+          if (failureReasonCode === 'OTHER' && !failureReasonNote) {
+            throw new OtpError(400, 'FAILURE_REASON_NOTE_REQUIRED', 'Add a short explanation when choosing Other.');
           }
+          failureReason = failureReasonNote ? `${failureReasonLabel}: ${failureReasonNote}` : failureReasonLabel;
           event = 'DELIVERY_FAILED';
-          update = { status: 'delivery_failed', deliveryFailedAt: now, failureReason };
+          update = { status: 'delivery_failed', deliveryFailedAt: now, failureReason, failureReasonCode, failureReasonLabel, failureReasonNote };
         } else if (action === 'reschedule-delivery') {
           if (currentStatus !== 'delivery_failed') {
             throw new OtpError(409, 'ORDER_NOT_RESCHEDULABLE', 'Only failed deliveries can be rescheduled by the distributor.');
@@ -198,6 +216,7 @@ function createDistributorAssignedOrdersHandler(getAdmin = getFirebaseAdmin) {
             distributorUid: distributor.decoded.uid,
             branchId: distributor.branch.id,
             ...(failureReason ? { failureReason } : {}),
+            ...(failureReasonCode ? { failureReasonCode, failureReasonLabel, failureReasonNote } : {}),
             ...(declineReason ? { declineReason } : {}),
             ...(scheduledAt ? { scheduledAt } : {}),
             createdAt: now,
