@@ -11,6 +11,8 @@ const DEFAULT_RETENTION_POLICY = Object.freeze({
   verificationRetentionHours: 24,
   rateLimitRetentionDays: 7,
   completedOrderArchiveDays: 90,
+  chatMessageRetentionDays: 90,
+  chatReportEvidenceRetentionDays: 180,
   version: 1,
 });
 
@@ -20,6 +22,8 @@ const POLICY_OPTIONS = Object.freeze({
   verificationRetentionHours: Object.freeze([12, 24, 48, 72]),
   rateLimitRetentionDays: Object.freeze([1, 7, 14, 30]),
   completedOrderArchiveDays: Object.freeze([30, 60, 90, 180, 365]),
+  chatMessageRetentionDays: Object.freeze([30, 60, 90, 180]),
+  chatReportEvidenceRetentionDays: Object.freeze([90, 180, 365]),
 });
 
 const PROTECTED_DATA = Object.freeze([
@@ -122,6 +126,8 @@ async function collectMaintenanceTargets(db, policy, now = Date.now()) {
   const verificationCutoff = now - policy.verificationRetentionHours * 60 * 60 * 1000;
   const rateLimitCutoff = now - policy.rateLimitRetentionDays * DAY_MS;
   const orderCutoff = now - policy.completedOrderArchiveDays * DAY_MS;
+  const chatCutoff = now - policy.chatMessageRetentionDays * DAY_MS;
+  const reportEvidenceCutoff = now - policy.chatReportEvidenceRetentionDays * DAY_MS;
 
   const [registrations, usernameReservations, emailVerifications, passwordVerifications, authRateLimits, registrationOtpRateLimits, passwordRateLimits, orders] = await Promise.all([
     queryBefore(db, 'registrationSessions', 'createdAt', registrationCutoff),
@@ -147,6 +153,56 @@ async function collectMaintenanceTargets(db, policy, now = Date.now()) {
   const expiredPasswordRateLimits = documents(passwordRateLimits).filter((doc) => millis(doc.data()?.lastSentAt) <= rateLimitCutoff);
   const ordersToArchive = documents(orders).filter((doc) => eligibleOrder(doc, orderCutoff));
 
+  let chatMessages = [];
+  let openChatReports = [];
+  let escalatedChatReports = [];
+  let resolvedChatReports = [];
+  let chatRestrictions = [];
+  let orderingRestrictions = [];
+  if (typeof db.collectionGroup === 'function') {
+    const [messageSnapshot, openReportSnapshot, escalatedReportSnapshot, resolvedReportSnapshot, chatRestrictionSnapshot, orderingRestrictionSnapshot] = await Promise.all([
+      db.collectionGroup('messages').where('createdAt', '<=', new Date(chatCutoff)).orderBy('createdAt', 'asc').limit(BATCH_SIZE).get(),
+      db.collection('chatReports').where('status', '==', 'open').orderBy('createdAt', 'desc').limit(BATCH_SIZE).get(),
+      db.collection('chatReports').where('status', '==', 'escalated').orderBy('createdAt', 'desc').limit(BATCH_SIZE).get(),
+      db.collection('chatReports').where('resolvedAt', '<=', new Date(reportEvidenceCutoff)).orderBy('resolvedAt', 'asc').limit(BATCH_SIZE).get(),
+      db.collection('chatRestrictions').where('nextExpiryAt', '<=', new Date(now)).limit(BATCH_SIZE).get(),
+      db.collection('orderingRestrictions').where('nextExpiryAt', '<=', new Date(now)).limit(BATCH_SIZE).get(),
+    ]);
+    chatMessages = documents(messageSnapshot);
+    openChatReports = documents(openReportSnapshot);
+    escalatedChatReports = documents(escalatedReportSnapshot);
+    resolvedChatReports = documents(resolvedReportSnapshot).filter((doc) => String(doc.data()?.status || '').toLowerCase() === 'resolved');
+    chatRestrictions = documents(chatRestrictionSnapshot);
+    orderingRestrictions = documents(orderingRestrictionSnapshot);
+  }
+  const evidenceHeldMessageKeys = new Set();
+  for (const reportDoc of [...openChatReports, ...escalatedChatReports]) {
+    const report = reportDoc.data() || {};
+    const status = String(report.status || '').toLowerCase();
+    if (!['open', 'escalated'].includes(status)) continue;
+    for (const message of report.evidenceSnapshot || []) {
+      if (report.conversationId && message.messageId) evidenceHeldMessageKeys.add(`${report.conversationId}/${message.messageId}`);
+    }
+  }
+  for (const messageDoc of chatMessages) {
+    for (const reportId of (messageDoc.data()?.retentionHoldReportIds || []).slice(0, 10)) {
+      const reportSnapshot = await db.collection('chatReports').doc(String(reportId)).get();
+      if (!reportSnapshot.exists) continue;
+      const report = reportSnapshot.data() || {};
+      const status = String(report.status || '').toLowerCase();
+      const stillHeld = ['open', 'escalated'].includes(status) || (status === 'resolved' && millis(report.resolvedAt) + policy.chatReportEvidenceRetentionDays * DAY_MS > now);
+      if (stillHeld) evidenceHeldMessageKeys.add(messageKeyFromPath(messageDoc));
+    }
+  }
+  function messageKeyFromPath(doc) { const segments = String(doc.ref?.path || '').split('/'); return segments.length >= 4 ? `${segments[1]}/${doc.id}` : ''; }
+  const messageKey = messageKeyFromPath;
+  const chatMessagesProtectedByEvidence = chatMessages.filter((doc) => evidenceHeldMessageKeys.has(messageKey(doc)));
+  const chatMessagesToDelete = chatMessages.filter((doc) => !evidenceHeldMessageKeys.has(messageKey(doc)));
+  const reportEvidenceToPurge = resolvedChatReports.filter((doc) => {
+    const report = doc.data() || {};
+    return String(report.status || '').toLowerCase() === 'resolved' && millis(report.resolvedAt) > 0 && millis(report.resolvedAt) <= reportEvidenceCutoff && (report.evidenceSnapshot || []).length > 0;
+  });
+
   return {
     registrationSessions,
     usernameReservations: expiredUsernameReservations,
@@ -156,6 +212,11 @@ async function collectMaintenanceTargets(db, policy, now = Date.now()) {
     registrationOtpRateLimits: expiredRegistrationOtpRateLimits,
     passwordResetRateLimits: expiredPasswordRateLimits,
     ordersToArchive,
+    chatMessagesToDelete,
+    chatMessagesProtectedByEvidence,
+    reportEvidenceToPurge,
+    openReportEvidenceProtected: [...openChatReports, ...escalatedChatReports].filter((doc) => (doc.data()?.evidenceSnapshot || []).length > 0),
+    expiredRestrictionProjections: [...chatRestrictions, ...orderingRestrictions],
   };
 }
 
@@ -165,6 +226,11 @@ function summarizeTargets(targets) {
   const expiredVerificationSessions = targets.emailOtpVerifications.length + targets.passwordResetSessions.length;
   const expiredRateLimitRecords = targets.authRateLimits.length + targets.registrationOtpRateLimits.length + targets.passwordResetRateLimits.length;
   const ordersEligibleForArchive = targets.ordersToArchive.length;
+  const expiredChatMessages = targets.chatMessagesToDelete.length;
+  const chatMessagesProtectedByEvidence = targets.chatMessagesProtectedByEvidence.length;
+  const reportEvidenceEligibleForPurge = targets.reportEvidenceToPurge.length;
+  const expiredRestrictionProjections = targets.expiredRestrictionProjections.length;
+  const openReportEvidenceProtected = targets.openReportEvidenceProtected.length;
   return {
     expiredNotifications: 0,
     expiredRegistrationSessions,
@@ -172,7 +238,14 @@ function summarizeTargets(targets) {
     expiredVerificationSessions,
     expiredRateLimitRecords,
     ordersEligibleForArchive,
-    temporaryRecordsEligible: expiredRegistrationSessions + expiredUsernameReservations + expiredVerificationSessions + expiredRateLimitRecords,
+    expiredChatMessages,
+    chatMessagesProtectedByEvidence,
+    chatMessagesSkipped: chatMessagesProtectedByEvidence,
+    openReportEvidenceProtected,
+    reportEvidenceEligibleForPurge,
+    expiredRestrictionProjections,
+    closedConversationsEligible: 0,
+    temporaryRecordsEligible: expiredRegistrationSessions + expiredUsernameReservations + expiredVerificationSessions + expiredRateLimitRecords + expiredChatMessages,
   };
 }
 
@@ -238,6 +311,28 @@ async function runCleanup(db, policy, triggeredBy, now = Date.now()) {
   for (const doc of targets.ordersToArchive) {
     operations.push({ type: 'update', ref: doc.ref, data: { archived: true, archivedAt, archivedByMaintenance: true } });
   }
+  const previewClears = new Set();
+  for (const doc of targets.chatMessagesToDelete) {
+    operations.push({ type: 'delete', ref: doc.ref });
+    const conversationRef = doc.ref?.parent?.parent;
+    if (!conversationRef?.get || previewClears.has(conversationRef.path)) continue;
+    const conversationSnapshot = await conversationRef.get();
+    if (conversationSnapshot.exists && Number(conversationSnapshot.data()?.lastMessageSeq || 0) === Number(doc.data()?.seq || -1)) {
+      previewClears.add(conversationRef.path);
+      operations.push({ type: 'update', ref: conversationRef, data: { lastMessagePreview: '', lastMessageAt: null, retentionPreviewClearedAt: archivedAt } });
+    }
+  }
+  for (const doc of targets.reportEvidenceToPurge) {
+    operations.push({ type: 'update', ref: doc.ref, data: { evidenceSnapshot: [], retentionHold: false, evidencePurgedAt: archivedAt, updatedAt: archivedAt } });
+  }
+  for (const doc of targets.expiredRestrictionProjections) {
+    const current = doc.data() || {};
+    const platform = millis(current.platform?.endsAt) > now ? current.platform : null;
+    const branches = Object.fromEntries(Object.entries(current.branches || {}).filter(([, entry]) => millis(entry?.endsAt) > now));
+    const expiries = [platform, ...Object.values(branches)].map((entry) => millis(entry?.endsAt)).filter((value) => value > now);
+    if (!platform && Object.keys(branches).length === 0) operations.push({ type: 'delete', ref: doc.ref });
+    else operations.push({ type: 'update', ref: doc.ref, data: { platform, branches, nextExpiryAt: expiries.length ? new Date(Math.min(...expiries)) : null, updatedAt: archivedAt } });
+  }
   try {
     await commitOperations(db, operations);
   } catch {
@@ -262,10 +357,14 @@ async function runCleanup(db, policy, triggeredBy, now = Date.now()) {
       usernameReservations: targets.usernameReservations.length,
       verificationSessions: targets.emailOtpVerifications.length + targets.passwordResetSessions.length,
       rateLimitRecords: targets.authRateLimits.length + targets.registrationOtpRateLimits.length + targets.passwordResetRateLimits.length,
+      chatMessages: targets.chatMessagesToDelete.length,
     },
+    reportEvidencePurged: targets.reportEvidenceToPurge.length,
+    restrictionProjectionsCleaned: targets.expiredRestrictionProjections.length,
+    chatMessagesProtectedByEvidence: targets.chatMessagesProtectedByEvidence.length,
     archivedOrders: targets.ordersToArchive.length,
     totalTemporaryRecordsRemoved: actualTargets.registrationSessions.length + targets.usernameReservations.length + targets.emailOtpVerifications.length +
-      targets.passwordResetSessions.length + targets.authRateLimits.length + targets.registrationOtpRateLimits.length + targets.passwordResetRateLimits.length,
+      targets.passwordResetSessions.length + targets.authRateLimits.length + targets.registrationOtpRateLimits.length + targets.passwordResetRateLimits.length + targets.chatMessagesToDelete.length,
   };
   const audit = {
     action: 'SYSTEM_MAINTENANCE_CLEANUP',

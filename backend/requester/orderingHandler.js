@@ -11,6 +11,7 @@ const { effectiveDeliveryDays, limitViolations } = require('../../services/produ
 const { requestedDateNeedsApproval, resolveEffectiveProductPolicy } = require('../utils/effectiveProductPolicy');
 const { RELATIONSHIP_VERSION_BASELINE } = require('../utils/relationshipEpochs');
 const { reconcileOrderLifecycleInTransaction } = require('../chat/conversationLifecycleService');
+const { assertOrderingAllowed, recordOrderAbuseIncidentInTransaction } = require('../moderation/moderationService');
 
 const clean = (value, max = 240) => String(value || '').trim().slice(0, max);
 const coordinate = (value, minimum, maximum) => {
@@ -108,9 +109,13 @@ async function activeCatalog(db) {
 
 function responseError(res, error) {
   const known = error instanceof OtpError;
+  const details = known && error.details && typeof error.details === 'object' ? error.details : {};
   return res.status(known ? error.status : 500).json({ error: {
     reason: known ? error.reason : 'service-unavailable',
     message: known ? error.message : 'Ordering is temporarily unavailable.',
+    ...(details.scope ? { scope: details.scope } : {}),
+    ...(details.branchName ? { branchName: details.branchName } : {}),
+    ...(details.endsAt ? { endsAt: details.endsAt } : {}),
   } });
 }
 
@@ -375,7 +380,15 @@ function createRequesterOrdersHandler(getAdmin = getFirebaseAdmin) {
             && (latest.requesterUid || latest.requester_id) === requester.decoded.uid
             && ['pending', 'outside_radius_pending_approval', 'manager_approval_pending'].includes(String(latest.status).toLowerCase());
           if (!latestPending) throw new OtpError(409, 'ORDER_NOT_CANCELLABLE', 'Only pending orders can be cancelled.');
-          const updates = { status: 'Cancelled', updatedAt: now, updated_at: now, cancelledAt: now };
+          const cancellationStage = String(latest.status || 'pending').trim().toLowerCase().replace(/[\s-]+/g, '_');
+          const updates = {
+            status: 'Cancelled',
+            updatedAt: now,
+            updated_at: now,
+            cancelledAt: now,
+            cancellationStageSnapshot: cancellationStage,
+            cancellationActorRole: 'requester',
+          };
           const guardRef = db.collection('requesterActiveOrders').doc(requester.decoded.uid);
           const guard = await tx.get(guardRef);
           await reconcileOrderLifecycleInTransaction({
@@ -386,12 +399,24 @@ function createRequesterOrdersHandler(getAdmin = getFirebaseAdmin) {
             event: 'ORDER_CANCELLED',
             now,
           });
+          await recordOrderAbuseIncidentInTransaction({
+            tx,
+            db,
+            orderId,
+            order: { ...latest, ...updates },
+            incidentType: 'cancellation',
+            category: 'REQUESTER_CANCELLED',
+            stage: cancellationStage,
+            now,
+          });
           tx.update(ref, updates);
           if (guard.exists && guard.data()?.orderId === orderId) tx.delete(guardRef);
           return { ...latest, ...updates };
         });
         return res.status(200).json({ order: safeOrder(orderId, cancelled) });
       }
+
+      await assertOrderingAllowed({ get: (ref) => ref.get() }, db, requester.decoded.uid, clean(body.branchId || body.currentBranchId, 128), Date.now());
 
       // Check process-level in-flight creation (local optimization against rapid double-clicks)
       if (inFlightRequesterCreations.has(requester.decoded.uid)) {
@@ -427,6 +452,7 @@ function createRequesterOrdersHandler(getAdmin = getFirebaseAdmin) {
 
         if (typeof db.runTransaction === 'function') {
           await db.runTransaction(async (tx) => {
+            await assertOrderingAllowed(tx, db, requester.decoded.uid, trusted.branchId, now);
             if (typeof tx.get === 'function') {
               const guardSnap = await tx.get(guardRef);
               if (guardSnap && guardSnap.exists) {

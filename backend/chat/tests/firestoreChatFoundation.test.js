@@ -23,7 +23,7 @@ test('conversation summaries are scoped to the caller UID or current Manager bra
 test('all authoritative chat, message, report, moderation, and restriction client writes are denied', () => {
   assert.match(rules, /match \/chatConversations\/\{conversationId\}[\s\S]*allow create, update, delete:\s*if false;/);
   assert.match(rules, /match \/messages\/\{messageId\}[\s\S]*allow create, update, delete:\s*if false;/);
-  for (const collection of ['chatReports', 'chatModerationActions', 'chatRestrictions']) {
+  for (const collection of ['chatReports', 'chatModerationActions', 'moderationActions', 'moderationMutationIds', 'moderationNotices', 'moderationActivity', 'orderAbuseReviews', 'chatRestrictions', 'orderingRestrictions', 'chatReportRateLimits', 'chatReportDuplicates']) {
     assert.match(rules, new RegExp(`match \/${collection}\/\\{document=\\*\\*\\} \\{ allow read, write: if false; \\}`));
   }
   for (const collection of ['chatAuthorityRegistry', 'chatMutationIds', 'chatRateLimits']) {
@@ -38,11 +38,10 @@ test('direct message reads require the current server-maintained parent lifecycl
   assert.match(messageBlock, /allow create, update, delete:\s*if false;/);
 });
 
-test('Firebase config keeps the two approved conversation summary indexes', () => {
+test('Firebase config keeps the two approved conversation summary indexes alongside moderation indexes', () => {
   assert.equal(firebase.firestore.rules, 'firestore.rules');
   assert.equal(firebase.firestore.indexes, 'firestore.indexes.json');
-  assert.equal(indexes.indexes.length, 2);
-  const normalized = indexes.indexes.map((index) => ({
+  const normalized = indexes.indexes.filter((index) => index.collectionGroup === 'chatConversations').map((index) => ({
     collectionGroup: index.collectionGroup,
     queryScope: index.queryScope,
     arrayField: index.fields[0].fieldPath,

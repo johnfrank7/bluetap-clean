@@ -27,6 +27,47 @@
           "order": "DESCENDING"
         }
       ]
+    },
+    {
+      "collectionGroup": "chatReports",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "jurisdictionBranchId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "chatReports",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "jurisdictionBranchId", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "chatReports",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "moderationActions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "reportId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "orderAbuseReviews",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "branchId", "order": "ASCENDING" },
+        { "fieldPath": "updatedAt", "order": "DESCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

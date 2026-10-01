@@ -27,6 +27,7 @@ Use this ownership map before changing configuration or recommending a deploymen
 - Redeploy Vercel after frontend or internal Gmail relay changes.
 - Rebuild the Expo native app after native dependency changes or `app.json` permission/plugin changes.
 - Treat Admin product and branch edits as runtime data. They must not require a frontend redeploy.
+- Reports, moderation, ordering-abuse protection, restriction enforcement, notices, and chat/evidence cleanup run on Render Node; changes to those handlers require a later Render Node deployment. Their client workspaces and notices require a Vercel deployment, while Expo JavaScript-only delivery may use EAS Update when the installed runtime is compatible. Firestore deny rules and composite indexes are separate Firebase deployments. These features do not affect the Python face service or require a native rebuild unless native dependencies/configuration also change.
 
 ## Readiness checklist
 

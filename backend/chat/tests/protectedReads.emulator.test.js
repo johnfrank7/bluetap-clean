@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { initializeApp, deleteApp } = require('firebase/app');
-const { getFirestore, connectFirestoreEmulator, doc, getDoc, getDocs, collection, query, where, terminate } = require('firebase/firestore');
+const { getFirestore, connectFirestoreEmulator, doc, getDoc, getDocs, collection, query, where, setDoc, terminate } = require('firebase/firestore');
 
 const host = process.env.FIRESTORE_EMULATOR_HOST;
 const project = 'demo-bluetap';
@@ -48,6 +48,15 @@ test('emulator: optional profile fields, own order queries, private chat signals
     await denied(getDoc(doc(r2, 'chatUserActivity/r1')));
     await getDoc(doc(m1, 'chatBranchActivity/a'));
     await denied(getDoc(doc(m2, 'chatBranchActivity/a')));
+    for (const path of [
+      'chatReports/report', 'moderationActions/action', 'moderationMutationIds/mutation',
+      'moderationNotices/r1/items/notice', 'moderationActivity/admin', 'orderAbuseReviews/review',
+      'chatRestrictions/r1', 'orderingRestrictions/r1', 'chatReportRateLimits/r1', 'chatReportDuplicates/duplicate',
+    ]) {
+      await denied(getDoc(doc(r1, path)));
+      await denied(setDoc(doc(r1, path), { forged: true }));
+      await denied(setDoc(doc(m1, path), { forged: true }));
+    }
     const conversation = { status: 'active', participantUserUids: ['r1', 'd1'], participantUserAccess: { r1: 'active', d1: 'active' }, participantBranchIds: ['a'], participantBranchAccess: { a: 'active' }, updatedAt: new Date() };
     await seed('chatConversations/c1', conversation);
     await seed('chatConversations/c1/messages/msg', { seq: 1, body: 'test message' });

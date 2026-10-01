@@ -6,19 +6,20 @@ import UserPortalShell from '../../components/UserPortalShell';
 import { RequesterDataProvider } from '../../components/RoleDataProviders';
 import ChatDataProvider from '../../components/chat/ChatDataProvider';
 import { RoleNotificationProvider } from '../../components/RoleNotifications';
+import { ModerationNoticeProvider } from '../../components/ModerationNotices';
 
 export default function RequesterLayout() {
   return (
     <RoleGate role="requester">
       <RequesterDataProvider>
-        <ChatDataProvider role="requester">
+        <ModerationNoticeProvider><ChatDataProvider role="requester">
           <RoleNotificationProvider role="requester">
             <UserPortalShell
               header={<RequesterHeader />}
               navigation={<RequesterBottomNav />}
             />
           </RoleNotificationProvider>
-        </ChatDataProvider>
+        </ChatDataProvider></ModerationNoticeProvider>
       </RequesterDataProvider>
     </RoleGate>
   );

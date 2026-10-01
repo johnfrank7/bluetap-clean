@@ -7,6 +7,7 @@ import LocationMap from '../../components/LocationMap';
 import ProductCard from '../../components/ProductCard';
 import { createPortalStyleSheet, useBlueTapTheme } from '../../components/BlueTapTheme';
 import TopToastFeedback from '../../components/TopToastFeedback';
+import { ModerationNoticeBanner, useModerationNotices } from '../../components/ModerationNotices';
 import { BLUETAP_COLORS, BLUETAP_LAYOUT } from '../../constants/bluetapTheme';
 import { USER_PORTAL_BOTTOM_CONTENT_INSET, USER_PORTAL_LAYOUT } from '../../constants/userPortalLayout';
 import { haversineDistanceKm, rankBranchesByDistance, requestCurrentLocation } from '../../services/location';
@@ -37,6 +38,7 @@ function LimitWarning({ items, colors }) {
 
 export default function RequestFormPage() {
   const { colors, isDark } = useBlueTapTheme();
+  const { activeRestrictions } = useModerationNotices();
   const router = useRouter(); const params = useLocalSearchParams(); const preferredProductId = firstParam(params.productId); const buyAgainOrderId = firstParam(params.buyAgainOrderId);
   const [catalog,setCatalog] = React.useState(null); const [loading,setLoading] = React.useState(true); const [loadError,setLoadError] = React.useState('');
   const [deliveryLocation,setDeliveryLocation] = React.useState(null); const [locationState,setLocationState] = React.useState('idle'); const [locationError,setLocationError] = React.useState('');
@@ -112,15 +114,17 @@ const rankedBranches = React.useMemo(()=>deliveryLocation?rankBranchesByDistance
 
   const profileComplete = catalog?.profile?.complete === true;
   const hasActiveOrder = activeOrders.length > 0;
+  const orderingRestriction = activeRestrictions.find((notice) => notice.scope === 'platform_ordering' || (notice.scope === 'branch_ordering' && (!selectedBranch || notice.branchName === selectedBranch.name)));
   const useCurrentLocation = async () => { if(locationState==='loading') return; setLocationState('loading'); setLocationError(''); try { const next=await requestCurrentLocation(); setDeliveryLocation(next); setSelectedBranchId(''); setLocationState('ready'); } catch(error){setLocationState('error');setLocationError(error.message);} };
   const chooseBranch = (branch) => { setSelectedBranchId(branch.id); setItems([]); setReviewing(false); };
   const addProduct = (product) => setItems((current)=>{ const found=current.find((item)=>item.productId===product.id); return found?current.map((item)=>item.productId===product.id?{...item,quantity:Math.min(100,item.quantity+1)}:item):[...current,{productId:product.id,quantity:1}]; });
   const changeQuantity = (productId,delta) => setItems((current)=>current.map((item)=>item.productId===productId?{...item,quantity:item.quantity+delta}:item).filter((item)=>item.quantity>0));
-  const canReview = !hasActiveOrder&&profileComplete&&deliveryLocation&&selectedBranch&&items.length>0;
+  const canReview = !hasActiveOrder&&!orderingRestriction&&profileComplete&&deliveryLocation&&selectedBranch&&items.length>0;
   const submit = async () => { if(!canReview||submitting) return; setSubmitting(true); setSubmitError(''); try { await createRequest({branchId:selectedBranch.id,deliveryLocation,container,saveAsDefaultLocation,items:items.map(({productId,quantity})=>({product_id:productId,quantity}))}); router.replace('/requester/r_request'); } catch(error){setSubmitError(error.message); setToast({ visible: true, message: error.message || 'Unable to submit order.', type: 'error' });} finally{setSubmitting(false);} };
 
   return <LinearGradient colors={isDark?[colors.background,colors.header]:[colors.primary,colors.primaryLight]} style={styles.gradient} start={{x:0,y:0}} end={{x:0,y:1}}><SafeAreaView edges={['left','right','bottom']} style={styles.safe}><TopToastFeedback visible={toast.visible} message={toast.message} type={toast.type} onDismiss={() => setToast((t) => ({ ...t, visible: false }))} /><KeyboardAvoidingView behavior={Platform.OS==='ios'?'padding':undefined} style={styles.flex}><ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
     <View style={styles.pageHeading}><Text style={styles.eyebrow}>NEW REQUEST</Text><Text style={styles.title}>Place a water order</Text><Text style={styles.subtitle}>Choose a delivery point, nearby provider, and products. Final pricing is verified by BlueTap.</Text></View>
+    <ModerationNoticeBanner scope="ordering" />
     {!!buyAgainMessage && <View style={{ backgroundColor: colors.primarySoft, borderColor: colors.border, borderWidth: 1, borderRadius: 10, padding: 12, marginBottom: 12 }}><Text style={{ color: colors.textPrimary, fontSize: 12 }}>{buyAgainMessage}</Text></View>}
     {loading&&!catalog?<View style={styles.state}><ActivityIndicator color={BLUETAP_COLORS.primary}/><Text style={styles.stateText}>Loading products and providers…</Text></View>:loadError?<View style={styles.state}><Text style={styles.errorTitle}>Unable to load ordering</Text><Text style={styles.stateText}>{loadError}</Text><TouchableOpacity onPress={()=>load(true)} style={styles.primaryButton}><Text style={styles.primaryText}>Retry</Text></TouchableOpacity></View>:<>
       {hasActiveOrder&&<View style={styles.activeOrderBanner}><Text style={styles.activeOrderTitle}>Active Order In Progress</Text><Text style={styles.activeOrderText}>You currently have an active order ({activeOrders[0].requestId || activeOrders[0].id} · {activeOrders[0].status}). You can only place one order at a time.</Text><TouchableOpacity onPress={()=>router.push('/requester/r_request')} style={styles.activeOrderButton}><Text style={styles.activeOrderButtonText}>View Active Order</Text></TouchableOpacity></View>}

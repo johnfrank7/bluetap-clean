@@ -28,6 +28,7 @@ import BlueTapEmptyState from '../../components/BlueTapEmptyState';
 import PortalSwipeContainer, { PortalSwipeIgnore, REQUESTER_TABS } from '../../components/PortalSwipeContainer';
 import { createPortalStyleSheet, useBlueTapTheme } from '../../components/BlueTapTheme';
 import { RequesterOrderChatActions } from '../../components/chat/ChatOrderActions';
+import { ModerationNoticeBanner } from '../../components/ModerationNotices';
 import { USER_PORTAL_BOTTOM_CONTENT_INSET, USER_PORTAL_LAYOUT } from '../../constants/userPortalLayout';
 import { BLUETAP_COLORS } from '../../constants/bluetapTheme';
 import { normalizeRequesterOrderStatus } from '../../constants/requesterOrderStatus';
@@ -533,6 +534,7 @@ export default function RequesterDashboard() {
               />
               <Text style={[styles.dateText, isDark && { color: colors.muted }]}>{todayText}</Text>
             </View>
+            <ModerationNoticeBanner />
 
             <View style={styles.productsSection}>
               {productsLoading ? (

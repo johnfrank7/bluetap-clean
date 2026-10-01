@@ -17,6 +17,7 @@ import {
 } from '../../services/distributorOrders';
 import { formatNotificationTime, getOrderLifecycleTimestamp, parseTimestamp } from '../../services/notificationTimestamp';
 import { useRoleNotifications } from '../../components/RoleNotifications';
+import { useModerationNotices } from '../../components/ModerationNotices';
 
 const NOTIFICATION_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -74,6 +75,7 @@ export default function DistributorNotification() {
   const params = useLocalSearchParams();
   const { orders, loading, error, refresh } = useAssignedDistributorOrders();
   const { events, markAllSeen, markSeen } = useRoleNotifications();
+  const { acknowledge } = useModerationNotices();
   const [selectedOrderId, setSelectedOrderId] = React.useState(null);
   const openedParamRef = React.useRef('');
 
@@ -130,7 +132,7 @@ export default function DistributorNotification() {
               return (
                 <TouchableOpacity
                   key={event.id}
-                  onPress={() => { markSeen([event.id]); setSelectedOrderId(event.orderId); }}
+                  onPress={() => { markSeen([event.id]); if (event.noticeId) acknowledge(event.noticeId).catch(() => {}); else setSelectedOrderId(event.orderId); }}
                   style={[styles.card, { borderLeftWidth: 4, borderLeftColor: tone.dot }]}
                 >
                   <View style={[styles.dot, { backgroundColor: tone.dot }]} />

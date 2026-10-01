@@ -2,6 +2,7 @@ const { randomUUID } = require('node:crypto');
 const { publishChatActivity } = require('./chatActivity');
 const { getFirebaseAdmin } = require('../firebase/firebaseAdmin');
 const { canonicalAccountStatus } = require('../auth/accountStatus');
+const { assertChatSendAllowed } = require('../moderation/moderationService');
 const { verifiedIdentity } = require('../auth/authorization');
 const { applyCors } = require('../utils/cors');
 const { OtpError } = require('../utils/otpError');
@@ -393,11 +394,17 @@ async function requesterBranchAuthorityCurrent(tx, db, conversation, nowMs) {
 
 async function authorizeConversation(tx, db, conversation, callerUid, callerClaims, mode, nowMs) {
   if (!conversation) throw new OtpError(404, 'CHAT_CONVERSATION_NOT_FOUND', 'The conversation was not found.');
+  const caller = requireChatProfile(await readRequired(tx, db.collection('users').doc(callerUid), 'CHAT_NOT_AUTHORIZED', 'Chat access is not authorized.'), callerUid);
+  if (mode === 'send') {
+    const branchContextId = conversation.type === CONVERSATION_TYPES.BRANCH_COORDINATION
+      ? clean(caller.branchId, 128)
+      : clean(conversation.branchIds?.[0] || conversation.participantBranchIds?.[0], 128);
+    await assertChatSendAllowed(tx, db, callerUid, branchContextId, nowMs);
+  }
   if (conversation.status === CONVERSATION_STATUS.CLOSED) throw new OtpError(409, 'CHAT_CLOSED', 'This conversation is closed.');
   if (isAccessExpired(conversation.accessEndsAt, nowMs) || (conversation.status === CONVERSATION_STATUS.READ_ONLY && !hasBoundedHistoricalRead(conversation, nowMs))) {
     throw new OtpError(mode === 'send' ? 409 : 403, mode === 'send' ? 'CHAT_READ_ONLY' : 'CHAT_NOT_AUTHORIZED', 'Conversation access has ended.');
   }
-  const caller = requireChatProfile(await readRequired(tx, db.collection('users').doc(callerUid), 'CHAT_NOT_AUTHORIZED', 'Chat access is not authorized.'), callerUid);
   let principal;
   let senderBranchId = '';
   let validContextOrderIds = new Set();
@@ -700,6 +707,9 @@ function errorResponse(res, error) {
       reason: known ? error.reason : 'CHAT_SERVICE_UNAVAILABLE',
       message: known ? error.message : 'Chat is temporarily unavailable.',
       ...(Number.isFinite(details.retryAfterSeconds) ? { retryAfterSeconds: details.retryAfterSeconds } : {}),
+      ...(details.scope ? { scope: details.scope } : {}),
+      ...(details.branchName ? { branchName: details.branchName } : {}),
+      ...(details.endsAt ? { endsAt: details.endsAt } : {}),
     },
   });
 }

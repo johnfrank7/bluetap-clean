@@ -25,6 +25,13 @@ const { createAdminProductsHandler } = require('../admin/productManagementHandle
 const { createAdminDispatchOverrideHandler } = require('../admin/adminDispatchOverrideHandler');
 const { createRequesterCatalogHandler, createRequesterOrdersHandler } = require('../requester/orderingHandler');
 const { createChatConversationsHandler, createChatMessagesHandler, createChatReadStateHandler } = require('../chat/chatHandler');
+const { createChatReportsHandler } = require('../chat/reportHandler');
+const {
+  createAdminChatReviewHandler,
+  createAdminModerationHandler,
+  createManagerModerationHandler,
+  createModerationNoticesHandler,
+} = require('../moderation/moderationHandler');
 
 const routes = new Map([
   ['/api/auth/check-username', createUsernameHandler('check')],
@@ -66,6 +73,11 @@ const routes = new Map([
   ['/api/chat/conversations', createChatConversationsHandler()],
   ['/api/chat/messages', createChatMessagesHandler()],
   ['/api/chat/read-state', createChatReadStateHandler()],
+  ['/api/chat/reports', createChatReportsHandler()],
+  ['/api/manager/moderation', createManagerModerationHandler()],
+  ['/api/admin/moderation', createAdminModerationHandler()],
+  ['/api/admin/chat-review', createAdminChatReviewHandler()],
+  ['/api/moderation/notices', createModerationNoticesHandler()],
 ]);
 
 module.exports = { routes };

@@ -13,6 +13,7 @@ const routeCopy = {
   '/admin/distributors': ['Distributor Management', 'Loading distributor workspace…'],
   '/admin/registration-security': ['Security Settings', 'Loading security policy…'],
   '/admin/system-maintenance': ['System Maintenance', 'Loading data retention controls…'],
+  '/admin/reports-safety': ['Reports & Safety', 'Loading the moderation queue…'],
 };
 
 export default function AdminLayout() {

@@ -6,6 +6,7 @@ const {
   createChatMessagesHandler,
   createChatReadStateHandler,
 } = require('../chatHandler');
+const { createChatReportsHandler } = require('../reportHandler');
 
 const clone = (value) => value === undefined ? undefined : structuredClone(value);
 
@@ -37,7 +38,12 @@ function fixture() {
       .filter(([path]) => path.startsWith(prefix) && !path.slice(prefix.length).includes('/'))
       .map(([path]) => ({ path, data: clone(store.get(path)) }));
     for (const [field, operator, expected] of query.filters) {
-      docs = docs.filter(({ data }) => operator === 'array-contains' ? data?.[field]?.includes(expected) : operator === '==' ? data?.[field] === expected : operator === '<' ? data?.[field] < expected : false);
+      docs = docs.filter(({ data }) => operator === 'array-contains' ? data?.[field]?.includes(expected)
+        : operator === '==' ? data?.[field] === expected
+          : operator === '<' ? data?.[field] < expected
+            : operator === '>=' ? data?.[field] >= expected
+              : operator === '<=' ? data?.[field] <= expected
+                : false);
     }
     if (query.order) {
       const [field, direction] = query.order;
@@ -119,10 +125,12 @@ function fixture() {
   let currentTime = Date.parse('2026-01-01T00:00:00Z');
   let conversationCounter = 0;
   let messageCounter = 0;
+  let reportCounter = 0;
   const dependencies = {
     now: () => new Date(currentTime),
     createConversationId: () => `opaque-conversation-${++conversationCounter}`,
     createMessageId: () => `opaque-message-${++messageCounter}`,
+    createReportId: () => `report-${++reportCounter}`,
   };
   const getAdmin = () => ({ auth, db });
   return {
@@ -130,6 +138,7 @@ function fixture() {
     conversations: createChatConversationsHandler(getAdmin, dependencies),
     messages: createChatMessagesHandler(getAdmin, dependencies),
     readState: createChatReadStateHandler(getAdmin, dependencies),
+    reports: createChatReportsHandler(getAdmin, dependencies),
     setTime(value) { currentTime = Number(value); },
     advanceTime(milliseconds) { currentTime += milliseconds; },
   };
@@ -508,4 +517,86 @@ test('persistent rate limits are isolated by user and idempotent retries do not 
   assert.equal(typeof limited.body.error.retryAfterSeconds, 'number');
   assert.equal((await call(f.messages, 'POST', 'requester-a-token', firstPayload)).statusCode, 200);
   assert.equal((await call(f.messages, 'POST', 'distributor-a-token', { conversationId, clientMutationId: 'other-user', body: 'isolated' })).statusCode, 201);
+});
+
+test('authorized Requester and Distributor reports derive the opposite epoch-bound participant server-side', async () => {
+  const f = fixture();
+  const conversationId = await directConversation(f);
+  const incoming = await call(f.messages, 'POST', 'distributor-a-token', {
+    conversationId, clientMutationId: 'reportable-message', body: 'Reportable delivery message',
+  });
+  const submitted = await call(f.reports, 'POST', 'requester-a-token', {
+    conversationId,
+    messageId: incoming.body.message.id,
+    category: 'DELIVERY_MISCONDUCT',
+    details: 'Unsafe delivery conduct',
+  });
+  assert.equal(submitted.statusCode, 201);
+  assert.equal(submitted.body.status, 'Submitted');
+  const stored = f.records.get(`chatReports/${submitted.body.reportId}`);
+  assert.equal(stored.reporterUid, 'requester-a');
+  assert.equal(stored.reportedUid, 'distributor-a');
+  assert.equal(stored.jurisdictionBranchId, 'branch-a');
+  assert.equal(stored.categoryLabel, 'Delivery misconduct');
+  assert.equal(stored.evidenceSnapshot.length, 1);
+  assert.equal(stored.evidenceSnapshot[0].body, 'Reportable delivery message');
+  assert.equal('deliveryLocation' in stored.evidenceSnapshot[0], false);
+
+  const forged = await call(f.reports, 'POST', 'requester-a-token', {
+    conversationId, category: 'SPAM', reportedUid: 'distributor-b',
+  });
+  assert.equal(forged.statusCode, 400);
+  assert.equal(forged.body.error.reason, 'REPORT_AUTHORITY_SERVER_OWNED');
+  assert.equal((await call(f.reports, 'POST', 'requester-b-token', { conversationId, category: 'SPAM' })).statusCode, 403);
+});
+
+test('report evidence is immutable, centered on the selected incoming message, and never exceeds five messages', async () => {
+  const f = fixture();
+  const conversationId = await directConversation(f);
+  const sent = [];
+  for (let index = 1; index <= 7; index += 1) {
+    const token = index % 2 === 0 ? 'distributor-a-token' : 'requester-a-token';
+    const result = await call(f.messages, 'POST', token, {
+      conversationId, clientMutationId: `evidence-${index}`, body: `message ${index}`,
+    });
+    sent.push(result.body.message);
+  }
+  const submitted = await call(f.reports, 'POST', 'requester-a-token', {
+    conversationId, messageId: sent[3].id, category: 'HARASSMENT_INAPPROPRIATE',
+  });
+  assert.equal(submitted.statusCode, 201);
+  const stored = f.records.get(`chatReports/${submitted.body.reportId}`);
+  assert.deepEqual(stored.evidenceSnapshot.map((message) => message.seq), [2, 3, 4, 5, 6]);
+  assert.equal(stored.evidenceSnapshot.length, 5);
+  for (const evidence of stored.evidenceSnapshot) {
+    const source = f.records.get(`chatConversations/${conversationId}/messages/${evidence.messageId}`);
+    assert.equal(source.retentionHold, true);
+    assert.deepEqual(source.retentionHoldReportIds, [submitted.body.reportId]);
+  }
+  f.records.get(`chatConversations/${conversationId}/messages/${sent[3].id}`).body = 'source changed later';
+  assert.equal(stored.evidenceSnapshot[2].body, 'message 4');
+});
+
+test('report validation, duplicate protection, and persistent hourly rate limiting fail closed', async () => {
+  const f = fixture();
+  const conversationId = await directConversation(f);
+  assert.equal((await call(f.reports, 'POST', 'requester-a-token', { conversationId, category: 'NOT_REAL' })).body.error.reason, 'REPORT_CATEGORY_INVALID');
+  assert.equal((await call(f.reports, 'POST', 'requester-a-token', { conversationId, category: 'OTHER' })).body.error.reason, 'DETAILS_REQUIRED');
+  assert.equal((await call(f.reports, 'POST', 'requester-a-token', { conversationId, category: 'OTHER', details: 'x'.repeat(1001) })).body.error.reason, 'REPORT_DETAILS_TOO_LONG');
+
+  const first = await call(f.reports, 'POST', 'requester-a-token', { conversationId, category: 'SPAM' });
+  const duplicate = await call(f.reports, 'POST', 'requester-a-token', { conversationId, category: 'SPAM' });
+  assert.equal(first.statusCode, 201);
+  assert.equal(duplicate.statusCode, 200);
+  assert.equal(duplicate.body.reportId, first.body.reportId);
+  assert.equal(duplicate.body.duplicate, true);
+
+  for (const category of ['FRAUD_SCAM', 'DELIVERY_MISCONDUCT', 'ORDER_ABUSE', 'THREAT_SAFETY']) {
+    assert.equal((await call(f.reports, 'POST', 'requester-a-token', { conversationId, category })).statusCode, 201);
+  }
+  const limited = await call(f.reports, 'POST', 'requester-a-token', {
+    conversationId, category: 'HARASSMENT_INAPPROPRIATE',
+  });
+  assert.equal(limited.statusCode, 429);
+  assert.equal(limited.body.error.reason, 'REPORT_RATE_LIMITED');
 });

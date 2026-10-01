@@ -12,7 +12,7 @@ const formatTime = (value) => {
   return new Date(timestamp).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 };
 
-export default function ChatMessageBubble({ message, own, receipt, colors, onRetry }) {
+export default function ChatMessageBubble({ message, own, receipt, colors, onRetry, onReport }) {
   return (
     <View style={[styles.row, own ? styles.outgoingRow : styles.incomingRow]}>
       <View style={[
@@ -29,6 +29,7 @@ export default function ChatMessageBubble({ message, own, receipt, colors, onRet
             <Text style={[styles.retry, { color: colors.onPrimary }]}>Tap to retry</Text>
           </Pressable>
         )}
+        {!own && message.id && <Pressable accessibilityRole="button" accessibilityLabel="Report this message" onPress={() => onReport?.(message)}><Text style={[styles.report, { color: colors.danger }]}>Report</Text></Pressable>}
       </View>
     </View>
   );
@@ -43,4 +44,5 @@ const styles = StyleSheet.create({
   meta: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 5, marginTop: 3 },
   time: { fontSize: 10, fontWeight: '600' },
   retry: { fontSize: 11, fontWeight: '800', marginTop: 5, textDecorationLine: 'underline' },
+  report: { fontSize: 10, fontWeight: '800', marginTop: 5, textDecorationLine: 'underline' },
 });

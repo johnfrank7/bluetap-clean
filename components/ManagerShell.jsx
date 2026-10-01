@@ -20,6 +20,7 @@ import AdminIcon from './AdminIcon';
 import { getModuleSession, signOutAndClearSessions } from '../services/authSession';
 import { useManagerRealtimeData } from './ManagerRealtimeData';
 import { useManagerNotifications } from './ManagerNotifications';
+import useModerationActivityBadge from './useModerationActivityBadge';
 
 export const MANAGER_COLORS = {
   navy: BLUETAP_COLORS.primary,
@@ -41,6 +42,7 @@ const NAV_ITEMS = [
   { key: 'distributors', label: 'Distributors', path: '/manager/distributors', icon: 'distributors' },
   { key: 'products', label: 'Products', path: '/manager/products', icon: 'products' },
   { key: 'analytics', label: 'Analytics', path: '/manager/analytics', icon: 'accounts' },
+  { key: 'reports', label: 'Reports & Safety', path: '/manager/reports-safety', icon: 'security' },
   { key: 'profile', label: 'Profile', path: '/manager/profile', icon: 'theme' },
 ];
 
@@ -158,6 +160,7 @@ export default function ManagerShell({
   const managerSession = getModuleSession('manager');
   const { requestsCount, dispatchCount } = useManagerRealtimeData();
   const { unreadCount } = useManagerNotifications();
+  const moderationCount = useModerationActivityBadge('manager');
   const [collapsed, setCollapsed] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [confirmLogout, setConfirmLogout] = useState(false);
@@ -261,8 +264,9 @@ export default function ManagerShell({
           const isActive = active === item.key;
           const isReq = item.key === 'requests';
           const isDispatch = item.key === 'distributors';
-          const count = isReq ? requestsCount : isDispatch ? dispatchCount : 0;
-          const label = (isReq || isDispatch) && count > 0
+          const isReports = item.key === 'reports';
+          const count = isReq ? requestsCount : isDispatch ? dispatchCount : isReports ? moderationCount : 0;
+          const label = (isReq || isDispatch || isReports) && count > 0
             ? `${item.label} [${count}]`
             : item.label;
 
@@ -288,7 +292,7 @@ export default function ManagerShell({
                     <Text numberOfLines={1} style={styles.navText}>
                       {item.label}
                     </Text>
-                    {(isReq || isDispatch) && (
+                    {(isReq || isDispatch || isReports) && (
                       <View style={[styles.badgePill, { backgroundColor: count > 0 ? colors.warning : 'rgba(255,255,255,0.2)' }]}>
                         <Text style={styles.badgePillText}>{count}</Text>
                       </View>

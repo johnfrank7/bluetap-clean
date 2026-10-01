@@ -3,6 +3,7 @@ import React from 'react';
 
 import { useDistributorData, useRequesterData } from './RoleDataProviders';
 import { useChat } from './chat/ChatContext';
+import { useModerationNotices } from './ModerationNotices';
 const { getChatFollowupNotifications, getDistributorAttentionCounts, getRoleOrderNotifications } = require('../services/orderNotifications');
 
 const RoleNotificationContext = React.createContext({
@@ -34,6 +35,7 @@ export function RoleNotificationProvider({ role, children }) {
   const requester = useRequesterData();
   const distributor = useDistributorData();
   const chat = useChat();
+  const moderation = useModerationNotices();
   const roleData = role === 'requester' ? requester : distributor;
   const uid = roleData.uid || roleData.profile?.uid || '';
   const key = uid ? storageKey(role, uid) : '';
@@ -44,7 +46,13 @@ export function RoleNotificationProvider({ role, children }) {
   const events = React.useMemo(() => [
     ...getRoleOrderNotifications(roleData.orders || [], role),
     ...getChatFollowupNotifications(chat.conversations || [], role),
-  ].sort((left, right) => right.at.getTime() - left.at.getTime()).slice(0, 150), [chat.conversations, role, roleData.orders]);
+    ...moderation.notices.map((notice) => ({
+      id: `moderation:${notice.id}`, kind: 'moderation', noticeId: notice.id,
+      status: notice.type === 'warn' ? 'warning' : 'restricted',
+      at: notice.createdAt?.toDate?.() || new Date(notice.createdAt || Date.now()),
+      message: notice.type === 'warn' ? `${notice.title}: review your BlueTap conduct notice.` : `${notice.title}${notice.branchName ? ` for ${notice.branchName}` : ''}.`,
+    })),
+  ].sort((left, right) => right.at.getTime() - left.at.getTime()).slice(0, 150), [chat.conversations, moderation.notices, role, roleData.orders]);
 
   React.useEffect(() => {
     let active = true;

@@ -5,15 +5,18 @@ import { useChat } from './ChatContext';
 import ChatComposer from './ChatComposer';
 import ChatMessageBubble from './ChatMessageBubble';
 import ChatOrderContextCard from './ChatOrderContextCard';
+import ChatReportDialog from './ChatReportDialog';
 
 export default function ChatConversationView() {
   const {
     backToList, closeChat, colors, currentConversation, hasEarlierMessages, loadEarlierMessages,
     loadingEarlier, messages, retryMessage, role, sendCurrentMessage, threadError,
-    isOwnMessage, receiptForMessage, canSend,
+    isOwnMessage, receiptForMessage, canSend, sendUnavailableReason,
   } = useChat();
+  const [reportTarget, setReportTarget] = React.useState(null);
   const scrollRef = React.useRef(null);
   const didInitialScroll = React.useRef(false);
+  const reportingAllowed = ['requester', 'distributor'].includes(role) && currentConversation?.type === 'requester_distributor';
 
   React.useEffect(() => {
     didInitialScroll.current = false;
@@ -27,6 +30,7 @@ export default function ChatConversationView() {
       <View style={[styles.threadHeader, { borderBottomColor: colors.border }]}>
         <Pressable accessibilityRole="button" accessibilityLabel="Back to conversations" onPress={backToList} style={styles.back}><Text style={[styles.backText, { color: colors.primary }]}>‹</Text></Pressable>
         <View style={{ flex: 1 }}><Text style={[styles.title, { color: colors.textPrimary }]} numberOfLines={1}>{currentConversation.displayName}</Text><Text style={[styles.subtitle, { color: colors.textSecondary }]} numberOfLines={1}>{currentConversation.contextLabel}</Text></View>
+        {reportingAllowed && <Pressable accessibilityRole="button" accessibilityLabel="Report user" onPress={() => setReportTarget({ type: 'user' })} style={styles.reportUser}><Text style={[styles.reportUserText, { color: colors.danger }]}>Report user</Text></Pressable>}
         <Pressable accessibilityRole="button" accessibilityLabel="Close messages" onPress={closeChat} style={styles.close}><Text style={[styles.closeText, { color: colors.textPrimary }]}>×</Text></Pressable>
       </View>
       <ChatOrderContextCard order={currentConversation.orderContextLocal} colors={colors} role={role} onNavigate={closeChat} />
@@ -56,11 +60,13 @@ export default function ChatConversationView() {
             receipt={receiptForMessage(message)}
             colors={colors}
             onRetry={retryMessage}
+            onReport={reportingAllowed ? (item) => setReportTarget({ type: 'message', message: item }) : undefined}
           />
         ))}
       </ScrollView>
       <ChatComposer colors={colors} disabled={!canSend} onSend={sendCurrentMessage} />
-      {!canSend && !threadError && <Text style={[styles.readOnly, { color: colors.textSecondary, backgroundColor: colors.surfaceAlt }]}>Sending is unavailable for this conversation.</Text>}
+      {!canSend && !threadError && <Text style={[styles.readOnly, { color: colors.textSecondary, backgroundColor: colors.surfaceAlt }]}>{sendUnavailableReason || 'Sending is unavailable for this conversation.'}</Text>}
+      <ChatReportDialog visible={!!reportTarget} conversation={currentConversation} message={reportTarget?.message} colors={colors} onClose={() => setReportTarget(null)} />
     </View>
   );
 }
@@ -74,6 +80,8 @@ const styles = StyleSheet.create({
   subtitle: { fontSize: 11, marginTop: 2 },
   close: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center' },
   closeText: { fontSize: 26, lineHeight: 28 },
+  reportUser: { minHeight: 38, justifyContent: 'center', paddingHorizontal: 7 },
+  reportUserText: { fontSize: 11, fontWeight: '900' },
   messages: { flexGrow: 1, padding: 12, justifyContent: 'flex-end' },
   earlier: { minHeight: 36, alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
   earlierText: { fontSize: 12, fontWeight: '900' },

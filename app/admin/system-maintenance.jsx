@@ -19,6 +19,8 @@ const OPTIONS = Object.freeze({
   verificationRetentionHours: [[12, '12 hours'], [24, '24 hours'], [48, '48 hours'], [72, '72 hours']],
   rateLimitRetentionDays: [[1, '1 day'], [7, '7 days'], [14, '14 days'], [30, '30 days']],
   completedOrderArchiveDays: [[30, '30 days'], [60, '60 days'], [90, '90 days'], [180, '180 days'], [365, '365 days']],
+  chatMessageRetentionDays: [[30, '30 days'], [60, '60 days'], [90, '90 days'], [180, '180 days']],
+  chatReportEvidenceRetentionDays: [[90, '90 days'], [180, '180 days'], [365, '365 days']],
 });
 
 const COUNT_ROWS = Object.freeze([
@@ -28,6 +30,12 @@ const COUNT_ROWS = Object.freeze([
   ['expiredVerificationSessions', 'Expired verification sessions'],
   ['expiredRateLimitRecords', 'Expired rate-limit records'],
   ['ordersEligibleForArchive', 'Orders eligible for archive'],
+  ['expiredChatMessages', 'Expired chat messages'],
+  ['chatMessagesProtectedByEvidence', 'Messages protected by report evidence'],
+  ['chatMessagesSkipped', 'Chat messages safely skipped'],
+  ['openReportEvidenceProtected', 'Open report evidence protected'],
+  ['reportEvidenceEligibleForPurge', 'Resolved report evidence eligible for purge'],
+  ['expiredRestrictionProjections', 'Expired restriction projections'],
 ]);
 
 const dateText = (value) => {
@@ -172,6 +180,8 @@ export default function SystemMaintenancePage() {
           <RetentionSelect label="Verification Sessions" detail="Delete expired email OTP and password verification sessions after:" value={draft.verificationRetentionHours} options={OPTIONS.verificationRetentionHours} onChange={(value) => updatePolicy('verificationRetentionHours', value)} styles={styles} colors={colors} />
           <RetentionSelect label="Rate Limit / Temporary Security Records" detail="Delete expired temporary security counters after:" value={draft.rateLimitRetentionDays} options={OPTIONS.rateLimitRetentionDays} onChange={(value) => updatePolicy('rateLimitRetentionDays', value)} styles={styles} colors={colors} />
           <RetentionSelect label="Completed Orders" detail="Archive terminal orders in place after:" value={draft.completedOrderArchiveDays} options={OPTIONS.completedOrderArchiveDays} onChange={(value) => updatePolicy('completedOrderArchiveDays', value)} styles={styles} colors={colors} />
+          <RetentionSelect label="Chat Messages" detail="Delete ordinary chat messages after this period unless protected by report evidence:" value={draft.chatMessageRetentionDays} options={OPTIONS.chatMessageRetentionDays} onChange={(value) => updatePolicy('chatMessageRetentionDays', value)} styles={styles} colors={colors} />
+          <RetentionSelect label="Report Evidence" detail="Keep resolved report evidence for this period; open and escalated cases remain protected:" value={draft.chatReportEvidenceRetentionDays} options={OPTIONS.chatReportEvidenceRetentionDays} onChange={(value) => updatePolicy('chatReportEvidenceRetentionDays', value)} styles={styles} colors={colors} />
           <ReadOnlyPolicy label="Audit Logs" value="Protected / permanent" detail="Admin audit records are excluded from automatic deletion." styles={styles} />
         </View>
         <TouchableOpacity disabled={saving} onPress={save} style={[styles.primaryButton, styles.saveButton, saving && styles.disabled]}><Text style={styles.primaryButtonText}>{saving ? 'Saving…' : 'Save Retention Policy'}</Text></TouchableOpacity>

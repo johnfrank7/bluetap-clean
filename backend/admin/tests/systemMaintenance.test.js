@@ -26,6 +26,7 @@ function fixture(seed = {}, { failCommitAt = 0 } = {}) {
   const refFor = (path) => ({
     path,
     id: path.split('/').pop(),
+    parent: path.split('/').length >= 4 ? { parent: refFor(path.split('/').slice(0, -2).join('/')) } : null,
     get: async () => snapshot(path),
     set: async (value, options) => setRecord(path, value, options),
     update: async (value) => setRecord(path, value, { merge: true }),
@@ -85,6 +86,20 @@ function fixture(seed = {}, { failCommitAt = 0 } = {}) {
   };
   const db = {
     collection,
+    collectionGroup: (group) => {
+      const groupQuery = (filters = [], sort = null, maximum = null) => ({
+        where: (field, op, value) => groupQuery([...filters, [field, op, value]], sort, maximum),
+        orderBy: (field, direction) => groupQuery(filters, [field, direction], maximum),
+        limit: (value) => groupQuery(filters, sort, value),
+        get: async () => {
+          let docs = [...records.keys()].filter((path) => path.split('/').slice(-2, -1)[0] === group).map(snapshot).filter((doc) => filters.every(([field, op, expected]) => op === '<=' && comparable(doc.data()?.[field]) <= comparable(expected)));
+          if (sort) docs.sort((a, b) => (comparable(a.data()?.[sort[0]]) || 0) - (comparable(b.data()?.[sort[0]]) || 0));
+          if (sort?.[1] === 'desc') docs.reverse();
+          return { docs: maximum == null ? docs : docs.slice(0, maximum) };
+        },
+      });
+      return groupQuery();
+    },
     batch,
     runTransaction: async (callback) => {
       const operations = [];
@@ -180,6 +195,13 @@ test('preview selects only expired ephemeral records and performs zero mutations
     expiredVerificationSessions: 2,
     expiredRateLimitRecords: 3,
     ordersEligibleForArchive: 1,
+    expiredChatMessages: 0,
+    chatMessagesProtectedByEvidence: 0,
+    chatMessagesSkipped: 0,
+    openReportEvidenceProtected: 0,
+    reportEvidenceEligibleForPurge: 0,
+    expiredRestrictionProjections: 0,
+    closedConversationsEligible: 0,
     temporaryRecordsEligible: 7,
   });
   assert.equal(preview.notificationArchitecture, 'derived');
@@ -216,6 +238,29 @@ test('cleanup preserves protected data, deletes ephemeral records, and archives 
   assert.equal(cleanupAudit.actorUid, 'admin-1');
   assert.equal(JSON.stringify(cleanupAudit).includes('secret-hash'), false);
   assert.equal(JSON.stringify(cleanupAudit).includes('private-owner-hash'), false);
+});
+
+test('chat retention preserves open report evidence and purges eligible resolved evidence', async () => {
+  const f = fixture({
+    'chatConversations/conversation-1': { lastMessageSeq: 2, lastMessagePreview: 'old ordinary' },
+    'chatConversations/conversation-1/messages/evidence': { seq: 1, body: 'held', createdAt: daysAgo(120) },
+    'chatConversations/conversation-1/messages/ordinary': { seq: 2, body: 'old ordinary', createdAt: daysAgo(120) },
+    'chatReports/open-report': { status: 'open', conversationId: 'conversation-1', createdAt: daysAgo(120), evidenceSnapshot: [{ messageId: 'evidence' }], retentionHold: true },
+    'chatReports/resolved-report': { status: 'resolved', conversationId: 'conversation-1', createdAt: daysAgo(300), resolvedAt: daysAgo(200), evidenceSnapshot: [{ messageId: 'gone' }], retentionHold: true },
+    'chatRestrictions/user-old': { platform: { endsAt: daysAgo(1) }, branches: {}, nextExpiryAt: daysAgo(1) },
+  });
+  const preview = await previewCleanup(f.db, DEFAULT_RETENTION_POLICY, NOW);
+  assert.equal(preview.counts.expiredChatMessages, 1);
+  assert.equal(preview.counts.chatMessagesProtectedByEvidence, 1);
+  assert.equal(preview.counts.openReportEvidenceProtected, 1);
+  assert.equal(preview.counts.reportEvidenceEligibleForPurge, 1);
+  assert.equal(preview.counts.expiredRestrictionProjections, 1);
+  const result = await runCleanup(f.db, DEFAULT_RETENTION_POLICY, 'admin-1', NOW);
+  assert.equal(f.records.has('chatConversations/conversation-1/messages/evidence'), true);
+  assert.equal(f.records.has('chatConversations/conversation-1/messages/ordinary'), false);
+  assert.deepEqual(f.records.get('chatReports/resolved-report').evidenceSnapshot, []);
+  assert.equal(f.records.has('chatRestrictions/user-old'), false);
+  assert.equal(result.summary.chatMessagesProtectedByEvidence, 1);
 });
 
 test('cleanup releases a stale registration-limit reservation before deleting its session', async () => {

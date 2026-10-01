@@ -81,6 +81,14 @@ There is no Requester-to-Requester chat, personal Manager-to-Manager direct mess
 - `distributor_branch` resolves inside the mounted chat panel. Resolution clears stale thread state and reattaches the one visible thread listener even when the authoritative conversation ID is unchanged.
 - Desktop uses an anchored overlay panel without route navigation. Narrow web and native use a safe-area full-height modal. Both presentations use BlueTap semantic light/dark tokens, accessible controls, a compact coordinate-free order context, and the custom water-drop/chat-bubble mark.
 
+## Reports, restrictions, and retention
+
+- Only authenticated Requesters and Distributors may report the opposite user in an authorized `requester_distributor` conversation. The report backend derives the target, branch jurisdiction, order relationship, and safe identity snapshots; never trust client-supplied target or branch fields.
+- Report evidence is an immutable snapshot of at most five authorized messages. A message report may reference only an incoming message from the derived target. Report creation is protected by persistent per-reporter rate limits and a ten-minute reporter/conversation/message/category duplicate key.
+- Chat restrictions are server-maintained projections in `chatRestrictions/{uid}`. Send authorization checks the active account first, then effective platform or conversation-branch restrictions using server time, before ordinary conversation lifecycle checks. Restricted users retain authorized read and report access.
+- Managers may apply only branch chat restrictions for their authoritative branch. Admins may apply platform chat restrictions. Neither role receives a global conversation inbox; Admin expanded review is report-scoped, reason-required, bounded to 20 messages, and audited.
+- Ordinary messages follow the configured chat retention period. Open or escalated report evidence, and resolved evidence still inside its configured evidence-retention period, protects referenced source messages from cleanup. Report metadata and moderation/Admin audit records remain protected; cleanup may purge only expired resolved evidence snapshots.
+
 ## Current V1 exclusions
 
-Do not add message editing, deletion, unsend, attachments, images, files, voice, reactions, forwarding, typing indicators, presence, push notifications, global search/export, reports, moderation, retention cleanup, unrestricted discovery, or an Admin chat inbox unless a later approved phase explicitly implements them.
+Do not add message editing, deletion, unsend, attachments, images, files, voice, reactions, forwarding, typing indicators, presence, push notifications, global search/export, unrestricted discovery, or an Admin chat inbox unless a later approved phase explicitly implements them.

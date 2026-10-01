@@ -13,6 +13,7 @@ import { normalizeRequesterOrderStatus, requesterOrderStatusLabel } from '../../
 import { refreshRequesterRequests } from '../../services/requests';
 import { formatNotificationTime, getOrderLifecycleTimestamp, parseTimestamp } from '../../services/notificationTimestamp';
 import { useRoleNotifications } from '../../components/RoleNotifications';
+import { useModerationNotices } from '../../components/ModerationNotices';
 
 const NOTIFICATION_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -56,6 +57,7 @@ export default function RequesterNotification() {
   const params = useLocalSearchParams();
   const { orders, loading, error: orderError, uid, readiness } = useRequesterData();
   const { events, markAllSeen, markSeen } = useRoleNotifications();
+  const { acknowledge } = useModerationNotices();
   const [retryError, setRetryError] = useState('');
   const error = orderError || retryError;
   const [selectedOrderId, setSelectedOrderId] = useState(null);
@@ -119,6 +121,7 @@ export default function RequesterNotification() {
                   key={event.id}
                   onPress={() => {
                     markSeen([event.id]);
+                    if (event.noticeId) { acknowledge(event.noticeId).catch(() => {}); return; }
                     if (event.orderId) {
                       setSelectedOrderId(event.orderId);
                     } else {

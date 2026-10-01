@@ -22,6 +22,7 @@ import DeliveryActionDialog from '../../components/DeliveryActionDialog';
 import PortalSwipeContainer, { DISTRIBUTOR_TABS, PortalSwipeIgnore } from '../../components/PortalSwipeContainer';
 import { createPortalStyleSheet, useBlueTapTheme } from '../../components/BlueTapTheme';
 import { DistributorOrderChatAction } from '../../components/chat/ChatOrderActions';
+import { ModerationNoticeBanner } from '../../components/ModerationNotices';
 import { USER_PORTAL_BOTTOM_CONTENT_INSET, USER_PORTAL_LAYOUT } from '../../constants/userPortalLayout';
 import { BLUETAP_COLORS } from '../../constants/bluetapTheme';
 import {
@@ -329,6 +330,7 @@ function DistributorDashboardContent() {
               </Text>
               <Text style={styles.dateText}>{todayText}</Text>
             </View>
+            <ModerationNoticeBanner />
 
             <View style={styles.summaryRow}>
               {dashboardSummary.map((item) => (

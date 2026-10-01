@@ -108,7 +108,15 @@ service cloud.firestore {
     match /adminAuditLogs/{document=**} { allow read, write: if false; }
     match /chatReports/{document=**} { allow read, write: if false; }
     match /chatModerationActions/{document=**} { allow read, write: if false; }
+    match /moderationActions/{document=**} { allow read, write: if false; }
+    match /moderationMutationIds/{document=**} { allow read, write: if false; }
+    match /moderationNotices/{document=**} { allow read, write: if false; }
+    match /moderationActivity/{document=**} { allow read, write: if false; }
+    match /orderAbuseReviews/{document=**} { allow read, write: if false; }
     match /chatRestrictions/{document=**} { allow read, write: if false; }
+    match /orderingRestrictions/{document=**} { allow read, write: if false; }
+    match /chatReportRateLimits/{document=**} { allow read, write: if false; }
+    match /chatReportDuplicates/{document=**} { allow read, write: if false; }
     // Render Node exclusively owns conversation uniqueness, idempotency, and
     // persistent message-rate state.
     match /chatAuthorityRegistry/{document=**} { allow read, write: if false; }

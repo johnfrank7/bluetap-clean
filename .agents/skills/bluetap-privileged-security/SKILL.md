@@ -37,6 +37,14 @@ Roles are `admin`, `manager`, `distributor`, and `requester`. The former operati
 - Managers may update product delivery-rule overrides only for their server-authoritative `manager.branchId`; client-supplied branch identifiers never select the write target and global Admin defaults remain immutable to Managers.
 - Public UID migration/backfill remains an Admin-authorized, server-side, deterministic, idempotent, audited workflow that preserves the oldest valid unique assignment and never derives a display identifier from a raw Firebase Auth UID.
 
+## Moderation authority
+
+- A Manager may list and act only on chat reports and ordering-abuse reviews whose server-derived jurisdiction matches the Manager's current active branch. Manager actions are dismiss, warn, 1/3/7-day branch chat restriction, 1/3/7-day branch ordering restriction, and escalation. Managers cannot apply platform restrictions, suspend an account globally, terminate an account, or reactivate an account.
+- Admin moderation may apply warnings, platform chat or ordering restrictions, canonical account suspension, termination, and eligible reactivation. Account actions must use canonical `accountStatus`, update Firebase Auth disabled state, revoke sessions for suspension/termination, and remain retry-safe through a stable mutation record.
+- Ordering restriction authority follows the same split: Manager restrictions are branch-only and Admin restrictions are platform-wide. Client-supplied role, target UID, or branch never establishes moderation authority.
+- Moderation actions and expanded chat reviews write append-only safe audit records. Private moderator notes never enter user notices or ordinary logs. Terminated accounts are not reactivated through the suspended/inactive reactivation path.
+- Admin moderation remains report- or abuse-review-scoped. It must never become a global chat inbox, conversation browser, search, or export surface.
+
 ## System Maintenance retention boundaries
 
 - System Maintenance currently owns Data Retention & Cleanup only. It must not become a generic destructive reset surface.

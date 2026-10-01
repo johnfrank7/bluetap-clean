@@ -13,6 +13,10 @@ const sections = [
   ['BlueTap’s role', 'BlueTap provides software for coordinating water requests between users and participating providers. Fulfilment, product quality, pricing, and delivery commitments remain the responsibility of the relevant provider.'],
   ['Availability', 'Features may change or be temporarily unavailable because of maintenance, network conditions, provider availability, or technical issues.'],
   ['Suspension', 'BlueTap may restrict or suspend accounts reasonably believed to be involved in abuse, fraud, security threats, or violations of these terms.'],
+  ['Reports and moderation', 'Requesters and Distributors may report conduct in eligible order conversations. Authorized branch Managers may review cases for their branch, while Administrators may review escalated cases and apply platform-level action. Reports are reviewed by people and do not create an automatic ban.'],
+  ['Operational messaging', 'BlueTap messages support order and station operations. They are not described as end-to-end encrypted and follow the service’s configured retention periods. A limited reported-message context may be reviewed by authorized personnel; broader Administrator review requires a recorded operational reason and audit.'],
+  ['Messaging and ordering restrictions', 'BlueTap may issue a warning or temporarily restrict messaging, ordering, or account access after an authorized review. Branch restrictions apply only to the relevant branch; platform restrictions require Administrator authority. Decisions and reasons are recorded for accountability.'],
+  ['Ordering abuse', 'Repeated, requester-attributable delivery failures or serious late-stage cancellations may be flagged for human review. Ordinary pending cancellations and provider-, vehicle-, weather-, or system-caused failures are not treated as requester abuse.'],
   ['Questions', 'For questions about these draft terms, contact the BlueTap project administrator or support contact provided within the application.'],
 ];
 

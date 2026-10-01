@@ -6,6 +6,7 @@ const { OtpError } = require('../utils/otpError');
 const { assignmentVersionForTransition } = require('../utils/relationshipEpochs');
 const { postOrderAccessEndsAt, reconcileOrderLifecycleInTransaction } = require('../chat/conversationLifecycleService');
 const { deliveryFailureReasonForCode } = require('../../constants/deliveryFailureReasons');
+const { recordOrderAbuseIncidentInTransaction } = require('../moderation/moderationService');
 
 const clean = (value, max = 128) => String(value || '').trim().slice(0, max);
 const history = (value) => Array.isArray(value) ? value : [];
@@ -209,7 +210,7 @@ function createDistributorAssignedOrdersHandler(getAdmin = getFirebaseAdmin) {
           const chatAccessEndsAt = postOrderAccessEndsAt(now);
           update = { status: 'delivered', deliveredAt: now, chatAccessEndsAt, postOrderChatAccessEndsAt: chatAccessEndsAt };
         }
-        return {
+        const result = {
           ...update,
           distributorDeliveryHistory: [...history(current.distributorDeliveryHistory), {
             event,
@@ -224,6 +225,19 @@ function createDistributorAssignedOrdersHandler(getAdmin = getFirebaseAdmin) {
           updatedAt: now,
           updated_at: now,
         };
+        if (event === 'DELIVERY_FAILED') {
+          await recordOrderAbuseIncidentInTransaction({
+            tx,
+            db,
+            orderId,
+            order: { ...current, ...result },
+            incidentType: 'delivery_failure',
+            category: failureReasonCode,
+            stage: 'out_for_delivery',
+            now,
+          });
+        }
+        return result;
       });
       return res.status(200).json({ order: safeOrder(orderId, saved) });
     } catch (error) { return responseError(res, error); }

@@ -100,6 +100,14 @@ Use this skill for BlueTap product catalogs, provider selection, order creation,
 - Requester Active Orders and the Dashboard Current Request must share one status classifier: every non-terminal lifecycle state remains active, while delivered, cancelled, declined, and rejected equivalents belong only in History.
 - Requester order reads must be scoped to the authenticated Firebase UID through the authoritative ordering endpoint. After a successful server-created order, prime or invalidate the per-UID order cache so the new order appears without a logout or stale-empty-state delay.
 
+## Ordering restrictions and abuse review
+
+- New order creation checks the active account and then the server-time `orderingRestrictions/{uid}` projection before the durable one-active-order guard and before any pricing or order write. A platform restriction blocks every branch; a Manager-created branch restriction blocks only its authoritative branch.
+- Restrictions affect only new order creation. Never cancel, hide, or mutate an existing active order because a later restriction begins; fulfillment and authorized order history remain available.
+- Ordering-abuse signals are review inputs, never an automatic suspension or permanent ban. A rolling 30-day projection opens review at three qualifying incidents and marks strong review at five.
+- Count only requester-attributable delivery-failure reason codes and serious late-stage requester cancellations. Pending/early ordinary cancellations are low concern and excluded. Provider availability, distributor/vehicle failure, weather, branch operations, and system failures are explicitly non-attributable.
+- Abuse-review projections store bounded safe order references, category, stage, concern, time, branch jurisdiction, and requester identity snapshots. Managers remain branch-scoped; Admin platform action still requires a human decision and an audited reason.
+
 ## Verification
 
 - Test location grant, denial, unavailable and manual selection; Haversine ordering; inactive/unlocated branch exclusion; markers, selection and fit view; missing images; multiple products; Admin product and branch lifecycle; price recalculation and snapshots; inactive product/branch rejection; trusted UID; exact order snapshots; bottom-nav/keyboard safety; notifications; profile fallbacks; and supported theme behavior.
