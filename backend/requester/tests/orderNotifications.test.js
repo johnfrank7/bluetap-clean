@@ -45,8 +45,31 @@ test('Requester scheduled and delivery-failure notifications use authoritative o
 test('structured and legacy failure reasons remain display compatible', () => {
   assert.equal(DELIVERY_FAILURE_REASONS.length, 10);
   assert.equal(formatDeliveryFailureReason({ failureReasonCode: 'NO_RESPONSE' }), 'Customer did not respond');
-  assert.equal(formatDeliveryFailureReason({ failureReasonCode: 'OTHER', failureReasonNote: 'Gate was locked' }), 'Other: Gate was locked');
+  assert.equal(formatDeliveryFailureReason({ failureReasonCode: 'OTHER', failureReasonLabel: 'Other', failureReasonNote: 'Gate was locked' }), 'Other: Gate was locked');
+  assert.equal(formatDeliveryFailureReason({ failureReasonLabel: 'Address could not be confirmed' }), 'Address could not be confirmed');
   assert.equal(formatDeliveryFailureReason({ failureReason: 'Legacy free-text reason' }), 'Legacy free-text reason');
+});
+
+test('delivery failure formatting is null-safe for empty and non-failed order state', () => {
+  assert.doesNotThrow(() => formatDeliveryFailureReason(null));
+  assert.equal(formatDeliveryFailureReason(null), '');
+  assert.equal(formatDeliveryFailureReason(undefined), '');
+  assert.equal(formatDeliveryFailureReason({}), '');
+  assert.equal(formatDeliveryFailureReason({ status: 'scheduled' }), '');
+  assert.equal(formatDeliveryFailureReason(null, 'Delivery issue reported'), 'Delivery issue reported');
+});
+
+test('Requester and Distributor detail presentation tolerate a missing selected order', () => {
+  const details = read('components/RequestDetailsModal.jsx');
+  const requesterDashboard = read('app/requester/r_dashboard.jsx');
+  const distributorDashboard = read('app/distributor/d_dashboard.jsx');
+
+  assert.doesNotThrow(() => formatDeliveryFailureReason(null, ''));
+  assert.equal(formatDeliveryFailureReason(null, ''), '');
+  assert.match(details, /formatDeliveryFailureReason\(request, ''\)/);
+  assert.match(details, /!!failureReason &&/);
+  assert.match(requesterDashboard, /<RequestDetailsModal/);
+  assert.match(distributorDashboard, /<RequestDetailsModal/);
 });
 
 test('Distributor action badges exclude terminal history and cap presentation at 99+', () => {

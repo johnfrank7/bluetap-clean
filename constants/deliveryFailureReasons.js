@@ -22,9 +22,10 @@ function deliveryFailureReasonForCode(code) {
 }
 
 function formatDeliveryFailureReason(order = {}, fallback = '') {
-  const reason = deliveryFailureReasonForCode(order.failureReasonCode);
-  const label = reason?.label || clean(order.failureReasonLabel) || clean(order.failureReason);
-  const note = clean(order.failureReasonNote);
+  const source = order && typeof order === 'object' ? order : {};
+  const reason = deliveryFailureReasonForCode(source.failureReasonCode);
+  const label = reason?.label || clean(source.failureReasonLabel) || clean(source.failureReason);
+  const note = clean(source.failureReasonNote);
   if (!label) return fallback;
   return note && note.toLowerCase() !== label.toLowerCase() ? `${label}: ${note}` : label;
 }
