@@ -52,6 +52,14 @@ const adminManagers = read('app/admin/managers.jsx');
 test('new request is structured into delivery, provider, product, details, and review sections', () => {
   for (const label of ['Delivery location', 'Select provider branch', 'Select products', 'Order details', 'Review request']) assert.match(form, new RegExp(label));
 });
+test('restricted providers use a semantic error card and request-form station messaging is removed', () => {
+  assert.match(form, /Ordering temporarily restricted/);
+  assert.match(form, /restrictionIcon/);
+  assert.match(form, /restrictedBranchCard/);
+  assert.match(form, /disabled=\{!!restricted\}/);
+  assert.match(form, /platformOrderingRestriction/);
+  assert.doesNotMatch(form, /Message station|messageBranch/);
+});
 test('incomplete Requester profile has a clear remediation action', () => {
   assert.match(form, /Complete your profile before placing an order/); assert.match(form, /Complete profile/);
 });

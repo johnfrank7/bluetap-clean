@@ -333,6 +333,56 @@ test('terminated callers and unsupported conversation graphs are denied', async 
   assert.equal(unsupported.body.error.reason, 'CHAT_TYPE_UNSUPPORTED');
 });
 
+test('Requester-to-Requester resolution is denied with no order and even when both accounts share a branch context', async () => {
+  const f = fixture();
+  const noOrder = await resolve(f, 'requester-a-token', { type: 'requester_requester', targetUid: 'requester-b' });
+  assert.equal(noOrder.statusCode, 400);
+  assert.equal(noOrder.body.error.reason, 'CHAT_TYPE_UNSUPPORTED');
+
+  const forgedInquiry = await resolve(f, 'requester-a-token', { type: 'requester_branch', intent: 'inquiry', branchId: 'branch-a', targetUid: 'requester-b' });
+  assert.equal(forgedInquiry.statusCode, 400);
+  assert.equal(forgedInquiry.body.error.reason, 'CHAT_REQUEST_FIELDS_INVALID');
+
+  f.records.set('requests/order-a', {
+    ...f.records.get('requests/order-a'),
+    assignedDistributorUid: 'requester-b',
+    currentBranchId: 'branch-a',
+    branchId: 'branch-a',
+  });
+  const sameBranch = await resolve(f, 'requester-a-token', { type: 'requester_distributor', orderId: 'order-a' });
+  assert.equal(sameBranch.statusCode, 403);
+  assert.equal(sameBranch.body.error.reason, 'CHAT_NOT_AUTHORIZED');
+});
+
+test('Requester chat resolution allows an eligible Branch and assigned Distributor but denies an unrelated Distributor', async () => {
+  const f = fixture();
+  assert.equal((await resolve(f, 'requester-a-token', { type: 'requester_branch', intent: 'inquiry', branchId: 'branch-a' })).statusCode, 201);
+  assert.equal((await resolve(f, 'requester-a-token', { type: 'requester_distributor', orderId: 'order-a' })).statusCode, 201);
+  const unrelatedDistributor = await resolve(f, 'distributor-b-token', { type: 'requester_distributor', orderId: 'order-a' });
+  assert.equal(unrelatedDistributor.statusCode, 403);
+  assert.equal(unrelatedDistributor.body.error.reason, 'CHAT_NOT_AUTHORIZED');
+});
+
+test('malformed legacy conversations with an extra Requester are denied and omitted from normal discovery', async () => {
+  const f = fixture();
+  const conversationId = await directConversation(f);
+  const malformed = f.records.get(`chatConversations/${conversationId}`);
+  f.records.set(`chatConversations/${conversationId}`, {
+    ...malformed,
+    participantUserUids: [...malformed.participantUserUids, 'requester-b'],
+    participantState: [...malformed.participantState, {
+      principalType: 'user', principalId: 'requester-b', accessState: 'active', unreadCount: 0,
+    }],
+  });
+
+  assert.equal((await call(f.conversations, 'GET', 'requester-a-token')).body.conversations.length, 0);
+  assert.equal((await call(f.conversations, 'GET', 'requester-b-token')).body.conversations.length, 0);
+  assert.equal((await resolve(f, 'requester-a-token', { type: 'requester_distributor', orderId: 'order-a' })).body.error.reason, 'CHAT_STATE_INVALID');
+  const deniedSend = await call(f.messages, 'POST', 'requester-a-token', { conversationId, clientMutationId: 'malformed-send', body: 'blocked' });
+  assert.equal(deniedSend.statusCode, 403);
+  assert.equal(deniedSend.body.error.reason, 'CHAT_STATE_INVALID');
+});
+
 test('authorized sends allocate immutable sequences and update summary and unread state atomically', async () => {
   const f = fixture();
   const conversationId = await directConversation(f);

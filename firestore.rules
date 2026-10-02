@@ -58,15 +58,117 @@ service cloud.firestore {
       return isManager() && branchId == currentUser().branchId;
     }
 
+    function hasCanonicalSingleBranch(conversation) {
+      return conversation.participantBranchIds is list
+        && conversation.participantBranchIds.size() == 1
+        && conversation.get('branchIds', []) is list
+        && conversation.get('branchIds', []).size() == 1
+        && conversation.participantBranchIds[0] == conversation.get('branchIds', [])[0];
+    }
+
+    function participantAccessMatchesGraph(conversation) {
+      return conversation.get('participantUserUids', []) is list
+        && conversation.get('participantBranchIds', []) is list
+        && conversation.get('participantUserAccess', {}) is map
+        && conversation.get('participantBranchAccess', {}) is map
+        && conversation.get('participantUserAccess', {}).keys().hasOnly(conversation.get('participantUserUids', []))
+        && conversation.get('participantUserAccess', {}).keys().size() == conversation.get('participantUserUids', []).size()
+        && conversation.get('participantBranchAccess', {}).keys().hasOnly(conversation.get('participantBranchIds', []))
+        && conversation.get('participantBranchAccess', {}).keys().size() == conversation.get('participantBranchIds', []).size();
+    }
+
+    function storedUserHasRole(uid, role) {
+      return uid is string
+        && exists(/databases/$(database)/documents/users/$(uid))
+        && get(/databases/$(database)/documents/users/$(uid)).data.role == role;
+    }
+
+    function hasCanonicalRequesterBranchGraph(conversation) {
+      return participantAccessMatchesGraph(conversation)
+        && conversation.get('participantUserUids', []).size() == 1
+        && conversation.get('participantUserUids', [])[0] == conversation.get('requesterUid', '')
+        && hasCanonicalSingleBranch(conversation);
+    }
+
+    function hasCanonicalRequesterDistributorGraph(conversation) {
+      return participantAccessMatchesGraph(conversation)
+        && conversation.get('requesterUid', '') != conversation.get('distributorUid', '')
+        && conversation.get('branchIds', []) is list
+        && conversation.get('branchIds', []).size() == 1
+        && conversation.get('participantUserUids', []).size() == 2
+        && conversation.get('requesterUid', '') in conversation.get('participantUserUids', [])
+        && conversation.get('distributorUid', '') in conversation.get('participantUserUids', [])
+        && conversation.get('participantBranchIds', []).size() == 0;
+    }
+
+    function hasCanonicalDistributorBranchGraph(conversation) {
+      return participantAccessMatchesGraph(conversation)
+        && hasCanonicalSingleBranch(conversation)
+        && conversation.get('participantUserUids', []).size() == 1
+        && conversation.get('participantUserUids', [])[0] == conversation.get('distributorUid', '');
+    }
+
+    function hasCanonicalBranchCoordinationGraph(conversation) {
+      return participantAccessMatchesGraph(conversation)
+        && conversation.get('participantUserUids', []).size() == 0
+        && conversation.get('participantBranchIds', []).size() == 2
+        && conversation.get('branchIds', []) is list
+        && conversation.get('branchIds', []).size() == 2
+        && conversation.get('participantBranchIds', [])[0] != conversation.get('participantBranchIds', [])[1]
+        && conversation.get('participantBranchIds', [])[0] in conversation.get('branchIds', [])
+        && conversation.get('participantBranchIds', [])[1] in conversation.get('branchIds', []);
+    }
+
+    function isCanonicalConversationUser(conversation) {
+      return (conversation.type == 'requester_branch'
+          && hasCanonicalRequesterBranchGraph(conversation)
+          && isRequester()
+          && conversation.get('requesterUid', '') == request.auth.uid
+          && conversation.participantUserUids[0] == request.auth.uid)
+        || (conversation.type == 'requester_distributor'
+          && hasCanonicalRequesterDistributorGraph(conversation)
+          && ((isRequester()
+              && conversation.get('requesterUid', '') == request.auth.uid
+              && storedUserHasRole(conversation.get('distributorUid', ''), 'distributor')
+              && get(/databases/$(database)/documents/users/$(conversation.get('distributorUid', ''))).data.branchId == conversation.get('branchIds', [])[0])
+            || (isDistributor()
+              && conversation.get('distributorUid', '') == request.auth.uid
+              && currentUser().branchId == conversation.get('branchIds', [])[0]
+              && storedUserHasRole(conversation.get('requesterUid', ''), 'requester'))))
+        || (conversation.type == 'distributor_branch'
+          && hasCanonicalDistributorBranchGraph(conversation)
+          && isDistributor()
+          && conversation.get('distributorUid', '') == request.auth.uid
+          && conversation.participantBranchIds[0] == currentUser().branchId);
+    }
+
+    function isCanonicalConversationBranch(conversation) {
+      return isManager()
+        && ((conversation.type == 'requester_branch'
+          && hasCanonicalRequesterBranchGraph(conversation)
+          && storedUserHasRole(conversation.get('requesterUid', ''), 'requester')
+          && conversation.participantBranchIds[0] == currentUser().branchId)
+        || (conversation.type == 'distributor_branch'
+          && hasCanonicalDistributorBranchGraph(conversation)
+          && storedUserHasRole(conversation.get('distributorUid', ''), 'distributor')
+          && get(/databases/$(database)/documents/users/$(conversation.get('distributorUid', ''))).data.branchId == currentUser().branchId
+          && conversation.participantBranchIds[0] == currentUser().branchId)
+        || (conversation.type == 'branch_coordination'
+          && hasCanonicalBranchCoordinationGraph(conversation)
+          && currentUser().branchId in conversation.participantBranchIds));
+    }
+
     function isConversationUserParticipant(conversation) {
       return conversation.participantUserUids is list
         && request.auth.uid in conversation.participantUserUids
+        && isCanonicalConversationUser(conversation)
         && conversation.get('participantUserAccess', {}).get(request.auth.uid, '') in ['active', 'read_only'];
     }
 
     function isConversationBranchParticipant(conversation) {
       return conversation.participantBranchIds is list
         && currentUser().branchId in conversation.participantBranchIds
+        && isCanonicalConversationBranch(conversation)
         && conversation.get('participantBranchAccess', {}).get(currentUser().branchId, '') in ['active', 'read_only'];
     }
 
@@ -81,8 +183,8 @@ service cloud.firestore {
 
     function canReadConversation(conversation) {
       return conversationAccessIsCurrent(conversation)
-        && (((isRequester() || isDistributor()) && isConversationUserParticipant(conversation))
-          || (isManager() && isConversationBranchParticipant(conversation)));
+        && (isConversationUserParticipant(conversation)
+          || isConversationBranchParticipant(conversation));
     }
 
     // The registration backend is the sole writer for these protected records.

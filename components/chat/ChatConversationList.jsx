@@ -4,6 +4,7 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, 
 import BlueTapChatIcon from './BlueTapChatIcon';
 import { useChat } from './ChatContext';
 const { timeOf } = require('./chatModel');
+const { avatarForConversation, buildRequesterConversationGroups } = require('./chatPresentation');
 
 const formatTimestamp = (value) => {
   const date = timeOf(value) ? new Date(timeOf(value)) : null;
@@ -21,7 +22,8 @@ const matchesSearch = (item, needle) => !needle || [
   item.lastMessagePreview,
 ].some((value) => String(value || '').toLowerCase().includes(needle));
 
-function ConversationRow({ colors, conversation, onPress }) {
+function ConversationRow({ colors, conversation, onPress, role }) {
+  const avatar = avatarForConversation(conversation, role);
   return (
     <Pressable
       accessibilityRole="button"
@@ -29,7 +31,9 @@ function ConversationRow({ colors, conversation, onPress }) {
       onPress={onPress}
       style={({ pressed, hovered }) => [styles.row, { borderBottomColor: colors.border }, (pressed || hovered) && { backgroundColor: colors.surfaceAlt }]}
     >
-      <View style={[styles.avatar, { backgroundColor: colors.primarySoft }]}><BlueTapChatIcon size={23} color={colors.primary} /></View>
+      <View style={[styles.avatar, { backgroundColor: avatar.avatarKind === 'station' ? colors.primarySoft : colors.surfaceAlt, borderColor: colors.border }]}>
+        <Text style={[styles.avatarText, { color: colors.primary }]}>{avatar.avatarLabel}</Text>
+      </View>
       <View style={styles.rowText}>
         <View style={styles.rowTop}><Text style={[styles.name, { color: colors.textPrimary }, conversation.unreadCount > 0 && styles.unreadName]} numberOfLines={1}>{conversation.displayName}</Text><Text style={[styles.timestamp, { color: colors.textSecondary }]}>{formatTimestamp(conversation.lastMessageAt || conversation.updatedAt)}</Text></View>
         {!!conversation.contextLabel && <Text style={[styles.context, { color: colors.textSecondary }]} numberOfLines={1}>{conversation.contextLabel}</Text>}
@@ -39,7 +43,7 @@ function ConversationRow({ colors, conversation, onPress }) {
   );
 }
 
-function ConversationSection({ colors, label, rows, openConversation, resolveAndOpen }) {
+function ConversationSection({ colors, label, rows, openConversation, resolveAndOpen, role }) {
   if (!rows.length) return null;
   return (
     <View style={styles.section}>
@@ -50,6 +54,7 @@ function ConversationSection({ colors, label, rows, openConversation, resolveAnd
             key={row.key || row.id}
             colors={colors}
             conversation={row}
+            role={role}
             onPress={() => row.resolveIntent
               ? resolveAndOpen(row.resolveIntent).catch(() => {})
               : openConversation(row)}
@@ -61,7 +66,7 @@ function ConversationSection({ colors, label, rows, openConversation, resolveAnd
 }
 
 export default function ChatConversationList() {
-  const { colors, conversations, branchDistributors = [], error, loading, openConversation, resolveAndOpen, resolveError, resolvingConversation, retrySummaries, role, stationName } = useChat();
+  const { colors, conversations, branchDistributors = [], error, loading, openConversation, requesterBranches = [], resolveAndOpen, resolveError, resolvingConversation, retrySummaries, role, stationName } = useChat();
   const [search, setSearch] = React.useState('');
   const needle = search.trim().toLowerCase();
   const filtered = conversations.filter((conversation) => matchesSearch(conversation, needle));
@@ -89,13 +94,16 @@ export default function ChatConversationList() {
     ...(stationConversation ? {} : { resolveIntent: { type: 'distributor_branch' }, unreadCount: 0 }),
   }].filter((row) => matchesSearch(row, needle)) : [];
   const distributorRequesterRows = role === 'distributor' ? filtered.filter((conversation) => conversation.type === 'requester_distributor') : [];
+  const requesterGroups = role === 'requester' ? buildRequesterConversationGroups(conversations, requesterBranches) : { branchRows: [], distributorRows: [] };
+  const requesterBranchRows = requesterGroups.branchRows.filter((row) => matchesSearch(row, needle));
+  const requesterDistributorRows = requesterGroups.distributorRows.filter((row) => matchesSearch(row, needle));
   const groupedCount = role === 'manager'
     ? managerDistributorRows.length + managerRequesterRows.length + managerCoordinationRows.length
     : role === 'distributor'
       ? distributorStationRows.length + distributorRequesterRows.length
-      : filtered.length;
+      : requesterBranchRows.length + requesterDistributorRows.length;
   const emptyCopy = {
-    requester: 'Use Follow Up on an active request to contact your station.',
+    requester: 'Authorized station and assigned Distributor conversations will appear here.',
     distributor: 'Chats with your branch and assigned requesters will appear here.',
     manager: 'Operational conversations for your branch will appear here.',
   }[role] || 'Your BlueTap conversations will appear here.';
@@ -123,15 +131,18 @@ export default function ChatConversationList() {
       ) : (
         <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.list}>
           {role === 'manager' && <>
-            <ConversationSection colors={colors} label="BRANCH DISTRIBUTORS" rows={managerDistributorRows} openConversation={openConversation} resolveAndOpen={resolveAndOpen} />
-            <ConversationSection colors={colors} label="REQUESTERS" rows={managerRequesterRows} openConversation={openConversation} resolveAndOpen={resolveAndOpen} />
-            <ConversationSection colors={colors} label="BRANCH COORDINATION" rows={managerCoordinationRows} openConversation={openConversation} resolveAndOpen={resolveAndOpen} />
+            <ConversationSection colors={colors} label="BRANCH DISTRIBUTORS" rows={managerDistributorRows} openConversation={openConversation} resolveAndOpen={resolveAndOpen} role={role} />
+            <ConversationSection colors={colors} label="REQUESTERS" rows={managerRequesterRows} openConversation={openConversation} resolveAndOpen={resolveAndOpen} role={role} />
+            <ConversationSection colors={colors} label="BRANCH COORDINATION" rows={managerCoordinationRows} openConversation={openConversation} resolveAndOpen={resolveAndOpen} role={role} />
           </>}
           {role === 'distributor' && <>
-            <ConversationSection colors={colors} label="YOUR STATION" rows={distributorStationRows} openConversation={openConversation} resolveAndOpen={resolveAndOpen} />
-            <ConversationSection colors={colors} label="REQUESTERS" rows={distributorRequesterRows} openConversation={openConversation} resolveAndOpen={resolveAndOpen} />
+            <ConversationSection colors={colors} label="YOUR STATION" rows={distributorStationRows} openConversation={openConversation} resolveAndOpen={resolveAndOpen} role={role} />
+            <ConversationSection colors={colors} label="REQUESTERS" rows={distributorRequesterRows} openConversation={openConversation} resolveAndOpen={resolveAndOpen} role={role} />
           </>}
-          {role === 'requester' && filtered.map((conversation) => <ConversationRow key={conversation.id} colors={colors} conversation={conversation} onPress={() => openConversation(conversation)} />)}
+          {role === 'requester' && <>
+            <ConversationSection colors={colors} label="BRANCH / STATION" rows={requesterBranchRows} openConversation={openConversation} resolveAndOpen={resolveAndOpen} role={role} />
+            <ConversationSection colors={colors} label="DISTRIBUTORS" rows={requesterDistributorRows} openConversation={openConversation} resolveAndOpen={resolveAndOpen} role={role} />
+          </>}
         </ScrollView>
       )}
     </View>
@@ -153,7 +164,8 @@ const styles = StyleSheet.create({
   sectionLabel: { fontSize: 10, fontWeight: '900', letterSpacing: 0.8, marginBottom: 6, paddingHorizontal: 2 },
   sectionRows: { borderWidth: 1, borderRadius: 14, overflow: 'hidden' },
   row: { minHeight: 78, flexDirection: 'row', alignItems: 'center', gap: 11, paddingHorizontal: 13, paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth },
-  avatar: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
+  avatar: { width: 42, height: 42, borderRadius: 21, borderWidth: 1, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  avatarText: { fontSize: 13, fontWeight: '950', letterSpacing: 0.4 },
   rowText: { flex: 1, minWidth: 0 },
   rowTop: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   name: { flex: 1, fontSize: 14, fontWeight: '800' },

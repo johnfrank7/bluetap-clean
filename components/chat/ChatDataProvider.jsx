@@ -12,9 +12,11 @@ import { useDistributorData, useRequesterData } from '../RoleDataProviders';
 import { ChatContext } from './ChatContext';
 import ChatFloatingLauncher from './ChatFloatingLauncher';
 import { useModerationNotices } from '../ModerationNotices';
+import { getActiveBranches } from '../../services/requesterOrdering';
 
 const chatModel = require('./chatModel');
 const { chatAccessReadiness } = require('./chatAccessReadiness');
+const { avatarForConversation, conversationAllowedForRole } = require('./chatPresentation');
 const { createClientMutationId, formatBadge, isOwnMessage, mergeMessages, principalStateFor, receiptFor, totalUnread, unreadForConversation } = chatModel;
 
 const clean = (value) => String(value || '').trim();
@@ -42,7 +44,7 @@ export function presentationFor(conversation, role, roleData) {
     const requesterBranchOrderReference = orderReferenceOf(order);
     displayName = role === 'manager'
       ? clean(order?.requesterNameSnapshot || order?.requesterName || userById(conversation.requesterUid)?.fullName) || 'Requester'
-      : clean(order?.currentBranchName || order?.currentBranchNameSnapshot || order?.branchNameSnapshot || order?.branchDisplayName || order?.water_station) || 'BlueTap Station';
+      : clean(conversation.branchNameSnapshot || order?.currentBranchName || order?.currentBranchNameSnapshot || order?.branchNameSnapshot || order?.branchDisplayName || order?.water_station) || 'BlueTap Station';
     contextLabel = requesterBranchOrderReference ? `Order ${requesterBranchOrderReference}` : 'General inquiry';
   } else if (conversation.type === 'requester_distributor') {
     displayName = role === 'distributor'
@@ -62,7 +64,8 @@ export function presentationFor(conversation, role, roleData) {
   }
 
   const orderReference = orderReferenceOf(order);
-  return { ...conversation, displayName, contextLabel, orderReference, orderContextLocal: order };
+  const presented = { ...conversation, displayName, contextLabel, orderReference, orderContextLocal: order };
+  return { ...presented, ...avatarForConversation(presented, role) };
 }
 
 export default function ChatDataProvider({ children, role }) {
@@ -92,6 +95,7 @@ export default function ChatDataProvider({ children, role }) {
   const [messageActionError, setMessageActionError] = React.useState('');
   const [resolvingConversation, setResolvingConversation] = React.useState(false);
   const [resolveError, setResolveError] = React.useState('');
+  const [requesterBranches, setRequesterBranches] = React.useState([]);
   const [threadVersion, setThreadVersion] = React.useState(0);
   const [clock, setClock] = React.useState(Date.now);
   const summaryUnsubscribeRef = React.useRef(null);
@@ -111,6 +115,18 @@ export default function ChatDataProvider({ children, role }) {
   }, [uid, branchId]);
 
   const accessReadiness = chatAccessReadiness({ authReady, branchId, role, roleData, uid });
+
+  React.useEffect(() => {
+    if (role !== 'requester' || accessReadiness !== 'ready') {
+      setRequesterBranches([]);
+      return undefined;
+    }
+    let active = true;
+    getActiveBranches()
+      .then((branches) => { if (active) setRequesterBranches(branches || []); })
+      .catch(() => { if (active) setRequesterBranches([]); });
+    return () => { active = false; };
+  }, [accessReadiness, role, uid]);
 
   React.useEffect(() => {
     summaryUnsubscribeRef.current?.();
@@ -146,7 +162,7 @@ export default function ChatDataProvider({ children, role }) {
     };
   }, [accessReadiness, branchId, retryVersion, role, uid]);
 
-  const conversations = React.useMemo(() => summaries.map((conversation) => {
+  const conversations = React.useMemo(() => summaries.filter((conversation) => conversationAllowedForRole(conversation, role)).map((conversation) => {
     const presented = presentationFor(conversation, role, roleData);
     const unreadCount = unreadForConversation(presented, role, uid, branchId);
     const principalState = principalStateFor(presented, role, uid, branchId);
@@ -242,7 +258,11 @@ export default function ChatDataProvider({ children, role }) {
     setPanelOpen(true);
     try {
       const conversation = await resolveConversation(intent);
-      const next = { ...conversation, ...(orderContextLocal ? { orderContextLocal } : {}) };
+      const inquiryBranch = intent?.type === 'requester_branch' && intent?.intent === 'inquiry'
+        ? requesterBranches.find((branch) => clean(branch.id || branch.branchId) === clean(intent.branchId))
+        : null;
+      const presentationLocal = inquiryBranch ? { branchNameSnapshot: clean(inquiryBranch.name) } : null;
+      const next = { ...conversation, ...(presentationLocal || {}), ...(orderContextLocal ? { orderContextLocal } : {}) };
       setSummaries((items) => [conversation, ...items.filter((item) => item.id !== conversation.id)]);
       setSelectedSeed(next);
       setThreadVersion((version) => version + 1);
@@ -253,7 +273,7 @@ export default function ChatDataProvider({ children, role }) {
     } finally {
       setResolvingConversation(false);
     }
-  }, []);
+  }, [requesterBranches]);
 
   const commitMessage = React.useCallback(async (optimistic) => {
     try {
@@ -345,6 +365,7 @@ export default function ChatDataProvider({ children, role }) {
   const value = React.useMemo(() => ({
     branchDistributors: role === 'manager' && accessReadiness === 'ready' ? (roleData.users || []).filter((user) => user.role === 'distributor' && user.branchId === branchId && ['active', 'approved'].includes(String(user.distributorStatus || user.approvalStatus || user.status || '').toLowerCase()) && (!user.accountStatus || user.accountStatus === 'active') && user.mustChangePassword !== true) : [],
     stationName: clean(roleData.branch?.name || roleData.profile?.branchName || roleData.profile?.branchNameSnapshot) || 'Your BlueTap Station',
+    requesterBranches,
     role, colors, conversations, loading, error, panelOpen, currentConversation, messages,
     canSend: availability.sendable && accessReadiness === 'ready' && !threadError && !chatRestriction,
     sendUnavailableReason: chatRestriction ? `${chatRestriction.title}${chatRestriction.branchName ? ` for ${chatRestriction.branchName}` : ''}.` : '',
@@ -364,7 +385,7 @@ export default function ChatDataProvider({ children, role }) {
     loadEarlierMessages,
     isOwnMessage: (message) => isOwnMessage(message, role, uid, branchId),
     receiptForMessage: (message) => receiptFor(message, currentConversation, role, uid, branchId),
-  }), [accessReadiness, roleData.users, branchId, chatRestriction, colors, conversations, currentConversation, deleteCurrentMessage, editCurrentMessage, error, hasEarlierMessages, loading, loadingEarlier, messageActionError, messages, openConversation, panelOpen, resolveAndOpen, resolveError, resolvingConversation, retryMessage, role, sendCurrentMessage, threadError, uid, loadEarlierMessages]);
+  }), [accessReadiness, roleData.users, branchId, chatRestriction, colors, conversations, currentConversation, deleteCurrentMessage, editCurrentMessage, error, hasEarlierMessages, loading, loadingEarlier, messageActionError, messages, openConversation, panelOpen, requesterBranches, resolveAndOpen, resolveError, resolvingConversation, retryMessage, role, sendCurrentMessage, threadError, uid, loadEarlierMessages]);
 
   return (
     <ChatContext.Provider value={value}>

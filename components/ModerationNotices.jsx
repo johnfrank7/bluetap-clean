@@ -8,6 +8,10 @@ import { useBlueTapTheme } from './BlueTapTheme';
 const Context = React.createContext({ notices: [], activeRestrictions: [], loading: false, acknowledge: async () => {}, openNotice: () => {}, refresh: async () => {} });
 const timeOf = (value) => value?.toDate?.()?.getTime?.() || new Date(value || 0).getTime() || 0;
 const categoryLabel = (value) => String(value || 'account conduct').toLowerCase().replaceAll('_', ' ');
+const formatNoticeTime = (value) => {
+  const date = new Date(value || 0);
+  return Number.isNaN(date.getTime()) ? 'Not specified' : date.toLocaleString([], { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
+};
 
 function NoticeDetailModal({ notice, onClose, onAcknowledge }) {
   const { colors } = useBlueTapTheme();
@@ -75,19 +79,32 @@ export function ModerationNoticeBanner({ scope }) {
   return <View>{visible.map((notice) => {
     const restriction = notice.type?.startsWith('suspend_');
     return <View key={notice.id} accessibilityRole="alert" style={[styles.banner, { backgroundColor: colors.warningSoft, borderColor: colors.warning }]}>
-      <View style={{ flex: 1, minWidth: 0 }}>
+      <View style={[styles.noticeIcon, { borderColor: colors.warning }]}><Text style={[styles.noticeIconText, { color: colors.warning }]}>!</Text></View>
+      <View style={styles.statusRow}><Text style={[styles.statusBadge, { color: colors.warning, borderColor: colors.warning }]}>{restriction ? 'ACTIVE RESTRICTION' : 'SAFETY WARNING'}</Text></View>
+      <View style={styles.noticeContent}>
         <Text style={[styles.title, { color: colors.textPrimary }]}>{notice.title || (restriction ? 'Account restriction' : 'Safety notice')}</Text>
-        <Text style={[styles.body, { color: colors.textSecondary }]}>{restriction ? `${notice.title}${notice.branchName ? ` for ${notice.branchName}` : ''}. This remains in effect until the stated end time.` : `A moderator issued a warning related to ${String(notice.category || 'account conduct').toLowerCase().replaceAll('_', ' ')}.`}</Text>
+        <Text style={[styles.body, { color: colors.textSecondary }]}>{restriction ? `This restriction remains active${notice.endsAt ? ' until the time shown below' : ''}.` : 'Please review BlueTap safety and conduct requirements.'}</Text>
+        <View style={[styles.metadata, { borderTopColor: colors.border }]}>
+          {!!notice.branchName && <View style={styles.metaRow}><Text style={[styles.metaLabel, { color: colors.textSecondary }]}>Branch</Text><Text style={[styles.metaValue, { color: colors.textPrimary }]}>{notice.branchName}</Text></View>}
+          <View style={styles.metaRow}><Text style={[styles.metaLabel, { color: colors.textSecondary }]}>Reason</Text><Text style={[styles.metaValue, { color: colors.textPrimary }]}>{categoryLabel(notice.category)}</Text></View>
+          {!!notice.endsAt && <View style={styles.metaRow}><Text style={[styles.metaLabel, { color: colors.textSecondary }]}>Until</Text><Text style={[styles.metaValue, { color: colors.textPrimary }]}>{formatNoticeTime(notice.endsAt)}</Text></View>}
+        </View>
       </View>
-      <Pressable accessibilityRole="button" accessibilityLabel="View safety notice details" onPress={() => openNotice(notice.id)} style={[styles.detailsButton, { borderColor: colors.warning }]}><Text style={[styles.detailsText, { color: colors.warning }]}>View details</Text></Pressable>
-      {!notice.acknowledgedAt && <Pressable accessibilityRole="button" accessibilityLabel="Acknowledge safety notice" onPress={() => acknowledge(notice.id)} style={[styles.button, { backgroundColor: colors.warning }]}><Text style={styles.buttonText}>Acknowledge</Text></Pressable>}
+      <View style={styles.bannerActions}><Pressable accessibilityRole="button" accessibilityLabel="View safety notice details" onPress={() => openNotice(notice.id)} style={[styles.detailsButton, { borderColor: colors.warning }]}><Text style={[styles.detailsText, { color: colors.warning }]}>View details</Text></Pressable>
+        {!notice.acknowledgedAt && <Pressable accessibilityRole="button" accessibilityLabel="Acknowledge safety notice" onPress={() => acknowledge(notice.id)} style={[styles.button, { backgroundColor: colors.warning }]}><Text style={styles.buttonText}>Acknowledge</Text></Pressable>}
+      </View>
     </View>;
   })}</View>;
 }
 
 const styles = StyleSheet.create({
-  banner: { width: '100%', minWidth: 0, borderWidth: 1, borderRadius: 14, padding: 14, marginVertical: 6, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 12 },
+  banner: { width: '100%', maxWidth: 560, minWidth: 0, alignSelf: 'flex-start', borderWidth: 1, borderRadius: 14, padding: 16, marginVertical: 6 },
+  noticeIcon: { width: 32, height: 32, borderRadius: 16, borderWidth: 2, alignItems: 'center', justifyContent: 'center' }, noticeIconText: { fontSize: 18, lineHeight: 20, fontWeight: '900' },
+  statusRow: { flexDirection: 'row', marginTop: 10 }, statusBadge: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3, fontSize: 9, fontWeight: '900', letterSpacing: .7 },
+  noticeContent: { minWidth: 0, marginTop: 9 },
   title: { fontSize: 14, fontWeight: '900' }, body: { fontSize: 12, lineHeight: 18, marginTop: 3 },
+  metadata: { borderTopWidth: 1, marginTop: 12, paddingTop: 10, gap: 8 }, metaRow: { minWidth: 0 }, metaLabel: { fontSize: 10, fontWeight: '800', textTransform: 'uppercase', letterSpacing: .6 }, metaValue: { fontSize: 12, fontWeight: '800', lineHeight: 18, marginTop: 1, textTransform: 'capitalize' },
+  bannerActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 9, marginTop: 14 },
   button: { minHeight: 36, paddingHorizontal: 12, borderRadius: 9, justifyContent: 'center' }, buttonText: { color: '#FFFFFF', fontSize: 12, fontWeight: '900' },
   detailsButton: { minHeight: 36, paddingHorizontal: 12, borderRadius: 9, borderWidth: 1, justifyContent: 'center' }, detailsText: { fontSize: 12, fontWeight: '900' },
   modalBackdrop: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 20 },

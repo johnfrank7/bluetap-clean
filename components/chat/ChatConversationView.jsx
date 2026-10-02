@@ -36,7 +36,8 @@ export default function ChatConversationView() {
     <View style={styles.root}>
       <View style={[styles.threadHeader, { borderBottomColor: colors.border }]}>
         <Pressable accessibilityRole="button" accessibilityLabel="Back to conversations" onPress={backToList} style={styles.back}><Text style={[styles.backText, { color: colors.primary }]}>‹</Text></Pressable>
-        <View style={{ flex: 1 }}><Text style={[styles.title, { color: colors.textPrimary }]} numberOfLines={1}>{currentConversation.displayName}</Text><Text style={[styles.subtitle, { color: colors.textSecondary }]} numberOfLines={1}>{currentConversation.contextLabel}</Text></View>
+        <View style={[styles.headerAvatar, { backgroundColor: colors.primarySoft, borderColor: colors.border }]}><Text style={[styles.headerAvatarText, { color: colors.primary }]}>{currentConversation.avatarLabel || 'BT'}</Text></View>
+        <View style={{ flex: 1, minWidth: 0 }}><Text style={[styles.title, { color: colors.textPrimary }]} numberOfLines={1}>{currentConversation.displayName}</Text><Text style={[styles.subtitle, { color: colors.textSecondary }]} numberOfLines={1}>{currentConversation.contextLabel}</Text></View>
         {reportingAllowed && <View style={styles.headerMenuWrap}><Pressable accessibilityRole="button" accessibilityLabel="Conversation options" onPress={() => setHeaderMenuOpen((open) => !open)} style={styles.headerMenuButton}><Text style={[styles.headerMenuGlyph, { color: colors.textPrimary }]}>⋮</Text></Pressable>{headerMenuOpen && <View style={[styles.headerMenu, { backgroundColor: colors.surface, borderColor: colors.border }]}><Pressable accessibilityRole="button" accessibilityLabel="Report user" onPress={() => { setHeaderMenuOpen(false); setReportTarget({ type: 'user' }); }} style={styles.headerMenuItem}><Text style={[styles.reportUserText, { color: colors.danger }]}>Report user</Text></Pressable></View>}</View>}
         <Pressable accessibilityRole="button" accessibilityLabel="Close messages" onPress={closeChat} style={styles.close}><Text style={[styles.closeText, { color: colors.textPrimary }]}>×</Text></Pressable>
       </View>
@@ -88,6 +89,8 @@ const styles = StyleSheet.create({
   threadHeader: { minHeight: 58, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, borderBottomWidth: 1 },
   back: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   backText: { fontSize: 34, lineHeight: 34, fontWeight: '500' },
+  headerAvatar: { width: 36, height: 36, borderRadius: 18, borderWidth: 1, alignItems: 'center', justifyContent: 'center', marginRight: 9, flexShrink: 0 },
+  headerAvatarText: { fontSize: 11, fontWeight: '950', letterSpacing: 0.3 },
   title: { fontSize: 15, fontWeight: '900' },
   subtitle: { fontSize: 11, marginTop: 2 },
   close: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },

@@ -62,6 +62,52 @@ function assertNoClientParticipantDefinition(input = {}) {
   return true;
 }
 
+function exactMembers(actual, expected) {
+  if (!Array.isArray(actual) && expected.length === 0) return true;
+  if (!Array.isArray(actual) || actual.length !== expected.length) return false;
+  const normalized = actual.map(clean);
+  return new Set(normalized).size === normalized.length
+    && [...normalized].sort().every((value, index) => value === [...expected].map(clean).sort()[index]);
+}
+
+function assertCanonicalConversationParticipants(conversation = {}) {
+  const type = clean(conversation.type);
+  let expectedUsers = [];
+  let expectedBranches = [];
+
+  if (type === CONVERSATION_TYPES.REQUESTER_BRANCH) {
+    expectedUsers = [clean(conversation.requesterUid)];
+    expectedBranches = [clean(conversation.branchIds?.[0] || conversation.participantBranchIds?.[0])];
+  } else if (type === CONVERSATION_TYPES.REQUESTER_DISTRIBUTOR) {
+    const requesterUid = clean(conversation.requesterUid);
+    const distributorUid = clean(conversation.distributorUid);
+    if (requesterUid && requesterUid === distributorUid) denied('CHAT_STATE_INVALID', 'The stored conversation relationship is invalid.');
+    expectedUsers = [requesterUid, distributorUid];
+  } else if (type === CONVERSATION_TYPES.DISTRIBUTOR_BRANCH) {
+    expectedUsers = [clean(conversation.distributorUid)];
+    expectedBranches = [clean(conversation.branchIds?.[0] || conversation.participantBranchIds?.[0])];
+  } else if (type === CONVERSATION_TYPES.BRANCH_COORDINATION) {
+    expectedBranches = Array.isArray(conversation.branchIds) ? conversation.branchIds.map(clean) : [];
+    if (expectedBranches.length !== 2 || expectedBranches[0] === expectedBranches[1]) denied('CHAT_STATE_INVALID', 'The stored conversation relationship is invalid.');
+  } else {
+    denied('CHAT_STATE_INVALID', 'The stored conversation type is invalid.');
+  }
+
+  if (expectedUsers.some((value) => !value) || expectedBranches.some((value) => !value)
+      || !exactMembers(conversation.participantUserUids, expectedUsers)
+      || !exactMembers(conversation.participantBranchIds, expectedBranches)) {
+    denied('CHAT_STATE_INVALID', 'The stored conversation participants are invalid.');
+  }
+
+  const expectedPrincipals = [
+    ...expectedUsers.map((principalId) => `user:${principalId}`),
+    ...expectedBranches.map((principalId) => `branch:${principalId}`),
+  ];
+  const actualPrincipals = (conversation.participantState || []).map((state) => `${clean(state.principalType)}:${clean(state.principalId)}`);
+  if (!exactMembers(actualPrincipals, expectedPrincipals)) denied('CHAT_STATE_INVALID', 'The stored conversation participant state is invalid.');
+  return true;
+}
+
 function authorizeRequesterBranch({ requester, branch, requesterInitiated = false, order = null } = {}) {
   requireRole(requester, 'requester');
   const branchId = requireActiveBranch(branch);
@@ -125,6 +171,7 @@ function authorizeBranchCoordination({ manager, sourceBranch, targetBranch } = {
 module.exports = {
   CONVERSATION_TYPES,
   TERMINAL_ORDER_STATUSES,
+  assertCanonicalConversationParticipants,
   assertNoClientParticipantDefinition,
   authorizeBranchCoordination,
   authorizeDistributorBranch,

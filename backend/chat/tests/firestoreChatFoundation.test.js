@@ -14,6 +14,8 @@ test('conversation summaries are scoped to the caller UID or current Manager bra
   assert.match(rules, /participantUserAccess[\s\S]*\['active', 'read_only'\]/);
   assert.match(rules, /function isConversationBranchParticipant\(conversation\)[\s\S]*currentUser\(\)\.branchId in conversation\.participantBranchIds/);
   assert.match(rules, /participantBranchAccess[\s\S]*\['active', 'read_only'\]/);
+  assert.match(rules, /function isCanonicalConversationUser\(conversation\)[\s\S]*conversation\.type == 'requester_branch'[\s\S]*conversation\.type == 'requester_distributor'[\s\S]*conversation\.type == 'distributor_branch'/);
+  assert.match(rules, /function isCanonicalConversationBranch\(conversation\)[\s\S]*conversation\.type == 'branch_coordination'/);
   assert.match(rules, /function conversationAccessIsCurrent\(conversation\)[\s\S]*conversation\.accessEndsAt > request\.time/);
   assert.match(rules, /function canReadConversation\(conversation\)[\s\S]*isRequester\(\) \|\| isDistributor\(\)[\s\S]*isManager\(\)/);
   assert.match(conversationBlock, /allow get, list:\s*if canReadConversation\(resource\.data\);/);

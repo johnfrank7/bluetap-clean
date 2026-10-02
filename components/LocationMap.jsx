@@ -3,6 +3,7 @@ import { Image, PanResponder, StyleSheet, Text, TouchableOpacity, View } from 'r
 import { BLUETAP_COLORS, BLUETAP_LAYOUT } from '../constants/bluetapTheme';
 import { haversineDistanceKm, normalizeLocation } from '../services/location';
 import { useBlueTapTheme } from './BlueTapTheme';
+const { PIN_GEOMETRY, connectorCoordinates, fitZoomWithMarkerPadding, pinTipTransform, stationColorFor } = require('./locationMapModel');
 
 const TILE_SIZE = 256;
 const DEFAULT_MAP_HEIGHT = 250;
@@ -102,7 +103,7 @@ export default function LocationMap({
           longitude: points.reduce((sum, point) => sum + point.longitude, 0) / points.length,
         }
       : DEFAULT_CENTER;
-    setViewport({ center, zoom: fitZoom(points) });
+    setViewport({ center, zoom: fitZoomWithMarkerPadding(fitZoom(points), points.length) });
   }, [pointSignature]);
 
   React.useEffect(() => {
@@ -232,6 +233,8 @@ export default function LocationMap({
 
   const lineDetails = React.useMemo(() => {
     if (!requester || !selectedBranchPoint) return null;
+    const endpoints = connectorCoordinates(requester, selectedBranchPoint);
+    if (endpoints.length !== 2) return null;
     const reqPos = position(requester);
     const stationPos = position(selectedBranchPoint);
     const dx = stationPos.left - reqPos.left;
@@ -342,6 +345,8 @@ export default function LocationMap({
         {branchPoints.map(({ branch, ...point }) => {
           const selected = branch.id === selectedBranchId;
           const pos = position(point);
+          const pinGeometry = selected ? PIN_GEOMETRY.stationSelected : PIN_GEOMETRY.station;
+          const pinColor = stationColorFor(branch.id || branch.name);
           return (
             <TouchableOpacity
               key={branch.id}
@@ -351,17 +356,17 @@ export default function LocationMap({
               style={[
                 styles.branchMarker,
                 styles.stationPinContainer,
-                { left: pos.left, top: pos.top },
+                { left: pos.left, top: pos.top, transform: pinTipTransform(pinGeometry) },
                 selected && styles.stationPinSelected,
               ]}
             >
-              <View style={[styles.stationPinHead, selected && styles.stationPinHeadSelected]}>
+              <View style={[styles.stationPinHead, { backgroundColor: pinColor }, selected && styles.stationPinHeadSelected]}>
                 <View style={styles.stationPinInnerCircle}>
-                  <Text style={styles.stationPinLetter}>S</Text>
+                  <Text style={[styles.stationPinLetter, { color: pinColor }]}>S</Text>
                 </View>
               </View>
               <View
-                style={[styles.stationPinPoint, selected && styles.stationPinPointSelected]}
+                style={[styles.stationPinPoint, { borderTopColor: pinColor }, selected && styles.stationPinPointSelected]}
               />
               <Text
                 numberOfLines={1}
@@ -377,13 +382,14 @@ export default function LocationMap({
         {requester && (
           <View
             accessibilityLabel={`${markerLabel}${readOnly ? '' : '. Drag to adjust.'}`}
-            style={[styles.requesterMarker, styles.requesterPinContainer, position(requester)]}
+            style={[styles.requesterMarker, styles.requesterPinContainer, position(requester), { transform: pinTipTransform(PIN_GEOMETRY.delivery) }]}
             {...(!readOnly ? markerPanResponder.panHandlers : {})}
           >
             <View style={styles.requesterPulseRing} />
             <View style={styles.requesterPinHead}>
               <View style={styles.requesterPinDot} />
             </View>
+            <View style={styles.requesterPinPoint} />
             <Text style={styles.requesterMarkerLabel}>{markerLabel}</Text>
           </View>
         )}
@@ -470,7 +476,6 @@ const styles = StyleSheet.create({
     position: 'absolute',
     alignItems: 'center',
     zIndex: 5,
-    transform: [{ translateX: -15 }, { translateY: -30 }],
   },
   requesterPulseRing: {
     position: 'absolute',
@@ -502,6 +507,17 @@ const styles = StyleSheet.create({
     borderRadius: 5,
     backgroundColor: '#FFFFFF',
   },
+  requesterPinPoint: {
+    width: 0,
+    height: 0,
+    borderLeftWidth: 5,
+    borderRightWidth: 5,
+    borderTopWidth: 8,
+    borderLeftColor: 'transparent',
+    borderRightColor: 'transparent',
+    borderTopColor: BLUETAP_COLORS.primary,
+    marginTop: -1,
+  },
   requesterMarkerLabel: {
     fontSize: 10,
     fontWeight: '900',
@@ -522,17 +538,14 @@ const styles = StyleSheet.create({
     position: 'absolute',
     alignItems: 'center',
     zIndex: 4,
-    transform: [{ translateX: -14 }, { translateY: -34 }],
   },
   stationPinSelected: {
     zIndex: 6,
-    transform: [{ translateX: -17 }, { translateY: -42 }],
   },
   stationPinHead: {
     width: 28,
     height: 28,
     borderRadius: 14,
-    backgroundColor: '#EF4444',
     borderWidth: 2,
     borderColor: '#FFFFFF',
     alignItems: 'center',
@@ -544,7 +557,6 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   stationPinHeadSelected: {
-    backgroundColor: '#DC2626',
     width: 34,
     height: 34,
     borderRadius: 17,
@@ -560,7 +572,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   stationPinLetter: {
-    color: '#DC2626',
     fontSize: 9,
     fontWeight: '900',
   },
@@ -572,11 +583,9 @@ const styles = StyleSheet.create({
     borderTopWidth: 6,
     borderLeftColor: 'transparent',
     borderRightColor: 'transparent',
-    borderTopColor: '#EF4444',
     marginTop: -1,
   },
   stationPinPointSelected: {
-    borderTopColor: '#DC2626',
     borderLeftWidth: 5,
     borderRightWidth: 5,
     borderTopWidth: 8,

@@ -34,3 +34,15 @@ test('restriction notices are mounted outside chat and ordering is blocked in th
   assert.match(read('app/requester/requestform.jsx'), /!orderingRestriction/);
   assert.match(read('components/chat/ChatDataProvider.jsx'), /!chatRestriction/);
 });
+
+test('Reports and Safety notices use a bounded vertical information card with safe metadata and separate actions', () => {
+  const notices = read('components/ModerationNotices.jsx');
+  assert.match(notices, /noticeIcon/);
+  assert.match(notices, /statusBadge/);
+  assert.match(notices, />Branch</);
+  assert.match(notices, />Reason</);
+  assert.match(notices, />Until</);
+  assert.match(notices, /bannerActions/);
+  assert.match(notices, /maxWidth: 560/);
+  assert.doesNotMatch(notices, /notice\.reporter|notice\.privateNote|notice\.actionId|notice\.riskScore/);
+});

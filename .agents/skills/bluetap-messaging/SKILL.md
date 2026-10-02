@@ -98,3 +98,9 @@ Message editing and soft deletion are implemented only through the server-author
 - Requester-to-branch general inquiries use the existing `requester_branch` authority with `intent: inquiry`, no order ID, and one reusable authority-registry conversation per Requester and active branch. Managers see the branch-scoped conversation as a general inquiry; no Manager identity becomes a personal participant.
 - Message edits and deletes are server-authoritative sender-only mutations within 15 minutes of server `createdAt`. Edits append protected revision history and honor chat restrictions. Deletes use a visible tombstone, preserve sequence/sender/receipts and immutable report evidence, and remain unavailable to suspended or terminated accounts.
 - User and message reporting belongs behind three-dot menus. Never expose a permanent red report control or allow reporting one's own message.
+
+## Phase 4.2 requester safeguards
+
+- Every stored conversation must match its canonical participant graph before list, read, send, cursor, mutation, or report authorization. A malformed legacy row with extra users or principals is denied and omitted from normal discovery; it is not repaired or deleted automatically.
+- Requester conversation lists keep `requester_branch` under Branch / Station and `requester_distributor` under Distributors. Active station entries may be pinned and resolved through the existing secure inquiry intent, but matching branch identity merges into one logical row.
+- Reusable chat initials derive only from visible display names, use first-plus-last initials with a two-character maximum, and fall back to a neutral product marker rather than a Firebase UID. Branch principals use a station marker instead of a Manager-person identity.

@@ -82,6 +82,7 @@ Use this skill for BlueTap product catalogs, provider selection, order creation,
 - Rank candidates nearest to farthest using Haversine distance unless a configured routing provider supplies road distance.
 - Label Haversine values as approximate or straight-line distance. Never present them as driving distance.
 - Anchor the dashed straight-line guide to the projected delivery and station coordinates (the visual pin tips), keep its distance badge near the midpoint, and explicitly state that it is not a driving route.
+- Shared mini-map pins use bottom-tip anchors: the marker and straight-line endpoint must consume the same unrounded normalized coordinate, while visual offsets come only from explicit icon geometry. Delivery remains blue; station colors are deterministic from branch identity and never random per render. Fit view reserves head/label padding around all endpoints.
 - Store the selected provider by `branchId`, not only by display name.
 - Shared maps must support web and native appropriately, show delivery and provider markers, highlight selection, and provide a fit-view action.
 - The New Request map must fit its container responsively without horizontal overflow. Selecting a GPS location or a manual map pin immediately unlocks active-branch ranking and refreshes the provider list; manual selection remains available when permission is denied.
@@ -108,6 +109,7 @@ Use this skill for BlueTap product catalogs, provider selection, order creation,
 - Count only requester-attributable delivery-failure reason codes and serious late-stage requester cancellations. Pending/early ordinary cancellations are low concern and excluded. Provider availability, distributor/vehicle failure, weather, branch operations, and system failures are explicitly non-attributable.
 - Abuse-review projections store bounded safe order references, category, stage, concern, time, branch jurisdiction, and requester identity snapshots. Managers remain branch-scoped; Admin platform action still requires a human decision and an audited reason.
 - Active platform ordering restrictions block the ordering flow. Active branch restrictions visibly disable only the matching provider while preserving unrelated provider discovery and station messaging. Manager approval cards may open only the canonical `requester_branch` order-follow-up conversation.
+- Restricted provider cards retain branch name, distance, and delivery-radius context while adding a non-color-only warning, expiry when available, an error accent/surface, and a disabled Select action. The New Request form does not expose station messaging; Requester branch inquiries remain available from the grouped chat panel.
 
 ## Verification
 

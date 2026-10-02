@@ -10,6 +10,7 @@ const { getAssignmentVersion, getBranchMembershipVersion } = require('../utils/r
 const {
   CONVERSATION_TYPES,
   TERMINAL_ORDER_STATUSES,
+  assertCanonicalConversationParticipants,
   authorizeBranchCoordination,
   authorizeDistributorBranch,
   authorizeRequesterBranch,
@@ -342,6 +343,7 @@ async function resolveOrCreateConversation({ db, callerUid, callerClaims, body, 
     if (conversation.authorityKeyHash !== hash || conversation.type !== resolved.type) {
       throw new OtpError(409, 'CHAT_STATE_INVALID', 'Conversation authority does not match its registry.');
     }
+    assertCanonicalConversationParticipants(conversation);
     if (conversation.status === CONVERSATION_STATUS.CLOSED) throw new OtpError(409, 'CHAT_CLOSED', 'This conversation is closed.');
 
     if (resolved.type === CONVERSATION_TYPES.REQUESTER_BRANCH && !created) {
@@ -395,6 +397,7 @@ async function requesterBranchAuthorityCurrent(tx, db, conversation, nowMs) {
 
 async function authorizeConversation(tx, db, conversation, callerUid, callerClaims, mode, nowMs) {
   if (!conversation) throw new OtpError(404, 'CHAT_CONVERSATION_NOT_FOUND', 'The conversation was not found.');
+  assertCanonicalConversationParticipants(conversation);
   const caller = requireChatProfile(await readRequired(tx, db.collection('users').doc(callerUid), 'CHAT_NOT_AUTHORIZED', 'Chat access is not authorized.'), callerUid);
   if (mode === 'send') {
     const branchContextId = conversation.type === CONVERSATION_TYPES.BRANCH_COORDINATION
@@ -750,6 +753,10 @@ async function listConversations({ db, callerUid, callerClaims, now }) {
             if (branchSnapshot.exists) branchNameSnapshots[branchId] = clean(branchSnapshot.data()?.name, 160);
           }
           conversations.push({ ...conversation, branchNameSnapshots });
+        } else if (conversation.type === CONVERSATION_TYPES.REQUESTER_BRANCH) {
+          const branchId = clean(conversation.branchIds?.[0] || conversation.participantBranchIds?.[0], 128);
+          const branchSnapshot = await tx.get(db.collection('branches').doc(branchId));
+          conversations.push({ ...conversation, branchNameSnapshot: branchSnapshot.exists ? clean(branchSnapshot.data()?.name, 160) : '' });
         } else conversations.push(conversation);
       } catch (error) {
         if (!(error instanceof OtpError) || ![403, 404, 409].includes(error.status)) throw error;
