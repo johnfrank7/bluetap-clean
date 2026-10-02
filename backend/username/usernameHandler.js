@@ -26,6 +26,8 @@ const errorCodes = {
   'invalid-request': 'INVALID_REQUEST',
   'too-many-attempts': 'TOO_MANY_ATTEMPTS',
   'account-disabled': 'ACCOUNT_DISABLED',
+  'account-suspended': 'ACCOUNT_SUSPENDED',
+  'account-terminated': 'ACCOUNT_TERMINATED',
   'portal-role-mismatch': 'PORTAL_ROLE_MISMATCH',
 };
 const publicProfile = (profile, uid, email) => ({
@@ -336,7 +338,13 @@ function createUsernameHandler(action, getAdmin = getFirebaseAdmin, { now = Date
           }
           throw genericLogin();
         }
-        if (providerCode === 'USER_DISABLED') throw new OtpError(403, 'account-disabled', 'This account is disabled. Please contact support.');
+        if (providerCode === 'USER_DISABLED') {
+          const disabledProfile = (await db.collection('users').doc(expectedUid).get()).data() || {};
+          const accountState = canonicalAccountStatus(disabledProfile);
+          if (accountState === ACCOUNT_STATUS.SUSPENDED) throw new OtpError(403, 'account-suspended', 'This account is temporarily suspended.');
+          if (accountState === ACCOUNT_STATUS.TERMINATED) throw new OtpError(403, 'account-terminated', 'This account has been terminated.');
+          throw new OtpError(403, 'account-disabled', 'This account is disabled. Please contact support.');
+        }
         if (providerCode === 'TOO_MANY_ATTEMPTS_TRY_LATER' || response.status === 429) {
           throw new OtpError(429, 'too-many-attempts', 'Too many login attempts. Please try again later.', { code: 'LOGIN_RATE_LIMITED', retryAfterSeconds: 300 });
         }
@@ -359,9 +367,10 @@ function createUsernameHandler(action, getAdmin = getFirebaseAdmin, { now = Date
       stage('PROFILE_CHECK_STARTED');
       const profile = (await db.collection('users').doc(expectedUid).get()).data();
       if (!profile || !['requester', 'distributor', 'admin', 'manager'].includes(profile.role)) throw setupError();
-      if (canonicalAccountStatus(profile) !== ACCOUNT_STATUS.ACTIVE) {
-        throw new OtpError(403, 'account-disabled', 'This account is disabled. Please contact support.');
-      }
+      const accountState = canonicalAccountStatus(profile);
+      if (accountState === ACCOUNT_STATUS.SUSPENDED) throw new OtpError(403, 'account-suspended', 'This account is temporarily suspended.');
+      if (accountState === ACCOUNT_STATUS.TERMINATED) throw new OtpError(403, 'account-terminated', 'This account has been terminated.');
+      if (accountState !== ACCOUNT_STATUS.ACTIVE) throw new OtpError(403, 'account-disabled', 'This account is disabled. Please contact support.');
       if ((profile.uid && profile.uid !== expectedUid) ||
           (!isEmail && profile.usernameNormalized && profile.usernameNormalized !== normalized)) throw mappingError();
       loginDiagnostic('LOGIN_PROFILE_UID', { uid: expectedUid });

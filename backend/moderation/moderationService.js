@@ -25,7 +25,14 @@ const MANAGER_DURATIONS = new Set([1, 3, 7]);
 const ADMIN_DURATIONS = new Set([1, 3, 7, 30]);
 
 const clean = (value, max = 1000) => Array.from(String(value || '').normalize('NFC').replace(/\s+/gu, ' ').trim()).slice(0, max).join('');
-const timeOf = (value) => value?.toMillis?.() || value?.getTime?.() || Number(value?.seconds || 0) * 1000 || new Date(value || 0).getTime() || 0;
+const timeOf = (value) => value?.toMillis?.() || value?.getTime?.() || Number(value?.seconds || value?._seconds || 0) * 1000 || new Date(value || 0).getTime() || 0;
+const isoTimestamp = (value) => {
+  const carriesWholeSeconds = typeof value?.toMillis !== 'function' && typeof value?.getTime !== 'function';
+  const nanoseconds = carriesWholeSeconds ? Number(value?.nanoseconds ?? value?._nanoseconds ?? 0) : 0;
+  const milliseconds = timeOf(value) + (Number.isFinite(nanoseconds) ? Math.floor(nanoseconds / 1e6) : 0);
+  if (!Number.isFinite(milliseconds) || milliseconds <= 0) return null;
+  try { return new Date(milliseconds).toISOString(); } catch { return null; }
+};
 const publicUidOf = (profile = {}) => clean(profile.publicUid || profile.displayUid || profile.unique_id, 80);
 const displayNameOf = (profile = {}) => clean(profile.fullName || `${profile.firstName || ''} ${profile.lastName || ''}`, 160);
 const hashId = (...parts) => createHash('sha256').update(parts.map((part) => clean(part, 256)).join('|')).digest('hex');
@@ -106,8 +113,8 @@ function safeRestriction(entry = {}) {
     branchId: clean(entry.branchId, 128) || null,
     branchName: clean(entry.branchNameSnapshot, 160) || null,
     reasonCategory: clean(entry.reasonCategory, 80),
-    startsAt: entry.startsAt || null,
-    endsAt: entry.endsAt || null,
+    startsAt: isoTimestamp(entry.startsAt),
+    endsAt: isoTimestamp(entry.endsAt),
   };
 }
 
@@ -207,12 +214,13 @@ function safeNotice(id, notice = {}) {
     title: clean(notice.title, 160),
     category: clean(notice.category, 80),
     scope: clean(notice.scope, 40),
+    branchId: clean(notice.branchId, 128) || null,
     branchName: clean(notice.branchName, 160) || null,
-    startsAt: notice.startsAt || null,
-    endsAt: notice.endsAt || null,
-    createdAt: notice.createdAt || null,
-    acknowledgedAt: notice.acknowledgedAt || null,
-    seenAt: notice.seenAt || null,
+    startsAt: isoTimestamp(notice.startsAt),
+    endsAt: isoTimestamp(notice.endsAt),
+    createdAt: isoTimestamp(notice.createdAt),
+    acknowledgedAt: isoTimestamp(notice.acknowledgedAt),
+    seenAt: isoTimestamp(notice.seenAt),
   };
 }
 
@@ -237,6 +245,7 @@ module.exports = {
   durationDays,
   effectiveRestriction,
   hashId,
+  isoTimestamp,
   nextRestrictionProjection,
   noticeForAction,
   publicUidOf,

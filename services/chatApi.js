@@ -45,6 +45,14 @@ export const sendMessage = async ({ conversationId, clientMutationId, body, orde
   })
 ).message;
 
+export const editMessage = async ({ conversationId, messageId, clientMutationId, body }) => (
+  await chatRequest('/api/chat/messages', { method: 'PATCH', body: { conversationId, messageId, clientMutationId, body } })
+).message;
+
+export const deleteMessage = async ({ conversationId, messageId, clientMutationId }) => (
+  await chatRequest('/api/chat/messages', { method: 'DELETE', body: { conversationId, messageId, clientMutationId } })
+).message;
+
 export const markRead = async ({ conversationId, lastReadSeq }) => (
   await chatRequest('/api/chat/read-state', {
     method: 'POST',

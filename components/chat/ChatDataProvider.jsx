@@ -3,7 +3,7 @@ import { onAuthStateChanged } from 'firebase/auth';
 import { StyleSheet, View } from 'react-native';
 
 import { auth } from '../../firebase';
-import { loadMessageHistory, markRead, resolveConversation, sendMessage } from '../../services/chatApi';
+import { deleteMessage as deleteChatMessage, editMessage as editChatMessage, loadMessageHistory, markRead, resolveConversation, sendMessage } from '../../services/chatApi';
 import { subscribeConversationSummaries, subscribeOpenConversationMessages } from '../../services/chatRealtime';
 import { useAdminTheme } from '../AdminTheme';
 import { useBlueTapTheme } from '../BlueTapTheme';
@@ -39,10 +39,11 @@ export function presentationFor(conversation, role, roleData) {
   let contextLabel = 'BlueTap messages';
 
   if (conversation.type === 'requester_branch') {
+    const requesterBranchOrderReference = orderReferenceOf(order);
     displayName = role === 'manager'
       ? clean(order?.requesterNameSnapshot || order?.requesterName || userById(conversation.requesterUid)?.fullName) || 'Requester'
       : clean(order?.currentBranchName || order?.currentBranchNameSnapshot || order?.branchNameSnapshot || order?.branchDisplayName || order?.water_station) || 'BlueTap Station';
-    contextLabel = role === 'manager' ? 'Requester · Station conversation' : 'Your station';
+    contextLabel = requesterBranchOrderReference ? `Order ${requesterBranchOrderReference}` : 'General inquiry';
   } else if (conversation.type === 'requester_distributor') {
     displayName = role === 'distributor'
       ? clean(order?.requesterNameSnapshot || order?.requesterName || order?.customerName) || 'Requester'
@@ -88,6 +89,7 @@ export default function ChatDataProvider({ children, role }) {
   const [hasEarlierMessages, setHasEarlierMessages] = React.useState(false);
   const [loadingEarlier, setLoadingEarlier] = React.useState(false);
   const [threadError, setThreadError] = React.useState('');
+  const [messageActionError, setMessageActionError] = React.useState('');
   const [resolvingConversation, setResolvingConversation] = React.useState(false);
   const [resolveError, setResolveError] = React.useState('');
   const [threadVersion, setThreadVersion] = React.useState(0);
@@ -181,6 +183,7 @@ export default function ChatDataProvider({ children, role }) {
     setOlderMessages([]);
     setLocalMessages([]);
     setThreadError('');
+    setMessageActionError('');
     if (!panelOpen || !currentConversation?.id || accessReadiness !== 'ready' || !availability.readable) return undefined;
     const unsubscribe = subscribeOpenConversationMessages({
       conversationId: currentConversation.id,
@@ -285,6 +288,43 @@ export default function ChatDataProvider({ children, role }) {
     commitMessage(retry);
   }, [commitMessage]);
 
+  const replaceCommittedMessage = React.useCallback((updated) => {
+    const replace = (items) => items.map((item) => item.id === updated.id ? { ...item, ...updated } : item);
+    setLiveMessages(replace);
+    setOlderMessages(replace);
+    setLocalMessages(replace);
+    if (Number(updated.seq) === Number(currentConversation?.lastMessageSeq)) {
+      const preview = updated.deletedAt ? 'Message deleted' : updated.body;
+      setSummaries((items) => items.map((item) => item.id === currentConversation?.id ? { ...item, lastMessagePreview: preview } : item));
+    }
+  }, [currentConversation?.id, currentConversation?.lastMessageSeq]);
+
+  const editCurrentMessage = React.useCallback(async (message, body) => {
+    if (!currentConversation?.id || !message?.id) return null;
+    setMessageActionError('');
+    try {
+      const updated = await editChatMessage({ conversationId: currentConversation.id, messageId: message.id, clientMutationId: createClientMutationId(), body });
+      replaceCommittedMessage(updated);
+      return updated;
+    } catch (mutationError) {
+      setMessageActionError(mutationError.message || 'The message could not be edited.');
+      throw mutationError;
+    }
+  }, [currentConversation?.id, replaceCommittedMessage]);
+
+  const deleteCurrentMessage = React.useCallback(async (message) => {
+    if (!currentConversation?.id || !message?.id) return null;
+    setMessageActionError('');
+    try {
+      const updated = await deleteChatMessage({ conversationId: currentConversation.id, messageId: message.id, clientMutationId: createClientMutationId() });
+      replaceCommittedMessage(updated);
+      return updated;
+    } catch (mutationError) {
+      setMessageActionError(mutationError.message || 'The message could not be deleted.');
+      throw mutationError;
+    }
+  }, [currentConversation?.id, replaceCommittedMessage]);
+
   const loadEarlierMessages = React.useCallback(async () => {
     if (!currentConversation?.id || loadingEarlier) return;
     const committed = messages.filter((message) => Number.isSafeInteger(Number(message.seq)));
@@ -308,7 +348,7 @@ export default function ChatDataProvider({ children, role }) {
     role, colors, conversations, loading, error, panelOpen, currentConversation, messages,
     canSend: availability.sendable && accessReadiness === 'ready' && !threadError && !chatRestriction,
     sendUnavailableReason: chatRestriction ? `${chatRestriction.title}${chatRestriction.branchName ? ` for ${chatRestriction.branchName}` : ''}.` : '',
-    hasEarlierMessages, loadingEarlier, threadError, resolvingConversation, resolveError,
+    hasEarlierMessages, loadingEarlier, threadError, messageActionError, resolvingConversation, resolveError,
     totalUnread: totalUnread(conversations, role, uid, branchId),
     totalUnreadLabel: formatBadge(totalUnread(conversations, role, uid, branchId)),
     openChat: () => setPanelOpen(true),
@@ -319,10 +359,12 @@ export default function ChatDataProvider({ children, role }) {
     retrySummaries: () => setRetryVersion((version) => version + 1),
     sendCurrentMessage,
     retryMessage,
+    editCurrentMessage,
+    deleteCurrentMessage,
     loadEarlierMessages,
     isOwnMessage: (message) => isOwnMessage(message, role, uid, branchId),
     receiptForMessage: (message) => receiptFor(message, currentConversation, role, uid, branchId),
-  }), [accessReadiness, roleData.users, branchId, chatRestriction, colors, conversations, currentConversation, error, hasEarlierMessages, loading, loadingEarlier, messages, openConversation, panelOpen, resolveAndOpen, resolveError, resolvingConversation, retryMessage, role, sendCurrentMessage, threadError, uid, loadEarlierMessages]);
+  }), [accessReadiness, roleData.users, branchId, chatRestriction, colors, conversations, currentConversation, deleteCurrentMessage, editCurrentMessage, error, hasEarlierMessages, loading, loadingEarlier, messageActionError, messages, openConversation, panelOpen, resolveAndOpen, resolveError, resolvingConversation, retryMessage, role, sendCurrentMessage, threadError, uid, loadEarlierMessages]);
 
   return (
     <ChatContext.Provider value={value}>

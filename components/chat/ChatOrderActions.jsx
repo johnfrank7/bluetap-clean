@@ -2,6 +2,7 @@ import React from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { useBlueTapTheme } from '../BlueTapTheme';
+import { useAdminTheme } from '../AdminTheme';
 import { useChat } from './ChatContext';
 
 const clean = (value) => String(value || '').trim();
@@ -80,10 +81,23 @@ export function DistributorOrderChatAction({ order }) {
   return <ActionButton busy={busy} colors={colors} label="Message Requester" onPress={open} secondary />;
 }
 
+export function ManagerOrderChatAction({ order }) {
+  const { colors } = useAdminTheme();
+  const { resolveAndOpen } = useChat();
+  const [busy, setBusy] = React.useState(false);
+  const orderId = orderIdOf(order);
+  if (!orderId || !clean(order?.requesterUid || order?.requester_id)) return null;
+  const open = async () => {
+    setBusy(true);
+    try { await resolveAndOpen({ type: 'requester_branch', intent: 'order_followup', orderId }, order); } catch {} finally { setBusy(false); }
+  };
+  return <ActionButton busy={busy} colors={colors} label="Message Requester" onPress={open} secondary />;
+}
+
 const styles = StyleSheet.create({
   wrap: { width: '100%', flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginTop: 10 },
   compact: { marginTop: 8 },
-  button: { flexGrow: 1, flexBasis: 124, minWidth: 0, minHeight: 42, paddingHorizontal: 10, borderWidth: 1, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  button: { flexGrow: 1, flexBasis: 124, minWidth: 0, minHeight: 44, paddingHorizontal: 10, borderWidth: 1, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   label: { fontSize: 12, fontWeight: '900' },
   pressed: { opacity: 0.82, transform: [{ scale: 0.98 }] },
   disabled: { opacity: 0.7 },

@@ -26,6 +26,7 @@ import ManagerShell, { MANAGER_COLORS, ManagerPill } from '../../components/Mana
 import { useManagerRealtimeData } from '../../components/ManagerRealtimeData';
 import { parseTimestamp } from '../../services/notificationTimestamp';
 import LocationMap from '../../components/LocationMap';
+import { ManagerOrderChatAction } from '../../components/chat/ChatOrderActions';
 const { getManagerQueues, toManagerOrder } = require('../../services/managerOperational');
 
 
@@ -154,6 +155,7 @@ function OutsideRadiusApprovalQueue({ orders, loading, styles, colors, isDark, o
               </View>
 
               <View style={styles.actionRow}>
+                <View style={{ flexGrow: 1, flexBasis: 150, minWidth: 0 }}><ManagerOrderChatAction order={order} /></View>
                 <TouchableOpacity onPress={() => onOpenOrder(order)} style={styles.viewDetailsBtn}>
                   <Text style={styles.viewDetailsBtnText}>View Details</Text>
                 </TouchableOpacity>

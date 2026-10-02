@@ -10,6 +10,7 @@ const {
   clean,
   durationDays,
   hashId,
+  isoTimestamp,
   nextRestrictionProjection,
   noticeForAction,
   publicUidOf,
@@ -42,7 +43,7 @@ function pageSize(value) {
 function statusFilter(value) {
   const status = clean(value, 24).toLowerCase();
   if (!status) return '';
-  if (!['open', 'escalated', 'resolved'].includes(status)) throw new OtpError(400, 'REPORT_STATUS_INVALID', 'Choose open, escalated, or resolved.');
+  if (!['active', 'open', 'escalated', 'resolved'].includes(status)) throw new OtpError(400, 'REPORT_STATUS_INVALID', 'Choose active, open, escalated, or resolved.');
   return status;
 }
 
@@ -66,19 +67,20 @@ function safeReport(report = {}, options = {}) {
     },
     branchId: clean(report.jurisdictionBranchId, 128),
     orderReference: clean(report.orderReferenceSnapshot, 80) || null,
-    createdAt: report.createdAt || null,
-    updatedAt: report.updatedAt || null,
-    reviewedAt: report.reviewedAt || null,
+    createdAt: isoTimestamp(report.createdAt),
+    updatedAt: isoTimestamp(report.updatedAt),
+    reviewedAt: isoTimestamp(report.reviewedAt),
     actionTaken: clean(report.actionTaken, 80) || null,
-    escalatedAt: report.escalatedAt || null,
-    resolvedAt: report.resolvedAt || null,
+    escalatedAt: isoTimestamp(report.escalatedAt),
+    resolvedAt: isoTimestamp(report.resolvedAt),
     ...(options.evidence ? { evidence: (report.evidenceSnapshot || []).slice(0, 5).map((message) => ({
       messageId: clean(message.messageId, 128),
       seq: Number(message.seq || 0),
       senderPublicUid: clean(message.senderPublicUidSnapshot, 80),
       senderRole: clean(message.senderRole, 30),
       body: clean(message.body, 2000),
-      createdAt: message.createdAt || null,
+      createdAt: isoTimestamp(message.createdAt),
+      reported: clean(message.messageId, 128) === clean(report.messageId, 128),
     })) } : {}),
   };
 }
@@ -96,15 +98,15 @@ function safeAbuseReview(review = {}) {
     incidentCount: Number(review.incidentCount || 0),
     severity: clean(review.severity, 40),
     status: clean(review.status || 'open', 24),
-    firstIncidentAt: review.firstIncidentAt || null,
-    lastIncidentAt: review.lastIncidentAt || null,
+    firstIncidentAt: isoTimestamp(review.firstIncidentAt),
+    lastIncidentAt: isoTimestamp(review.lastIncidentAt),
     incidents: (review.incidents || []).slice(-10).map((incident) => ({
       orderReference: clean(incident.orderReference, 80),
       type: clean(incident.type, 48),
       category: clean(incident.category, 80),
       stage: clean(incident.stage, 48),
       concern: clean(incident.concern, 24),
-      at: incident.at || null,
+      at: isoTimestamp(incident.at),
     })),
   };
 }
@@ -121,16 +123,17 @@ function safeAction(action = {}) {
     actorRole: clean(action.actorRole, 30),
     reasonCategory: clean(action.reasonCategory, 80),
     reason: clean(action.reason, 1000),
-    startsAt: action.startsAt || null,
-    endsAt: action.endsAt || null,
-    createdAt: action.createdAt || null,
+    startsAt: isoTimestamp(action.startsAt),
+    endsAt: isoTimestamp(action.endsAt),
+    createdAt: isoTimestamp(action.createdAt),
   };
 }
 
 async function reportList(db, { branchId = '', status = '', limit = 25, cursor = '' } = {}) {
   let query = db.collection('chatReports');
   if (branchId) query = query.where('jurisdictionBranchId', '==', branchId);
-  if (status) query = query.where('status', '==', status);
+  if (status === 'active') query = query.where('status', 'in', ['open', 'escalated']);
+  else if (status) query = query.where('status', '==', status);
   query = query.orderBy('createdAt', 'desc').limit(limit + 1);
   if (cursor) {
     const cursorSnapshot = await db.collection('chatReports').doc(cursor).get();
@@ -363,15 +366,17 @@ async function applyModerationAction({ auth, db, actor, actorRole, actorBranch =
       });
     }
 
-    const resolved = action !== 'escalate';
+    const remainsActionable = action === 'escalate' || (actorRole === 'manager' && action === 'warn');
+    const nextStatus = action === 'escalate' ? 'escalated' : remainsActionable ? latestStatus : 'resolved';
     tx.update(latestCaseRef, {
-      status: resolved ? 'resolved' : 'escalated',
+      status: nextStatus,
       reviewedByUid: actorUid,
       reviewedByPublicUidSnapshot: publicUidOf(actor.profile || actor),
       reviewedByRole: actorRole,
       reviewedAt: now,
       actionTaken: action,
-      ...(resolved ? { resolvedAt: now } : { escalatedAt: now, escalationReason: reason }),
+      ...(!remainsActionable ? { resolvedAt: now } : {}),
+      ...(action === 'escalate' ? { escalatedAt: now, escalationReason: reason } : {}),
       updatedAt: now,
     });
     if (NOTICE_ACTIONS.has(action)) {
@@ -456,7 +461,7 @@ async function expandChatReview({ db, admin, body, now }) {
     senderPublicUid: clean(message.senderPublicUidSnapshot, 80),
     senderRole: clean(message.senderRole, 30),
     body: clean(message.body, 2000),
-    createdAt: message.createdAt || null,
+    createdAt: isoTimestamp(message.createdAt),
   }));
   await db.collection('adminAuditLogs').doc().set({
     action: 'CHAT_REVIEW_EXPANDED', actorUid: admin.uid,
@@ -484,13 +489,18 @@ function createModerationNoticesHandler(getAdmin = getFirebaseAdmin, dependencie
         const snapshot = await collection.orderBy('createdAt', 'desc').limit(50).get();
         return res.status(200).json({ notices: (snapshot.docs || []).map((item) => safeNotice(item.id, item.data() || {})) });
       }
-      const noticeId = clean(bodyOf(req).noticeId, 128);
+      const body = bodyOf(req);
+      const noticeId = clean(body.noticeId, 128);
+      const action = clean(body.action || 'acknowledge', 24).toLowerCase();
+      if (!['seen', 'acknowledge'].includes(action)) throw new OtpError(400, 'NOTICE_ACTION_INVALID', 'Choose seen or acknowledge.');
       const ref = collection.doc(noticeId);
       const snapshot = noticeId ? await ref.get() : null;
       if (!snapshot?.exists) throw new OtpError(404, 'NOTICE_NOT_FOUND', 'The account notice was not found.');
       const timestamp = now();
-      await ref.update({ acknowledgedAt: snapshot.data()?.acknowledgedAt || timestamp, seenAt: snapshot.data()?.seenAt || timestamp });
-      return res.status(200).json({ notice: safeNotice(noticeId, { ...snapshot.data(), acknowledgedAt: snapshot.data()?.acknowledgedAt || timestamp, seenAt: snapshot.data()?.seenAt || timestamp }) });
+      const seenAt = snapshot.data()?.seenAt || timestamp;
+      const acknowledgedAt = action === 'acknowledge' ? snapshot.data()?.acknowledgedAt || timestamp : snapshot.data()?.acknowledgedAt || null;
+      await ref.update({ seenAt, ...(action === 'acknowledge' ? { acknowledgedAt } : {}) });
+      return res.status(200).json({ notice: safeNotice(noticeId, { ...snapshot.data(), acknowledgedAt, seenAt }) });
     } catch (error) { return errorResponse(res, error); }
   };
 }

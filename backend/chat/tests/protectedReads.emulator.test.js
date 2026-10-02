@@ -38,8 +38,9 @@ test('emulator: optional profile fields, own order queries, private chat signals
     await seed('users/d1', { role: 'distributor', approvalStatus: 'approved', branchId: 'a' });
     await seed('users/m1', { role: 'manager', managerStatus: 'active', branchId: 'a' });
     await seed('users/m2', { role: 'manager', managerStatus: 'active', branchId: 'b' });
+    await seed('users/a1', { role: 'admin', accountStatus: 'active' });
     await seed('requests/o1', { requester_id: 'r1', branchId: 'a', assignedDistributorUid: 'd1', status: 'out_for_delivery', deliveryLocation: { latitude: 10, longitude: 123 } });
-    const r1 = client('r1'), r2 = client('r2'), d1 = client('d1'), m1 = client('m1', { role: 'manager' }), m2 = client('m2', { manager: true });
+    const r1 = client('r1'), r2 = client('r2'), d1 = client('d1'), m1 = client('m1', { role: 'manager' }), m2 = client('m2', { manager: true }), a1 = client('a1', { admin: true });
     assert.equal((await getDocs(query(collection(r1, 'requests'), where('requester_id', '==', 'r1')))).size, 1);
     await denied(getDoc(doc(r2, 'requests/o1')));
     assert.equal((await getDoc(doc(d1, 'requests/o1'))).exists(), true);
@@ -48,9 +49,16 @@ test('emulator: optional profile fields, own order queries, private chat signals
     await denied(getDoc(doc(r2, 'chatUserActivity/r1')));
     await getDoc(doc(m1, 'chatBranchActivity/a'));
     await denied(getDoc(doc(m2, 'chatBranchActivity/a')));
+    await getDoc(doc(r1, 'moderationActivity/user_r1'));
+    await denied(getDoc(doc(r2, 'moderationActivity/user_r1')));
+    await getDoc(doc(m1, 'moderationActivity/branch_a'));
+    await denied(getDoc(doc(m2, 'moderationActivity/branch_a')));
+    await getDoc(doc(a1, 'moderationActivity/admin'));
+    await denied(getDoc(doc(a1, 'moderationActivity/branch_a')));
+    await denied(getDocs(collection(a1, 'moderationActivity')));
     for (const path of [
       'chatReports/report', 'moderationActions/action', 'moderationMutationIds/mutation',
-      'moderationNotices/r1/items/notice', 'moderationActivity/admin', 'orderAbuseReviews/review',
+      'moderationNotices/r1/items/notice', 'orderAbuseReviews/review', 'chatMessageRevisions/revision',
       'chatRestrictions/r1', 'orderingRestrictions/r1', 'chatReportRateLimits/r1', 'chatReportDuplicates/duplicate',
     ]) {
       await denied(getDoc(doc(r1, path)));

@@ -35,4 +35,6 @@ export const loadModerationDetail = (role, reportId) => request(`/api/${role}/mo
 export const applyModerationAction = (role, body) => request(`/api/${role}/moderation`, { method: 'POST', body });
 export const loadExpandedChatReview = (body) => request('/api/admin/chat-review', { method: 'POST', body });
 export const loadModerationNotices = () => request('/api/moderation/notices');
-export const acknowledgeModerationNotice = (noticeId) => request('/api/moderation/notices', { method: 'POST', body: { noticeId } });
+export const updateModerationNotice = (noticeId, action) => request('/api/moderation/notices', { method: 'POST', body: { noticeId, action } });
+export const acknowledgeModerationNotice = (noticeId) => updateModerationNotice(noticeId, 'acknowledge');
+export const markModerationNoticeSeen = (noticeId) => updateModerationNotice(noticeId, 'seen');

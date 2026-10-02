@@ -12,15 +12,25 @@ const formatTime = (value) => {
   return new Date(timestamp).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 };
 
-export default function ChatMessageBubble({ message, own, receipt, colors, onRetry, onReport }) {
+export default function ChatMessageBubble({ message, own, receipt, colors, onRetry, onReport, onEdit, onDelete }) {
+  const [menuOpen, setMenuOpen] = React.useState(false);
+  const deleted = Boolean(message.deletedAt);
+  const withinWindow = Boolean(message.id) && !deleted && Date.now() - timeOf(message.createdAt) <= 15 * 60 * 1000;
+  const reportable = !own && message.id && onReport && !deleted;
+  const hasOptions = own ? withinWindow : Boolean(reportable);
   return (
     <View style={[styles.row, own ? styles.outgoingRow : styles.incomingRow]}>
       <View style={[
         styles.bubble,
         own ? { backgroundColor: colors.primaryAction } : { backgroundColor: colors.surfaceAlt, borderColor: colors.border, borderWidth: 1 },
       ]}>
-        <Text style={[styles.body, { color: own ? colors.onPrimary : colors.textPrimary }]}>{message.body}</Text>
+        {hasOptions && <Pressable accessibilityRole="button" accessibilityLabel="Message options" onPress={() => setMenuOpen((open) => !open)} style={styles.menuButton}><Text style={[styles.menuGlyph, { color: own ? colors.onPrimary : colors.textPrimary }]}>⋮</Text></Pressable>}
+        {menuOpen && <View style={[styles.menu, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+          {own ? <><Pressable accessibilityRole="button" accessibilityLabel="Edit message" onPress={() => { setMenuOpen(false); onEdit?.(message); }} style={styles.menuItem}><Text style={[styles.menuText, { color: colors.textPrimary }]}>Edit</Text></Pressable><Pressable accessibilityRole="button" accessibilityLabel="Delete message" onPress={() => { setMenuOpen(false); onDelete?.(message); }} style={styles.menuItem}><Text style={[styles.menuText, { color: colors.danger }]}>Delete</Text></Pressable></> : <Pressable accessibilityRole="button" accessibilityLabel="Report message" onPress={() => { setMenuOpen(false); onReport?.(message); }} style={styles.menuItem}><Text style={[styles.menuText, { color: colors.danger }]}>Report this message</Text></Pressable>}
+        </View>}
+        <Text style={[styles.body, deleted && styles.deleted, { color: own ? colors.onPrimary : colors.textPrimary }]}>{deleted ? 'Message deleted' : message.body}</Text>
         <View style={styles.meta}>
+          {!!message.editedAt && !deleted && <Text style={[styles.time, { color: own ? 'rgba(255,255,255,0.78)' : colors.textSecondary }]}>Edited</Text>}
           <Text style={[styles.time, { color: own ? 'rgba(255,255,255,0.78)' : colors.textSecondary }]}>{formatTime(message.createdAt)}</Text>
           {own && <ChatReceipt state={receipt} color={receipt === 'failed' ? colors.onPrimary : 'rgba(255,255,255,0.88)'} />}
         </View>
@@ -29,7 +39,6 @@ export default function ChatMessageBubble({ message, own, receipt, colors, onRet
             <Text style={[styles.retry, { color: colors.onPrimary }]}>Tap to retry</Text>
           </Pressable>
         )}
-        {!own && message.id && <Pressable accessibilityRole="button" accessibilityLabel="Report this message" onPress={() => onReport?.(message)}><Text style={[styles.report, { color: colors.danger }]}>Report</Text></Pressable>}
       </View>
     </View>
   );
@@ -39,10 +48,12 @@ const styles = StyleSheet.create({
   row: { width: '100%', marginVertical: 4 },
   outgoingRow: { alignItems: 'flex-end' },
   incomingRow: { alignItems: 'flex-start' },
-  bubble: { maxWidth: '76%', minWidth: 44, flexShrink: 1, borderRadius: 17, paddingHorizontal: 12, paddingTop: 8, paddingBottom: 6 },
+  bubble: { maxWidth: '76%', minWidth: 44, flexShrink: 1, borderRadius: 17, paddingHorizontal: 12, paddingTop: 8, paddingBottom: 6, position: 'relative' },
   body: { fontSize: 14, lineHeight: 20, flexShrink: 1, ...Platform.select({ web: { overflowWrap: 'anywhere', wordBreak: 'break-word' }, default: {} }) },
+  deleted: { fontStyle: 'italic', opacity: .78 }, menuButton: { position: 'absolute', right: 0, top: 0, width: 44, height: 44, zIndex: 3, alignItems: 'center', justifyContent: 'center' }, menuGlyph: { fontSize: 20, fontWeight: '900' },
+  menu: { position: 'absolute', right: 5, top: 42, minWidth: 144, borderWidth: 1, borderRadius: 10, zIndex: 5, paddingVertical: 4, shadowColor: '#000', shadowOpacity: .16, shadowRadius: 8, elevation: 8 },
+  menuItem: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 12 }, menuText: { fontSize: 12, fontWeight: '800' },
   meta: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 5, marginTop: 3 },
   time: { fontSize: 10, fontWeight: '600' },
   retry: { fontSize: 11, fontWeight: '800', marginTop: 5, textDecorationLine: 'underline' },
-  report: { fontSize: 10, fontWeight: '800', marginTop: 5, textDecorationLine: 'underline' },
 });

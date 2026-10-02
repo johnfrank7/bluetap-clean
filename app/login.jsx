@@ -402,6 +402,8 @@ export default function LoginPage() {
         clearAllAuthSessions();
         await signOut(auth).catch(() => {});
       }
+      const accountState = error?.code === 'ACCOUNT_SUSPENDED' || error?.code === 'username/account-suspended' ? 'suspended' : error?.code === 'ACCOUNT_TERMINATED' || error?.code === 'username/account-terminated' ? 'terminated' : '';
+      if (accountState) { router.replace({ pathname: '/account-access-status', params: { state: accountState } }); return; }
       const privileged = error?.code === 'PRIVILEGED_LOGIN_REQUIRED' || error?.code === 'username/privileged-login-required';
       showNotification('Login failed', getPublicLoginErrorMessage(error), privileged ? () => router.replace('/admin/login') : undefined, privileged ? 'Go to Admin Login' : '');
     } finally {

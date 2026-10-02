@@ -75,7 +75,7 @@ export default function DistributorNotification() {
   const params = useLocalSearchParams();
   const { orders, loading, error, refresh } = useAssignedDistributorOrders();
   const { events, markAllSeen, markSeen } = useRoleNotifications();
-  const { acknowledge } = useModerationNotices();
+  const { openNotice } = useModerationNotices();
   const [selectedOrderId, setSelectedOrderId] = React.useState(null);
   const openedParamRef = React.useRef('');
 
@@ -132,7 +132,7 @@ export default function DistributorNotification() {
               return (
                 <TouchableOpacity
                   key={event.id}
-                  onPress={() => { markSeen([event.id]); if (event.noticeId) acknowledge(event.noticeId).catch(() => {}); else setSelectedOrderId(event.orderId); }}
+                  onPress={() => { markSeen([event.id]); if (event.noticeId) openNotice(event.noticeId); else setSelectedOrderId(event.orderId); }}
                   style={[styles.card, { borderLeftWidth: 4, borderLeftColor: tone.dot }]}
                 >
                   <View style={[styles.dot, { backgroundColor: tone.dot }]} />

@@ -88,7 +88,10 @@ function fixture() {
           if (working.has(ref.path)) throw new Error(`already exists: ${ref.path}`);
           working.set(ref.path, clone(data));
         },
-        set(ref, data) { working.set(ref.path, clone(data)); },
+        set(ref, data, options = {}) {
+          const next = clone(data);
+          working.set(ref.path, options.merge && working.has(ref.path) ? { ...working.get(ref.path), ...next } : next);
+        },
         update(ref, data) {
           if (!working.has(ref.path)) throw new Error(`missing: ${ref.path}`);
           working.set(ref.path, { ...working.get(ref.path), ...clone(data) });
@@ -389,6 +392,49 @@ test('idempotent retry returns the committed message and conflicting reuse is re
   assert.equal(crossConversation.body.error.reason, 'CHAT_MUTATION_CONFLICT');
 });
 
+test('message edit and delete are sender-only, idempotent, time-bounded, and preserve revisions', async () => {
+  const f = fixture();
+  const conversationId = await directConversation(f);
+  const sent = await call(f.messages, 'POST', 'requester-a-token', { conversationId, clientMutationId: 'mutation-source', body: 'Original text' });
+  const messageId = sent.body.message.id;
+  const denied = await call(f.messages, 'PATCH', 'distributor-a-token', { conversationId, messageId, clientMutationId: 'foreign-edit', body: 'Spoofed edit' });
+  assert.equal(denied.statusCode, 403);
+  assert.equal(denied.body.error.reason, 'CHAT_MESSAGE_MUTATION_DENIED');
+
+  const editBody = { conversationId, messageId, clientMutationId: 'edit-1', body: 'Corrected text' };
+  const edited = await call(f.messages, 'PATCH', 'requester-a-token', editBody);
+  assert.equal(edited.statusCode, 200);
+  assert.equal(edited.body.message.body, 'Corrected text');
+  assert.ok(edited.body.message.editedAt);
+  assert.equal((await call(f.messages, 'PATCH', 'requester-a-token', editBody)).body.created, false);
+  assert.equal([...f.records.keys()].filter((key) => key.startsWith('chatMessageRevisions/')).length, 1);
+
+  f.records.set('chatRestrictions/requester-a', { platform: { scope: 'platform_chat', endsAt: new Date('2026-01-02T00:00:00Z') } });
+  assert.equal((await call(f.messages, 'PATCH', 'requester-a-token', { conversationId, messageId, clientMutationId: 'edit-restricted', body: 'Blocked' })).body.error.reason, 'CHAT_PLATFORM_SUSPENDED');
+  const deleted = await call(f.messages, 'DELETE', 'requester-a-token', { conversationId, messageId, clientMutationId: 'delete-1' });
+  assert.equal(deleted.statusCode, 200, JSON.stringify(deleted.body));
+  assert.equal(deleted.body.message.body, '');
+  assert.ok(deleted.body.message.deletedAt);
+  assert.equal(deleted.body.message.seq, 1);
+  assert.equal(deleted.body.message.senderUid, 'requester-a');
+  assert.equal(f.records.get(`chatConversations/${conversationId}`).lastMessagePreview, 'Message deleted');
+  assert.equal([...f.records.keys()].filter((key) => key.startsWith('chatMessageRevisions/')).length, 2);
+});
+
+test('message mutation expires after 15 minutes and suspended accounts cannot mutate history', async () => {
+  const f = fixture();
+  const conversationId = await directConversation(f);
+  const sent = await call(f.messages, 'POST', 'requester-a-token', { conversationId, clientMutationId: 'expiry-source', body: 'Original' });
+  f.advanceTime((15 * 60 * 1000) + 1);
+  const expired = await call(f.messages, 'DELETE', 'requester-a-token', { conversationId, messageId: sent.body.message.id, clientMutationId: 'expired-delete' });
+  assert.equal(expired.statusCode, 409);
+  assert.equal(expired.body.error.reason, 'CHAT_MESSAGE_MUTATION_WINDOW_EXPIRED');
+  f.records.get('users/requester-a').accountStatus = 'suspended';
+  const suspended = await call(f.messages, 'DELETE', 'requester-a-token', { conversationId, messageId: sent.body.message.id, clientMutationId: 'suspended-delete' });
+  assert.equal(suspended.statusCode, 403);
+  assert.equal(suspended.body.error.reason, 'CHAT_ACCOUNT_SUSPENDED');
+});
+
 test('read cursors advance monotonically with exact unread counts and cannot be spoofed', async () => {
   const f = fixture();
   const conversationId = await directConversation(f);
@@ -568,6 +614,10 @@ test('report evidence is immutable, centered on the selected incoming message, a
   const stored = f.records.get(`chatReports/${submitted.body.reportId}`);
   assert.deepEqual(stored.evidenceSnapshot.map((message) => message.seq), [2, 3, 4, 5, 6]);
   assert.equal(stored.evidenceSnapshot.length, 5);
+  const evidenceBody = stored.evidenceSnapshot.find((message) => message.messageId === sent[3].id).body;
+  const deleted = await call(f.messages, 'DELETE', 'distributor-a-token', { conversationId, messageId: sent[3].id, clientMutationId: 'delete-after-report' });
+  assert.equal(deleted.statusCode, 200, JSON.stringify(deleted.body));
+  assert.equal(f.records.get(`chatReports/${submitted.body.reportId}`).evidenceSnapshot.find((message) => message.messageId === sent[3].id).body, evidenceBody);
   for (const evidence of stored.evidenceSnapshot) {
     const source = f.records.get(`chatConversations/${conversationId}/messages/${evidence.messageId}`);
     assert.equal(source.retentionHold, true);

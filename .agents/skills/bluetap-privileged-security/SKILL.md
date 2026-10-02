@@ -52,3 +52,8 @@ Roles are `admin`, `manager`, `distributor`, and `requester`. The former operati
 - Automated cleanup must never delete user identities, public UID counters, branches, authoritative historical orders, financial snapshots, security configuration, or Admin audit records.
 - Preview Cleanup is server-authoritative and non-mutating. The backend selects supported cleanup categories, validates safe policy values, recomputes eligibility before execution, and rejects client-selected collections.
 - Historical performance problems should first be addressed through bounded queries, pagination, and scoped realtime listeners. Data deletion is not a substitute for correct query design.
+
+## Phase 4.1 moderation state
+
+- Reports & Safety uses `active` for open plus escalated reports. A Manager warning remains actionable so a later escalation appends history and leaves the final state escalated. Managers cannot use platform/account actions; Admin has no global Messages inbox and expanded context always requires an audited reason.
+- Moderation timestamps returned to clients are ISO strings. Reporter identity and private moderator notes never appear in target-user notices.

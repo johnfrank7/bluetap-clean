@@ -37,6 +37,7 @@ const { isAccessExpired, participantAccessProjection } = require('./conversation
 const {
   advanceParticipantReadState,
   applyMessageToParticipantState,
+  assertMessageMutationWindow,
   consumeMessageRateLimit,
   messageBodyHash,
   messagePreview,
@@ -609,6 +610,65 @@ async function sendMessage({ db, callerUid, callerClaims, body, now, createMessa
   });
 }
 
+async function mutateMessage({ db, callerUid, callerClaims, body, now, operation, createRevisionId = randomUUID }) {
+  requireNoClientSenderFields(body);
+  const editing = operation === 'edit';
+  requireOnlyFields(body, new Set(['conversationId', 'messageId', 'clientMutationId', ...(editing ? ['body'] : [])]));
+  const conversationId = requiredId(body.conversationId, 'CHAT_CONVERSATION_REQUIRED', 'conversationId is required.');
+  const messageId = requiredId(body.messageId, 'CHAT_MESSAGE_REQUIRED', 'messageId is required.');
+  const clientMutationId = normalizeClientMutationId(body.clientMutationId);
+  const normalizedBody = editing ? normalizeMessageBody(body.body) : '';
+  const conversationRef = db.collection('chatConversations').doc(conversationId);
+  const messageRef = conversationRef.collection('messages').doc(messageId);
+
+  return db.runTransaction(async (tx) => {
+    const conversation = await readRequired(tx, conversationRef, 'CHAT_CONVERSATION_NOT_FOUND', 'The conversation was not found.');
+    const authorization = await authorizeConversation(tx, db, conversation, callerUid, callerClaims, editing ? 'send' : 'read', timeOf(now));
+    const message = await readRequired(tx, messageRef, 'CHAT_MESSAGE_NOT_FOUND', 'The message was not found.');
+    if (clean(message.senderUid, 128) !== callerUid) throw new OtpError(403, 'CHAT_MESSAGE_MUTATION_DENIED', 'Only the original sender may change this message.');
+    assertMessageMutationWindow(message, timeOf(now));
+    if (message.deletedAt) {
+      if (!editing) return { created: false, message };
+      throw new OtpError(409, 'CHAT_MESSAGE_DELETED', 'A deleted message cannot be edited.');
+    }
+    const mutationId = mutationRegistryId(authorization.principal, `${operation}:${clientMutationId}`);
+    const mutationRef = db.collection('chatMutationIds').doc(mutationId);
+    const mutationSnapshot = await tx.get(mutationRef);
+    const bodyHash = messageBodyHash(conversationId, editing ? normalizedBody : 'Message deleted', messageId);
+    if (mutationSnapshot.exists) {
+      const mutation = mutationSnapshot.data() || {};
+      if (mutation.conversationId !== conversationId || mutation.messageId !== messageId || mutation.bodyHash !== bodyHash || mutation.operation !== operation) {
+        throw new OtpError(409, 'CHAT_MUTATION_CONFLICT', 'clientMutationId was already used for a different message change.');
+      }
+      return { created: false, message: await readRequired(tx, messageRef, 'CHAT_MESSAGE_NOT_FOUND', 'The message was not found.') };
+    }
+    const revision = Number(message.revision || 0) + 1;
+    const revisionId = createRevisionId();
+    const revisionRecord = {
+      schemaVersion: 1, operation, conversationId, messageId, revision,
+      actorUid: callerUid, previousBody: String(message.body || ''),
+      ...(editing ? { newBody: normalizedBody } : {}), createdAt: now,
+    };
+    const update = editing
+      ? { body: normalizedBody, editedAt: now, revision }
+      : { body: '', deletedAt: now, deletedByUid: callerUid, revision };
+    tx.create(db.collection('chatMessageRevisions').doc(revisionId), revisionRecord);
+    tx.update(messageRef, update);
+    if (clean(conversation.lastMessageId, 128) === messageId) {
+      tx.update(conversationRef, { lastMessagePreview: editing ? messagePreview(normalizedBody) : 'Message deleted' });
+    }
+    tx.create(mutationRef, {
+      conversationId, messageId, bodyHash, operation,
+      senderPrincipalKey: principalKey(authorization.principal), clientMutationId, createdAt: now,
+    });
+    publishChatActivity(tx, db, conversation, now);
+    return { created: true, message: { id: messageId, ...message, ...update } };
+  });
+}
+
+const editMessage = (options) => mutateMessage({ ...options, operation: 'edit' });
+const deleteMessage = (options) => mutateMessage({ ...options, operation: 'delete' });
+
 async function advanceReadState({ db, callerUid, callerClaims, body, now }) {
   requireNoClientReadPrincipal(body);
   requireOnlyFields(body, new Set(['conversationId', 'lastReadSeq']));
@@ -722,7 +782,7 @@ function createChatHandler(mode, getAdmin = getFirebaseAdmin, dependencies = {})
     res.setHeader('Cache-Control', 'no-store');
     if (!applyCors(req, res)) return;
     if (req.method === 'OPTIONS') return res.status(204).end();
-    const allowed = mode === 'messages' || mode === 'conversations' ? ['GET', 'POST'] : ['POST'];
+    const allowed = mode === 'messages' ? ['GET', 'POST', 'PATCH', 'DELETE'] : mode === 'conversations' ? ['GET', 'POST'] : ['POST'];
     if (!allowed.includes(req.method)) return res.status(405).json({ error: { reason: 'method-not-allowed', message: `Use ${allowed.join(' or ')}.` } });
     try {
       const { auth, db } = getAdmin();
@@ -740,6 +800,14 @@ function createChatHandler(mode, getAdmin = getFirebaseAdmin, dependencies = {})
       if (req.method === 'POST') {
         const result = await sendMessage({ db, callerUid: decoded.uid, callerClaims: decoded, body: parseBody(req), now: timestamp, createMessageId });
         return res.status(result.created ? 201 : 200).json(result);
+      }
+      if (req.method === 'PATCH') {
+        const result = await editMessage({ db, callerUid: decoded.uid, callerClaims: decoded, body: parseBody(req), now: timestamp });
+        return res.status(200).json(result);
+      }
+      if (req.method === 'DELETE') {
+        const result = await deleteMessage({ db, callerUid: decoded.uid, callerClaims: decoded, body: parseBody(req), now: timestamp });
+        return res.status(200).json(result);
       }
       const params = new URL(req.url || '/api/chat/messages', 'http://localhost').searchParams;
       const conversationId = requiredId(params.get('conversationId'), 'CHAT_CONVERSATION_REQUIRED', 'conversationId is required.');
@@ -761,6 +829,8 @@ module.exports = {
   createChatConversationsHandler,
   createChatMessagesHandler,
   createChatReadStateHandler,
+  deleteMessage,
+  editMessage,
   listMessages,
   listConversations,
   resolveOrCreateConversation,

@@ -111,7 +111,14 @@ service cloud.firestore {
     match /moderationActions/{document=**} { allow read, write: if false; }
     match /moderationMutationIds/{document=**} { allow read, write: if false; }
     match /moderationNotices/{document=**} { allow read, write: if false; }
-    match /moderationActivity/{document=**} { allow read, write: if false; }
+    // Content-free invalidation documents may be read only by their exact
+    // authorized audience. All activity writes remain server-owned.
+    match /moderationActivity/{activityId} {
+      allow get: if (activityId == 'admin' && isAdmin())
+        || (isManager() && activityId == 'branch_' + currentUser().branchId)
+        || ((isRequester() || isDistributor()) && activityId == 'user_' + request.auth.uid);
+      allow list, create, update, delete: if false;
+    }
     match /orderAbuseReviews/{document=**} { allow read, write: if false; }
     match /chatRestrictions/{document=**} { allow read, write: if false; }
     match /orderingRestrictions/{document=**} { allow read, write: if false; }
@@ -122,6 +129,7 @@ service cloud.firestore {
     match /chatAuthorityRegistry/{document=**} { allow read, write: if false; }
     match /chatMutationIds/{document=**} { allow read, write: if false; }
     match /chatRateLimits/{document=**} { allow read, write: if false; }
+    match /chatMessageRevisions/{document=**} { allow read, write: if false; }
     // A private change signal triggers a bounded, server-authorized summary read.
     // No conversation content is stored here; clients cannot publish signals.
     match /chatUserActivity/{uid} {

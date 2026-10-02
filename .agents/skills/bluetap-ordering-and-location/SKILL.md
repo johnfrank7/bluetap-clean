@@ -107,6 +107,7 @@ Use this skill for BlueTap product catalogs, provider selection, order creation,
 - Ordering-abuse signals are review inputs, never an automatic suspension or permanent ban. A rolling 30-day projection opens review at three qualifying incidents and marks strong review at five.
 - Count only requester-attributable delivery-failure reason codes and serious late-stage requester cancellations. Pending/early ordinary cancellations are low concern and excluded. Provider availability, distributor/vehicle failure, weather, branch operations, and system failures are explicitly non-attributable.
 - Abuse-review projections store bounded safe order references, category, stage, concern, time, branch jurisdiction, and requester identity snapshots. Managers remain branch-scoped; Admin platform action still requires a human decision and an audited reason.
+- Active platform ordering restrictions block the ordering flow. Active branch restrictions visibly disable only the matching provider while preserving unrelated provider discovery and station messaging. Manager approval cards may open only the canonical `requester_branch` order-follow-up conversation.
 
 ## Verification
 

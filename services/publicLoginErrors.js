@@ -6,6 +6,8 @@ const messages = {
   ACCOUNT_SETUP_INCOMPLETE: 'Your account setup is incomplete. Please contact support.',
   ACCOUNT_MAPPING_INVALID: 'Your account sign-in setup needs attention. Please contact support.',
   ACCOUNT_DISABLED: 'This account is disabled. Please contact support.',
+  ACCOUNT_SUSPENDED: 'This account is temporarily suspended.',
+  ACCOUNT_TERMINATED: 'This account has been terminated.',
   TOO_MANY_ATTEMPTS: 'Too many login attempts. Please try again later.',
   LOGIN_RATE_LIMITED: 'Too many login attempts. Please try again later.',
   INVALID_REQUEST: 'Enter a valid username or email and password.',
@@ -27,6 +29,8 @@ const aliases = {
   'username/account-setup-incomplete': 'ACCOUNT_SETUP_INCOMPLETE',
   'username/account-mapping-invalid': 'ACCOUNT_MAPPING_INVALID',
   'username/account-disabled': 'ACCOUNT_DISABLED',
+  'username/account-suspended': 'ACCOUNT_SUSPENDED',
+  'username/account-terminated': 'ACCOUNT_TERMINATED',
   'auth/user-disabled': 'ACCOUNT_DISABLED',
   'username/invalid-request': 'INVALID_REQUEST',
 };

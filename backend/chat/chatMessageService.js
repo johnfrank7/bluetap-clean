@@ -10,9 +10,17 @@ const BURST_LIMIT = 5;
 const BURST_WINDOW_MS = 10_000;
 const SUSTAINED_LIMIT = 30;
 const SUSTAINED_WINDOW_MS = 60_000;
+const MESSAGE_MUTATION_WINDOW_MS = 15 * 60_000;
 
 const clean = (value) => String(value || '').trim();
-const millis = (value) => Number(value?.toMillis?.() || value?.getTime?.() || value || 0);
+const millis = (value) => Number(value?.toMillis?.() || value?.getTime?.() || Number(value?.seconds || value?._seconds || 0) * 1000 || value || 0);
+
+function assertMessageMutationWindow(message = {}, nowMs = Date.now()) {
+  const createdAt = millis(message.createdAt);
+  if (!createdAt || !Number.isFinite(createdAt) || nowMs - createdAt > MESSAGE_MUTATION_WINDOW_MS || nowMs < createdAt) {
+    throw new OtpError(409, 'CHAT_MESSAGE_MUTATION_WINDOW_EXPIRED', 'Messages may be edited or deleted for 15 minutes after sending.');
+  }
+}
 
 function normalizeMessageBody(value) {
   if (typeof value !== 'string') {
@@ -188,11 +196,13 @@ module.exports = {
   MAX_CLIENT_MUTATION_ID_CHARACTERS,
   MAX_MESSAGE_CHARACTERS,
   MAX_MESSAGE_PAGE_SIZE,
+  MESSAGE_MUTATION_WINDOW_MS,
   MAX_PREVIEW_CHARACTERS,
   SUSTAINED_LIMIT,
   SUSTAINED_WINDOW_MS,
   advanceParticipantReadState,
   applyMessageToParticipantState,
+  assertMessageMutationWindow,
   consumeMessageRateLimit,
   messageBodyHash,
   messagePreview,

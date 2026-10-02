@@ -23,12 +23,20 @@ test('conversation summaries are scoped to the caller UID or current Manager bra
 test('all authoritative chat, message, report, moderation, and restriction client writes are denied', () => {
   assert.match(rules, /match \/chatConversations\/\{conversationId\}[\s\S]*allow create, update, delete:\s*if false;/);
   assert.match(rules, /match \/messages\/\{messageId\}[\s\S]*allow create, update, delete:\s*if false;/);
-  for (const collection of ['chatReports', 'chatModerationActions', 'moderationActions', 'moderationMutationIds', 'moderationNotices', 'moderationActivity', 'orderAbuseReviews', 'chatRestrictions', 'orderingRestrictions', 'chatReportRateLimits', 'chatReportDuplicates']) {
+  for (const collection of ['chatReports', 'chatModerationActions', 'moderationActions', 'moderationMutationIds', 'moderationNotices', 'orderAbuseReviews', 'chatRestrictions', 'orderingRestrictions', 'chatReportRateLimits', 'chatReportDuplicates', 'chatMessageRevisions']) {
     assert.match(rules, new RegExp(`match \/${collection}\/\\{document=\\*\\*\\} \\{ allow read, write: if false; \\}`));
   }
   for (const collection of ['chatAuthorityRegistry', 'chatMutationIds', 'chatRateLimits']) {
     assert.match(rules, new RegExp(`match \/${collection}\/\\{document=\\*\\*\\} \\{ allow read, write: if false; \\}`));
   }
+});
+
+test('moderation activity exposes only content-free exact documents and remains server-owned', () => {
+  const block = rules.slice(rules.indexOf('match /moderationActivity/{activityId}'), rules.indexOf('match /orderAbuseReviews/'));
+  assert.match(block, /activityId == 'admin' && isAdmin\(\)/);
+  assert.match(block, /activityId == 'branch_' \+ currentUser\(\)\.branchId/);
+  assert.match(block, /activityId == 'user_' \+ request\.auth\.uid/);
+  assert.match(block, /allow list, create, update, delete:\s*if false;/);
 });
 
 test('direct message reads require the current server-maintained parent lifecycle projection', () => {

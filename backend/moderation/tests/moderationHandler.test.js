@@ -1,9 +1,22 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { applyModerationAction, expandChatReview } = require('../moderationHandler');
+const { applyModerationAction, expandChatReview, safeAction, safeReport } = require('../moderationHandler');
+const { safeNotice } = require('../moderationService');
 
 const clone = (value) => value === undefined ? undefined : structuredClone(value);
+
+test('moderation DTOs serialize Firestore and legacy timestamps as ISO strings', () => {
+  const timestamp = { seconds: 1767225600, nanoseconds: 125000000 };
+  const report = safeReport({ id: 'r', messageId: 'm1', createdAt: timestamp, evidenceSnapshot: [{ messageId: 'm1', createdAt: timestamp }] }, { evidence: true });
+  const action = safeAction({ id: 'a', createdAt: timestamp, startsAt: timestamp, endsAt: timestamp });
+  const notice = safeNotice('n', { createdAt: timestamp, startsAt: timestamp, endsAt: timestamp });
+  assert.equal(report.createdAt, '2026-01-01T00:00:00.125Z');
+  assert.equal(report.evidence[0].createdAt, '2026-01-01T00:00:00.125Z');
+  assert.equal(report.evidence[0].reported, true);
+  assert.equal(action.endsAt, '2026-01-01T00:00:00.125Z');
+  assert.equal(notice.createdAt, '2026-01-01T00:00:00.125Z');
+});
 
 function fixture({ reportBranch = 'branch-a', accountStatus = 'active' } = {}) {
   const records = new Map(Object.entries({
@@ -103,7 +116,14 @@ test('Manager warning is append-only, user-visible, private-note safe, and idemp
   assert.equal(notice.title, 'BlueTap Warning');
   assert.equal('privateNote' in notice, false);
   assert.equal('reporterUid' in notice, false);
-  assert.equal(f.records.get('chatReports/report-a').status, 'resolved');
+  assert.equal(f.records.get('chatReports/report-a').status, 'open');
+
+  await apply(f, 'manager', {
+    reportId: 'report-a', action: 'escalate', reason: 'Admin review is required', clientMutationId: 'warn-then-escalate',
+  }, 'action-b');
+  assert.equal(f.records.get('chatReports/report-a').status, 'escalated');
+  assert.equal(f.records.get('chatReports/report-a').actionTaken, 'escalate');
+  assert.equal([...f.records.keys()].filter((key) => key.startsWith('moderationActions/')).length, 2);
 });
 
 test('Manager branch chat and ordering restrictions support only 1, 3, and 7 days', async () => {

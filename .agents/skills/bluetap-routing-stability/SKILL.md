@@ -37,3 +37,6 @@ The floating messenger and “Message your station” open the role-level chat p
 - Manager order context: `/manager/request?orderId=<branch-authorized-order-id>`
 
 These routes resolve the ID against the current role-scoped live collection before opening details. Order-linked chat cards and notifications may use them; generic chat launchers and station resolution remain overlays.
+
+- Manager approval notifications navigate to `/manager/request` with the canonical order ID.
+- Suspended or terminated account transitions replace protected content with the dedicated account-state screen, clear sessions, and return to the correct shared sign-in route without leaking moderation details.

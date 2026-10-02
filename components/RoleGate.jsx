@@ -14,6 +14,7 @@ import {
 } from '../services/authSession';
 import SessionSecurityGuard from './SessionSecurityGuard';
 import { logDevelopmentTiming } from '../services/performanceLog';
+import AccountAccessState from './AccountAccessState';
 
 export default function RoleGate({ role, allowedRoles, children, bypass = false, loadingFallback = null }) {
   const router = useRouter();
@@ -26,6 +27,7 @@ export default function RoleGate({ role, allowedRoles, children, bypass = false,
   const authorizedChildren = <SessionSecurityGuard role={sessionRole}>{children}</SessionSecurityGuard>;
   const validationRunRef = useRef(0);
   const redirectTimerRef = useRef(null);
+  const accountStateRef = useRef('');
   const [gateState, setGateState] = useState({
     status: 'checking',
     message: '',
@@ -65,6 +67,8 @@ export default function RoleGate({ role, allowedRoles, children, bypass = false,
       clearModuleSession(result.clearRole);
     }
 
+    const accountState = String(result.status || '').startsWith('account-') ? String(result.status).slice('account-'.length) : '';
+    if (accountState) accountStateRef.current = accountState;
     if (result.shouldSignOut) {
       clearAllAuthSessions();
 
@@ -81,6 +85,8 @@ export default function RoleGate({ role, allowedRoles, children, bypass = false,
       status: result.status || 'unauthorized',
       message: result.message || 'Unauthorized Access',
     });
+
+    if (accountState) return;
 
     redirectTimerRef.current = setTimeout(() => {
       routerRef.current.replace(result.redirectTo || '/login');
@@ -101,6 +107,7 @@ export default function RoleGate({ role, allowedRoles, children, bypass = false,
     let unsubscribeProfile = () => {};
     const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
       unsubscribeProfile();
+      if (!user && accountStateRef.current) return;
       setGateState({ status: 'checking', message: '' });
       validateAccess();
 
@@ -144,6 +151,10 @@ export default function RoleGate({ role, allowedRoles, children, bypass = false,
 
   if (gateState.status !== 'authorized') {
     const isChecking = gateState.status === 'checking';
+
+    if (gateState.status.startsWith('account-')) {
+      return <AccountAccessState state={gateState.status.slice('account-'.length)} onBack={() => { accountStateRef.current = ''; router.replace('/login'); }} />;
+    }
 
     if (isChecking && loadingFallback) return loadingFallback;
 

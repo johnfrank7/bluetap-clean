@@ -57,7 +57,7 @@ export default function RequesterNotification() {
   const params = useLocalSearchParams();
   const { orders, loading, error: orderError, uid, readiness } = useRequesterData();
   const { events, markAllSeen, markSeen } = useRoleNotifications();
-  const { acknowledge } = useModerationNotices();
+  const { openNotice } = useModerationNotices();
   const [retryError, setRetryError] = useState('');
   const error = orderError || retryError;
   const [selectedOrderId, setSelectedOrderId] = useState(null);
@@ -121,7 +121,7 @@ export default function RequesterNotification() {
                   key={event.id}
                   onPress={() => {
                     markSeen([event.id]);
-                    if (event.noticeId) { acknowledge(event.noticeId).catch(() => {}); return; }
+                    if (event.noticeId) { openNotice(event.noticeId); return; }
                     if (event.orderId) {
                       setSelectedOrderId(event.orderId);
                     } else {
