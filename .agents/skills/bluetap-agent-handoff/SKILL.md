@@ -29,6 +29,18 @@ Do not have two agents actively edit the same working tree. For parallel work, u
 
 When continuing after a usage limit or interruption, inspect the working tree and prior visible report/specification, determine what is complete, and continue from that state. Do not restart a feature, duplicate APIs or components, or redesign working code without evidence that the existing implementation cannot satisfy the task.
 
+## Confidential file and secret handling
+
+- Never stage, commit, push, print, summarize, or expose secret environment values.
+- Treat `backend/.env`, `.env.local`, all `.env` files, service-account files, private keys, Gmail App Passwords, OTP/hash secrets, API secrets, tokens, cookies, and credential files as confidential.
+- `backend/.env` and `.env.local` must remain local and Git-ignored. Never use `git add -f` on ignored environment or credential files.
+- Never use `git add .` or `git add -A` for BlueTap release commits. Stage task files using explicit paths only.
+- Before every commit run `git status --short`, `git diff --cached --name-only`, and `git diff --cached --check`. Inspect the staged file list and stop if any confidential or environment file is present.
+- Never paste secret values into logs, reports, prompts, screenshots, or commit messages. Environment-variable names may be reported; secret values may not.
+- Treat every `EXPO_PUBLIC_*` value as public and browser-visible. It must never contain credentials or secrets.
+- If an ignored secret file becomes tracked, stop and report the file instead of committing it.
+- If a secret may have been committed previously, stop and report the affected file and commit without reproducing the secret value.
+
 ## UI and diff safety
 
 Before major UI work, compare against the current committed version or known last-good commit. “Replace demo data” means preserve valid UI and replace the data source; it does not authorize deleting or rewriting the page.

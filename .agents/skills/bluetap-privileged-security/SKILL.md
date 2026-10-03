@@ -37,6 +37,18 @@ Roles are `admin`, `manager`, `distributor`, and `requester`. The former operati
 - Managers may update product delivery-rule overrides only for their server-authoritative `manager.branchId`; client-supplied branch identifiers never select the write target and global Admin defaults remain immutable to Managers.
 - Public UID migration/backfill remains an Admin-authorized, server-side, deterministic, idempotent, audited workflow that preserves the oldest valid unique assignment and never derives a display identifier from a raw Firebase Auth UID.
 
+## Confidential file and secret handling
+
+- Never stage, commit, push, print, summarize, or expose secret environment values.
+- Treat `backend/.env`, `.env.local`, all `.env` files, service-account files, private keys, Gmail App Passwords, OTP/hash secrets, API secrets, tokens, cookies, and credential files as confidential.
+- `backend/.env` and `.env.local` must remain local and Git-ignored. Never use `git add -f` on ignored environment or credential files.
+- Never use `git add .` or `git add -A` for BlueTap release commits. Stage task files using explicit paths only.
+- Before every commit run `git status --short`, `git diff --cached --name-only`, and `git diff --cached --check`. Inspect the staged file list and stop if any confidential or environment file is present.
+- Never paste secret values into logs, reports, prompts, screenshots, or commit messages. Environment-variable names may be reported; secret values may not.
+- Treat every `EXPO_PUBLIC_*` value as public and browser-visible. It must never contain credentials or secrets.
+- If an ignored secret file becomes tracked, stop and report the file instead of committing it.
+- If a secret may have been committed previously, stop and report the affected file and commit without reproducing the secret value.
+
 ## Moderation authority
 
 - A Manager may list and act only on chat reports and ordering-abuse reviews whose server-derived jurisdiction matches the Manager's current active branch. Manager actions are dismiss, warn, 1/3/7-day branch chat restriction, 1/3/7-day branch ordering restriction, and escalation. Managers cannot apply platform restrictions, suspend an account globally, terminate an account, or reactivate an account.
