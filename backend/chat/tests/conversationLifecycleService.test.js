@@ -86,7 +86,7 @@ test('Distributor decline immediately disables the old assignment conversation a
   assert.equal([...f.records.keys()].filter((path) => path.startsWith('chatConversations/')).length, 1);
 });
 
-test('delivery persists one seven-calendar-day follow-up deadline and sanitized closure context', async () => {
+test('delivery closes direct sends immediately while preserving bounded history and branch follow-up', async () => {
   const f = fixture();
   const directAuthority = { orderId: 'order-a', requesterUid: 'requester-a', distributorUid: 'distributor-a', assignmentVersion: 2, branchId: 'branch-a' };
   const directId = f.seed('requester_distributor', directAuthority, {}, 'delivered-direct');
@@ -102,7 +102,8 @@ test('delivery persists one seven-calendar-day follow-up deadline and sanitized 
   const direct = f.records.get(`chatConversations/${directId}`);
   const branch = f.records.get(`chatConversations/${branchId}`);
   assert.equal(POST_ORDER_FOLLOWUP_DAYS, 7);
-  assert.equal(direct.status, 'active');
+  assert.equal(direct.status, 'read_only');
+  assert.equal(direct.participantUserAccess['requester-a'], 'read_only');
   assert.equal(direct.accessEndsAt.getTime(), deliveredAt.getTime() + (7 * 24 * 60 * 60 * 1000));
   assert.equal(isAccessExpired(direct.accessEndsAt, new Date(direct.accessEndsAt.getTime() - 1)), false);
   assert.equal(isAccessExpired(direct.accessEndsAt, direct.accessEndsAt), true);
@@ -110,6 +111,28 @@ test('delivery persists one seven-calendar-day follow-up deadline and sanitized 
   assert.equal(branch.authorityReasons.active_order, undefined);
   assert.deepEqual(branch.authorityReasons.post_order_followup.orderIds, ['order-a']);
   assert.equal(branch.status, 'active');
+});
+
+test('failed delivery grants exactly one hour and rescheduling removes the deadline', async () => {
+  const f = fixture();
+  const authority = { orderId: 'order-a', requesterUid: 'requester-a', distributorUid: 'distributor-a', assignmentVersion: 2, branchId: 'branch-a' };
+  const directId = f.seed('requester_distributor', authority, {}, 'failed-direct');
+  const failedAt = new Date('2026-09-30T03:00:00Z');
+  const graceUntil = new Date(failedAt.getTime() + (60 * 60 * 1000));
+  const before = baseOrder({ assignedDistributorUid: 'distributor-a', assignmentVersion: 2, status: 'out_for_delivery' });
+  const failed = baseOrder({ assignedDistributorUid: 'distributor-a', assignmentVersion: 2, status: 'delivery_failed', deliveryFailedAt: failedAt, distributorChatGraceUntil: graceUntil });
+
+  await reconcileOrderLifecycleInTransaction({ tx: f.tx, db: f.db, before, after: failed, event: 'DELIVERY_FAILED', now: failedAt });
+  let conversation = f.records.get(`chatConversations/${directId}`);
+  assert.equal(conversation.status, 'active');
+  assert.equal(conversation.accessEndsAt.getTime(), graceUntil.getTime());
+
+  const rescheduledAt = new Date('2026-09-30T03:30:00Z');
+  const rescheduled = { ...failed, status: 'scheduled', distributorChatGraceUntil: null, rescheduledAt };
+  await reconcileOrderLifecycleInTransaction({ tx: f.tx, db: f.db, before: failed, after: rescheduled, event: 'DELIVERY_RESCHEDULED', now: rescheduledAt });
+  conversation = f.records.get(`chatConversations/${directId}`);
+  assert.equal(conversation.status, 'active');
+  assert.equal(conversation.accessEndsAt, null);
 });
 
 test('cancellation ends Distributor sends while an independent requester inquiry survives', async () => {

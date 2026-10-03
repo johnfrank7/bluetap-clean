@@ -13,6 +13,7 @@ const TERMINAL_ORDER_STATUSES = new Set([
   'delivered', 'completed', 'cancelled', 'canceled', 'rejected', 'declined',
   'declined_outside_service_area',
 ]);
+const FAILED_DELIVERY_CHAT_GRACE_MS = 60 * 60 * 1000;
 
 const clean = (value) => String(value || '').trim();
 const timeOf = (value) => value?.toMillis?.() || value?.getTime?.() || Number(value?.seconds || 0) * 1000 || new Date(value || 0).getTime() || 0;
@@ -21,6 +22,13 @@ const owningBranchId = (order = {}) => clean(order.currentBranchId || order.bran
 const orderRequesterUid = (order = {}) => clean(order.requester_id || order.requesterUid);
 const orderAssignmentVersion = (order = {}) => getAssignmentVersion(order);
 const profileMembershipVersion = (profile = {}) => getBranchMembershipVersion(profile);
+
+function failedDeliveryChatEndsAt(order = {}) {
+  const persisted = order.distributorChatGraceUntil || order.deliveryFailureChatEndsAt || null;
+  if (timeOf(persisted) > 0) return persisted;
+  const failedAt = order.deliveryFailedAt || order.delivery_failed_at || null;
+  return timeOf(failedAt) > 0 ? new Date(timeOf(failedAt) + FAILED_DELIVERY_CHAT_GRACE_MS) : null;
+}
 
 function denied(reason, message) {
   throw new OtpError(403, reason, message);
@@ -144,11 +152,14 @@ function authorizeRequesterDistributor({ requester, distributor, branch, order, 
   if (owningBranchId(order) !== branchId || clean(distributor.branchId) !== branchId) denied('CHAT_BRANCH_MISMATCH', 'The Distributor is outside the authoritative fulfillment branch.');
   if (!Number.isSafeInteger(assignmentVersion) || assignmentVersion !== expectedVersion) denied('CHAT_ASSIGNMENT_VERSION_STALE', 'The Distributor assignment epoch is stale.');
   const status = normalizedStatus(order?.status);
-  const accessEndsAt = order?.chatAccessEndsAt || order?.postOrderChatAccessEndsAt || null;
-  const deliveredFollowupActive = ['delivered', 'completed'].includes(status) && timeOf(accessEndsAt) > timeOf(now);
-  if (TERMINAL_ORDER_STATUSES.has(status) && !deliveredFollowupActive) denied('CHAT_ASSIGNMENT_NOT_WRITABLE', 'This assignment no longer grants send authority.');
+  if (['delivered', 'completed'].includes(status)) denied('CHAT_ASSIGNMENT_NOT_WRITABLE', 'Delivery completion ends direct messaging immediately.');
+  if (TERMINAL_ORDER_STATUSES.has(status)) denied('CHAT_ASSIGNMENT_NOT_WRITABLE', 'This assignment no longer grants send authority.');
+  const accessEndsAt = status === 'delivery_failed' ? failedDeliveryChatEndsAt(order) : null;
+  if (status === 'delivery_failed' && (!accessEndsAt || timeOf(accessEndsAt) <= timeOf(now))) {
+    denied('CHAT_ASSIGNMENT_NOT_WRITABLE', 'The failed-delivery messaging window has ended.');
+  }
 
-  return { requesterUid, distributorUid, branchId, orderId: clean(order.id || order.requestId), assignmentVersion: expectedVersion, ...(deliveredFollowupActive ? { accessEndsAt } : {}) };
+  return { requesterUid, distributorUid, branchId, orderId: clean(order.id || order.requestId), assignmentVersion: expectedVersion, ...(accessEndsAt ? { accessEndsAt } : {}) };
 }
 
 function authorizeDistributorBranch({ distributor, branch, branchMembershipVersion } = {}) {
@@ -170,6 +181,7 @@ function authorizeBranchCoordination({ manager, sourceBranch, targetBranch } = {
 
 module.exports = {
   CONVERSATION_TYPES,
+  FAILED_DELIVERY_CHAT_GRACE_MS,
   TERMINAL_ORDER_STATUSES,
   assertCanonicalConversationParticipants,
   assertNoClientParticipantDefinition,
@@ -178,6 +190,7 @@ module.exports = {
   authorizeExistingRequesterBranchForManager,
   authorizeRequesterBranch,
   authorizeRequesterDistributor,
+  failedDeliveryChatEndsAt,
   normalizedStatus,
   orderAssignmentVersion,
   orderRequesterUid,

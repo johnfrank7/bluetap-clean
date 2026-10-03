@@ -12,7 +12,6 @@ import { useDistributorData, useRequesterData } from '../RoleDataProviders';
 import { ChatContext } from './ChatContext';
 import ChatFloatingLauncher from './ChatFloatingLauncher';
 import { useModerationNotices } from '../ModerationNotices';
-import { getActiveBranches } from '../../services/requesterOrdering';
 
 const chatModel = require('./chatModel');
 const { chatAccessReadiness } = require('./chatAccessReadiness');
@@ -43,13 +42,13 @@ export function presentationFor(conversation, role, roleData) {
   if (conversation.type === 'requester_branch') {
     const requesterBranchOrderReference = orderReferenceOf(order);
     displayName = role === 'manager'
-      ? clean(order?.requesterNameSnapshot || order?.requesterName || userById(conversation.requesterUid)?.fullName) || 'Requester'
+      ? clean(conversation.requesterDisplayName || order?.requesterNameSnapshot || order?.requesterName || userById(conversation.requesterUid)?.fullName) || 'Requester'
       : clean(conversation.branchNameSnapshot || order?.currentBranchName || order?.currentBranchNameSnapshot || order?.branchNameSnapshot || order?.branchDisplayName || order?.water_station) || 'BlueTap Station';
     contextLabel = requesterBranchOrderReference ? `Order ${requesterBranchOrderReference}` : 'General inquiry';
   } else if (conversation.type === 'requester_distributor') {
     displayName = role === 'distributor'
-      ? clean(order?.requesterNameSnapshot || order?.requesterName || order?.customerName) || 'Requester'
-      : clean(order?.assignedDistributorNameSnapshot || order?.assignedDistributorName || order?.distributorName) || 'Assigned Distributor';
+      ? clean(conversation.requesterDisplayName || order?.requesterNameSnapshot || order?.requesterName || order?.customerName) || 'Requester'
+      : clean(conversation.distributorDisplayName || order?.assignedDistributorNameSnapshot || order?.assignedDistributorName || order?.distributorName) || 'Assigned Distributor';
     contextLabel = orderReferenceOf(order) ? `Order ${orderReferenceOf(order)}` : 'Assigned order';
   } else if (conversation.type === 'distributor_branch') {
     displayName = role === 'manager'
@@ -64,7 +63,8 @@ export function presentationFor(conversation, role, roleData) {
   }
 
   const orderReference = orderReferenceOf(order);
-  const presented = { ...conversation, displayName, contextLabel, orderReference, orderContextLocal: order };
+  const orderStatus = clean(order?.status || order?.finalStatus);
+  const presented = { ...conversation, displayName, contextLabel, orderReference, orderStatus, orderContextLocal: order };
   return { ...presented, ...avatarForConversation(presented, role) };
 }
 
@@ -94,8 +94,9 @@ export default function ChatDataProvider({ children, role }) {
   const [threadError, setThreadError] = React.useState('');
   const [messageActionError, setMessageActionError] = React.useState('');
   const [resolvingConversation, setResolvingConversation] = React.useState(false);
+  const resolveInFlightRef = React.useRef(null);
   const [resolveError, setResolveError] = React.useState('');
-  const [requesterBranches, setRequesterBranches] = React.useState([]);
+  const requesterBranches = role === 'requester' ? requesterData.branches || [] : [];
   const [threadVersion, setThreadVersion] = React.useState(0);
   const [clock, setClock] = React.useState(Date.now);
   const summaryUnsubscribeRef = React.useRef(null);
@@ -115,18 +116,6 @@ export default function ChatDataProvider({ children, role }) {
   }, [uid, branchId]);
 
   const accessReadiness = chatAccessReadiness({ authReady, branchId, role, roleData, uid });
-
-  React.useEffect(() => {
-    if (role !== 'requester' || accessReadiness !== 'ready') {
-      setRequesterBranches([]);
-      return undefined;
-    }
-    let active = true;
-    getActiveBranches()
-      .then((branches) => { if (active) setRequesterBranches(branches || []); })
-      .catch(() => { if (active) setRequesterBranches([]); });
-    return () => { active = false; };
-  }, [accessReadiness, role, uid]);
 
   React.useEffect(() => {
     summaryUnsubscribeRef.current?.();
@@ -177,6 +166,7 @@ export default function ChatDataProvider({ children, role }) {
   }, [conversations, role, roleData, selectedSeed]);
 
   const availability = chatModel.conversationAvailability(currentConversation, role, uid, branchId, clock);
+  const conversationNotice = chatModel.conversationLifecycleNotice(currentConversation, clock);
   const chatRestriction = role === 'manager' ? null : moderation.activeRestrictions.find((notice) => {
     if (notice.scope === 'platform_chat') return true;
     if (notice.scope !== 'branch_chat') return false;
@@ -188,8 +178,9 @@ export default function ChatDataProvider({ children, role }) {
     setClock(Date.now());
     const deadline = chatModel.timeOf(currentConversation?.accessEndsAt);
     if (!deadline || deadline <= Date.now()) return undefined;
-    const timer = setTimeout(() => setClock(Date.now()), Math.min(2147483647, deadline - Date.now() + 25));
-    return () => clearTimeout(timer);
+    const expiryTimer = setTimeout(() => setClock(Date.now()), Math.min(2147483647, deadline - Date.now() + 25));
+    const minuteTimer = setInterval(() => setClock(Date.now()), 30_000);
+    return () => { clearTimeout(expiryTimer); clearInterval(minuteTimer); };
   }, [currentConversation?.accessEndsAt]);
 
   React.useEffect(() => {
@@ -250,29 +241,36 @@ export default function ChatDataProvider({ children, role }) {
     setThreadVersion((version) => version + 1);
     setPanelOpen(true);
   }, []);
-  const resolveAndOpen = React.useCallback(async (intent, orderContextLocal = null) => {
-    setThreadError('');
-    setResolveError('');
-    setResolvingConversation(true);
-    setSelectedSeed(null);
-    setPanelOpen(true);
-    try {
-      const conversation = await resolveConversation(intent);
-      const inquiryBranch = intent?.type === 'requester_branch' && intent?.intent === 'inquiry'
-        ? requesterBranches.find((branch) => clean(branch.id || branch.branchId) === clean(intent.branchId))
-        : null;
-      const presentationLocal = inquiryBranch ? { branchNameSnapshot: clean(inquiryBranch.name) } : null;
-      const next = { ...conversation, ...(presentationLocal || {}), ...(orderContextLocal ? { orderContextLocal } : {}) };
-      setSummaries((items) => [conversation, ...items.filter((item) => item.id !== conversation.id)]);
-      setSelectedSeed(next);
-      setThreadVersion((version) => version + 1);
-      return conversation;
-    } catch (resolveError) {
-      setResolveError(resolveError.message || 'This conversation could not be opened.');
-      throw resolveError;
-    } finally {
-      setResolvingConversation(false);
-    }
+  const resolveAndOpen = React.useCallback((intent, orderContextLocal = null) => {
+    if (resolveInFlightRef.current) return resolveInFlightRef.current;
+    let attempt;
+    attempt = (async () => {
+      setThreadError('');
+      setResolveError('');
+      setResolvingConversation(true);
+      setSelectedSeed(null);
+      setPanelOpen(true);
+      try {
+        const conversation = await resolveConversation(intent);
+        const inquiryBranch = intent?.type === 'requester_branch' && intent?.intent === 'inquiry'
+          ? requesterBranches.find((branch) => clean(branch.id || branch.branchId) === clean(intent.branchId))
+          : null;
+        const presentationLocal = inquiryBranch ? { branchNameSnapshot: clean(inquiryBranch.name) } : null;
+        const next = { ...conversation, ...(presentationLocal || {}), ...(orderContextLocal ? { orderContextLocal } : {}) };
+        setSummaries((items) => [conversation, ...items.filter((item) => item.id !== conversation.id)]);
+        setSelectedSeed(next);
+        setThreadVersion((version) => version + 1);
+        return conversation;
+      } catch (resolveError) {
+        setResolveError('Unable to open conversation. Please try again.');
+        throw resolveError;
+      } finally {
+        if (resolveInFlightRef.current === attempt) resolveInFlightRef.current = null;
+        setResolvingConversation(false);
+      }
+    })();
+    resolveInFlightRef.current = attempt;
+    return attempt;
   }, [requesterBranches]);
 
   const commitMessage = React.useCallback(async (optimistic) => {
@@ -368,7 +366,12 @@ export default function ChatDataProvider({ children, role }) {
     requesterBranches,
     role, colors, conversations, loading, error, panelOpen, currentConversation, messages,
     canSend: availability.sendable && accessReadiness === 'ready' && !threadError && !chatRestriction,
-    sendUnavailableReason: chatRestriction ? `${chatRestriction.title}${chatRestriction.branchName ? ` for ${chatRestriction.branchName}` : ''}.` : '',
+    sendUnavailableReason: chatRestriction
+      ? `${chatRestriction.title}${chatRestriction.branchName ? ` for ${chatRestriction.branchName}` : ''}.`
+      : conversationNotice?.state === 'closed'
+        ? conversationNotice.body
+        : '',
+    conversationNotice,
     hasEarlierMessages, loadingEarlier, threadError, messageActionError, resolvingConversation, resolveError,
     totalUnread: totalUnread(conversations, role, uid, branchId),
     totalUnreadLabel: formatBadge(totalUnread(conversations, role, uid, branchId)),
@@ -385,7 +388,7 @@ export default function ChatDataProvider({ children, role }) {
     loadEarlierMessages,
     isOwnMessage: (message) => isOwnMessage(message, role, uid, branchId),
     receiptForMessage: (message) => receiptFor(message, currentConversation, role, uid, branchId),
-  }), [accessReadiness, roleData.users, branchId, chatRestriction, colors, conversations, currentConversation, deleteCurrentMessage, editCurrentMessage, error, hasEarlierMessages, loading, loadingEarlier, messageActionError, messages, openConversation, panelOpen, requesterBranches, resolveAndOpen, resolveError, resolvingConversation, retryMessage, role, sendCurrentMessage, threadError, uid, loadEarlierMessages]);
+  }), [accessReadiness, roleData.users, branchId, chatRestriction, colors, conversationNotice, conversations, currentConversation, deleteCurrentMessage, editCurrentMessage, error, hasEarlierMessages, loading, loadingEarlier, messageActionError, messages, openConversation, panelOpen, requesterBranches, resolveAndOpen, resolveError, resolvingConversation, retryMessage, role, sendCurrentMessage, threadError, uid, loadEarlierMessages]);
 
   return (
     <ChatContext.Provider value={value}>

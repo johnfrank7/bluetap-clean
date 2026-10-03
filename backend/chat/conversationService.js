@@ -4,6 +4,7 @@ const { OtpError } = require('../utils/otpError');
 const {
   CONVERSATION_TYPES,
   TERMINAL_ORDER_STATUSES,
+  failedDeliveryChatEndsAt,
   normalizedStatus,
   orderAssignmentVersion,
   orderRequesterUid,
@@ -148,9 +149,9 @@ function resolveConversationLifecycle(input = {}) {
   if (input.type === CONVERSATION_TYPES.REQUESTER_DISTRIBUTOR) {
     if (!requesterDistributorAssignmentIsCurrent(input)) return CONVERSATION_STATUS.READ_ONLY;
     const status = normalizedStatus(input.order?.status);
-    if (['delivered', 'completed'].includes(status)) {
-      return timeOf(input.accessEndsAt) > Number(input.now || Date.now()) ? CONVERSATION_STATUS.ACTIVE : CONVERSATION_STATUS.READ_ONLY;
-    }
+    if (['delivered', 'completed'].includes(status)) return CONVERSATION_STATUS.READ_ONLY;
+    if (status === 'delivery_failed') return timeOf(failedDeliveryChatEndsAt(input.order)) > Number(input.now || Date.now())
+      ? CONVERSATION_STATUS.ACTIVE : CONVERSATION_STATUS.READ_ONLY;
     return TERMINAL_ORDER_STATUSES.has(status) ? CONVERSATION_STATUS.READ_ONLY : CONVERSATION_STATUS.ACTIVE;
   }
   if (input.type === CONVERSATION_TYPES.DISTRIBUTOR_BRANCH) {
@@ -208,16 +209,18 @@ function reconcileOrderAuthorityTransition({ before = {}, after = {}, event = 'o
   if (branchChanged && afterBranch) append({ action: 'add_authority_reason', authorityReason: AUTHORITY_REASONS.ACTIVE_ORDER, orderId: afterAssignment?.orderId || clean(after.id || after.requestId), authority: afterBranch });
 
   const afterStatus = normalizedStatus(after.status);
+  const beforeStatus = normalizedStatus(before.status);
   const delivered = ['delivered', 'completed'].includes(afterStatus);
   const terminal = TERMINAL_ORDER_STATUSES.has(afterStatus);
+  if (afterStatus === 'delivery_failed' && afterAssignment) {
+    const graceActive = timeOf(accessEndsAt) > Number(now);
+    append({ action: graceActive ? 'eligible' : 'read_only', reason: 'delivery_failed_grace', ...(graceActive ? { accessEndsAt } : {}), authority: afterAssignment });
+  } else if (beforeStatus === 'delivery_failed' && !terminal && afterAssignment) {
+    append({ action: 'eligible', reason: clean(event), authority: afterAssignment });
+  }
   if (terminal) {
     const followupActive = delivered && timeOf(accessEndsAt) > Number(now);
-    if (afterAssignment) append({
-      action: followupActive ? 'eligible' : 'read_only',
-      reason: followupActive ? AUTHORITY_REASONS.POST_ORDER_FOLLOWUP : afterStatus,
-      ...(followupActive ? { accessEndsAt } : {}),
-      authority: afterAssignment,
-    });
+    if (afterAssignment) append({ action: 'read_only', reason: afterStatus, ...(followupActive ? { accessEndsAt } : {}), authority: afterAssignment });
     if (afterBranch) {
       append({ action: 'remove_authority_reason', authorityReason: AUTHORITY_REASONS.ACTIVE_ORDER, orderId: afterAssignment?.orderId || clean(after.id || after.requestId), authority: afterBranch });
       if (followupActive) append({ action: 'add_authority_reason', authorityReason: AUTHORITY_REASONS.POST_ORDER_FOLLOWUP, orderId: afterAssignment?.orderId || clean(after.id || after.requestId), accessEndsAt, authority: afterBranch });

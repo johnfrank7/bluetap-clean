@@ -3,6 +3,7 @@ const { publishChatActivity } = require('./chatActivity');
 const { getBranchMembershipVersion } = require('../utils/relationshipEpochs');
 const {
   CONVERSATION_TYPES,
+  failedDeliveryChatEndsAt,
   normalizedStatus,
   orderRequesterUid,
   owningBranchId,
@@ -63,7 +64,7 @@ function authorityIsComplete(type, authority = {}) {
 
 function terminalOrderContext(order = {}) {
   const status = normalizedStatus(order.status);
-  if (!['delivered', 'completed', 'cancelled', 'canceled', 'rejected', 'declined', 'declined_outside_service_area'].includes(status)) return null;
+  if (!['delivery_failed', 'delivered', 'completed', 'cancelled', 'canceled', 'rejected', 'declined', 'declined_outside_service_area'].includes(status)) return null;
   const productSummary = Array.isArray(order.items)
     ? order.items.slice(0, 20).map((item) => ({
       name: clean(item.productNameSnapshot || item.product_name || item.name).slice(0, 160),
@@ -73,10 +74,12 @@ function terminalOrderContext(order = {}) {
   return {
     orderId: orderIdOf(order),
     publicOrderReference: clean(order.requestId || order.request_id).slice(0, 80),
+    requesterName: clean(order.requesterNameSnapshot || order.requester_name).slice(0, 160),
     productSummary,
     finalStatus: status,
     branchDisplayName: clean(order.currentBranchNameSnapshot || order.branchNameSnapshot || order.water_station).slice(0, 160),
     deliveryDate: order.deliveredAt || order.delivered_at || null,
+    ...(status === 'delivery_failed' && failedDeliveryChatEndsAt(order) ? { distributorChatGraceUntil: failedDeliveryChatEndsAt(order) } : {}),
     totalSnapshot: Number.isFinite(Number(order.totalAtOrder ?? order.total_cost)) ? Number(order.totalAtOrder ?? order.total_cost) : null,
   };
 }
@@ -108,12 +111,14 @@ function reasonDeadline(authorityReasons, now) {
 function applyTransition(conversation, transition, after, now) {
   const reason = clean(transition.reason || transition.authorityReason || 'relationship_changed');
   if (transition.action === 'read_only') {
+    const accessEndsAt = transition.accessEndsAt || now;
     return {
       ...conversation,
       status: CONVERSATION_STATUS.READ_ONLY,
-      accessEndsAt: now,
-      readAccessEndsAt: now,
+      accessEndsAt,
+      readAccessEndsAt: accessEndsAt,
       lifecycleReason: reason,
+      ...(terminalOrderContext(after) ? { orderContext: terminalOrderContext(after) } : {}),
       ...participantAccessProjection(conversation, 'read_only'),
       updatedAt: now,
     };
@@ -165,6 +170,8 @@ async function reconcileOrderLifecycleInTransaction({ tx, db, before = {}, after
   const afterStatus = normalizedStatus(after.status);
   const accessEndsAt = ['delivered', 'completed'].includes(afterStatus)
     ? (after.chatAccessEndsAt || after.postOrderChatAccessEndsAt || postOrderAccessEndsAt(after.deliveredAt || after.delivered_at || timestamp))
+    : afterStatus === 'delivery_failed'
+      ? failedDeliveryChatEndsAt(after)
     : null;
   const plan = reconcileOrderAuthorityTransition({ before, after, event, accessEndsAt, now: timeOf(timestamp) });
   const loaded = new Map();

@@ -571,6 +571,7 @@ export default function RequesterRequests() {
               visible={!!selectedRequest}
               onClose={() => setSelectedRequest(null)}
               request={selectedDetailsRequest}
+              branches={requesterData.branches}
               onEdit={liveSelectedRequest && isPendingRequest(liveSelectedRequest) ? () => {
                 const reqToEdit = liveSelectedRequest;
                 setSelectedRequest(null);

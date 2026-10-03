@@ -8,6 +8,7 @@ const {
   authorizeExistingRequesterBranchForManager,
   authorizeRequesterBranch,
   authorizeRequesterDistributor,
+  FAILED_DELIVERY_CHAT_GRACE_MS,
 } = require('../chatAuthorization');
 
 const requester = { uid: 'requester-a', role: 'requester', accountStatus: 'active' };
@@ -41,8 +42,14 @@ test('Requester and Distributor authority requires ownership, assignment, branch
   legacyFieldOrder.distributor_id = 'distributor-a';
   assert.equal(authorizeRequesterDistributor({ requester, distributor, branch: branchA, order: legacyFieldOrder, assignmentVersion: 1 }).distributorUid, 'distributor-a');
   const delivered = { ...order, status: 'delivered', chatAccessEndsAt: new Date('2026-10-07T00:00:00Z') };
-  assert.equal(authorizeRequesterDistributor({ requester, distributor, branch: branchA, order: delivered, assignmentVersion: 4, now: new Date('2026-10-06T23:59:59Z') }).accessEndsAt, delivered.chatAccessEndsAt);
-  assert.throws(() => authorizeRequesterDistributor({ requester, distributor, branch: branchA, order: delivered, assignmentVersion: 4, now: delivered.chatAccessEndsAt }), (error) => error.reason === 'CHAT_ASSIGNMENT_NOT_WRITABLE');
+  assert.throws(() => authorizeRequesterDistributor({ requester, distributor, branch: branchA, order: delivered, assignmentVersion: 4, now: new Date('2026-10-06T23:59:59Z') }), (error) => error.reason === 'CHAT_ASSIGNMENT_NOT_WRITABLE');
+  const failedAt = new Date('2026-10-06T00:00:00Z');
+  const graceUntil = new Date(failedAt.getTime() + FAILED_DELIVERY_CHAT_GRACE_MS);
+  const failed = { ...order, status: 'delivery_failed', deliveryFailedAt: failedAt, distributorChatGraceUntil: graceUntil };
+  assert.equal(authorizeRequesterDistributor({ requester, distributor, branch: branchA, order: failed, assignmentVersion: 4, now: new Date(failedAt.getTime() + (30 * 60 * 1000)) }).accessEndsAt, graceUntil);
+  assert.equal(authorizeRequesterDistributor({ requester, distributor, branch: branchA, order: failed, assignmentVersion: 4, now: new Date(graceUntil.getTime() - 1000) }).accessEndsAt, graceUntil);
+  assert.throws(() => authorizeRequesterDistributor({ requester, distributor, branch: branchA, order: failed, assignmentVersion: 4, now: graceUntil }), (error) => error.reason === 'CHAT_ASSIGNMENT_NOT_WRITABLE');
+  assert.throws(() => authorizeRequesterDistributor({ requester, distributor, branch: branchA, order: failed, assignmentVersion: 4, now: new Date(graceUntil.getTime() + 1) }), (error) => error.reason === 'CHAT_ASSIGNMENT_NOT_WRITABLE');
   assert.throws(() => authorizeRequesterDistributor({ requester, distributor, branch: branchA, order: { ...order, assignmentVersion: 0 }, assignmentVersion: 1 }), (error) => error.reason === 'INVALID_ASSIGNMENT_VERSION');
 });
 

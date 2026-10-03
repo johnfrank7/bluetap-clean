@@ -121,6 +121,8 @@ function safeOrder(id, data = {}, branchNames = new Map()) {
     failureReasonCode: clean(data.failureReasonCode, 48),
     failureReasonLabel: clean(data.failureReasonLabel, 160),
     failureReasonNote: clean(data.failureReasonNote, 240),
+    deliveryFailedAt: data.deliveryFailedAt || data.delivery_failed_at || null,
+    distributorChatGraceUntil: data.distributorChatGraceUntil || null,
     createdAt: data.createdAt || data.created_at || null,
     updatedAt: data.updatedAt || data.updated_at || null,
   };
@@ -408,6 +410,7 @@ function createManagerDispatchHandler(getAdmin = getFirebaseAdmin) {
             scheduled_at: scheduledAt,
             expectedDeliveryDate: scheduledAt.toISOString(),
             delivery_date: scheduledAt.toISOString(),
+            distributorChatGraceUntil: null,
             assignmentHistory: [...history(current.assignmentHistory), entry],
           });
         });

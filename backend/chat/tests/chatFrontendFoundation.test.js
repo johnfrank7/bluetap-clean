@@ -15,6 +15,9 @@ test('user and Manager branch unread totals use logical principal state', () => 
   ] }];
   assert.equal(model.totalUnread(conversations, 'requester', 'requester-a', ''), 2);
   assert.equal(model.totalUnread(conversations, 'manager', 'manager-a', 'branch-a'), 3);
+  assert.equal(model.formatBadge(0), '0');
+  assert.equal(model.formatBadge(99), '99');
+  assert.equal(model.formatBadge(100), '99+');
 });
 
 test('receipt semantics move from pending to sent to seen', () => {
@@ -98,7 +101,7 @@ test('conversation resolution clears stale thread state and localizes resolve er
   const provider = read('components/chat/ChatDataProvider.jsx');
   const list = read('components/chat/ChatConversationList.jsx');
   assert.match(provider, /setSelectedSeed\(null\)[\s\S]*resolveConversation\(intent\)/);
-  assert.match(provider, /setResolveError\(resolveError\.message/);
+  assert.match(provider, /setResolveError\('Unable to open conversation\. Please try again\.'\)/);
   assert.doesNotMatch(provider, /catch \(resolveError\) \{[\s\S]{0,160}setThreadError/);
   assert.match(list, /resolveError/);
 });
@@ -125,8 +128,11 @@ test('operational layouts mount chat while Admin stays excluded', () => {
 
 test('order entry points resolve only server-authorized conversation intents', () => {
   const source = read('components/chat/ChatOrderActions.jsx');
+  const provider = read('components/chat/ChatDataProvider.jsx');
   assert.match(source, /type: 'requester_branch', intent: 'order_followup', orderId/);
   assert.match(source, /type: 'requester_distributor', orderId/);
+  assert.match(source, /Unable to open conversation\. Please try again\./);
+  assert.match(provider, /if \(resolveInFlightRef\.current\) return resolveInFlightRef\.current/);
   assert.doesNotMatch(source, /requesterUid\s*:|distributorUid\s*:|participantUserUids\s*:/);
 });
 
@@ -135,6 +141,33 @@ test('message bubbles keep incoming and outgoing alignment with semantic theme s
   assert.match(source, /own \? styles\.outgoingRow : styles\.incomingRow/);
   assert.match(source, /colors\.primaryAction/);
   assert.match(source, /colors\.surfaceAlt/);
+  assert.match(source, /onMouseEnter/);
+  assert.match(source, /onMouseLeave/);
+  assert.match(source, /onFocus/);
+  assert.match(source, /delayLongPress=\{500\}/);
+  assert.match(source, /More message actions/);
+  assert.match(source, /event\.key === 'Escape'/);
+});
+
+test('desktop message action visibility survives focus and an open menu while mouse leave hides a closed trigger', () => {
+  assert.equal(model.messageActionTriggerVisible({ hovered: true }), true);
+  assert.equal(model.messageActionTriggerVisible({ focused: true }), true);
+  assert.equal(model.messageActionTriggerVisible({ menuOpen: true }), true);
+  assert.equal(model.messageActionTriggerVisible({ hovered: false, focused: false, menuOpen: false }), false);
+});
+
+test('message action derivation and failed-delivery UI remain role and lifecycle specific', () => {
+  assert.deepEqual(model.messageActionNames({ own: true, withinWindow: true }), ['Edit', 'Delete']);
+  assert.deepEqual(model.messageActionNames({ own: true, withinWindow: false }), []);
+  assert.deepEqual(model.messageActionNames({ own: false, reportable: true }), ['Report']);
+  const now = Date.parse('2026-01-01T00:00:00Z');
+  const grace = model.conversationLifecycleNotice({
+    type: 'requester_distributor', accessEndsAt: new Date(now + (42 * 60 * 1000)),
+    orderContext: { status: 'delivery_failed' },
+  }, now);
+  assert.equal(grace.state, 'grace');
+  assert.equal(grace.minutes, 42);
+  assert.equal(model.conversationLifecycleNotice({ type: 'requester_distributor', orderContext: { status: 'delivered' } }, now).state, 'closed');
 });
 
 test('desktop and mobile messenger presentations remain overlay based', () => {

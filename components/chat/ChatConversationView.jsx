@@ -12,7 +12,7 @@ export default function ChatConversationView() {
     backToList, closeChat, colors, currentConversation, hasEarlierMessages, loadEarlierMessages,
     loadingEarlier, messages, retryMessage, role, sendCurrentMessage, threadError,
     messageActionError,
-    isOwnMessage, receiptForMessage, canSend, sendUnavailableReason,
+    isOwnMessage, receiptForMessage, canSend, sendUnavailableReason, conversationNotice,
     editCurrentMessage, deleteCurrentMessage,
   } = useChat();
   const [reportTarget, setReportTarget] = React.useState(null);
@@ -35,13 +35,13 @@ export default function ChatConversationView() {
   return (
     <View style={styles.root}>
       <View style={[styles.threadHeader, { borderBottomColor: colors.border }]}>
-        <Pressable accessibilityRole="button" accessibilityLabel="Back to conversations" onPress={backToList} style={styles.back}><Text style={[styles.backText, { color: colors.primary }]}>‹</Text></Pressable>
+        <Pressable accessibilityRole="button" accessibilityLabel="Back to conversations" onPress={backToList} style={styles.back}><Text style={[styles.backText, { color: colors.primary }]}>{'<'}</Text></Pressable>
         <View style={[styles.headerAvatar, { backgroundColor: colors.primarySoft, borderColor: colors.border }]}><Text style={[styles.headerAvatarText, { color: colors.primary }]}>{currentConversation.avatarLabel || 'BT'}</Text></View>
         <View style={{ flex: 1, minWidth: 0 }}><Text style={[styles.title, { color: colors.textPrimary }]} numberOfLines={1}>{currentConversation.displayName}</Text><Text style={[styles.subtitle, { color: colors.textSecondary }]} numberOfLines={1}>{currentConversation.contextLabel}</Text></View>
-        {reportingAllowed && <View style={styles.headerMenuWrap}><Pressable accessibilityRole="button" accessibilityLabel="Conversation options" onPress={() => setHeaderMenuOpen((open) => !open)} style={styles.headerMenuButton}><Text style={[styles.headerMenuGlyph, { color: colors.textPrimary }]}>⋮</Text></Pressable>{headerMenuOpen && <View style={[styles.headerMenu, { backgroundColor: colors.surface, borderColor: colors.border }]}><Pressable accessibilityRole="button" accessibilityLabel="Report user" onPress={() => { setHeaderMenuOpen(false); setReportTarget({ type: 'user' }); }} style={styles.headerMenuItem}><Text style={[styles.reportUserText, { color: colors.danger }]}>Report user</Text></Pressable></View>}</View>}
-        <Pressable accessibilityRole="button" accessibilityLabel="Close messages" onPress={closeChat} style={styles.close}><Text style={[styles.closeText, { color: colors.textPrimary }]}>×</Text></Pressable>
+        {reportingAllowed && <View style={styles.headerMenuWrap}><Pressable accessibilityRole="button" accessibilityLabel="Conversation options" onPress={() => setHeaderMenuOpen((open) => !open)} style={styles.headerMenuButton}><Text style={[styles.headerMenuGlyph, { color: colors.textPrimary }]}>{'\u22EE'}</Text></Pressable>{headerMenuOpen && <View style={[styles.headerMenu, { backgroundColor: colors.surface, borderColor: colors.border }]}><Pressable accessibilityRole="button" accessibilityLabel="Report user" onPress={() => { setHeaderMenuOpen(false); setReportTarget({ type: 'user' }); }} style={styles.headerMenuItem}><Text style={[styles.reportUserText, { color: colors.danger }]}>Report user</Text></Pressable></View>}</View>}
+        <Pressable accessibilityRole="button" accessibilityLabel="Close messages" onPress={closeChat} style={styles.close}><Text style={[styles.closeText, { color: colors.textPrimary }]}>x</Text></Pressable>
       </View>
-      <ChatOrderContextCard order={currentConversation.orderContextLocal} colors={colors} role={role} onNavigate={closeChat} />
+      <ChatOrderContextCard order={currentConversation.orderContextLocal} colors={colors} role={role} onNavigate={closeChat} generalInquiry={currentConversation.type === 'requester_branch' && !currentConversation.orderContextLocal} />
       <ScrollView
         ref={scrollRef}
         keyboardShouldPersistTaps="handled"
@@ -75,8 +75,8 @@ export default function ChatConversationView() {
           />
         ))}
       </ScrollView>
-      <ChatComposer colors={colors} disabled={!canSend} onSend={sendCurrentMessage} />
-      {!canSend && !threadError && <Text style={[styles.readOnly, { color: colors.textSecondary, backgroundColor: colors.surfaceAlt }]}>{sendUnavailableReason || 'Sending is unavailable for this conversation.'}</Text>}
+      {!!conversationNotice && <View style={[styles.lifecycleNotice, { backgroundColor: colors.surfaceAlt, borderColor: colors.border }]}><Text style={[styles.lifecycleTitle, { color: colors.textPrimary }]}>{conversationNotice.title}</Text><Text style={[styles.lifecycleBody, { color: colors.textSecondary }]}>{conversationNotice.body}</Text></View>}
+      {canSend ? <ChatComposer colors={colors} onSend={sendCurrentMessage} /> : !threadError && !conversationNotice && <Text style={[styles.readOnly, { color: colors.textSecondary, backgroundColor: colors.surfaceAlt }]}>{sendUnavailableReason || 'Sending is unavailable for this conversation.'}</Text>}
       <ChatReportDialog visible={!!reportTarget} conversation={currentConversation} message={reportTarget?.message} colors={colors} onClose={() => setReportTarget(null)} />
       <Modal visible={!!editTarget} transparent animationType="fade" onRequestClose={() => setEditTarget(null)}><View style={styles.modalBackdrop}><View accessibilityViewIsModal style={[styles.modalCard, { backgroundColor: colors.surface, borderColor: colors.border }]}><Text style={[styles.modalTitle, { color: colors.textPrimary }]}>Edit message</Text><TextInput accessibilityLabel="Edited message" value={editBody} onChangeText={setEditBody} maxLength={2000} multiline style={[styles.editInput, { color: colors.textPrimary, backgroundColor: colors.surfaceAlt, borderColor: colors.border }]} /><View style={styles.modalActions}><Pressable onPress={() => setEditTarget(null)} style={[styles.secondary, { borderColor: colors.border }]}><Text style={{ color: colors.textPrimary, fontWeight: '800' }}>Cancel</Text></Pressable><Pressable disabled={mutationBusy || !editBody.trim()} onPress={async () => { setMutationBusy(true); try { await editCurrentMessage(editTarget, editBody); setEditTarget(null); } catch {} finally { setMutationBusy(false); } }} style={[styles.primary, { backgroundColor: colors.primaryAction, opacity: mutationBusy ? .6 : 1 }]}><Text style={styles.primaryText}>Save edit</Text></Pressable></View></View></View></Modal>
       <Modal visible={!!deleteTarget} transparent animationType="fade" onRequestClose={() => setDeleteTarget(null)}><View style={styles.modalBackdrop}><View accessibilityViewIsModal style={[styles.modalCard, { backgroundColor: colors.surface, borderColor: colors.border }]}><Text style={[styles.modalTitle, { color: colors.textPrimary }]}>Delete this message?</Text><Text style={[styles.modalCopy, { color: colors.textSecondary }]}>The message will become a tombstone. Protected revision and report evidence records are preserved.</Text><View style={styles.modalActions}><Pressable onPress={() => setDeleteTarget(null)} style={[styles.secondary, { borderColor: colors.border }]}><Text style={{ color: colors.textPrimary, fontWeight: '800' }}>Cancel</Text></Pressable><Pressable disabled={mutationBusy} onPress={async () => { setMutationBusy(true); try { await deleteCurrentMessage(deleteTarget); setDeleteTarget(null); } catch {} finally { setMutationBusy(false); } }} style={[styles.primary, { backgroundColor: colors.danger, opacity: mutationBusy ? .6 : 1 }]}><Text style={styles.primaryText}>Delete message</Text></Pressable></View></View></View></Modal>
@@ -103,5 +103,8 @@ const styles = StyleSheet.create({
   empty: { textAlign: 'center', fontSize: 12, marginVertical: 24 },
   error: { textAlign: 'center', fontSize: 12, marginVertical: 10 },
   readOnly: { textAlign: 'center', paddingVertical: 7, fontSize: 11, fontWeight: '700' },
+  lifecycleNotice: { marginHorizontal: 12, marginBottom: 8, borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 9 },
+  lifecycleTitle: { fontSize: 12, fontWeight: '900' },
+  lifecycleBody: { fontSize: 11, lineHeight: 16, marginTop: 2 },
   modalBackdrop: { flex: 1, padding: 20, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(5,20,32,.62)' }, modalCard: { width: '100%', maxWidth: 460, borderWidth: 1, borderRadius: 16, padding: 20 }, modalTitle: { fontSize: 19, fontWeight: '900' }, modalCopy: { fontSize: 13, lineHeight: 20, marginTop: 8 }, editInput: { minHeight: 100, marginTop: 14, borderWidth: 1, borderRadius: 10, padding: 11, textAlignVertical: 'top' }, modalActions: { flexDirection: 'row', justifyContent: 'flex-end', flexWrap: 'wrap', gap: 9, marginTop: 16 }, secondary: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 16, borderWidth: 1, borderRadius: 10 }, primary: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 16, borderRadius: 10 }, primaryText: { color: '#FFFFFF', fontWeight: '900' },
 });

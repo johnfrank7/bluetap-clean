@@ -20,6 +20,24 @@ test('station conversation presentation accepts no order context without crashin
   assert.equal(station.orderContextLocal, null);
 });
 
+test('authorized server presentation supplies real requester names and order status without UID fallback', () => {
+  const manager = exportsObject.presentationFor({
+    id: 'branch-thread', type: 'requester_branch', requesterUid: 'firebase-requester-uid',
+    requesterDisplayName: 'John Franz Caliguid',
+    orderContext: { id: 'order-a', requestId: 'BT-2026-8B4B75BE', requesterName: 'John Franz Caliguid', status: 'pending' },
+  }, 'manager', { orders: [], users: [] });
+  assert.equal(manager.displayName, 'John Franz Caliguid');
+  assert.equal(manager.displayName.includes('firebase-requester-uid'), false);
+  assert.equal(manager.orderReference, 'BT-2026-8B4B75BE');
+  assert.equal(manager.orderStatus, 'pending');
+
+  const distributor = exportsObject.presentationFor({
+    id: 'direct-thread', type: 'requester_distributor', requesterDisplayName: 'Crystal Jeanne Ortega',
+    orderContext: { id: 'order-b', requestId: 'BT-2026-9A', status: 'out_for_delivery' },
+  }, 'distributor', { orders: [], users: [] });
+  assert.equal(distributor.displayName, 'Crystal Jeanne Ortega');
+});
+
 test('active logical participant is readable and sendable; closed, expired and read-only states cannot send', () => {
   const conversation = { status: 'active', participantState: [{ principalType: 'user', principalId: 'r1', accessState: 'active' }] };
   assert.deepEqual(model.conversationAvailability(conversation, 'requester', 'r1'), { readable: true, sendable: true });
@@ -57,6 +75,13 @@ test('Requester conversations stay grouped by Branch or Distributor and pinned s
   assert.match(conversationListSource, /label="DISTRIBUTORS"/);
 });
 
+test('conversation role badges describe the visible counterpart without relabeling branch principals', () => {
+  assert.equal(presentation.counterpartRoleLabel({ type: 'requester_distributor' }, 'requester'), 'Distributor');
+  assert.equal(presentation.counterpartRoleLabel({ type: 'distributor_branch' }, 'manager'), 'Distributor');
+  assert.equal(presentation.counterpartRoleLabel({ type: 'requester_branch', counterpartRole: 'manager' }, 'requester'), '');
+  assert.equal(presentation.counterpartRoleLabel({ type: 'future_direct', counterpartRole: 'manager' }, 'requester'), 'Manager');
+});
+
 test('chat avatar initials are deterministic and never require a UID fallback', () => {
   assert.equal(presentation.initialsForName('John Franz'), 'JF');
   assert.equal(presentation.initialsForName('John Franz Caliguid'), 'JC');
@@ -69,8 +94,18 @@ test('chat avatar initials are deterministic and never require a UID fallback', 
 test('message bubbles remain content-sized and wrap long text on shared web/mobile code', () => {
   assert.match(bubbleSource, /outgoingRow: \{ alignItems: 'flex-end' \}/);
   assert.match(bubbleSource, /incomingRow: \{ alignItems: 'flex-start' \}/);
-  assert.match(bubbleSource, /maxWidth: '76%'/);
-  assert.match(bubbleSource, /minWidth: 44/);
+  assert.match(bubbleSource, /maxWidth: '100%'/);
+  assert.match(bubbleSource, /minWidth: 72/);
+  assert.match(bubbleSource, /flexWrap: 'nowrap'/);
   assert.match(bubbleSource, /overflowWrap: 'anywhere'/);
   assert.match(bubbleSource, /receipt/);
+});
+
+test('conversation status stays compact in the name row while unread remains visible', () => {
+  assert.match(conversationListSource, /styles\.identityRow/);
+  assert.match(conversationListSource, /compact numberOfLines=\{1\}/);
+  assert.match(conversationListSource, /maxWidth: '52%'/);
+  assert.doesNotMatch(conversationListSource, /flexWrap: 'wrap'/);
+  assert.match(conversationListSource, /conversation\.unreadCount > 0/);
+  assert.match(conversationListSource, /counterpartRoleLabel/);
 });

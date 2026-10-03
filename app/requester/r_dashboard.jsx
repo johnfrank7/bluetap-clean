@@ -772,6 +772,7 @@ export default function RequesterDashboard() {
           visible={!!detailsRequest}
           onClose={() => setDetailsRequest(null)}
           request={detailsRequestData}
+          branches={requesterData.branches}
         />
 
         <Modal visible={!!notification} transparent animationType="fade">

@@ -52,7 +52,8 @@ There is no Requester-to-Requester chat, personal Manager-to-Manager direct mess
 ## Lifecycle persistence
 
 - Canonical conversation states are `active`, `read_only`, and `closed`. Only Render Node may change lifecycle fields or participant access projections.
-- Requester/Distributor conversations remain active for seven calendar days after the trusted `deliveredAt` time. Render persists `accessEndsAt`; server and Firestore reads fail closed when that deadline expires.
+- Requester/Distributor conversations become read-only immediately when the trusted order reaches `delivered`; neither participant may send another message. Render may preserve bounded historical read access through `accessEndsAt`, and server and Firestore reads fail closed when that deadline expires.
+- A trusted `delivery_failed` transition starts an exact one-hour requester/Distributor send grace period from the server-owned failure timestamp. Render persists `distributorChatGraceUntil`; send authorization compares server time against that trusted deadline and ignores client-supplied lifecycle fields. Rescheduling clears the failure grace projection and restores the active assignment conversation, while reassignment still creates a new assignment epoch.
 - Distributor decline, assignment clearing, reassignment, and Admin dispatch override invalidate the old `assignmentVersion` thread in the same order transaction. A later assignment uses a new authority hash and never reactivates the old thread.
 - A transfer request keeps source-branch order authority but immediately invalidates a cleared Distributor assignment. Transfer acceptance removes the source `active_order` reason and adds it for the target Branch; transfer decline grants the target nothing.
 - Requester/Branch reasons are independent. Removing `active_order` must not close a conversation while `requester_inquiry` or an unexpired `post_order_followup` reason remains valid.
@@ -80,6 +81,7 @@ There is no Requester-to-Requester chat, personal Manager-to-Manager direct mess
 - Summary and thread listeners wait for Firebase auth and authoritative role identity hydration. Manager listeners require the loaded active Manager profile and active current Branch; Distributor listeners require the loaded active profile and operational `branchId`. Hydration is a loading state, not a permission failure.
 - `distributor_branch` resolves inside the mounted chat panel. Resolution clears stale thread state and reattaches the one visible thread listener even when the authoritative conversation ID is unchanged.
 - Desktop uses an anchored overlay panel without route navigation. Narrow web and native use a safe-area full-height modal. Both presentations use BlueTap semantic light/dark tokens, accessible controls, a compact coordinate-free order context, and the custom water-drop/chat-bubble mark.
+- Conversation summaries use server-sanitized display names and compact order context only. Never render Firebase UIDs as labels or expose delivery coordinates in chat summaries. Order-linked rows show the real order status with the shared order-status mapping; general inquiries remain clearly separate when no order context exists.
 
 ## Reports, restrictions, and retention
 
@@ -104,3 +106,10 @@ Message editing and soft deletion are implemented only through the server-author
 - Every stored conversation must match its canonical participant graph before list, read, send, cursor, mutation, or report authorization. A malformed legacy row with extra users or principals is denied and omitted from normal discovery; it is not repaired or deleted automatically.
 - Requester conversation lists keep `requester_branch` under Branch / Station and `requester_distributor` under Distributors. Active station entries may be pinned and resolved through the existing secure inquiry intent, but matching branch identity merges into one logical row.
 - Reusable chat initials derive only from visible display names, use first-plus-last initials with a two-character maximum, and fall back to a neutral product marker rather than a Firebase UID. Branch principals use a station marker instead of a Manager-person identity.
+
+## Phase 4.3 chat UX and order context
+
+- Requester order `Follow Up` resolves `requester_branch` with the trusted `orderId`. Manager summaries and thread context show the sanitized requester display name, public order reference, actual order status, total, and an authorized View details action; unrelated order fields and coordinates never enter the chat projection.
+- Unread row badges remain realtime and use `participantState.unreadCount`: hide zero, show exact values from 1 through 99, and show `99+` at 100 or more. Opening a visible thread advances the shared logical-principal read cursor and clears the badge through the normal server-authoritative path.
+- On desktop web, message actions live beside the bubble and appear on hover or keyboard focus without covering message text, timestamps, or receipts. On narrow web and native, a long press opens a bottom action sheet. Escape, outside click, and Cancel dismiss the menu; Edit/Delete remain sender-only within the server-enforced window and Report remains incoming-only.
+- Lifecycle notices are explicit in the thread UI. Delivered direct chats hide the composer immediately. Failed-delivery direct chats keep the composer active only until the exact trusted grace deadline, update the remaining time, and then close locally while the server remains authoritative.

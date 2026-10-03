@@ -4,6 +4,7 @@ const { applyCors } = require('../utils/cors');
 const { safeOrder, owningBranchId } = require('../manager/dispatchHandler');
 const { OtpError } = require('../utils/otpError');
 const { assignmentVersionForTransition } = require('../utils/relationshipEpochs');
+const { FAILED_DELIVERY_CHAT_GRACE_MS } = require('../chat/chatAuthorization');
 const { postOrderAccessEndsAt, reconcileOrderLifecycleInTransaction } = require('../chat/conversationLifecycleService');
 const { deliveryFailureReasonForCode } = require('../../constants/deliveryFailureReasons');
 const { recordOrderAbuseIncidentInTransaction } = require('../moderation/moderationService');
@@ -184,7 +185,15 @@ function createDistributorAssignedOrdersHandler(getAdmin = getFirebaseAdmin) {
           }
           failureReason = failureReasonNote ? `${failureReasonLabel}: ${failureReasonNote}` : failureReasonLabel;
           event = 'DELIVERY_FAILED';
-          update = { status: 'delivery_failed', deliveryFailedAt: now, failureReason, failureReasonCode, failureReasonLabel, failureReasonNote };
+          update = {
+            status: 'delivery_failed',
+            deliveryFailedAt: now,
+            distributorChatGraceUntil: new Date(now.getTime() + FAILED_DELIVERY_CHAT_GRACE_MS),
+            failureReason,
+            failureReasonCode,
+            failureReasonLabel,
+            failureReasonNote,
+          };
         } else if (action === 'reschedule-delivery') {
           if (currentStatus !== 'delivery_failed') {
             throw new OtpError(409, 'ORDER_NOT_RESCHEDULABLE', 'Only failed deliveries can be rescheduled by the distributor.');
@@ -201,6 +210,7 @@ function createDistributorAssignedOrdersHandler(getAdmin = getFirebaseAdmin) {
             expectedDeliveryDate: scheduledAt.toISOString(),
             delivery_date: scheduledAt.toISOString(),
             rescheduledAt: now,
+            distributorChatGraceUntil: null,
           };
         } else {
           if (currentStatus !== 'out_for_delivery') {

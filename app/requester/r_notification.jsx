@@ -55,7 +55,7 @@ export default function RequesterNotification() {
   useBlueTapTheme();
   const router = useRouter();
   const params = useLocalSearchParams();
-  const { orders, loading, error: orderError, uid, readiness } = useRequesterData();
+  const { orders, branches, loading, error: orderError, uid, readiness } = useRequesterData();
   const { events, markAllSeen, markSeen } = useRoleNotifications();
   const { openNotice } = useModerationNotices();
   const [retryError, setRetryError] = useState('');
@@ -150,6 +150,7 @@ export default function RequesterNotification() {
         visible={liveSelectedOrder !== null}
         onClose={() => setSelectedOrderId(null)}
         request={liveSelectedOrder}
+        branches={branches}
       />
     </SafeAreaView>
   );

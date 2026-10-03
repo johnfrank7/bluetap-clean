@@ -12,9 +12,9 @@ const clone = (value) => value === undefined ? undefined : structuredClone(value
 
 function fixture() {
   const records = new Map(Object.entries({
-    'users/requester-a': { role: 'requester', accountStatus: 'active', publicUid: 'Req001' },
-    'users/requester-b': { role: 'requester', accountStatus: 'active', publicUid: 'Req002' },
-    'users/distributor-a': { role: 'distributor', accountStatus: 'active', distributorStatus: 'active', branchId: 'branch-a', branchMembershipVersion: 3, publicUid: 'Dis001' },
+    'users/requester-a': { role: 'requester', accountStatus: 'active', publicUid: 'Req001', fullName: 'John Franz Caliguid' },
+    'users/requester-b': { role: 'requester', accountStatus: 'active', publicUid: 'Req002', fullName: 'Crystal Jeanne Ortega' },
+    'users/distributor-a': { role: 'distributor', accountStatus: 'active', distributorStatus: 'active', branchId: 'branch-a', branchMembershipVersion: 3, publicUid: 'Dis001', fullName: 'BlueTap Test Distributor' },
     'users/distributor-b': { role: 'distributor', accountStatus: 'active', distributorStatus: 'active', branchId: 'branch-a', branchMembershipVersion: 2, publicUid: 'Dis002' },
     'users/manager-a': { role: 'manager', accountStatus: 'active', managerStatus: 'active', branchId: 'branch-a', publicUid: 'Man001' },
     'users/manager-b': { role: 'manager', accountStatus: 'active', managerStatus: 'active', branchId: 'branch-b', publicUid: 'Man002' },
@@ -22,7 +22,7 @@ function fixture() {
     'branches/branch-a': { name: 'A', status: 'active' },
     'branches/branch-b': { name: 'B', status: 'active' },
     'branches/branch-c': { name: 'C', status: 'active' },
-    'requests/order-a': { requester_id: 'requester-a', currentBranchId: 'branch-a', branchId: 'branch-a', assignedDistributorUid: 'distributor-a', assignmentVersion: 4, status: 'distributor_assigned' },
+    'requests/order-a': { requester_id: 'requester-a', requesterNameSnapshot: 'John Franz Caliguid', requestId: 'BT-2026-8B4B75BE', totalAtOrder: 180, currentBranchId: 'branch-a', branchId: 'branch-a', branchNameSnapshot: 'A', assignedDistributorUid: 'distributor-a', assignmentVersion: 4, status: 'distributor_assigned' },
     'requests/order-b': { requester_id: 'requester-b', currentBranchId: 'branch-b', branchId: 'branch-b', assignmentVersion: 1, status: 'pending' },
   }).map(([key, value]) => [key, clone(value)]));
 
@@ -196,7 +196,13 @@ test('cold summary discovery returns the same authorized conversation to both us
 test('Manager cold summaries and pinned Distributor resolution enforce own active branch and membership', async () => {
   const f = fixture();
   const followup = await resolve(f, 'requester-a-token', { type: 'requester_branch', intent: 'order_followup', orderId: 'order-a' });
-  assert.equal((await call(f.conversations, 'GET', 'manager-a-token')).body.conversations[0].id, followup.body.conversation.id);
+  const managerSummary = (await call(f.conversations, 'GET', 'manager-a-token')).body.conversations[0];
+  assert.equal(managerSummary.id, followup.body.conversation.id);
+  assert.equal(managerSummary.requesterDisplayName, 'John Franz Caliguid');
+  assert.equal(managerSummary.orderContext.requestId, 'BT-2026-8B4B75BE');
+  assert.equal(managerSummary.orderContext.status, 'distributor_assigned');
+  assert.equal(managerSummary.orderContext.totalAtOrder, 180);
+  assert.notEqual(managerSummary.requesterDisplayName, 'requester-a');
   assert.equal((await call(f.conversations, 'GET', 'manager-b-token')).body.conversations.length, 0);
   const pinned = await resolve(f, 'manager-a-token', { type: 'distributor_branch', distributorId: 'distributor-a' });
   assert.equal(pinned.statusCode, 201);
@@ -243,6 +249,8 @@ test('an active-order Follow Up remains an active requester-branch conversation 
   assert.equal(followup.body.conversation.type, 'requester_branch');
   assert.equal(followup.body.conversation.status, 'active');
   assert.deepEqual(followup.body.conversation.authorityReasons.active_order.orderIds, ['order-a']);
+  assert.equal(followup.body.conversation.orderContext.requestId, 'BT-2026-8B4B75BE');
+  assert.equal(followup.body.conversation.requesterDisplayName, 'John Franz Caliguid');
 
   const sent = await call(f.messages, 'POST', 'requester-a-token', {
     conversationId: followup.body.conversation.id,
@@ -254,17 +262,13 @@ test('an active-order Follow Up remains an active requester-branch conversation 
   assert.equal(sent.body.message.body, 'Please check my active request.');
 });
 
-test('a delivered assignment can resolve on demand only during its trusted follow-up window', async () => {
+test('a delivered assignment cannot resolve a writable direct conversation', async () => {
   const f = fixture();
   const accessEndsAt = new Date('2026-01-08T00:00:00Z');
   f.records.set('requests/order-a', { ...f.records.get('requests/order-a'), status: 'delivered', deliveredAt: new Date('2026-01-01T00:00:00Z'), chatAccessEndsAt: accessEndsAt });
-  const active = await resolve(f, 'requester-a-token', { type: 'requester_distributor', orderId: 'order-a' });
-  assert.equal(active.statusCode, 201);
-  assert.equal(active.body.conversation.accessEndsAt.getTime(), accessEndsAt.getTime());
-  f.setTime(accessEndsAt.getTime());
-  const expired = await resolve(f, 'requester-a-token', { type: 'requester_distributor', orderId: 'order-a' });
-  assert.equal(expired.statusCode, 403);
-  assert.equal(expired.body.error.reason, 'CHAT_ASSIGNMENT_NOT_WRITABLE');
+  const denied = await resolve(f, 'requester-a-token', { type: 'requester_distributor', orderId: 'order-a' });
+  assert.equal(denied.statusCode, 403);
+  assert.equal(denied.body.error.reason, 'CHAT_ASSIGNMENT_NOT_WRITABLE');
 });
 
 test('concurrent resolve is registry-backed and returns exactly one conversation', async () => {
@@ -361,6 +365,10 @@ test('Requester chat resolution allows an eligible Branch and assigned Distribut
   const unrelatedDistributor = await resolve(f, 'distributor-b-token', { type: 'requester_distributor', orderId: 'order-a' });
   assert.equal(unrelatedDistributor.statusCode, 403);
   assert.equal(unrelatedDistributor.body.error.reason, 'CHAT_NOT_AUTHORIZED');
+  f.records.set('requests/order-a', { ...f.records.get('requests/order-a'), assignedDistributorUid: null, distributor_id: '' });
+  const noAssignment = await resolve(f, 'requester-a-token', { type: 'requester_distributor', orderId: 'order-a' });
+  assert.equal(noAssignment.statusCode, 403);
+  assert.equal(noAssignment.body.error.reason, 'CHAT_NOT_AUTHORIZED');
 });
 
 test('malformed legacy conversations with an extra Requester are denied and omitted from normal discovery', async () => {
@@ -565,23 +573,59 @@ test('terminal direct-order history requires an explicit bounded read deadline',
   assert.equal(expired.body.error.reason, 'CHAT_NOT_AUTHORIZED');
 });
 
-test('delivered assignment remains writable only until the trusted seven-day deadline', async () => {
+test('delivered assignment denies sends immediately while bounded history remains readable', async () => {
   const f = fixture();
   const conversationId = await directConversation(f);
   const accessEndsAt = new Date(Date.parse('2026-01-08T00:00:00Z'));
   f.records.set('requests/order-a', { ...f.records.get('requests/order-a'), status: 'delivered', deliveredAt: new Date('2026-01-01T00:00:00Z'), chatAccessEndsAt: accessEndsAt });
   f.records.set(`chatConversations/${conversationId}`, {
     ...f.records.get(`chatConversations/${conversationId}`),
-    status: 'active',
+    status: 'read_only',
     accessEndsAt,
     readAccessEndsAt: accessEndsAt,
   });
-  const beforeExpiry = await call(f.messages, 'POST', 'requester-a-token', { conversationId, clientMutationId: 'followup-1', body: 'Delivery follow-up' });
-  assert.equal(beforeExpiry.statusCode, 201);
+  const denied = await call(f.messages, 'POST', 'requester-a-token', { conversationId, clientMutationId: 'followup-1', body: 'Delivery follow-up' });
+  assert.equal(denied.statusCode, 409);
+  assert.equal(denied.body.error.reason, 'CHAT_READ_ONLY');
+  assert.equal((await call(f.messages, 'GET', 'requester-a-token', {}, `?conversationId=${conversationId}`)).statusCode, 200);
   f.setTime(accessEndsAt.getTime());
   const expired = await call(f.messages, 'POST', 'requester-a-token', { conversationId, clientMutationId: 'followup-2', body: 'Too late' });
   assert.equal(expired.statusCode, 409);
   assert.equal(expired.body.error.reason, 'CHAT_READ_ONLY');
+});
+
+test('failed delivery send authority uses exact trusted server-time grace semantics', async () => {
+  const f = fixture();
+  const conversationId = await directConversation(f);
+  const failedAt = new Date(Date.parse('2026-01-01T00:00:00Z'));
+  const graceUntil = new Date(failedAt.getTime() + (60 * 60 * 1000));
+  f.records.set('requests/order-a', {
+    ...f.records.get('requests/order-a'),
+    status: 'delivery_failed',
+    deliveryFailedAt: failedAt,
+    distributorChatGraceUntil: graceUntil,
+  });
+  f.records.set(`chatConversations/${conversationId}`, {
+    ...f.records.get(`chatConversations/${conversationId}`),
+    status: 'active',
+    accessEndsAt: graceUntil,
+    readAccessEndsAt: graceUntil,
+  });
+
+  f.setTime(failedAt.getTime() + (30 * 60 * 1000));
+  assert.equal((await call(f.messages, 'POST', 'requester-a-token', { conversationId, clientMutationId: 'failed-30', body: 'Address clarification' })).statusCode, 201);
+  f.setTime(graceUntil.getTime() - 1000);
+  assert.equal((await call(f.messages, 'POST', 'distributor-a-token', { conversationId, clientMutationId: 'failed-59', body: 'I am nearby' })).statusCode, 201);
+  f.setTime(graceUntil.getTime());
+  const atDeadline = await call(f.messages, 'POST', 'requester-a-token', { conversationId, clientMutationId: 'failed-60', body: 'Too late' });
+  assert.equal(atDeadline.statusCode, 409);
+  assert.equal(atDeadline.body.error.reason, 'CHAT_READ_ONLY');
+  f.setTime(graceUntil.getTime() + 1);
+  assert.equal((await call(f.messages, 'POST', 'distributor-a-token', { conversationId, clientMutationId: 'failed-after', body: 'Still too late' })).body.error.reason, 'CHAT_READ_ONLY');
+
+  const forged = await resolve(f, 'requester-a-token', { type: 'requester_distributor', orderId: 'order-a', distributorChatGraceUntil: new Date('2099-01-01T00:00:00Z') });
+  assert.equal(forged.statusCode, 400);
+  assert.equal(forged.body.error.reason, 'CHAT_REQUEST_FIELDS_INVALID');
 });
 
 test('message history is newest-first and bounded by sequence pagination', async () => {

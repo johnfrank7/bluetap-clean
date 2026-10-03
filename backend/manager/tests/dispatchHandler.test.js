@@ -354,12 +354,17 @@ test('Distributor failed delivery and reschedule workflow strictly enforces stat
   assert.equal(f.records.get('requests/order-a').failureReasonCode, 'NO_RESPONSE');
   assert.equal(f.records.get('requests/order-a').failureReasonLabel, 'Customer did not respond');
   assert.equal(f.records.get('requests/order-a').failureReasonNote, 'Called twice at the gate.');
+  assert.equal(
+    f.records.get('requests/order-a').distributorChatGraceUntil.getTime() - f.records.get('requests/order-a').deliveryFailedAt.getTime(),
+    60 * 60 * 1000
+  );
 
   // Now distributor can reschedule
   const rescheduled = await call(distributor, 'PATCH', 'distributor-a-token', { orderId: 'order-a', action: 'reschedule-delivery', scheduledAt: defaultSchedule });
   assert.equal(rescheduled.statusCode, 200);
   assert.equal(rescheduled.body.order.status, 'scheduled');
   assert.equal(f.records.get('requests/order-a').status, 'scheduled');
+  assert.equal(f.records.get('requests/order-a').distributorChatGraceUntil, null);
 
   // Restart delivery and deliver
   await call(distributor, 'PATCH', 'distributor-a-token', { orderId: 'order-a', action: 'start-delivery' });

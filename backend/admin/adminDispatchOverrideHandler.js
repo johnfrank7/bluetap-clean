@@ -169,6 +169,7 @@ function createAdminDispatchOverrideHandler(getAdmin = getFirebaseAdmin) {
           status: 'distributor_assigned',
           assignmentVersion: assignmentEpoch.assignmentVersion,
           assignedDistributorUid: distributorUid,
+          distributorChatGraceUntil: null,
           assignedDistributorNameSnapshot: targetName,
           assignedDistributorUniqueIdSnapshot: targetPublicUid,
           distributorUniqueId: targetPublicUid,

@@ -30,6 +30,15 @@ function avatarForConversation(conversation = {}, role = '') {
     : { avatarKind: 'person', avatarLabel: initialsForName(conversation.displayName) };
 }
 
+function counterpartRoleLabel(conversation = {}, role = '') {
+  if (role === 'requester' && conversation.type === 'requester_distributor') return 'Distributor';
+  if (role === 'manager' && conversation.type === 'distributor_branch') return 'Distributor';
+  const declaredRole = clean(conversation.counterpartRole).toLowerCase();
+  if (declaredRole === 'manager' && conversation.type !== 'requester_branch') return 'Manager';
+  if (declaredRole === 'distributor') return 'Distributor';
+  return '';
+}
+
 function buildRequesterConversationGroups(conversations = [], branches = []) {
   const branchRows = [];
   const branchRowIndex = new Map();
@@ -82,6 +91,7 @@ module.exports = {
   avatarForConversation,
   branchIdForConversation,
   buildRequesterConversationGroups,
+  counterpartRoleLabel,
   conversationAllowedForRole,
   initialsForName,
 };

@@ -82,12 +82,15 @@ test('lifecycle closes only after retention and otherwise becomes read-only when
   assert.equal(resolveConversationLifecycle({ ...base, retentionExpired: true }), 'closed');
 });
 
-test('delivered access deadline and branch membership drive lifecycle without message logic', () => {
+test('delivered closes sends immediately while failed delivery uses the trusted one-hour deadline', () => {
   const delivered = { requester_id: 'requester-a', currentBranchId: 'branch-a', assignedDistributorUid: 'distributor-a', assignmentVersion: 2, status: 'delivered' };
   const now = Date.parse('2026-01-01T00:00:00Z');
   const base = { type: 'requester_distributor', order: delivered, requesterUid: 'requester-a', distributorUid: 'distributor-a', distributorBranchId: 'branch-a', assignmentVersion: 2, now, accounts: [{ accountStatus: 'active' }], branches: [{ id: 'branch-a', status: 'active' }] };
-  assert.equal(resolveConversationLifecycle({ ...base, accessEndsAt: new Date(now + 1000) }), 'active');
+  assert.equal(resolveConversationLifecycle({ ...base, accessEndsAt: new Date(now + 1000) }), 'read_only');
   assert.equal(resolveConversationLifecycle({ ...base, accessEndsAt: new Date(now - 1000) }), 'read_only');
+  const failed = { ...delivered, status: 'delivery_failed', deliveryFailedAt: new Date(now), distributorChatGraceUntil: new Date(now + 60 * 60 * 1000) };
+  assert.equal(resolveConversationLifecycle({ ...base, order: failed, now: now + (30 * 60 * 1000) }), 'active');
+  assert.equal(resolveConversationLifecycle({ ...base, order: failed, now: now + (60 * 60 * 1000) }), 'read_only');
 
   const membership = { uid: 'distributor-a', role: 'distributor', accountStatus: 'active', distributorStatus: 'active', branchId: 'branch-a', branchMembershipVersion: 5 };
   assert.equal(resolveConversationLifecycle({ type: 'distributor_branch', distributor: membership, branchId: 'branch-a', branchMembershipVersion: 5, accounts: [membership], branches: [{ id: 'branch-a', status: 'active' }] }), 'active');
@@ -135,5 +138,10 @@ test('terminal reconciliation prepares read-only or bounded post-order follow-up
   const now = Date.parse('2026-01-01T00:00:00Z');
   const accessEndsAt = new Date(now + 60_000);
   const delivered = reconcileOrderAuthorityTransition({ before, after: { ...before, status: 'delivered' }, event: 'ORDER_DELIVERED', now, accessEndsAt });
-  assert.ok(delivered.transitions.some((item) => item.action === 'eligible' && item.reason === 'post_order_followup' && item.accessEndsAt === accessEndsAt));
+  assert.ok(delivered.transitions.some((item) => item.action === 'read_only' && item.authority.type === 'requester_distributor' && item.accessEndsAt === accessEndsAt));
+  assert.ok(delivered.transitions.some((item) => item.action === 'add_authority_reason' && item.authorityReason === 'post_order_followup' && item.accessEndsAt === accessEndsAt));
+
+  const graceUntil = new Date(now + (60 * 60 * 1000));
+  const failed = reconcileOrderAuthorityTransition({ before, after: { ...before, status: 'delivery_failed', deliveryFailedAt: new Date(now), distributorChatGraceUntil: graceUntil }, event: 'DELIVERY_FAILED', now, accessEndsAt: graceUntil });
+  assert.ok(failed.transitions.some((item) => item.action === 'eligible' && item.reason === 'delivery_failed_grace' && item.accessEndsAt === graceUntil));
 });

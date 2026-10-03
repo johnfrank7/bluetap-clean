@@ -2,9 +2,10 @@ import React from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import BlueTapChatIcon from './BlueTapChatIcon';
+import SoftStatusBadge from '../SoftStatusBadge';
 import { useChat } from './ChatContext';
 const { timeOf } = require('./chatModel');
-const { avatarForConversation, buildRequesterConversationGroups } = require('./chatPresentation');
+const { avatarForConversation, buildRequesterConversationGroups, counterpartRoleLabel } = require('./chatPresentation');
 
 const formatTimestamp = (value) => {
   const date = timeOf(value) ? new Date(timeOf(value)) : null;
@@ -24,6 +25,12 @@ const matchesSearch = (item, needle) => !needle || [
 
 function ConversationRow({ colors, conversation, onPress, role }) {
   const avatar = avatarForConversation(conversation, role);
+  const roleLabel = counterpartRoleLabel(conversation, role);
+  const generalInquiry = role === 'manager'
+    && conversation.type === 'requester_branch'
+    && !conversation.orderReference;
+  const showContext = Boolean(conversation.orderReference)
+    || ['distributor_branch', 'branch_coordination'].includes(conversation.type);
   return (
     <Pressable
       accessibilityRole="button"
@@ -35,9 +42,20 @@ function ConversationRow({ colors, conversation, onPress, role }) {
         <Text style={[styles.avatarText, { color: colors.primary }]}>{avatar.avatarLabel}</Text>
       </View>
       <View style={styles.rowText}>
-        <View style={styles.rowTop}><Text style={[styles.name, { color: colors.textPrimary }, conversation.unreadCount > 0 && styles.unreadName]} numberOfLines={1}>{conversation.displayName}</Text><Text style={[styles.timestamp, { color: colors.textSecondary }]}>{formatTimestamp(conversation.lastMessageAt || conversation.updatedAt)}</Text></View>
-        {!!conversation.contextLabel && <Text style={[styles.context, { color: colors.textSecondary }]} numberOfLines={1}>{conversation.contextLabel}</Text>}
-        <View style={styles.previewRow}><Text style={[styles.preview, { color: conversation.unreadCount ? colors.textPrimary : colors.textSecondary }]} numberOfLines={1}>{conversation.lastMessagePreview || conversation.emptyPreview || 'Start the conversation'}</Text>{conversation.unreadCount > 0 && <View style={[styles.badge, { backgroundColor: colors.danger }]}><Text style={styles.badgeText}>{conversation.unreadLabel}</Text></View>}</View>
+        <View style={styles.rowTop}>
+          <View style={styles.identityRow}>
+            <Text style={[styles.name, { color: colors.textPrimary }, conversation.unreadCount > 0 && styles.unreadName]} numberOfLines={1}>{conversation.displayName}</Text>
+            {!!roleLabel && <SoftStatusBadge status="active" label={roleLabel} compact numberOfLines={1} style={styles.statusBadge} />}
+            {!roleLabel && !!conversation.orderStatus && <SoftStatusBadge status={conversation.orderStatus} compact numberOfLines={1} style={styles.statusBadge} />}
+            {!roleLabel && !conversation.orderStatus && generalInquiry && <SoftStatusBadge status="pending" label="General inquiry" compact numberOfLines={1} style={styles.statusBadge} />}
+          </View>
+          <View style={styles.rowMeta}>
+            {conversation.unreadCount > 0 && <View style={[styles.badge, { backgroundColor: colors.danger }]}><Text style={styles.badgeText}>{conversation.unreadLabel}</Text></View>}
+            <Text style={[styles.timestamp, { color: colors.textSecondary }]}>{formatTimestamp(conversation.lastMessageAt || conversation.updatedAt)}</Text>
+          </View>
+        </View>
+        {showContext && !!conversation.contextLabel && <Text style={[styles.context, { color: colors.textSecondary }]} numberOfLines={1}>{conversation.contextLabel}</Text>}
+        <View style={styles.previewRow}><Text style={[styles.preview, { color: conversation.unreadCount ? colors.textPrimary : colors.textSecondary }]} numberOfLines={1}>{conversation.lastMessagePreview || conversation.emptyPreview || 'Start the conversation'}</Text></View>
       </View>
     </Pressable>
   );
@@ -121,9 +139,9 @@ export default function ChatConversationList() {
         />
       </View>
       {!!resolveError && <Text accessibilityRole="alert" style={[styles.inlineError, { color: colors.danger, backgroundColor: colors.dangerSoft }]}>{resolveError}</Text>}
-      {resolvingConversation && <View style={styles.resolving}><ActivityIndicator size="small" color={colors.primary} /><Text style={[styles.helper, { color: colors.textSecondary }]}>Opening conversationâ€¦</Text></View>}
+      {resolvingConversation && <View style={styles.resolving}><ActivityIndicator size="small" color={colors.primary} /><Text style={[styles.helper, { color: colors.textSecondary }]}>Opening conversation...</Text></View>}
       {loading && conversations.length === 0 ? (
-        <View style={styles.center}><ActivityIndicator color={colors.primary} /><Text style={[styles.helper, { color: colors.textSecondary }]}>Loading conversations…</Text></View>
+        <View style={styles.center}><ActivityIndicator color={colors.primary} /><Text style={[styles.helper, { color: colors.textSecondary }]}>Loading conversations...</Text></View>
       ) : error && conversations.length === 0 ? (
         <View style={styles.center}><Text style={[styles.emptyTitle, { color: colors.textPrimary }]}>Messages unavailable</Text><Text style={[styles.helper, { color: colors.textSecondary }]}>{error}</Text><Pressable accessibilityRole="button" onPress={retrySummaries}><Text style={[styles.retry, { color: colors.primary }]}>Try again</Text></Pressable></View>
       ) : groupedCount === 0 ? (
@@ -163,15 +181,18 @@ const styles = StyleSheet.create({
   section: { marginTop: 10 },
   sectionLabel: { fontSize: 10, fontWeight: '900', letterSpacing: 0.8, marginBottom: 6, paddingHorizontal: 2 },
   sectionRows: { borderWidth: 1, borderRadius: 14, overflow: 'hidden' },
-  row: { minHeight: 78, flexDirection: 'row', alignItems: 'center', gap: 11, paddingHorizontal: 13, paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth },
+  row: { minHeight: 72, flexDirection: 'row', alignItems: 'center', gap: 11, paddingHorizontal: 13, paddingVertical: 9, borderBottomWidth: StyleSheet.hairlineWidth },
   avatar: { width: 42, height: 42, borderRadius: 21, borderWidth: 1, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   avatarText: { fontSize: 13, fontWeight: '950', letterSpacing: 0.4 },
   rowText: { flex: 1, minWidth: 0 },
-  rowTop: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  name: { flex: 1, fontSize: 14, fontWeight: '800' },
+  rowTop: { minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 6 },
+  identityRow: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 5 },
+  name: { minWidth: 56, flexShrink: 1, fontSize: 14, fontWeight: '800' },
   unreadName: { fontWeight: '950' },
-  timestamp: { fontSize: 10, fontWeight: '600' },
+  rowMeta: { flexShrink: 0, flexDirection: 'row', alignItems: 'center', gap: 5 },
+  timestamp: { flexShrink: 0, fontSize: 10, fontWeight: '600' },
   context: { fontSize: 11, marginTop: 2 },
+  statusBadge: { maxWidth: '52%', flexShrink: 1 },
   previewRow: { flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 3 },
   preview: { flex: 1, fontSize: 12 },
   badge: { minWidth: 20, height: 20, paddingHorizontal: 5, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },

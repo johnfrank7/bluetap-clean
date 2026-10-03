@@ -9,9 +9,11 @@ const read = (path) => readFileSync(resolve(root, path), 'utf8');
 test('reporting is limited in the client to requester-distributor threads and incoming messages', () => {
   const conversation = read('components/chat/ChatConversationView.jsx');
   const bubble = read('components/chat/ChatMessageBubble.jsx');
+  const model = read('components/chat/chatModel.js');
   assert.match(conversation, /currentConversation\?\.type === 'requester_distributor'/);
   assert.match(conversation, /Report user/);
-  assert.match(bubble, /!own && message\.id/);
+  assert.match(bubble, /const reportable = !own && Boolean\(message\.id && onReport && !deleted\)/);
+  assert.match(model, /return reportable \? \['Report'\] : \[\]/);
   assert.match(bubble, /Report this message/);
 });
 

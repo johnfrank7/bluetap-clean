@@ -159,16 +159,16 @@ export const getSoftStatusMeta = (status) => {
   );
 };
 
-export default function SoftStatusBadge({ status, label, style, dark }) {
+export default function SoftStatusBadge({ status, label, style, textStyle, dark, compact = false, numberOfLines }) {
   const { isDark: portalIsDark } = useBlueTapTheme();
   const isDark = dark === undefined ? portalIsDark : dark;
   const normalizedStatus = normalizeStatus(status || 'Pending');
   const meta = (isDark ? DARK_STATUS_META[normalizedStatus] : null) || getSoftStatusMeta(status);
 
   return (
-    <View style={[styles.badge, { backgroundColor: meta.backgroundColor }, style]}>
-      <View style={[styles.dot, { backgroundColor: meta.color }]} />
-      <Text style={[styles.text, { color: meta.color }]}>
+    <View style={[styles.badge, compact && styles.compactBadge, { backgroundColor: meta.backgroundColor }, style]}>
+      <View style={[styles.dot, compact && styles.compactDot, { backgroundColor: meta.color }]} />
+      <Text numberOfLines={numberOfLines} ellipsizeMode="tail" style={[styles.text, compact && styles.compactText, { color: meta.color }, textStyle]}>
         {label || meta.label}
       </Text>
     </View>
@@ -196,5 +196,25 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 16,
     fontWeight: '600',
+  },
+  compactBadge: {
+    minHeight: 20,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    flexShrink: 1,
+    overflow: 'hidden',
+  },
+  compactDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
+    marginRight: 5,
+    flexShrink: 0,
+  },
+  compactText: {
+    minWidth: 0,
+    flexShrink: 1,
+    fontSize: 10,
+    lineHeight: 13,
   },
 });

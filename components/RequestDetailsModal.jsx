@@ -13,6 +13,7 @@ import { createShadow } from './shadowStyles';
 import { createPortalStyleSheet, useBlueTapTheme } from './BlueTapTheme';
 import { formatDisplayUniqueId } from '../services/uniqueIds';
 const { formatDeliveryFailureReason } = require('../constants/deliveryFailureReasons');
+const { branchMapDataForRequest } = require('./locationMapModel');
 
 const BLUE = '#187BCD';
 const BLUE_LIGHT = '#E3F2FD';
@@ -55,6 +56,7 @@ export default function RequestDetailsModal({
   visible,
   onClose,
   request,
+  branches = [],
   onCancel,
   onEdit,
 }) {
@@ -64,7 +66,7 @@ export default function RequestDetailsModal({
   const requestReference = request?.requestId || request?.request_id || request?.id;
   const waterStation = request?.waterStation || request?.currentBranchName || request?.currentBranchNameSnapshot || request?.branchNameSnapshot || request?.water_station;
   const deliveryAddress = request?.deliveryAddress || request?.addressSnapshot || request?.address || request?.deliveryLocation?.address;
-  const branchLocation = request?.branchLocation || request?.currentBranchLocation || null;
+  const branchMapData = branchMapDataForRequest(request, branches);
   const failureReason = formatDeliveryFailureReason(request, '');
   const requesterUniqueId = formatDisplayUniqueId(
     request?.requesterUniqueId || request?.requester_unique_id || request?.requesterId,
@@ -201,18 +203,8 @@ export default function RequestDetailsModal({
                   <React.Suspense fallback={<View style={styles.mapLoading}><Text style={styles.mapLoadingText}>Loading delivery map…</Text></View>}>
                     <LazyLocationMap
                       location={request.deliveryLocation}
-                      branches={
-                        Number.isFinite(branchLocation?.latitude) && Number.isFinite(branchLocation?.longitude)
-                          ? [
-                              {
-                                id: request.branchId || 'station',
-                                name: request.waterStation || 'Water Station',
-                                location: branchLocation,
-                              },
-                            ]
-                          : []
-                      }
-                      selectedBranchId={request.branchId || 'station'}
+                      branches={branchMapData ? [branchMapData] : []}
+                      selectedBranchId={branchMapData?.id}
                       readOnly={true}
                       height={170}
                       themed={true}

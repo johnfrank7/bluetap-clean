@@ -3,7 +3,7 @@ import { Image, PanResponder, StyleSheet, Text, TouchableOpacity, View } from 'r
 import { BLUETAP_COLORS, BLUETAP_LAYOUT } from '../constants/bluetapTheme';
 import { haversineDistanceKm, normalizeLocation } from '../services/location';
 import { useBlueTapTheme } from './BlueTapTheme';
-const { PIN_GEOMETRY, connectorCoordinates, fitZoomWithMarkerPadding, pinTipTransform, stationColorFor } = require('./locationMapModel');
+const { PIN_GEOMETRY, connectorCoordinates, fitZoomWithMarkerPadding, pinBodyPosition, projectedOverlayGeometry, stationColorFor } = require('./locationMapModel');
 
 const TILE_SIZE = 256;
 const DEFAULT_MAP_HEIGHT = 250;
@@ -207,6 +207,8 @@ export default function LocationMap({
     const pixel = project(point, viewport.zoom);
     return { left: pixel.x - left, top: pixel.y - top };
   };
+  const requesterPosition = requester ? position(requester) : null;
+  const positionedBranchPoints = branchPoints.map((point) => ({ ...point, screenPosition: position(point) }));
 
   const zoomBy = (amount) =>
     setViewport((current) => ({
@@ -223,8 +225,8 @@ export default function LocationMap({
   // Selected station connection line calculations
   const selectedBranchPoint = React.useMemo(() => {
     if (!selectedBranchId) return null;
-    return branchPoints.find((bp) => bp.branch.id === selectedBranchId) || null;
-  }, [selectedBranchId, branchPoints]);
+    return positionedBranchPoints.find((bp) => bp.branch.id === selectedBranchId) || null;
+  }, [selectedBranchId, pointSignature, viewport.center, viewport.zoom, left, top]);
 
   const distanceKmValue = React.useMemo(() => {
     if (!requester || !selectedBranchPoint?.branch) return null;
@@ -232,26 +234,10 @@ export default function LocationMap({
   }, [requester, selectedBranchPoint]);
 
   const lineDetails = React.useMemo(() => {
-    if (!requester || !selectedBranchPoint) return null;
+    if (!requester || !requesterPosition || !selectedBranchPoint) return null;
     const endpoints = connectorCoordinates(requester, selectedBranchPoint);
     if (endpoints.length !== 2) return null;
-    const reqPos = position(requester);
-    const stationPos = position(selectedBranchPoint);
-    const dx = stationPos.left - reqPos.left;
-    const dy = stationPos.top - reqPos.top;
-    const length = Math.sqrt(dx * dx + dy * dy);
-    if (length < 2) return null;
-    const angle = (Math.atan2(dy, dx) * 180) / Math.PI;
-    const midX = (reqPos.left + stationPos.left) / 2;
-    const midY = (reqPos.top + stationPos.top) / 2;
-    return {
-      left: reqPos.left,
-      top: reqPos.top - 1.5,
-      width: length,
-      angle,
-      midX,
-      midY,
-    };
+    return projectedOverlayGeometry(requesterPosition, selectedBranchPoint.screenPosition);
   }, [requester, selectedBranchPoint, viewport.center, viewport.zoom, left, top]);
 
   return (
@@ -294,12 +280,11 @@ export default function LocationMap({
             style={[
               styles.radiusCircle,
               {
-                ...position(requester),
+                left: requesterPosition.left - radiusPixels,
+                top: requesterPosition.top - radiusPixels,
                 width: radiusPixels * 2,
                 height: radiusPixels * 2,
                 borderRadius: radiusPixels,
-                marginLeft: -radiusPixels,
-                marginTop: -radiusPixels,
               },
             ]}
           />
@@ -313,14 +298,15 @@ export default function LocationMap({
               style={[
                 styles.distanceLine,
                 {
-                  left: lineDetails.left,
-                  top: lineDetails.top,
-                  width: lineDetails.width,
-                  transform: [{ rotate: `${lineDetails.angle}deg` }],
+                  left: lineDetails.line.left,
+                  top: lineDetails.line.top,
+                  width: lineDetails.line.width,
+                  height: lineDetails.line.height,
+                  transform: [{ rotate: `${lineDetails.line.angle}deg` }],
                 },
               ]}
             >
-              {Array.from({ length: Math.max(1, Math.ceil(lineDetails.width / 12)) }, (_, index) => (
+              {Array.from({ length: Math.max(1, Math.ceil(lineDetails.line.width / 12)) }, (_, index) => (
                 <View key={`distance-dash-${index}`} style={styles.distanceDash} />
               ))}
             </View>
@@ -330,8 +316,8 @@ export default function LocationMap({
                 style={[
                   styles.distanceBadge,
                   {
-                    left: lineDetails.midX,
-                    top: lineDetails.midY,
+                    left: lineDetails.midpoint.left,
+                    top: lineDetails.midpoint.top,
                   },
                 ]}
               >
@@ -342,9 +328,9 @@ export default function LocationMap({
         )}
 
         {/* Station Landmark Pins (Red Landmark Pin) */}
-        {branchPoints.map(({ branch, ...point }) => {
+        {positionedBranchPoints.map(({ branch, screenPosition, ...point }) => {
           const selected = branch.id === selectedBranchId;
-          const pos = position(point);
+          const pos = screenPosition;
           const pinGeometry = selected ? PIN_GEOMETRY.stationSelected : PIN_GEOMETRY.station;
           const pinColor = stationColorFor(branch.id || branch.name);
           return (
@@ -356,7 +342,7 @@ export default function LocationMap({
               style={[
                 styles.branchMarker,
                 styles.stationPinContainer,
-                { left: pos.left, top: pos.top, transform: pinTipTransform(pinGeometry) },
+                pinBodyPosition(pos, pinGeometry),
                 selected && styles.stationPinSelected,
               ]}
             >
@@ -370,7 +356,11 @@ export default function LocationMap({
               />
               <Text
                 numberOfLines={1}
-                style={[styles.stationPinLabel, selected && styles.stationPinLabelSelected]}
+                style={[
+                  styles.stationPinLabel,
+                  { top: pinGeometry.height + 2, left: (pinGeometry.width / 2) - 48 },
+                  selected && styles.stationPinLabelSelected,
+                ]}
               >
                 {branch.name}
               </Text>
@@ -382,7 +372,7 @@ export default function LocationMap({
         {requester && (
           <View
             accessibilityLabel={`${markerLabel}${readOnly ? '' : '. Drag to adjust.'}`}
-            style={[styles.requesterMarker, styles.requesterPinContainer, position(requester), { transform: pinTipTransform(PIN_GEOMETRY.delivery) }]}
+            style={[styles.requesterMarker, styles.requesterPinContainer, pinBodyPosition(requesterPosition, PIN_GEOMETRY.delivery)]}
             {...(!readOnly ? markerPanResponder.panHandlers : {})}
           >
             <View style={styles.requesterPulseRing} />
@@ -395,7 +385,7 @@ export default function LocationMap({
         )}
 
         {requester && radiusPixels > 0 && (
-          <View pointerEvents="none" style={[styles.radiusLabel, position(requester)]}>
+          <View pointerEvents="none" style={[styles.radiusLabel, requesterPosition]}>
             <Text style={styles.radiusLabelText}>Normal delivery area · {radius} km</Text>
           </View>
         )}
@@ -519,6 +509,11 @@ const styles = StyleSheet.create({
     marginTop: -1,
   },
   requesterMarkerLabel: {
+    position: 'absolute',
+    top: PIN_GEOMETRY.delivery.height + 3,
+    left: (PIN_GEOMETRY.delivery.width / 2) - 65,
+    width: 130,
+    textAlign: 'center',
     fontSize: 10,
     fontWeight: '900',
     color: BLUETAP_COLORS.primary,
@@ -526,7 +521,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 6,
-    marginTop: 3,
     shadowColor: '#000',
     shadowOpacity: 0.1,
     shadowRadius: 2,
@@ -591,6 +585,9 @@ const styles = StyleSheet.create({
     borderTopWidth: 8,
   },
   stationPinLabel: {
+    position: 'absolute',
+    width: 96,
+    textAlign: 'center',
     fontSize: 9,
     fontWeight: '800',
     color: BLUETAP_COLORS.textPrimary,
@@ -598,8 +595,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 5,
     paddingVertical: 1.5,
     borderRadius: 4,
-    marginTop: 2,
-    maxWidth: 95,
   },
   stationPinLabelSelected: {
     fontWeight: '900',

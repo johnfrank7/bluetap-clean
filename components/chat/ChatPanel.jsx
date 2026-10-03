@@ -16,7 +16,7 @@ function PanelSurface({ mobile }) {
           <View style={[styles.header, { backgroundColor: colors.header || colors.surface, borderBottomColor: colors.border }]}>
             <View style={[styles.iconBadge, { backgroundColor: colors.primaryAction }]}><BlueTapChatIcon size={24} /></View>
             <View style={{ flex: 1 }}><Text style={[styles.heading, { color: colors.textPrimary }]}>Messages</Text><Text style={[styles.subheading, { color: colors.textSecondary }]}>Secure BlueTap conversations</Text></View>
-            <Pressable accessibilityRole="button" accessibilityLabel="Close messages" onPress={closeChat} style={styles.close}><Text style={[styles.closeText, { color: colors.textPrimary }]}>×</Text></Pressable>
+            <Pressable accessibilityRole="button" accessibilityLabel="Close messages" onPress={closeChat} style={styles.close}><Text style={[styles.closeText, { color: colors.textPrimary }]}>x</Text></Pressable>
           </View>
         )}
         {currentConversation ? <ChatConversationView /> : <ChatConversationList role={role} />}

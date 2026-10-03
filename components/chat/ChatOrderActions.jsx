@@ -10,13 +10,13 @@ const normalizedStatus = (value) => clean(value).toLowerCase().replace(/[_-]+/g,
 const TERMINAL = new Set(['delivered', 'completed', 'cancelled', 'canceled', 'rejected', 'declined', 'declined outside service area']);
 const orderIdOf = (order = {}) => clean(order.id || order.sourceId || order.requestId || order.request_id);
 
-function ActionButton({ busy, colors, label, onPress, secondary = false }) {
+function ActionButton({ busy, colors, disabled = false, label, onPress, secondary = false }) {
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
       accessibilityState={{ busy }}
-      disabled={busy}
+      disabled={busy || disabled}
       onPress={onPress}
       style={({ pressed }) => [
         styles.button,
@@ -53,7 +53,7 @@ export function RequesterOrderChatActions({ order, compact = false }) {
         order
       );
     } catch (openError) {
-      setError(openError.message || 'This conversation is unavailable.');
+      setError('Unable to open conversation. Please try again.');
     } finally {
       setBusy('');
     }
@@ -61,8 +61,8 @@ export function RequesterOrderChatActions({ order, compact = false }) {
 
   return (
     <View style={[styles.wrap, compact && styles.compact]}>
-      <ActionButton busy={busy === 'branch'} colors={colors} label="Follow Up" onPress={() => open('branch')} secondary />
-      {hasDistributor && <ActionButton busy={busy === 'distributor'} colors={colors} label="Message Distributor" onPress={() => open('distributor')} />}
+      <ActionButton busy={busy === 'branch'} disabled={Boolean(busy)} colors={colors} label="Follow Up" onPress={() => open('branch')} secondary />
+      {hasDistributor && <ActionButton busy={busy === 'distributor'} disabled={Boolean(busy)} colors={colors} label="Message Distributor" onPress={() => open('distributor')} />}
       {!!error && <Text accessibilityRole="alert" style={[styles.error, { color: colors.danger }]}>{error}</Text>}
     </View>
   );

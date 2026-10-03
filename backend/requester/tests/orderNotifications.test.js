@@ -125,7 +125,7 @@ test('shared UI sources keep dialogs bounded, bubbles content-sized, maps gracef
   assert.match(dialog, /KeyboardAvoidingView/);
   assert.match(deliveryDialog, /Confirm Delivered/);
   assert.match(deliveryDialog, /DELIVERY_FAILURE_REASONS\.map/);
-  assert.match(bubble, /maxWidth: '76%'/);
+  assert.match(bubble, /maxWidth: '100%'/);
   assert.match(bubble, /overflowWrap: 'anywhere'/);
   assert.match(details, /Delivery Location Map/);
   assert.match(details, /Location unavailable/);
@@ -138,6 +138,9 @@ test('authorized role detail entry points pass map snapshots to the shared dashe
   const distributorHistory = read('app/distributor/d_history.jsx');
   const requesterDashboard = read('app/requester/r_dashboard.jsx');
   const requesterOrders = read('app/requester/r_request.jsx');
+  const requesterNotifications = read('app/requester/r_notification.jsx');
+  const requesterProvider = read('components/RoleDataProviders.jsx');
+  const details = read('components/RequestDetailsModal.jsx');
   const managerRequests = read('app/manager/request.jsx');
   const map = read('components/LocationMap.jsx');
   for (const source of [distributorDashboard, distributorHistory, requesterDashboard, requesterOrders]) {
@@ -145,10 +148,15 @@ test('authorized role detail entry points pass map snapshots to the shared dashe
     assert.match(source, /branchLocation/);
     assert.match(source, /RequestDetailsModal/);
   }
+  for (const source of [requesterDashboard, requesterOrders, requesterNotifications]) assert.match(source, /branches=/);
+  assert.match(requesterProvider, /getActiveBranches/);
+  assert.match(details, /branchMapDataForRequest\(request, branches\)/);
+  assert.match(details, /branches=\{branchMapData \? \[branchMapData\] : \[\]\}/);
   assert.match(managerRequests, /Delivery Location Map/);
   assert.match(managerRequests, /<LocationMap/);
-  assert.match(map, /position\(requester\)/);
-  assert.match(map, /position\(selectedBranchPoint\)/);
+  assert.match(map, /requesterPosition = requester \? position\(requester\) : null/);
+  assert.match(map, /screenPosition: position\(point\)/);
+  assert.match(map, /projectedOverlayGeometry\(requesterPosition, selectedBranchPoint\.screenPosition\)/);
   assert.match(map, /distanceDash/);
   assert.match(map, /Dashed line shows straight-line distance estimate, not driving distance\./);
   assert.match(map, /onPress=\{fitView\}/);

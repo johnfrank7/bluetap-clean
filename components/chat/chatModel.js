@@ -108,12 +108,40 @@ function conversationAvailability(conversation, role, uid, branchId, now = Date.
   return { readable, sendable: readable && conversation.status === 'active' && state.accessState === 'active' };
 }
 
+function conversationLifecycleNotice(conversation, now = Date.now()) {
+  if (clean(conversation?.type) !== 'requester_distributor') return null;
+  const order = conversation.orderContextLocal || conversation.orderContext || {};
+  const status = clean(order.status || order.finalStatus).toLowerCase().replace(/[\s-]+/g, '_');
+  if (['delivered', 'completed'].includes(status)) {
+    return { state: 'closed', title: 'Delivery completed', body: 'Messaging for this delivery has ended.' };
+  }
+  if (status !== 'delivery_failed') return null;
+  const deadline = timeOf(conversation.accessEndsAt || order.distributorChatGraceUntil);
+  if (deadline > now) {
+    const minutes = Math.max(1, Math.ceil((deadline - now) / 60000));
+    return { state: 'grace', title: 'Delivery attempt failed', body: `Messaging remains available for ${minutes} more ${minutes === 1 ? 'minute' : 'minutes'}.`, minutes };
+  }
+  return { state: 'closed', title: 'Messaging window ended', body: 'Contact the station if you still need assistance.' };
+}
+
+function messageActionNames({ own = false, withinWindow = false, reportable = false } = {}) {
+  if (own) return withinWindow ? ['Edit', 'Delete'] : [];
+  return reportable ? ['Report'] : [];
+}
+
+function messageActionTriggerVisible({ hovered = false, focused = false, menuOpen = false } = {}) {
+  return Boolean(hovered || focused || menuOpen);
+}
+
 module.exports = {
   conversationAvailability,
+  conversationLifecycleNotice,
   createClientMutationId,
   formatBadge,
   isOwnMessage,
   mergeMessages,
+  messageActionNames,
+  messageActionTriggerVisible,
   principalFor,
   principalStateFor,
   receiptFor,
