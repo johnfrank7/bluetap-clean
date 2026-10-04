@@ -262,6 +262,63 @@ test('an active-order Follow Up remains an active requester-branch conversation 
   assert.equal(sent.body.message.body, 'Please check my active request.');
 });
 
+test('authorized Manager, Requester, and Distributor sends pass while stale presentation context and cross-branch authority fail closed', async () => {
+  const f = fixture();
+  const branchConversation = await resolve(f, 'requester-a-token', { type: 'requester_branch', intent: 'order_followup', orderId: 'order-a' });
+  const conversationId = branchConversation.body.conversation.id;
+
+  const priorManagerFailure = await call(f.messages, 'POST', 'manager-a-token', {
+    conversationId,
+    clientMutationId: 'manager-stale-presentation',
+    body: 'test',
+    orderId: 'order-b',
+  });
+  assert.equal(priorManagerFailure.statusCode, 400);
+  assert.equal(priorManagerFailure.body.error.reason, 'CHAT_ORDER_CONTEXT_INVALID');
+
+  const managerSend = await call(f.messages, 'POST', 'manager-a-token', {
+    conversationId,
+    clientMutationId: 'manager-authorized-send',
+    body: 'test',
+  });
+  assert.equal(managerSend.statusCode, 201);
+  assert.equal(managerSend.body.message.senderPrincipalType, 'branch');
+  assert.equal(managerSend.body.message.senderBranchId, 'branch-a');
+  assert.equal(managerSend.body.conversation.participantState.find((item) => item.principalId === 'branch-a').unreadCount, 0);
+  assert.equal(managerSend.body.conversation.participantState.find((item) => item.principalId === 'requester-a').unreadCount, 1);
+
+  const requesterBranchSend = await call(f.messages, 'POST', 'requester-a-token', {
+    conversationId,
+    clientMutationId: 'requester-branch-send',
+    body: 'Branch reply',
+    orderId: 'order-a',
+  });
+  assert.equal(requesterBranchSend.statusCode, 201);
+
+  const directId = await directConversation(f);
+  assert.equal((await call(f.messages, 'POST', 'requester-a-token', {
+    conversationId: directId, clientMutationId: 'requester-direct-send', body: 'Requester direct', orderId: 'order-a',
+  })).statusCode, 201);
+  assert.equal((await call(f.messages, 'POST', 'distributor-a-token', {
+    conversationId: directId, clientMutationId: 'distributor-direct-send', body: 'Distributor direct', orderId: 'order-a',
+  })).statusCode, 201);
+
+  const stationConversation = await resolve(f, 'distributor-a-token', { type: 'distributor_branch' });
+  assert.equal((await call(f.messages, 'POST', 'distributor-a-token', {
+    conversationId: stationConversation.body.conversation.id, clientMutationId: 'distributor-branch-send', body: 'Station update',
+  })).statusCode, 201);
+
+  const crossBranch = await call(f.messages, 'POST', 'manager-b-token', {
+    conversationId, clientMutationId: 'cross-branch-manager', body: 'Denied',
+  });
+  assert.equal(crossBranch.statusCode, 403);
+  assert.equal(crossBranch.body.error.reason, 'CHAT_NOT_AUTHORIZED');
+
+  const managerPersonalDm = await resolve(f, 'manager-a-token', { type: 'requester_manager' });
+  assert.equal(managerPersonalDm.statusCode, 400);
+  assert.equal(managerPersonalDm.body.error.reason, 'CHAT_TYPE_UNSUPPORTED');
+});
+
 test('a delivered assignment cannot resolve a writable direct conversation', async () => {
   const f = fixture();
   const accessEndsAt = new Date('2026-01-08T00:00:00Z');

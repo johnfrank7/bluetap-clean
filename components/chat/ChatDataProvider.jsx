@@ -16,7 +16,7 @@ import { useModerationNotices } from '../ModerationNotices';
 const chatModel = require('./chatModel');
 const { chatAccessReadiness } = require('./chatAccessReadiness');
 const { avatarForConversation, conversationAllowedForRole } = require('./chatPresentation');
-const { createClientMutationId, formatBadge, isOwnMessage, mergeMessages, principalStateFor, receiptFor, totalUnread, unreadForConversation } = chatModel;
+const { createClientMutationId, formatBadge, isOwnMessage, mergeMessages, principalStateFor, receiptFor, sendContextOrderId, totalUnread, unreadForConversation } = chatModel;
 
 const clean = (value) => String(value || '').trim();
 const orderIdOf = (order) => clean(order?.id || order?.sourceId || order?.requestId || order?.request_id);
@@ -279,7 +279,7 @@ export default function ChatDataProvider({ children, role }) {
         conversationId: currentConversation.id,
         clientMutationId: optimistic.clientMutationId,
         body: optimistic.body,
-        orderId: orderIdOf(currentConversation.orderContextLocal) || currentConversation.orderId,
+        orderId: sendContextOrderId(currentConversation),
       });
       setLocalMessages((items) => mergeMessages(items.filter((item) => item.clientMutationId !== optimistic.clientMutationId), committed));
       setSummaries((items) => items.map((item) => item.id === currentConversation.id ? { ...item, lastMessagePreview: committed.body, lastMessageAt: committed.createdAt, updatedAt: committed.createdAt, lastMessageSeq: committed.seq } : item));

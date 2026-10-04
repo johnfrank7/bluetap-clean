@@ -43,6 +43,25 @@ test('optimistic reconciliation deduplicates the committed mutation', () => {
   assert.equal(merged[0].pending, false);
 });
 
+test('send context uses only server-authorized order metadata and ignores local presentation state', () => {
+  const provider = read('components/chat/ChatDataProvider.jsx');
+  assert.equal(model.sendContextOrderId({
+    type: 'requester_branch',
+    authorityReasons: { active_order: { orderIds: ['order-a'] } },
+    orderContext: { id: 'order-a' },
+    orderContextLocal: { id: 'stale-local-order' },
+  }), 'order-a');
+  assert.equal(model.sendContextOrderId({
+    type: 'requester_branch',
+    authorityReasons: { requester_inquiry: { active: true } },
+    orderContextLocal: { id: 'stale-local-order' },
+  }), '');
+  assert.equal(model.sendContextOrderId({ type: 'requester_distributor', orderId: 'order-a' }), 'order-a');
+  assert.equal(model.sendContextOrderId({ type: 'distributor_branch', orderContextLocal: { id: 'order-a' } }), '');
+  assert.match(provider, /orderId: sendContextOrderId\(currentConversation\)/);
+  assert.doesNotMatch(provider, /orderId: orderIdOf\(currentConversation\.orderContextLocal\)/);
+});
+
 test('summary listeners are role scoped and bounded to fifty', () => {
   const source = read('services/chatRealtime.js');
   assert.match(source, /role === 'manager'[\s\S]*participantBranchIds/);
@@ -174,6 +193,8 @@ test('message bubbles keep incoming and outgoing alignment with semantic theme s
   assert.match(source, /<View\s+ref=\{groupRef\}/);
   assert.match(source, /onMouseEnter/);
   assert.match(source, /onMouseLeave/);
+  assert.match(source, /ref=\{groupRef\}[\s\S]{0,300}style=\{\[styles\.row/);
+  assert.match(source, /<View style=\{\[styles\.messageGroup/);
   assert.doesNotMatch(source, /ref=\{groupRef\}[\s\S]{0,160}onHoverIn/);
   assert.doesNotMatch(source, /width < 700/);
   assert.match(source, /onFocus/);
@@ -207,6 +228,13 @@ test('message action controls preserve compact metadata and receipts', () => {
   assert.match(source, /\{formatTime\(message\.createdAt\)\}/);
   assert.match(source, /own && <ChatReceipt state=\{receipt\}/);
   assert.match(source, /meta: \{ flexDirection: 'row', flexWrap: 'nowrap'/);
+});
+
+test('permanent send failures do not offer a futile retry while transient failures remain retryable', () => {
+  assert.deepEqual(model.messageFailurePresentation('CHAT_READ_ONLY'), { retryable: false, label: 'Messaging for this delivery has ended.' });
+  assert.deepEqual(model.messageFailurePresentation('CHAT_STALE_ASSIGNMENT'), { retryable: false, label: 'Messaging for this delivery has ended.' });
+  assert.deepEqual(model.messageFailurePresentation('CHAT_NOT_AUTHORIZED'), { retryable: false, label: 'You no longer have access to this conversation.' });
+  assert.deepEqual(model.messageFailurePresentation('CHAT_SERVICE_UNAVAILABLE'), { retryable: true, label: 'Tap to retry' });
 });
 
 test('message action derivation and failed-delivery UI remain role and lifecycle specific', () => {

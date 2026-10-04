@@ -61,6 +61,7 @@ export default function ChatMessageBubble({ message, own, receipt, colors, onRet
   const actions = chatModel.messageActionNames({ own, withinWindow, reportable });
   const hasOptions = actions.length > 0;
   const buttonVisible = chatModel.messageActionTriggerVisible({ hovered, focused, menuOpen });
+  const failure = chatModel.messageFailurePresentation(message.errorCode);
 
   React.useEffect(() => {
     if (!menuOpen || useActionSheet || Platform.OS !== 'web' || typeof document === 'undefined') return undefined;
@@ -111,13 +112,13 @@ export default function ChatMessageBubble({ message, own, receipt, colors, onRet
   ) : null;
 
   return (
-    <View style={[styles.row, own ? styles.outgoingRow : styles.incomingRow]}>
-      <View
-        ref={groupRef}
-        onMouseEnter={Platform.OS === 'web' ? () => setHovered(true) : undefined}
-        onMouseLeave={Platform.OS === 'web' ? () => setHovered(false) : undefined}
-        style={[styles.messageGroup, own ? styles.outgoingGroup : styles.incomingGroup]}
-      >
+    <View
+      ref={groupRef}
+      onMouseEnter={Platform.OS === 'web' ? () => setHovered(true) : undefined}
+      onMouseLeave={Platform.OS === 'web' ? () => setHovered(false) : undefined}
+      style={[styles.row, own ? styles.outgoingRow : styles.incomingRow]}
+    >
+      <View style={[styles.messageGroup, own ? styles.outgoingGroup : styles.incomingGroup]}>
         {own && desktopControl}
         <Pressable
           accessibilityRole="text"
@@ -139,7 +140,9 @@ export default function ChatMessageBubble({ message, own, receipt, colors, onRet
             <Text style={[styles.time, { color: own ? 'rgba(255,255,255,0.78)' : colors.textSecondary }]}>{formatTime(message.createdAt)}</Text>
             {own && <ChatReceipt state={receipt} color={receipt === 'failed' ? colors.onPrimary : 'rgba(255,255,255,0.88)'} />}
           </View>
-          {message.failed && <Pressable accessibilityRole="button" accessibilityLabel="Retry sending message" onPress={() => onRetry?.(message)}><Text style={[styles.retry, { color: colors.onPrimary }]}>Tap to retry</Text></Pressable>}
+          {message.failed && (failure.retryable
+            ? <Pressable accessibilityRole="button" accessibilityLabel="Retry sending message" onPress={() => onRetry?.(message)}><Text style={[styles.retry, { color: colors.onPrimary }]}>{failure.label}</Text></Pressable>
+            : <Text accessibilityRole="alert" style={[styles.failure, { color: colors.onPrimary }]}>{failure.label}</Text>)}
         </Pressable>
         {!own && desktopControl}
       </View>
@@ -179,6 +182,7 @@ const styles = StyleSheet.create({
   meta: { flexDirection: 'row', flexWrap: 'nowrap', alignItems: 'center', justifyContent: 'flex-end', alignSelf: 'stretch', gap: 4, marginTop: 3 },
   time: { flexShrink: 0, fontSize: 10, lineHeight: 13, fontWeight: '600' },
   retry: { fontSize: 11, fontWeight: '800', marginTop: 5, textDecorationLine: 'underline' },
+  failure: { fontSize: 11, lineHeight: 15, fontWeight: '800', marginTop: 5 },
   sheetBackdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(5,20,32,.55)' },
   sheet: { width: '100%', borderTopWidth: 1, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingBottom: 18 },
   sheetTitle: { paddingHorizontal: 18, paddingVertical: 16, fontSize: 15, fontWeight: '900' },

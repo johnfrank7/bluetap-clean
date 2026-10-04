@@ -93,6 +93,28 @@ function createClientMutationId(now = Date.now, random = Math.random) {
   return `msg_${now().toString(36)}_${Math.floor(random() * 0x100000000).toString(36)}`;
 }
 
+function sendContextOrderId(conversation = {}) {
+  const clean = (value) => String(value || '').trim();
+  if (conversation.type === 'requester_distributor') return clean(conversation.orderId);
+  if (conversation.type !== 'requester_branch') return '';
+  const orderId = clean(conversation.orderContext?.id || conversation.orderContext?.orderId);
+  if (!orderId) return '';
+  const authorizedOrderIds = Object.values(conversation.authorityReasons || {})
+    .flatMap((reason) => Array.isArray(reason?.orderIds) ? reason.orderIds : [])
+    .map(clean);
+  return authorizedOrderIds.includes(orderId) ? orderId : '';
+}
+
+function messageFailurePresentation(code) {
+  if (['CHAT_READ_ONLY', 'CHAT_CLOSED', 'CHAT_STALE_ASSIGNMENT', 'CHAT_STALE_BRANCH_MEMBERSHIP'].includes(code)) {
+    return { retryable: false, label: 'Messaging for this delivery has ended.' };
+  }
+  if (['CHAT_NOT_AUTHORIZED', 'CHAT_ACCOUNT_INACTIVE', 'CHAT_ACCOUNT_SUSPENDED', 'CHAT_ACCOUNT_TERMINATED', 'CHAT_MANAGER_INACTIVE'].includes(code)) {
+    return { retryable: false, label: 'You no longer have access to this conversation.' };
+  }
+  return { retryable: true, label: 'Tap to retry' };
+}
+
 function formatBadge(count) {
   const value = Math.max(0, Number(count || 0));
   return value > 99 ? '99+' : String(value);
@@ -139,12 +161,14 @@ module.exports = {
   createClientMutationId,
   formatBadge,
   isOwnMessage,
+  messageFailurePresentation,
   mergeMessages,
   messageActionNames,
   messageActionTriggerVisible,
   principalFor,
   principalStateFor,
   receiptFor,
+  sendContextOrderId,
   timeOf,
   totalUnread,
   unreadForConversation,

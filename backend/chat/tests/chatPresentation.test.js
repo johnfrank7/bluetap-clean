@@ -94,6 +94,9 @@ test('chat avatar initials are deterministic and never require a UID fallback', 
 test('message bubbles remain content-sized and wrap long text on shared web/mobile code', () => {
   assert.match(bubbleSource, /outgoingRow: \{ alignItems: 'flex-end' \}/);
   assert.match(bubbleSource, /incomingRow: \{ alignItems: 'flex-start' \}/);
+  assert.match(bubbleSource, /ref=\{groupRef\}[\s\S]{0,300}style=\{\[styles\.row/);
+  assert.match(bubbleSource, /row: \{ width: '100%'/);
+  assert.match(bubbleSource, /\{own && desktopControl\}[\s\S]*styles\.bubble[\s\S]*\{!own && desktopControl\}/);
   assert.match(bubbleSource, /maxWidth: '100%'/);
   assert.match(bubbleSource, /minWidth: 72/);
   assert.match(bubbleSource, /flexWrap: 'nowrap'/);
