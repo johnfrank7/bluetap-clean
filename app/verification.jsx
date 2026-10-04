@@ -13,7 +13,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { onAuthStateChanged, reload } from 'firebase/auth';
 
-import { BLUETAP_LOGIN_GRADIENT } from '../constants/bluetapTheme';
+import { createPortalStyleSheet, useBlueTapTheme } from '../components/BlueTapTheme';
 import { auth } from '../firebase';
 import { getPendingRegistration } from '../services/emailVerification';
 import {
@@ -34,6 +34,7 @@ const { REGISTRATION_STEP: STEP, unavailableRegistrationRoute } = require('../se
 const isVerificationRole = (role) => role === 'requester' || role === 'distributor';
 
 export default function VerificationPage() {
+  const { colors, isDark } = useBlueTapTheme();
   const router = useRouter();
   const [isLoading, setIsLoading] = React.useState(true);
   const [isStarting, setIsStarting] = React.useState(false);
@@ -334,7 +335,7 @@ export default function VerificationPage() {
 
   return (
     <LinearGradient
-      colors={BLUETAP_LOGIN_GRADIENT}
+      colors={isDark ? [colors.background, colors.header] : [colors.primary, colors.primaryLight]}
       style={styles.gradient}
       start={{ x: 0, y: 0 }}
       end={{ x: 0, y: 1 }}
@@ -353,7 +354,7 @@ export default function VerificationPage() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = createPortalStyleSheet({
   gradient: { flex: 1 },
   safeArea: { flex: 1 },
   scrollContent: {

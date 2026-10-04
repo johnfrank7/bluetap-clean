@@ -8,7 +8,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 
-import { BLUETAP_COLORS, BLUETAP_LOGIN_GRADIENT } from '../constants/bluetapTheme';
+import { BLUETAP_COLORS } from '../constants/bluetapTheme';
+import { createPortalStyleSheet, useBlueTapTheme } from '../components/BlueTapTheme';
 import { clearAllAuthSessions } from '../services/authSession';
 import { clearPendingRegistration, completeRegistrationWithoutOtp, getPendingRegistration, requestRegistrationOtp, setPendingRegistration } from '../services/emailVerification';
 import { checkUsername, normalizeUsername, validateUsername } from '../services/usernameAuth';
@@ -48,6 +49,7 @@ const Field = ({ label, error, hint, children }) => (
 );
 
 export default function SignupPage() {
+  const { colors, isDark } = useBlueTapTheme();
   const router = useRouter();
   const params = useLocalSearchParams();
   const { width } = useWindowDimensions();
@@ -411,7 +413,7 @@ export default function SignupPage() {
   const [title, subtitle] = titles[step];
 
   return (
-    <LinearGradient colors={BLUETAP_LOGIN_GRADIENT} style={styles.screen}>
+    <LinearGradient colors={isDark ? [colors.background, colors.header] : [colors.primary, colors.primaryLight]} style={styles.screen}>
       <SafeAreaView style={styles.safe}>
         <StatusBar style="light" />
         <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
@@ -465,7 +467,7 @@ export default function SignupPage() {
                 <Field label="Phone number" error={errors.phone}><View style={[styles.phone, errors.phone && styles.inputError]}><Text style={styles.prefix}>+63</Text><TextInput style={styles.phoneInput} value={form.phone} onChangeText={(v) => update('phone', normalizePhone(v))} keyboardType="phone-pad" maxLength={10} accessibilityLabel="Philippine mobile number" /></View></Field>
                 <Field label="Barangay" error={errors.barangay}><TouchableOpacity style={[styles.input, styles.select, errors.barangay && styles.inputError]} onPress={() => setShowBarangays((v) => !v)}><Text style={form.barangay ? styles.inputText : styles.placeholder}>{form.barangay || 'Select barangay'}</Text><Text>⌄</Text></TouchableOpacity></Field>
                 {showBarangays && <ScrollView style={styles.dropdown} nestedScrollEnabled>{BARANGAYS.map((item) => <TouchableOpacity key={item} style={styles.option} onPress={() => { update('barangay', item); setShowBarangays(false); }}><Text style={styles.inputText}>{item}</Text></TouchableOpacity>)}</ScrollView>}
-                <Field label="Address" error={errors.address}><TextInput style={[styles.input, errors.address && styles.inputError]} value={form.address} onChangeText={(v) => update('address', v)} placeholder="Street, sitio, or house number" placeholderTextColor={BLUETAP_COLORS.textSecondary} /></Field>
+                <Field label="Address" error={errors.address}><TextInput style={[styles.input, errors.address && styles.inputError]} value={form.address} onChangeText={(v) => update('address', v)} placeholder="Street, sitio, or house number" placeholderTextColor={colors.textSecondary} /></Field>
                 {form.role === 'distributor' && <Field label="Apply to branch" error={errors.requestedBranchId} hint={branchLoadError || (branchesLoading ? 'Loading active BlueTap branches…' : 'Choose the active BlueTap branch you are applying to. Administrator approval is required before delivery access.')}><TouchableOpacity disabled={branchesLoading || !!branchLoadError} style={[styles.input, styles.select, errors.requestedBranchId && styles.inputError, (branchesLoading || !!branchLoadError) && styles.inputDisabled]} onPress={() => setShowBranches((value) => !value)} accessibilityRole="combobox" accessibilityLabel="Apply to branch"><Text style={form.requestedBranchId ? styles.inputText : styles.placeholder}>{registrationBranches.find((branch) => branch.id === form.requestedBranchId)?.name || 'Select BlueTap branch'}</Text><Text>⌄</Text></TouchableOpacity></Field>}
                 {form.role === 'distributor' && showBranches && <ScrollView style={styles.dropdown} nestedScrollEnabled>{registrationBranches.map((branch) => <TouchableOpacity key={branch.id} style={styles.option} onPress={() => { update('requestedBranchId', branch.id); setShowBranches(false); }}><Text style={styles.inputText}>{branch.name}</Text></TouchableOpacity>)}{!registrationBranches.length && !branchesLoading && <Text style={styles.emptyDropdown}>No active BlueTap branches are currently available.</Text>}</ScrollView>}
               </View>}
@@ -518,7 +520,7 @@ export default function SignupPage() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = createPortalStyleSheet({
   identityCard: { borderRadius: 20, padding: 24, shadowOpacity: 0.16, shadowRadius: 16 },
   identityCardMobile: { padding: 16 },
   verifyPreview: { borderWidth: 1, borderColor: '#D8E5EF', backgroundColor: '#F7FAFC', borderRadius: 12, padding: 18 },

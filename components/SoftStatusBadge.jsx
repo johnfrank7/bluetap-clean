@@ -24,6 +24,16 @@ const STATUS_META = {
     color: '#9A5B00',
     label: 'Pending',
   },
+  warning: {
+    backgroundColor: '#FFF7ED',
+    color: '#B45309',
+    label: 'Warning',
+  },
+  restricted: {
+    backgroundColor: '#FFF1F0',
+    color: '#C2410C',
+    label: 'Restricted',
+  },
   'outside radius pending approval': {
     backgroundColor: '#FFF8E6',
     color: '#9A5B00',
@@ -123,6 +133,8 @@ const DARK_STATUS_META = {
   active: { backgroundColor: '#0F392B', color: '#34D399', label: 'Active' },
   inactive: { backgroundColor: '#26333D', color: '#CBD5E1', label: 'Inactive' },
   pending: { backgroundColor: '#38280B', color: '#FBBF24', label: 'Pending' },
+  warning: { backgroundColor: '#38280B', color: '#FBBF24', label: 'Warning' },
+  restricted: { backgroundColor: '#451A03', color: '#FB923C', label: 'Restricted' },
   'outside radius pending approval': { backgroundColor: '#38280B', color: '#FBBF24', label: 'Waiting for branch approval' },
   'manager approval pending': { backgroundColor: '#38280B', color: '#FBBF24', label: 'Waiting for branch approval' },
   'awaiting distributor assignment': { backgroundColor: '#133554', color: '#60A5FA', label: 'Waiting for distributor assignment' },

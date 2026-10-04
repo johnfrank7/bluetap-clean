@@ -1,11 +1,11 @@
 import React, { useMemo } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { BLUETAP_COLORS, BLUETAP_LAYOUT } from '../../constants/bluetapTheme';
 import { createPortalStyleSheet, useBlueTapTheme } from '../../components/BlueTapTheme';
-import SoftStatusBadge from '../../components/SoftStatusBadge';
 import BlueTapEmptyState from '../../components/BlueTapEmptyState';
+import NotificationCard from '../../components/NotificationCard';
 import { USER_PORTAL_BOTTOM_CONTENT_INSET, USER_PORTAL_LAYOUT } from '../../constants/userPortalLayout';
 import BlueTapHeader from '../../components/BlueTapHeader';
 import DistributorPortalBackground from '../../components/DistributorPortalBackground';
@@ -24,20 +24,6 @@ const NOTIFICATION_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const formatWhen = (order) => {
   const ts = getOrderLifecycleTimestamp(order);
   return formatNotificationTime(ts);
-};
-
-const getNotificationTone = (statusRaw) => {
-  const s = String(statusRaw || '').toLowerCase().replace(/[\s-]+/g, '_');
-  if (['delivered', 'completed'].includes(s)) {
-    return { dot: '#10B981', border: 'rgba(16, 185, 129, 0.3)' }; // green
-  }
-  if (['delivery_failed', 'cancelled', 'canceled', 'declined'].includes(s)) {
-    return { dot: '#EF4444', border: 'rgba(239, 68, 68, 0.3)' }; // red
-  }
-  if (['out_for_delivery', 'scheduled', 'accepted'].includes(s)) {
-    return { dot: '#0284C7', border: 'rgba(2, 132, 199, 0.3)' }; // blue/cyan
-  }
-  return { dot: '#F59E0B', border: 'rgba(245, 158, 11, 0.3)' }; // amber
 };
 
 const messageFor = (order) => {
@@ -70,7 +56,7 @@ const messageFor = (order) => {
 };
 
 export default function DistributorNotification() {
-  useBlueTapTheme();
+  const { colors, isDark } = useBlueTapTheme();
   const router = useRouter();
   const params = useLocalSearchParams();
   const { orders, loading, error, refresh } = useAssignedDistributorOrders();
@@ -127,26 +113,17 @@ export default function DistributorNotification() {
           />
         ) : (
           <View style={styles.list}>
-            {events.map((event) => {
-              const tone = getNotificationTone(event.status);
-              return (
-                <TouchableOpacity
-                  key={event.id}
-                  onPress={() => { markSeen([event.id]); if (event.noticeId) openNotice(event.noticeId); else setSelectedOrderId(event.orderId); }}
-                  style={[styles.card, { borderLeftWidth: 4, borderLeftColor: tone.dot }]}
-                >
-                  <View style={[styles.dot, { backgroundColor: tone.dot }]} />
-                  <View style={styles.cardBody}>
-                    <View style={styles.cardHeaderRow}>
-                      <SoftStatusBadge status={event.status} />
-                      <Text style={styles.time}>{formatNotificationTime(event.at)}</Text>
-                    </View>
-                    <Text style={styles.message}>{event.message}</Text>
-                  </View>
-                  <Text style={styles.chevron}>›</Text>
-                </TouchableOpacity>
-              );
-            })}
+            {events.map((event) => (
+              <NotificationCard
+                key={event.id}
+                colors={colors}
+                dark={isDark}
+                status={event.status}
+                time={formatNotificationTime(event.at)}
+                message={event.message}
+                onPress={() => { markSeen([event.id]); if (event.noticeId) openNotice(event.noticeId); else setSelectedOrderId(event.orderId); }}
+              />
+            ))}
           </View>
         )}
       </ScrollView>
@@ -205,49 +182,6 @@ const styles = createPortalStyleSheet({
   },
   list: {
     gap: 10,
-  },
-  card: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    backgroundColor: BLUETAP_COLORS.surface,
-    borderWidth: 1,
-    borderColor: BLUETAP_COLORS.border,
-    borderRadius: BLUETAP_LAYOUT.radius.lg,
-    padding: 16,
-    ...BLUETAP_LAYOUT.shadow,
-  },
-  dot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: BLUETAP_COLORS.primary,
-  },
-  cardBody: {
-    flex: 1,
-    minWidth: 0,
-  },
-  cardHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 8,
-    marginBottom: 6,
-  },
-  message: {
-    color: BLUETAP_COLORS.textPrimary,
-    fontSize: 14,
-    lineHeight: 20,
-    fontWeight: '700',
-  },
-  time: {
-    color: BLUETAP_COLORS.muted,
-    fontSize: 11,
-    marginTop: 6,
-  },
-  chevron: {
-    color: BLUETAP_COLORS.primary,
-    fontSize: 24,
   },
   state: {
     minHeight: 220,

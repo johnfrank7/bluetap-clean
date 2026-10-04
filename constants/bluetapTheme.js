@@ -1,3 +1,5 @@
+const { ROLE_THEME_TOKENS } = require('./rolePresentation');
+
 export const BLUETAP_COLORS = Object.freeze({
   primary: '#187BCD',
   primaryAction: '#0B67AD',
@@ -15,6 +17,7 @@ export const BLUETAP_COLORS = Object.freeze({
   success: '#167347', successSoft: '#E3F7EC', warning: '#A96800', warningSoft: '#FFF7E5', danger: '#B52F2F', dangerSoft: '#FCE9E8', disabled: '#A8BBCB',
   successAction: '#167347', onSuccess: '#FFFFFF', warningAction: '#A15F00', onWarning: '#FFFFFF', dangerAction: '#B52F2F', onDanger: '#FFFFFF', disabledText: '#526579',
   white: '#FFFFFF',
+  ...ROLE_THEME_TOKENS.light,
 });
 
 export const BLUETAP_LAYOUT = Object.freeze({
@@ -61,6 +64,7 @@ export const BLUETAP_DARK_COLORS = Object.freeze({
   onDanger: '#FFFFFF',
   disabledText: '#9FB4C8',
   white: '#FFFFFF',
+  ...ROLE_THEME_TOKENS.dark,
 });
 
 export const BLUETAP_LIGHT_PORTAL_COLORS = Object.freeze({

@@ -2,7 +2,6 @@ import React from 'react';
 import {
   Modal,
   ScrollView,
-  StyleSheet,
   Text,
   TouchableOpacity,
   useWindowDimensions,
@@ -61,8 +60,9 @@ export default function RequestDetailsModal({
   onEdit,
 }) {
   const { colors } = useBlueTapTheme();
-  const { width } = useWindowDimensions();
+  const { height, width } = useWindowDimensions();
   const compact = width < 600;
+  const modalMaxHeight = Math.max(1, height - (compact ? 24 : 40));
   const requestReference = request?.requestId || request?.request_id || request?.id;
   const waterStation = request?.waterStation || request?.currentBranchName || request?.currentBranchNameSnapshot || request?.branchNameSnapshot || request?.water_station;
   const deliveryAddress = request?.deliveryAddress || request?.addressSnapshot || request?.address || request?.deliveryLocation?.address;
@@ -114,11 +114,11 @@ export default function RequestDetailsModal({
       animationType="fade"
       onRequestClose={onClose}
     >
-      <View style={[styles.backdrop, !compact && styles.desktopBackdrop, { backgroundColor: colors.overlay }]}>
-        <View style={[styles.modal, !compact && styles.desktopModal]}>
+      <View style={[styles.backdrop, compact ? styles.compactBackdrop : styles.desktopBackdrop, { backgroundColor: colors.overlay }]}>
+        <View accessibilityViewIsModal style={[styles.modal, compact ? styles.compactModal : styles.desktopModal, { maxHeight: modalMaxHeight }]}>
           <View style={styles.header}>
             <Text style={styles.title}>Request Details</Text>
-            <TouchableOpacity activeOpacity={0.75} onPress={onClose}>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Close request details" activeOpacity={0.75} onPress={onClose} style={styles.closeButton}>
               <Text style={styles.closeText}>Close</Text>
             </TouchableOpacity>
           </View>
@@ -136,11 +136,19 @@ export default function RequestDetailsModal({
                   key={`summary-row-${rowIndex}`}
                   style={[
                     styles.summaryRow,
+                    compact && styles.compactGridRow,
                     rowIndex > 0 && styles.summaryRowDivider,
                   ]}
                 >
-                  {row.map((item) => (
-                    <View key={item.label} style={styles.summaryCell}>
+                  {row.map((item, itemIndex) => (
+                    <View
+                      key={item.label}
+                      style={[
+                        styles.summaryCell,
+                        compact && styles.compactGridCell,
+                        compact && itemIndex > 0 && styles.compactGridCellDivider,
+                      ]}
+                    >
                       <Text style={styles.summaryLabel}>{item.label}</Text>
                       {item.status ? (
                         <SoftStatusBadge status={item.status} />
@@ -163,11 +171,19 @@ export default function RequestDetailsModal({
                     key={`customer-row-${rowIndex}`}
                     style={[
                       styles.customerRow,
+                      compact && styles.compactGridRow,
                       rowIndex > 0 && styles.customerRowDivider,
                     ]}
                   >
-                    {row.map((item) => (
-                      <View key={item.label} style={styles.customerCell}>
+                    {row.map((item, itemIndex) => (
+                      <View
+                        key={item.label}
+                        style={[
+                          styles.customerCell,
+                          compact && styles.compactGridCell,
+                          compact && itemIndex > 0 && styles.compactGridCellDivider,
+                        ]}
+                      >
                         <Text style={styles.summaryLabel}>{item.label}</Text>
                         <Text style={styles.summaryValue} numberOfLines={2}>
                           {displayValue(item.value)}
@@ -220,14 +236,16 @@ export default function RequestDetailsModal({
               <Text style={styles.sectionTitle}>Ordered Products</Text>
 
               <View style={styles.productsTable}>
-                <View style={styles.productHeaderRow}>
-                  <Text style={[styles.productHeaderText, styles.productNameColumn]}>
-                    Product
-                  </Text>
-                  <Text style={styles.productHeaderText}>Quantity</Text>
-                  <Text style={styles.productHeaderText}>Unit Price</Text>
-                  <Text style={styles.productHeaderText}>Subtotal</Text>
-                </View>
+                {!compact && (
+                  <View style={styles.productHeaderRow}>
+                    <Text style={[styles.productHeaderText, styles.productNameColumn]}>
+                      Product
+                    </Text>
+                    <Text style={styles.productHeaderText}>Quantity</Text>
+                    <Text style={styles.productHeaderText}>Unit Price</Text>
+                    <Text style={styles.productHeaderText}>Subtotal</Text>
+                  </View>
+                )}
 
                 {products.length === 0 ? (
                   <Text style={styles.emptyText}>No product details available.</Text>
@@ -237,24 +255,42 @@ export default function RequestDetailsModal({
                       key={item.id || `${item.productName}-${index}`}
                       style={[
                         styles.productRow,
+                        compact && styles.compactProductRow,
                         index > 0 && styles.productRowDivider,
                       ]}
                     >
                       <Text
-                        style={[styles.productValue, styles.productNameColumn]}
+                        style={[
+                          styles.productValue,
+                          styles.productNameColumn,
+                          compact && styles.compactProductName,
+                        ]}
                         numberOfLines={2}
                       >
                         {item.productName}
                       </Text>
-                      <Text style={styles.productValue} numberOfLines={1}>
-                        {item.quantity}
-                      </Text>
-                      <Text style={styles.productValue} numberOfLines={1}>
-                        {formatAmount(item.unitPrice)}
-                      </Text>
-                      <Text style={styles.productValue} numberOfLines={1}>
-                        {formatAmount(item.subtotal)}
-                      </Text>
+                      {compact ? (
+                        <View style={styles.compactProductMeta}>
+                          <View style={styles.compactProductField}>
+                            <Text style={styles.productMobileLabel}>Quantity</Text>
+                            <Text style={styles.compactProductValue} numberOfLines={1}>{item.quantity}</Text>
+                          </View>
+                          <View style={styles.compactProductField}>
+                            <Text style={styles.productMobileLabel}>Unit Price</Text>
+                            <Text style={styles.compactProductValue} numberOfLines={1}>{formatAmount(item.unitPrice)}</Text>
+                          </View>
+                          <View style={styles.compactProductField}>
+                            <Text style={styles.productMobileLabel}>Subtotal</Text>
+                            <Text style={styles.compactProductValue} numberOfLines={1}>{formatAmount(item.subtotal)}</Text>
+                          </View>
+                        </View>
+                      ) : (
+                        <>
+                          <Text style={styles.productValue} numberOfLines={1}>{item.quantity}</Text>
+                          <Text style={styles.productValue} numberOfLines={1}>{formatAmount(item.unitPrice)}</Text>
+                          <Text style={styles.productValue} numberOfLines={1}>{formatAmount(item.subtotal)}</Text>
+                        </>
+                      )}
                     </View>
                   ))
                 )}
@@ -313,10 +349,12 @@ const styles = createPortalStyleSheet({
     justifyContent: 'center',
     padding: 20,
   },
+  compactBackdrop: {
+    paddingTop: 12,
+  },
   modal: {
     width: '100%',
     maxWidth: 430,
-    maxHeight: '90%',
     backgroundColor: '#FFFFFF',
     borderTopLeftRadius: 22,
     borderTopRightRadius: 22,
@@ -331,8 +369,12 @@ const styles = createPortalStyleSheet({
       offset: { width: 0, height: 6 },
     }),
   },
+  compactModal: {
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
+  },
   desktopModal: {
-    maxWidth: 720,
+    maxWidth: 640,
     borderRadius: 22,
   },
   header: {
@@ -351,6 +393,12 @@ const styles = createPortalStyleSheet({
     color: BLUE,
     fontSize: 12,
     fontWeight: 'bold',
+  },
+  closeButton: {
+    minHeight: 36,
+    minWidth: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   divider: {
     height: 1,
@@ -374,6 +422,9 @@ const styles = createPortalStyleSheet({
   summaryRow: {
     flexDirection: 'row',
   },
+  compactGridRow: {
+    flexDirection: 'column',
+  },
   summaryRowDivider: {
     borderTopWidth: 1,
     borderTopColor: BLUE_LIGHT,
@@ -384,6 +435,14 @@ const styles = createPortalStyleSheet({
     paddingHorizontal: 12,
     paddingVertical: 10,
     justifyContent: 'center',
+  },
+  compactGridCell: {
+    flex: 0,
+    width: '100%',
+  },
+  compactGridCellDivider: {
+    borderTopWidth: 1,
+    borderTopColor: BLUE_LIGHT,
   },
   summaryLabel: {
     color: TEXT_MUTED,
@@ -466,6 +525,38 @@ const styles = createPortalStyleSheet({
   productRowDivider: {
     borderTopWidth: 1,
     borderTopColor: BLUE_LIGHT,
+  },
+  compactProductRow: {
+    alignItems: 'stretch',
+    flexDirection: 'column',
+    gap: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+  },
+  compactProductName: {
+    flex: 0,
+    width: '100%',
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  compactProductMeta: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  compactProductField: {
+    flex: 1,
+    minWidth: 0,
+  },
+  productMobileLabel: {
+    color: TEXT_MUTED,
+    fontSize: 9,
+    fontWeight: '700',
+    marginBottom: 3,
+  },
+  compactProductValue: {
+    color: TEXT_DARK,
+    fontSize: 11,
+    fontWeight: '800',
   },
   productValue: {
     flex: 1,

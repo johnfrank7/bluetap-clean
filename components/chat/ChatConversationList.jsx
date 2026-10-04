@@ -2,6 +2,7 @@ import React from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import BlueTapChatIcon from './BlueTapChatIcon';
+import RoleBadge from '../RoleBadge';
 import SoftStatusBadge from '../SoftStatusBadge';
 import { useChat } from './ChatContext';
 const { timeOf } = require('./chatModel');
@@ -45,7 +46,7 @@ function ConversationRow({ colors, conversation, onPress, role }) {
         <View style={styles.rowTop}>
           <View style={styles.identityRow}>
             <Text style={[styles.name, { color: colors.textPrimary }, conversation.unreadCount > 0 && styles.unreadName]} numberOfLines={1}>{conversation.displayName}</Text>
-            {!!roleLabel && <SoftStatusBadge status="active" label={roleLabel} compact numberOfLines={1} style={styles.statusBadge} />}
+            {!!roleLabel && <RoleBadge colors={colors} role={roleLabel} compact numberOfLines={1} style={styles.roleBadge} />}
             {!roleLabel && !!conversation.orderStatus && <SoftStatusBadge status={conversation.orderStatus} compact numberOfLines={1} style={styles.statusBadge} />}
             {!roleLabel && !conversation.orderStatus && generalInquiry && <SoftStatusBadge status="pending" label="General inquiry" compact numberOfLines={1} style={styles.statusBadge} />}
           </View>
@@ -193,6 +194,7 @@ const styles = StyleSheet.create({
   timestamp: { flexShrink: 0, fontSize: 10, fontWeight: '600' },
   context: { fontSize: 11, marginTop: 2 },
   statusBadge: { maxWidth: '52%', flexShrink: 1 },
+  roleBadge: { maxWidth: '42%', flexShrink: 1 },
   previewRow: { flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 3 },
   preview: { flex: 1, fontSize: 12 },
   badge: { minWidth: 20, height: 20, paddingHorizontal: 5, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },

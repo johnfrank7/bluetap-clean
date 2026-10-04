@@ -1,13 +1,16 @@
 import React from 'react';
 import { StyleSheet, TouchableOpacity, View } from 'react-native';
+import { useBlueTapTheme } from './BlueTapTheme';
 
 export default function PasswordVisibilityButton({
   visible,
   onPress,
-  color = '#187BCD',
+  color,
   style,
   label = 'password',
 }) {
+  const { colors } = useBlueTapTheme();
+  const resolvedColor = color || colors.primary;
   return (
     <TouchableOpacity
       accessibilityRole="button"
@@ -16,10 +19,10 @@ export default function PasswordVisibilityButton({
       onPress={onPress}
       style={[styles.button, style]}
     >
-      <View style={[styles.eye, { borderColor: color }]}>
-        <View style={[styles.pupil, { backgroundColor: color }]} />
+      <View style={[styles.eye, { borderColor: resolvedColor }]}>
+        <View style={[styles.pupil, { backgroundColor: resolvedColor }]} />
       </View>
-      {!visible && <View style={[styles.slash, { backgroundColor: color }]} />}
+      {!visible && <View style={[styles.slash, { backgroundColor: resolvedColor }]} />}
     </TouchableOpacity>
   );
 }

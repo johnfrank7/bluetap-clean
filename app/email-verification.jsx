@@ -14,7 +14,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRootNavigationState, useRouter } from 'expo-router';
 import { onAuthStateChanged, reload, signInWithCustomToken, signOut } from 'firebase/auth';
 
-import { BLUETAP_LOGIN_GRADIENT } from '../constants/bluetapTheme';
+import { createPortalStyleSheet, useBlueTapTheme } from '../components/BlueTapTheme';
 import { RegistrationActions, RegistrationBrand, RegistrationNotice, RegistrationStepper } from '../components/RegistrationUi';
 import { auth } from '../firebase';
 import { clearAllAuthSessions, fetchFirestoreUserProfile, getPostAuthenticationDestination } from '../services/authSession';
@@ -75,6 +75,7 @@ const getOtpError = (error) => {
 };
 
 export default function EmailVerificationPage() {
+  const { colors, isDark } = useBlueTapTheme();
   const router = useRouter();
   const rootNavigationState = useRootNavigationState();
   const params = useLocalSearchParams();
@@ -399,7 +400,7 @@ export default function EmailVerificationPage() {
 
   return (
     <LinearGradient
-      colors={BLUETAP_LOGIN_GRADIENT}
+      colors={isDark ? [colors.background, colors.header] : [colors.primary, colors.primaryLight]}
       style={styles.gradient}
       start={{ x: 0, y: 0 }}
       end={{ x: 0, y: 1 }}
@@ -538,7 +539,7 @@ export default function EmailVerificationPage() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = createPortalStyleSheet({
   gradient: { flex: 1 },
   safeArea: { flex: 1 },
   scrollContent: {

@@ -21,6 +21,9 @@ test('Admin shell owns responsive navigation, theme preference, and confirmed lo
   assert.match(shell, /duration: 240/);
   assert.match(shell, /drawerOpen/);
   assert.match(shell, /Close navigation/);
+  assert.match(shell, /compact && styles\.compactHeader/);
+  assert.match(shell, /compact && styles\.compactContent/);
+  assert.match(shell, /!compact && <View style=\{\[styles\.adminBadge/);
   assert.match(shell, /accessibilityRole="switch"/);
   assert.match(shell, /Light mode/);
   assert.match(shell, /Dark mode/);

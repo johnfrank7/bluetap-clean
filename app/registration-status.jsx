@@ -5,7 +5,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { onAuthStateChanged } from 'firebase/auth';
 
-import { BLUETAP_LOGIN_GRADIENT } from '../constants/bluetapTheme';
+import { createPortalStyleSheet, useBlueTapTheme } from '../components/BlueTapTheme';
 import { auth } from '../firebase';
 import {
   fetchFirestoreUserProfile,
@@ -14,6 +14,7 @@ import {
 } from '../services/authSession';
 
 export default function RegistrationStatusPage() {
+  const { colors, isDark } = useBlueTapTheme();
   const router = useRouter();
   const [profile, setProfile] = React.useState(null);
   const [loading, setLoading] = React.useState(true);
@@ -63,10 +64,10 @@ export default function RegistrationStatusPage() {
       : 'Your identity verification succeeded. Your distributor application is awaiting administrator approval before you can access the distributor dashboard.';
 
   return (
-    <LinearGradient colors={BLUETAP_LOGIN_GRADIENT} style={styles.gradient}>
+    <LinearGradient colors={isDark ? [colors.background, colors.header] : [colors.primary, colors.primaryLight]} style={styles.gradient}>
       <SafeAreaView style={styles.safeArea}>
         <View style={styles.card}>
-          {loading ? <ActivityIndicator size="large" color="#187BCD" /> : <>
+          {loading ? <ActivityIndicator size="large" color={colors.primary} /> : <>
             <Text style={styles.title}>{title}</Text>
             <Text style={styles.message}>{message}</Text>
             <TouchableOpacity style={styles.button} onPress={returnToLogin}>
@@ -79,10 +80,10 @@ export default function RegistrationStatusPage() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = createPortalStyleSheet({
   gradient: { flex: 1 },
   safeArea: { flex: 1, justifyContent: 'center', padding: 24 },
-  card: { backgroundColor: '#FFF', borderRadius: 20, padding: 28, alignItems: 'center' },
+  card: { width: '100%', maxWidth: 480, alignSelf: 'center', backgroundColor: '#FFF', borderRadius: 20, padding: 28, alignItems: 'center' },
   title: { color: '#12304A', fontSize: 24, fontWeight: '800', textAlign: 'center', marginBottom: 12 },
   message: { color: '#4D6274', fontSize: 15, lineHeight: 22, textAlign: 'center' },
   button: { backgroundColor: '#187BCD', borderRadius: 12, marginTop: 24, minHeight: 50, paddingHorizontal: 20, justifyContent: 'center' },

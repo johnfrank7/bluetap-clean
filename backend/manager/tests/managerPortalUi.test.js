@@ -16,6 +16,7 @@ const managerProducts = read('app/manager/products.jsx');
 const managerAnalytics = read('app/manager/analytics.jsx');
 const emptyState = read('components/BlueTapEmptyState.jsx');
 const notificationHook = read('components/ManagerNotifications.jsx');
+const notificationCard = read('components/NotificationCard.jsx');
 const rules = read('firestore.rules');
 
 test('Manager operational queues use shared BlueTap visual empty states with contextual copy', () => {
@@ -67,6 +68,15 @@ test('Manager notification control reuses the canonical BlueTap bell asset and k
 });
 
 test('notification cards navigate to authorized order context with a read-only fallback for non-order events', () => {
+  assert.match(notifications, /NotificationCard/);
+  assert.match(notifications, /dark=\{resolvedTheme === 'dark'\}/);
+  assert.match(notifications, /time=\{formatNotificationTime\(event\.at\)\}/);
+  assert.match(notifications, /metadata=\{`Order #\$\{event\.requestId\}/);
+  assert.match(notifications, /maxWidth: 760/);
+  assert.match(notificationCard, /backgroundColor: colors\.surface/);
+  assert.match(notificationCard, /borderColor: colors\.border/);
+  assert.match(notificationCard, /color: colors\.textPrimary \|\| colors\.text/);
+  assert.match(notificationCard, /marginLeft: 'auto'/);
   assert.match(notifications, /router\.push\(\{ pathname: '\/manager\/request', params: \{ orderId: event\.orderId \} \}\)/);
   assert.match(notifications, /setSelectedEventId\(event\.id\)/);
   assert.match(notifications, /events\.find/);

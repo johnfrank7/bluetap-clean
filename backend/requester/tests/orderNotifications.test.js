@@ -17,6 +17,9 @@ const {
   orderDetailPathForRole,
   orderDetailTarget,
 } = require('../../../services/orderNavigation');
+const {
+  notificationSeverity,
+} = require('../../../components/notificationPresentation');
 
 const root = path.resolve(__dirname, '..', '..', '..');
 const read = (file) => fs.readFileSync(path.join(root, file), 'utf8');
@@ -57,6 +60,33 @@ test('delivery failure formatting is null-safe for empty and non-failed order st
   assert.equal(formatDeliveryFailureReason({}), '');
   assert.equal(formatDeliveryFailureReason({ status: 'scheduled' }), '');
   assert.equal(formatDeliveryFailureReason(null, 'Delivery issue reported'), 'Delivery issue reported');
+});
+
+test('notification severity distinguishes success, information, warning, restriction, and cancellation without color alone', () => {
+  assert.equal(notificationSeverity('delivered').kind, 'success');
+  assert.equal(notificationSeverity('scheduled').kind, 'info');
+  assert.equal(notificationSeverity('out_for_delivery').kind, 'delivery');
+  assert.equal(notificationSeverity('pending').kind, 'warning');
+  assert.equal(notificationSeverity('outside_radius_pending_approval').kind, 'warning');
+  assert.equal(notificationSeverity('review').kind, 'warning');
+  assert.equal(notificationSeverity('warning').kind, 'warning');
+  assert.equal(notificationSeverity('restricted').kind, 'restricted');
+  assert.equal(notificationSeverity('cancelled').kind, 'error');
+  assert.notEqual(notificationSeverity('warning').icon, notificationSeverity('restricted').icon);
+  assert.notEqual(notificationSeverity('restricted').icon, notificationSeverity('cancelled').icon);
+  assert.notEqual(notificationSeverity('warning').accent, notificationSeverity('restricted').accent);
+  assert.notEqual(notificationSeverity('warning').soft, notificationSeverity('warning', true).soft);
+
+  for (const file of ['app/requester/r_notification.jsx', 'app/distributor/d_notification.jsx', 'app/manager/notifications.jsx']) {
+    const source = read(file);
+    assert.match(source, /NotificationCard/);
+  }
+  const card = read('components/NotificationCard.jsx');
+  assert.match(card, /notificationSeverity\(status, dark\)/);
+  assert.match(card, /accessibilityLabel=\{`\$\{tone\.label\} notification`\}/);
+  assert.match(card, /tone\.icon/);
+  assert.match(card, /flexWrap: 'wrap'/);
+  assert.match(card, /borderLeftColor: tone\.accent/);
 });
 
 test('Requester and Distributor detail presentation tolerate a missing selected order', () => {
@@ -129,6 +159,11 @@ test('shared UI sources keep dialogs bounded, bubbles content-sized, maps gracef
   assert.match(bubble, /overflowWrap: 'anywhere'/);
   assert.match(details, /Delivery Location Map/);
   assert.match(details, /Location unavailable/);
+  assert.match(details, /maxWidth: 640/);
+  assert.match(details, /height - \(compact \? 24 : 40\)/);
+  assert.match(details, /compactGridRow/);
+  assert.match(details, /compactProductMeta/);
+  assert.match(details, /style=\{styles\.scroll\}/);
   assert.match(header, /unseenCount > 0 &&/);
   assert.match(nav, /badgeCount > 0 &&/);
 });

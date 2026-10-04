@@ -1,10 +1,46 @@
 import React from 'react';
-import { Modal, Platform, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { Modal, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import ChatReceipt from './ChatReceipt';
 import chatModel from './chatModel';
 
 const { timeOf } = chatModel;
+const FINE_POINTER_QUERY = '(hover: hover) and (pointer: fine)';
+
+const finePointerMatches = () =>
+  Platform.OS === 'web' &&
+  typeof window !== 'undefined' &&
+  typeof window.matchMedia === 'function' &&
+  window.matchMedia(FINE_POINTER_QUERY).matches;
+
+const useFinePointer = () => {
+  const [matches, setMatches] = React.useState(finePointerMatches);
+
+  React.useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+      return undefined;
+    }
+
+    const mediaQuery = window.matchMedia(FINE_POINTER_QUERY);
+    const update = (event) => setMatches(event.matches);
+    setMatches(mediaQuery.matches);
+    if (typeof mediaQuery.addEventListener === 'function') {
+      mediaQuery.addEventListener('change', update);
+    } else {
+      mediaQuery.addListener?.(update);
+    }
+
+    return () => {
+      if (typeof mediaQuery.removeEventListener === 'function') {
+        mediaQuery.removeEventListener('change', update);
+      } else {
+        mediaQuery.removeListener?.(update);
+      }
+    };
+  }, []);
+
+  return matches;
+};
 
 const formatTime = (value) => {
   const timestamp = timeOf(value);
@@ -17,8 +53,8 @@ export default function ChatMessageBubble({ message, own, receipt, colors, onRet
   const [hovered, setHovered] = React.useState(false);
   const [focused, setFocused] = React.useState(false);
   const groupRef = React.useRef(null);
-  const { width } = useWindowDimensions();
-  const useActionSheet = Platform.OS !== 'web' || width < 700;
+  const finePointer = useFinePointer();
+  const useActionSheet = Platform.OS !== 'web' || !finePointer;
   const deleted = Boolean(message.deletedAt);
   const withinWindow = Boolean(message.id) && !deleted && Date.now() - timeOf(message.createdAt) <= 15 * 60 * 1000;
   const reportable = !own && Boolean(message.id && onReport && !deleted);
@@ -30,7 +66,8 @@ export default function ChatMessageBubble({ message, own, receipt, colors, onRet
     if (!menuOpen || useActionSheet || Platform.OS !== 'web' || typeof document === 'undefined') return undefined;
     const closeOutside = (event) => {
       const node = groupRef.current;
-      if (!node?.contains?.(event.target)) setMenuOpen(false);
+      const eventPath = event.composedPath?.() || [];
+      if (!eventPath.includes(node) && !node?.contains?.(event.target)) setMenuOpen(false);
     };
     const closeOnEscape = (event) => { if (event.key === 'Escape') setMenuOpen(false); };
     document.addEventListener('mousedown', closeOutside);
@@ -59,7 +96,7 @@ export default function ChatMessageBubble({ message, own, receipt, colors, onRet
         pointerEvents={buttonVisible ? 'auto' : 'none'}
         style={[styles.menuButton, !buttonVisible && styles.menuButtonHidden]}
       >
-        <Text style={[styles.menuGlyph, { color: colors.textSecondary }]}>{'\u22EE'}</Text>
+        <Text style={[styles.menuGlyph, { color: colors.textSecondary }]}>{'\u2022\u2022\u2022'}</Text>
       </Pressable>
       {menuOpen && (
         <View style={[styles.menu, own ? styles.outgoingMenu : styles.incomingMenu, { backgroundColor: colors.surface, borderColor: colors.border }]}>
@@ -75,12 +112,10 @@ export default function ChatMessageBubble({ message, own, receipt, colors, onRet
 
   return (
     <View style={[styles.row, own ? styles.outgoingRow : styles.incomingRow]}>
-      <View
+      <Pressable
         ref={groupRef}
-        {...(Platform.OS === 'web' ? {
-          onMouseEnter: () => setHovered(true),
-          onMouseLeave: () => setHovered(false),
-        } : {})}
+        onHoverIn={Platform.OS === 'web' ? () => setHovered(true) : undefined}
+        onHoverOut={Platform.OS === 'web' ? () => setHovered(false) : undefined}
         style={[styles.messageGroup, own ? styles.outgoingGroup : styles.incomingGroup]}
       >
         {own && desktopControl}
@@ -107,7 +142,7 @@ export default function ChatMessageBubble({ message, own, receipt, colors, onRet
           {message.failed && <Pressable accessibilityRole="button" accessibilityLabel="Retry sending message" onPress={() => onRetry?.(message)}><Text style={[styles.retry, { color: colors.onPrimary }]}>Tap to retry</Text></Pressable>}
         </Pressable>
         {!own && desktopControl}
-      </View>
+      </Pressable>
       <Modal visible={useActionSheet && menuOpen} transparent animationType="fade" onRequestClose={() => setMenuOpen(false)}>
         <View style={styles.sheetBackdrop}>
           <Pressable accessibilityRole="button" accessibilityLabel="Cancel message actions" onPress={() => setMenuOpen(false)} style={StyleSheet.absoluteFill} />
@@ -135,7 +170,7 @@ const styles = StyleSheet.create({
   actionSlot: { width: 34, height: 34, flexShrink: 0, position: 'relative', alignItems: 'center', justifyContent: 'center' },
   menuButton: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
   menuButtonHidden: { opacity: 0 },
-  menuGlyph: { fontSize: 20, fontWeight: '900' },
+  menuGlyph: { fontSize: 15, fontWeight: '900', letterSpacing: 1 },
   menu: { position: 'absolute', top: 32, minWidth: 144, borderWidth: 1, borderRadius: 10, zIndex: 20, paddingVertical: 4, shadowColor: '#000', shadowOpacity: .16, shadowRadius: 8, elevation: 8 },
   outgoingMenu: { right: 0 },
   incomingMenu: { left: 0 },

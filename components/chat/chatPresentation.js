@@ -33,6 +33,7 @@ function avatarForConversation(conversation = {}, role = '') {
 function counterpartRoleLabel(conversation = {}, role = '') {
   if (role === 'requester' && conversation.type === 'requester_distributor') return 'Distributor';
   if (role === 'manager' && conversation.type === 'distributor_branch') return 'Distributor';
+  if (role === 'distributor' && conversation.type === 'distributor_branch') return 'Manager';
   const declaredRole = clean(conversation.counterpartRole).toLowerCase();
   if (declaredRole === 'manager' && conversation.type !== 'requester_branch') return 'Manager';
   if (declaredRole === 'distributor') return 'Distributor';

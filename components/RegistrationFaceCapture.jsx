@@ -4,6 +4,7 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import { beginRegistrationFace, evaluateRegistrationChallenge, completeRegistrationFace } from '../services/faceVerification';
 import { nativeChallengeAvailable, runNativeFaceChallenge } from '../services/nativeFaceChallenge';
 import WebRegistrationFaceCapture from './WebRegistrationFaceCapture';
+import { createPortalStyleSheet } from './BlueTapTheme';
 
 const { getRegistrationFaceCaptureMode, isTrustedRegistrationFaceVerification } = require('../services/webFaceCaptureCore');
 const { isFaceServicePreparationError } = require('../services/faceServiceWarmupCore');
@@ -171,7 +172,7 @@ function FaceServicePreparation({ status, onCheck }) {
 function PrivacyNote() {
   return <View style={styles.privacyBox}><View style={styles.lockIcon} accessible={false}><View style={styles.lockShackle} /><View style={styles.lockBody} /></View><View style={styles.privacyContent}><Text style={styles.privacyTitle}>Privacy and security</Text><Text style={styles.privacy}>Your face check is used only for identity verification. BlueTap stores only verification metadata in your profile.</Text></View></View>;
 }
-const styles = StyleSheet.create({
+const styles = createPortalStyleSheet({
   stack: { width: '100%', gap: 16 },
   box: { width: '100%', alignItems: 'center', gap: 12, padding: 24, backgroundColor: '#F8FBFE', borderWidth: 1, borderColor: '#DDEBF6', borderRadius: 18 },
   title: { fontSize: 19, fontWeight: '600', color: '#12304A', textAlign: 'center' },

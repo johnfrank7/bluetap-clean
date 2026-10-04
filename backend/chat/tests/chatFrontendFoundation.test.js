@@ -7,6 +7,8 @@ const root = path.resolve(__dirname, '..', '..', '..');
 const read = (file) => fs.readFileSync(path.join(root, file), 'utf8');
 const model = require('../../../components/chat/chatModel');
 const { chatAccessReadiness } = require('../../../components/chat/chatAccessReadiness');
+const { counterpartRoleLabel } = require('../../../components/chat/chatPresentation');
+const { getRolePresentation, ROLE_THEME_TOKENS } = require('../../../constants/rolePresentation');
 
 test('user and Manager branch unread totals use logical principal state', () => {
   const conversations = [{ participantState: [
@@ -126,6 +128,32 @@ test('operational layouts mount chat while Admin stays excluded', () => {
   assert.doesNotMatch(read('app/admin/_layout.jsx'), /ChatDataProvider|ChatFloatingLauncher/);
 });
 
+test('chat role badges reuse Accounts and Audit role colors without replacing order statuses', () => {
+  const list = read('components/chat/ChatConversationList.jsx');
+  const accounts = read('app/admin/managers.jsx');
+  const adminTheme = read('components/AdminTheme.jsx');
+  const portalTheme = read('constants/bluetapTheme.js');
+
+  assert.equal(counterpartRoleLabel({ type: 'distributor_branch', displayName: 'BlueTap A' }, 'distributor'), 'Manager');
+  assert.equal(counterpartRoleLabel({ type: 'distributor_branch' }, 'manager'), 'Distributor');
+  assert.equal(counterpartRoleLabel({ type: 'requester_branch', counterpartRole: 'manager' }, 'requester'), '');
+  assert.deepEqual(getRolePresentation('manager', ROLE_THEME_TOKENS.light), {
+    role: 'manager', label: 'Manager', backgroundColor: '#F2EDFF', color: '#6D28D9',
+  });
+  assert.deepEqual(getRolePresentation('distributor', ROLE_THEME_TOKENS.light), {
+    role: 'distributor', label: 'Distributor', backgroundColor: '#E5F7F3', color: '#0F766E',
+  });
+  assert.notEqual(getRolePresentation('distributor', ROLE_THEME_TOKENS.light).color, '#047857');
+
+  assert.match(list, /<RoleBadge colors=\{colors\} role=\{roleLabel\} compact/);
+  assert.match(list, /!roleLabel && !!conversation\.orderStatus && <SoftStatusBadge status=\{conversation\.orderStatus\}/);
+  assert.match(list, /displayName: stationConversation\?\.displayName \|\| stationName \|\| 'Your BlueTap Station'/);
+  assert.doesNotMatch(list, /SoftStatusBadge status="active" label=\{roleLabel\}/);
+  assert.match(accounts, /<RoleBadge colors=\{colors\}/);
+  assert.match(adminTheme, /\.\.\.ROLE_THEME_TOKENS\.light/);
+  assert.match(portalTheme, /\.\.\.ROLE_THEME_TOKENS\.light/);
+});
+
 test('order entry points resolve only server-authorized conversation intents', () => {
   const source = read('components/chat/ChatOrderActions.jsx');
   const provider = read('components/chat/ChatDataProvider.jsx');
@@ -141,12 +169,16 @@ test('message bubbles keep incoming and outgoing alignment with semantic theme s
   assert.match(source, /own \? styles\.outgoingRow : styles\.incomingRow/);
   assert.match(source, /colors\.primaryAction/);
   assert.match(source, /colors\.surfaceAlt/);
-  assert.match(source, /onMouseEnter/);
-  assert.match(source, /onMouseLeave/);
+  assert.match(source, /\(hover: hover\) and \(pointer: fine\)/);
+  assert.match(source, /window\.matchMedia/);
+  assert.match(source, /onHoverIn/);
+  assert.match(source, /onHoverOut/);
+  assert.doesNotMatch(source, /width < 700/);
   assert.match(source, /onFocus/);
   assert.match(source, /delayLongPress=\{500\}/);
   assert.match(source, /More message actions/);
   assert.match(source, /event\.key === 'Escape'/);
+  assert.match(source, /\\u2022\\u2022\\u2022/);
 });
 
 test('desktop message action visibility survives focus and an open menu while mouse leave hides a closed trigger', () => {

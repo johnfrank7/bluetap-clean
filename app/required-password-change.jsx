@@ -1,14 +1,17 @@
 import React from 'react';
 import { ActivityIndicator, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useRouter } from 'expo-router';
+import { LinearGradient } from 'expo-linear-gradient';
 import { onAuthStateChanged, signInWithEmailAndPassword } from 'firebase/auth';
 
 import { auth } from '../firebase';
 import { clearAllAuthSessions, getPostAuthenticationDestination, getRoleLoginPath, saveRoleSession, signOutAndClearSessions } from '../services/authSession';
 import { completeRequiredPasswordChange } from '../services/requiredPasswordChange';
 import PasswordVisibilityButton from '../components/PasswordVisibilityButton';
+import { createPortalStyleSheet, useBlueTapTheme } from '../components/BlueTapTheme';
 
 export default function RequiredPasswordChangePage() {
+  const { colors, isDark } = useBlueTapTheme();
   const router = useRouter();
   const passwordChangeFlow = React.useRef(false);
   const [ready, setReady] = React.useState(false);
@@ -57,24 +60,24 @@ export default function RequiredPasswordChangePage() {
     } finally { setSaving(false); }
   };
 
-  if (!ready) return <View style={styles.screen}><ActivityIndicator color="#187BCD" size="large" /></View>;
-  return <View style={styles.screen}><View style={styles.card}>
+  if (!ready) return <View style={styles.screen}><ActivityIndicator color={colors.primary} size="large" /></View>;
+  return <LinearGradient colors={isDark ? [colors.background, colors.header] : [colors.primary, colors.primaryLight]} style={styles.screen}><View style={styles.card}>
     <Text style={styles.eyebrow}>BLUETAP ACCOUNT SECURITY</Text>
     <Text style={styles.title}>Create a new password</Text>
     <Text style={styles.help}>Your temporary password must be replaced before you can access BlueTap.</Text>
     <Text style={styles.label}>New password</Text>
-    <View style={styles.passwordField}><TextInput secureTextEntry={!showPassword} autoCapitalize="none" value={password} onChangeText={setPassword} style={styles.passwordInput} placeholder="Enter a new password" /><PasswordVisibilityButton visible={showPassword} onPress={() => setShowPassword((visible) => !visible)} label="new password" /></View>
+    <View style={styles.passwordField}><TextInput secureTextEntry={!showPassword} autoCapitalize="none" value={password} onChangeText={setPassword} style={styles.passwordInput} placeholder="Enter a new password" placeholderTextColor={colors.textSecondary} /><PasswordVisibilityButton visible={showPassword} onPress={() => setShowPassword((visible) => !visible)} label="new password" /></View>
     <Text style={styles.hint}>Use at least 12 characters with uppercase, lowercase, and a number.</Text>
     <Text style={styles.label}>Confirm new password</Text>
-    <View style={styles.passwordField}><TextInput secureTextEntry={!showConfirmation} autoCapitalize="none" value={confirmPassword} onChangeText={setConfirmPassword} style={styles.passwordInput} placeholder="Re-enter the new password" /><PasswordVisibilityButton visible={showConfirmation} onPress={() => setShowConfirmation((visible) => !visible)} label="password confirmation" /></View>
+    <View style={styles.passwordField}><TextInput secureTextEntry={!showConfirmation} autoCapitalize="none" value={confirmPassword} onChangeText={setConfirmPassword} style={styles.passwordInput} placeholder="Re-enter the new password" placeholderTextColor={colors.textSecondary} /><PasswordVisibilityButton visible={showConfirmation} onPress={() => setShowConfirmation((visible) => !visible)} label="password confirmation" /></View>
     {!!error && <Text style={styles.error}>{error}</Text>}
     <TouchableOpacity disabled={saving} onPress={submit} style={[styles.button, saving && styles.disabled]}><Text style={styles.buttonText}>{saving ? 'Changing password...' : 'Change password'}</Text></TouchableOpacity>
     <TouchableOpacity disabled={saving} onPress={async () => { await signOutAndClearSessions(); router.replace('/login'); }} style={styles.signOut}><Text style={styles.signOutText}>Sign out</Text></TouchableOpacity>
-  </View></View>;
+  </View></LinearGradient>;
 }
 
-const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: '#EAF5FD', alignItems: 'center', justifyContent: 'center', padding: 20 },
+const styles = createPortalStyleSheet({
+  screen: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 20 },
   card: { width: '100%', maxWidth: 480, backgroundColor: '#FFF', borderRadius: 20, padding: 26, borderWidth: 1, borderColor: '#CDE3F2' },
   eyebrow: { color: '#187BCD', fontSize: 12, fontWeight: '800', letterSpacing: 1, textAlign: 'center' },
   title: { color: '#17324D', fontSize: 27, fontWeight: '900', textAlign: 'center', marginTop: 8 },

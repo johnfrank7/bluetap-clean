@@ -46,6 +46,14 @@ const uniqueIds = read('services/uniqueIds.js');
 const login = read('app/login.jsx');
 const signup = read('app/signup.jsx');
 const passwordChange = read('app/required-password-change.jsx');
+const registrationStatus = read('app/registration-status.jsx');
+const emailVerification = read('app/email-verification.jsx');
+const verification = read('app/verification.jsx');
+const accountAccessState = read('components/AccountAccessState.jsx');
+const registrationUi = read('components/RegistrationUi.jsx');
+const registrationFaceCapture = read('components/RegistrationFaceCapture.jsx');
+const webRegistrationFaceCapture = read('components/WebRegistrationFaceCapture.web.jsx');
+const passwordVisibilityButton = read('components/PasswordVisibilityButton.jsx');
 const privilegedLogin = read('components/PrivilegedLogin.jsx');
 const adminManagers = read('app/admin/managers.jsx');
 
@@ -159,6 +167,11 @@ test('new request uses the same light-default gradient treatment as the Requeste
   assert.match(form, /colors\.primaryLight/);
   assert.match(form, /backgroundColor:'transparent'/);
 });
+test('Requester notifications use the current light-default portal gradient instead of the legacy flat canvas', () => {
+  assert.match(notifications, /LinearGradient/);
+  assert.match(notifications, /colors\.primaryLight/);
+  assert.match(notifications, /backgroundColor: 'transparent'/);
+});
 test('landing, Requester, and Distributor share one persisted light-default theme', () => {
   assert.match(rootLayout, /BlueTapThemeProvider/);
   assert.match(theme, /BLUETAP_THEME_STORAGE_KEY = 'bluetap-theme'/);
@@ -166,6 +179,22 @@ test('landing, Requester, and Distributor share one persisted light-default them
   assert.match(theme, /AsyncStorage\.setItem\(BLUETAP_THEME_STORAGE_KEY/);
   assert.match(landing, /useBlueTapTheme/);
   assert.match(header, /ThemeIconButton/);
+});
+test('public authentication and account-access surfaces use the one persisted BlueTap theme source', () => {
+  const themedAuthScreens = [login, signup, registrationStatus, emailVerification, verification, passwordChange];
+  for (const screen of themedAuthScreens) {
+    assert.match(screen, /useBlueTapTheme/);
+    assert.match(screen, /createPortalStyleSheet/);
+    assert.match(screen, /isDark \? \[colors\.background, colors\.header\] : \[colors\.primary, colors\.primaryLight\]/);
+  }
+  for (const sharedSurface of [registrationUi, registrationFaceCapture, webRegistrationFaceCapture]) {
+    assert.match(sharedSurface, /createPortalStyleSheet/);
+  }
+  assert.match(accountAccessState, /useBlueTapTheme/);
+  assert.match(accountAccessState, /colors\.background/);
+  assert.match(passwordVisibilityButton, /useBlueTapTheme/);
+  assert.match(registrationStatus, /maxWidth: 480/);
+  assert.equal((theme.match(/BLUETAP_THEME_STORAGE_KEY = 'bluetap-theme'/g) || []).length, 1);
 });
 test('shared theme toggle is accessible and follows the landing moon and sun pattern', () => {
   assert.match(themeButton, /Switch to light theme/);

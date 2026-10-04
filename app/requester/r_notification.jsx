@@ -1,12 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useRequesterData } from '../../components/RoleDataProviders';
 import { BLUETAP_COLORS, BLUETAP_LAYOUT } from '../../constants/bluetapTheme';
 import { createPortalStyleSheet, useBlueTapTheme } from '../../components/BlueTapTheme';
-import SoftStatusBadge from '../../components/SoftStatusBadge';
 import BlueTapEmptyState from '../../components/BlueTapEmptyState';
+import NotificationCard from '../../components/NotificationCard';
 import RequestDetailsModal from '../../components/RequestDetailsModal';
 import { USER_PORTAL_BOTTOM_CONTENT_INSET, USER_PORTAL_LAYOUT } from '../../constants/userPortalLayout';
 import { normalizeRequesterOrderStatus, requesterOrderStatusLabel } from '../../constants/requesterOrderStatus';
@@ -20,20 +21,6 @@ const NOTIFICATION_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const formatWhen = (order) => {
   const ts = getOrderLifecycleTimestamp(order);
   return formatNotificationTime(ts);
-};
-
-const getNotificationTone = (statusRaw) => {
-  const s = String(statusRaw || '').toLowerCase().replace(/[\s-]+/g, '_');
-  if (['delivered', 'completed'].includes(s)) {
-    return { dot: '#10B981', border: 'rgba(16, 185, 129, 0.3)' }; // green
-  }
-  if (['delivery_failed', 'cancelled', 'canceled', 'declined', 'declined_outside_service_area'].includes(s)) {
-    return { dot: '#EF4444', border: 'rgba(239, 68, 68, 0.3)' }; // red
-  }
-  if (['out_for_delivery', 'scheduled', 'accepted'].includes(s)) {
-    return { dot: '#0284C7', border: 'rgba(2, 132, 199, 0.3)' }; // blue/cyan
-  }
-  return { dot: '#F59E0B', border: 'rgba(245, 158, 11, 0.3)' }; // amber
 };
 
 const messageFor = (order) => {
@@ -52,7 +39,7 @@ const messageFor = (order) => {
 };
 
 export default function RequesterNotification() {
-  useBlueTapTheme();
+  const { colors, isDark } = useBlueTapTheme();
   const router = useRouter();
   const params = useLocalSearchParams();
   const { orders, branches, loading, error: orderError, uid, readiness } = useRequesterData();
@@ -83,8 +70,14 @@ export default function RequesterNotification() {
   const liveSelectedOrder = selectedOrderId ? orders.find((order) => String(order.id) === String(selectedOrderId)) || null : null;
 
   return (
-    <SafeAreaView edges={['left', 'right', 'bottom']} style={styles.safe}>
-      <ScrollView contentContainerStyle={styles.content}>
+    <LinearGradient
+      colors={isDark ? [colors.background, colors.header] : [colors.primary, colors.primaryLight]}
+      start={{ x: 0, y: 0 }}
+      end={{ x: 0, y: 1 }}
+      style={styles.gradient}
+    >
+      <SafeAreaView edges={['left', 'right', 'bottom']} style={styles.safe}>
+        <ScrollView contentContainerStyle={styles.content}>
         <TouchableOpacity accessibilityRole="button" onPress={() => router.back()} style={styles.back}>
           <Text style={styles.backText}>‹ Back</Text>
         </TouchableOpacity>
@@ -114,53 +107,48 @@ export default function RequesterNotification() {
           />
         ) : (
           <View style={styles.list}>
-            {events.map((event) => {
-              const tone = getNotificationTone(event.status);
-              return (
-                <TouchableOpacity
-                  key={event.id}
-                  onPress={() => {
-                    markSeen([event.id]);
-                    if (event.noticeId) { openNotice(event.noticeId); return; }
-                    if (event.orderId) {
-                      setSelectedOrderId(event.orderId);
-                    } else {
-                      // Graceful fallback: no order data resolvable
-                      router.push('/requester/r_request');
-                    }
-                  }}
-                  style={[styles.card, { borderLeftWidth: 4, borderLeftColor: tone.dot }]}
-                >
-                  <View style={[styles.dot, { backgroundColor: tone.dot }]} />
-                  <View style={styles.cardBody}>
-                    <View style={styles.cardHeaderRow}>
-                      <SoftStatusBadge status={event.status} />
-                      <Text style={styles.time}>{formatNotificationTime(event.at)}</Text>
-                    </View>
-                    <Text style={styles.message}>{event.message}</Text>
-                  </View>
-                  <Text style={styles.chevron}>›</Text>
-                </TouchableOpacity>
-              );
-            })}
+            {events.map((event) => (
+              <NotificationCard
+                key={event.id}
+                colors={colors}
+                dark={isDark}
+                status={event.status}
+                time={formatNotificationTime(event.at)}
+                message={event.message}
+                onPress={() => {
+                  markSeen([event.id]);
+                  if (event.noticeId) { openNotice(event.noticeId); return; }
+                  if (event.orderId) {
+                    setSelectedOrderId(event.orderId);
+                  } else {
+                    // Graceful fallback: no order data resolvable
+                    router.push('/requester/r_request');
+                  }
+                }}
+              />
+            ))}
           </View>
         )}
-      </ScrollView>
-      <RequestDetailsModal
-        visible={liveSelectedOrder !== null}
-        onClose={() => setSelectedOrderId(null)}
-        request={liveSelectedOrder}
-        branches={branches}
-      />
-    </SafeAreaView>
+        </ScrollView>
+        <RequestDetailsModal
+          visible={liveSelectedOrder !== null}
+          onClose={() => setSelectedOrderId(null)}
+          request={liveSelectedOrder}
+          branches={branches}
+        />
+      </SafeAreaView>
+    </LinearGradient>
   );
 }
 
 const styles = createPortalStyleSheet({
+  gradient: {
+    flex: 1,
+  },
   safe: {
     flex: 1,
     minWidth: 0,
-    backgroundColor: BLUETAP_COLORS.background,
+    backgroundColor: 'transparent',
   },
   content: {
     width: '100%',
@@ -177,23 +165,23 @@ const styles = createPortalStyleSheet({
     marginBottom: 10,
   },
   backText: {
-    color: BLUETAP_COLORS.primary,
+    color: BLUETAP_COLORS.white,
     fontWeight: '900',
   },
   eyebrow: {
-    color: BLUETAP_COLORS.primary,
+    color: BLUETAP_COLORS.white,
     fontSize: 11,
     fontWeight: '900',
     letterSpacing: 1,
   },
   title: {
-    color: BLUETAP_COLORS.textPrimary,
+    color: BLUETAP_COLORS.white,
     fontSize: 28,
     fontWeight: '900',
     marginTop: 5,
   },
   subtitle: {
-    color: BLUETAP_COLORS.textSecondary,
+    color: BLUETAP_COLORS.white,
     fontSize: 14,
     lineHeight: 20,
     marginTop: 6,
@@ -201,47 +189,6 @@ const styles = createPortalStyleSheet({
   },
   list: {
     gap: 12,
-  },
-  card: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    backgroundColor: BLUETAP_COLORS.surface,
-    borderWidth: 1,
-    borderColor: BLUETAP_COLORS.border,
-    borderRadius: BLUETAP_LAYOUT.radius.lg,
-    padding: 16,
-    ...BLUETAP_LAYOUT.shadow,
-  },
-  cardHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 8,
-    marginBottom: 6,
-  },
-  dot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-  },
-  cardBody: {
-    flex: 1,
-    minWidth: 0,
-  },
-  message: {
-    color: BLUETAP_COLORS.textPrimary,
-    fontSize: 14,
-    lineHeight: 20,
-    fontWeight: '700',
-  },
-  time: {
-    color: BLUETAP_COLORS.muted,
-    fontSize: 11,
-  },
-  chevron: {
-    color: BLUETAP_COLORS.primary,
-    fontSize: 24,
   },
   state: {
     minHeight: 220,

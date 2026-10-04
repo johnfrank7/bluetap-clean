@@ -2,6 +2,7 @@ import React from 'react';
 import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 import { beginRegistrationFace, completeWebRegistrationFace } from '../services/faceVerification';
+import { createPortalStyleSheet } from './BlueTapTheme';
 const { isFaceServicePreparationError } = require('../services/faceServiceWarmupCore');
 
 const {
@@ -251,7 +252,7 @@ const videoStyle = {
   width: '100%', height: '100%', objectFit: 'cover', transform: 'scaleX(-1)', backgroundColor: '#12304A',
 };
 
-const styles = StyleSheet.create({
+const styles = createPortalStyleSheet({
   stack: { width: '100%', gap: 16 },
   box: { width: '100%', alignItems: 'center', gap: 12, padding: 24, backgroundColor: '#F8FBFE', borderWidth: 1, borderColor: '#DDEBF6', borderRadius: 18 },
   title: { fontSize: 19, fontWeight: '600', color: '#12304A', textAlign: 'center' },

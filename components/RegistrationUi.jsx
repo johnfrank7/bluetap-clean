@@ -2,6 +2,7 @@ import React from 'react';
 import { ActivityIndicator, Animated, Easing, Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 import { BLUETAP_COLORS } from '../constants/bluetapTheme';
+import { createPortalStyleSheet } from './BlueTapTheme';
 
 const {
   REGISTRATION_STEP_NUMBERS,
@@ -166,7 +167,7 @@ export function RegistrationActions({
   </View>;
 }
 
-const styles = StyleSheet.create({
+const styles = createPortalStyleSheet({
   brand: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 18 },
   logo: { width: 52, height: 52, marginRight: 10 },
   brandName: { color: '#FFF', fontSize: 26, fontWeight: '800', letterSpacing: -0.4 },

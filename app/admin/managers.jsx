@@ -9,7 +9,9 @@ import { checkUsername, validateUsername } from '../../services/usernameAuth';
 import { ADMIN_CACHE_KEYS, setCachedAdminData, useAdminData } from '../../services/adminDataCache';
 import TopToastFeedback from '../../components/TopToastFeedback';
 import PasswordVisibilityButton from '../../components/PasswordVisibilityButton';
+import RoleBadge from '../../components/RoleBadge';
 const { accountPageMeta, accountPageNumbers, accountPageSlice } = require('../../services/adminAccountsPagination');
+const { roleFromTone, roleToneFor } = require('../../constants/rolePresentation');
 
 const roles = ['all', 'requester', 'distributor', 'manager'];
 const statuses = ['all', 'active', 'inactive', 'pending', 'rejected'];
@@ -18,13 +20,13 @@ const emptyCreate = { fullName: '', email: '', username: '', temporaryPassword: 
 const titleCase = (value) => String(value || '').replace(/_/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
 const dateText = (value) => { if (!value) return '—'; const raw = value?._seconds ? value._seconds * 1000 : value?.seconds ? value.seconds * 1000 : value; const date = new Date(raw); return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString(); };
 const accountSearch = (a) => `${a.fullName} ${a.username} ${a.email} ${a.branchName}`.toLowerCase();
-const roleTone = (role) => ({ requester: 'requesterRole', distributor: 'distributorRole', manager: 'managerRole' })[String(role || '').toLowerCase()] || 'blue';
+const roleTone = roleToneFor;
 const statusTone = (status) => ['active', 'approved'].includes(status) ? 'green' : status === 'pending' ? 'amber' : status === 'inactive' ? 'gray' : status === 'rejected' ? 'red' : 'blue';
 const sourceText = (source) => source === 'admin_created' ? 'Admin created' : 'Public registration';
 
 function Field({ label, hint, children, half = false, create = false }) { const { colors } = useAdminTheme(); const styles = createStyles(colors); return <View style={[styles.field, !half && !create && { flexBasis: 'auto' }, half && styles.halfField, create && styles.createField]}><Text style={styles.label}>{label}</Text>{children}{hint ? <Text style={styles.hint}>{hint}</Text> : null}</View>; }
 function Input({ value, onChangeText, placeholder, secureTextEntry = false, editable = true, autoCapitalize = 'sentences' }) { const { colors } = useAdminTheme(); const styles = createStyles(colors); return <TextInput value={value} onChangeText={onChangeText} placeholder={placeholder} placeholderTextColor={colors.placeholder} editable={editable} secureTextEntry={secureTextEntry} autoCapitalize={autoCapitalize} style={[styles.input, !editable && styles.inputDisabled]} />; }
-function Badge({ children, tone }) { const { colors } = useAdminTheme(); const styles = createStyles(colors); const resolvedTone = tone || roleTone(children); const toneStyle = resolvedTone === 'green' ? styles.badgeGreen : resolvedTone === 'amber' ? styles.badgeAmber : resolvedTone === 'gray' ? { color: colors.textSecondary, backgroundColor: colors.neutral } : resolvedTone === 'red' ? styles.badgeRed : resolvedTone === 'requesterRole' ? { color: colors.requesterRoleText, backgroundColor: colors.requesterRole } : resolvedTone === 'distributorRole' ? { color: colors.distributorRoleText, backgroundColor: colors.distributorRole } : resolvedTone === 'managerRole' ? { color: colors.managerRoleText, backgroundColor: colors.managerRole } : null; return <Text style={[styles.badge, toneStyle]}>{children}</Text>; }
+function Badge({ children, tone }) { const { colors } = useAdminTheme(); const styles = createStyles(colors); const resolvedTone = tone || roleTone(children); const role = roleFromTone(resolvedTone); if (role) return <RoleBadge colors={colors} label={children} role={role} />; const toneStyle = resolvedTone === 'green' ? styles.badgeGreen : resolvedTone === 'amber' ? styles.badgeAmber : resolvedTone === 'gray' ? { color: colors.textSecondary, backgroundColor: colors.neutral } : resolvedTone === 'red' ? styles.badgeRed : null; return <Text style={[styles.badge, toneStyle]}>{children}</Text>; }
 function Tab({ active, children, onPress }) { const { colors } = useAdminTheme(); const styles = createStyles(colors); return <TouchableOpacity accessibilityRole="tab" accessibilityState={{ selected: active }} onPress={onPress} style={[styles.tab, active && styles.tabActive]}><Text style={[styles.tabText, active && styles.tabTextActive]}>{children}</Text></TouchableOpacity>; }
 function Section({ title, help, children }) { const { colors } = useAdminTheme(); const styles = createStyles(colors); return <View style={[styles.section, { backgroundColor: colors.surfaceAlt, borderColor: colors.border }]}><Text style={styles.sectionTitle}>{title}</Text>{help ? <Text style={styles.sectionHelp}>{help}</Text> : null}{children}</View>; }
 function Info({ label, value }) { const { colors } = useAdminTheme(); const styles = createStyles(colors); return <View style={styles.info}><Text style={styles.infoLabel}>{label}</Text><Text selectable style={styles.infoValue}>{value || '—'}</Text></View>; }

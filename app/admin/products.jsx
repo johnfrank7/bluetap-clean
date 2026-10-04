@@ -946,7 +946,7 @@ const createStyles = (colors, compact, isMobile) =>
       outlineWidth: 3,
       outlineColor: colors.primary,
       outlineOffset: 2,
-    },
+      },
     primaryText: {
       color: colors.onPrimary,
       fontWeight: '900',
