@@ -1,6 +1,7 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { usePathname } from 'expo-router';
 
 import { USER_PORTAL_LAYOUT } from '../../constants/userPortalLayout';
 import BlueTapChatIcon from './BlueTapChatIcon';
@@ -9,9 +10,11 @@ import ChatPanel from './ChatPanel';
 
 export default function ChatFloatingLauncher() {
   const { colors, openChat, panelOpen, role, totalUnread, totalUnreadLabel } = useChat();
+  const pathname = usePathname();
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   if (role === 'admin') return null;
+  const isAssistantRoute = pathname === '/requester/bluetap_AI' || pathname?.includes('bluetap_AI');
   const portalRole = role === 'requester' || role === 'distributor';
   const right = portalRole ? Math.max(18, (width - USER_PORTAL_LAYOUT.maxWidth) / 2 + 18) : 24;
   const bottom = portalRole
@@ -19,7 +22,7 @@ export default function ChatFloatingLauncher() {
     : 24 + insets.bottom;
   return (
     <View pointerEvents="box-none" style={StyleSheet.absoluteFill}>
-      {!panelOpen && (
+      {!panelOpen && !isAssistantRoute && (
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={`Open BlueTap messages${totalUnread ? `, ${totalUnread} unread` : ''}`}
@@ -47,5 +50,5 @@ const styles = StyleSheet.create({
   focused: { borderWidth: 3 },
   pressed: { opacity: 0.82 },
   badge: { position: 'absolute', top: -5, right: -5, minWidth: 23, height: 23, paddingHorizontal: 5, borderRadius: 12, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
-  badgeText: { color: '#FFFFFF', fontSize: 10, fontWeight: '950' },
+  badgeText: { color: '#FFFFFF', fontSize: 10, fontWeight: '900' },
 });

@@ -607,7 +607,7 @@ export default function DistributorProfilePage() {
 
               <TouchableOpacity
                 activeOpacity={0.85}
-                onPress={() => alert('BlueTap AI for distributor coming soon')}
+                onPress={() => router.replace('/distributor/bluetap_AI')}
               >
                 <View style={styles.helpIconWrapper}>
                   <Image

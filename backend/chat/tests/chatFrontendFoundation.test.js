@@ -2,6 +2,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const vm = require('node:vm');
+const babel = require('@babel/core');
 
 const root = path.resolve(__dirname, '..', '..', '..');
 const read = (file) => fs.readFileSync(path.join(root, file), 'utf8');
@@ -122,9 +124,17 @@ test('conversation resolution clears stale thread state and localizes resolve er
   const provider = read('components/chat/ChatDataProvider.jsx');
   const list = read('components/chat/ChatConversationList.jsx');
   assert.match(provider, /setSelectedSeed\(null\)[\s\S]*resolveConversation\(intent\)/);
-  assert.match(provider, /setResolveError\('Unable to open conversation\. Please try again\.'\)/);
+  assert.match(provider, /setResolveError\(mapResolveError\(resolveError\)\)/);
   assert.doesNotMatch(provider, /catch \(resolveError\) \{[\s\S]{0,160}setThreadError/);
   assert.match(list, /resolveError/);
+
+  // Test mapResolveError mappings
+  const mapResolveError = model.mapResolveError;
+  assert.equal(typeof mapResolveError, 'function');
+  assert.equal(mapResolveError({ code: 'CHAT_BRANCH_REQUIRED' }), 'No water station is currently assigned to your account.');
+  assert.equal(mapResolveError({ code: 'CHAT_RESTRICTED' }), 'Chat is temporarily restricted for your account.');
+  assert.equal(mapResolveError({ code: 'CHAT_NOT_AUTHORIZED', message: 'The branch is unavailable.' }), 'Your water station is currently unavailable.');
+  assert.equal(mapResolveError(null), 'Unable to open conversation. Please try again.');
 });
 
 test('read state advances only after a visible thread presents incoming messages', () => {
@@ -254,8 +264,41 @@ test('message action derivation and failed-delivery UI remain role and lifecycle
 test('desktop and mobile messenger presentations remain overlay based', () => {
   const source = read('components/chat/ChatPanel.jsx');
   assert.match(source, /const mobile = width < 720/);
-  assert.match(source, /<Modal visible transparent=\{false\}/);
+  assert.match(source, /<Modal visible transparent/);
   assert.match(source, /styles\.desktopAnchor/);
+  assert.match(source, /calculateMobileChatDimensions/);
+
+  const transformed = babel.transformSync(source, {
+    filename: path.join(root, 'components/chat/ChatPanel.jsx'),
+    babelrc: false,
+    configFile: false,
+    plugins: ['@babel/plugin-transform-modules-commonjs', '@babel/plugin-transform-react-jsx'],
+  }).code;
+  const modExports = {};
+  vm.runInNewContext(transformed, {
+    exports: modExports,
+    require: () => ({ StyleSheet: { create: (s) => s } }),
+  });
+
+  const { calculateMobileChatDimensions } = modExports;
+  assert.equal(typeof calculateMobileChatDimensions, 'function');
+
+  // Test 320px viewport has margins and is not edge-to-edge
+  const at320 = calculateMobileChatDimensions({ width: 320, height: 600, insets: { top: 20, bottom: 20 } });
+  assert.equal(at320.isEdgeToEdge, false);
+  assert.ok(at320.horizontalMargin >= 10);
+  assert.ok(at320.mobileWidth <= 300);
+
+  // Test 390px/400px mobile viewports have safe margins and are bounded
+  const at390 = calculateMobileChatDimensions({ width: 390, height: 800, insets: { top: 40, bottom: 30 } });
+  assert.equal(at390.isEdgeToEdge, false);
+  assert.ok(at390.horizontalMargin >= 12);
+  assert.ok(at390.mobileWidth < 390);
+
+  const at400 = calculateMobileChatDimensions({ width: 400, height: 850, insets: { top: 40, bottom: 30 } });
+  assert.equal(at400.isEdgeToEdge, false);
+  assert.ok(at400.horizontalMargin >= 12);
+  assert.ok(at400.mobileWidth < 400);
 });
 
 test('older history uses one bounded API page and merges without duplicate realtime listeners', () => {

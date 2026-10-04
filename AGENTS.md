@@ -27,3 +27,4 @@ This repository is BlueTap. Before substantial work, inspect the relevant skill 
 | Realtime role data, caches, listeners, and cleanup | `bluetap-realtime-data` |
 | Conversation authority, messaging, cursors, and unread state | `bluetap-messaging` |
 | Expo Router paths, role navigation, authenticated refresh, and overlays | `bluetap-routing-stability` |
+| Operational assistant, safe context, multilingual intent, and assistant UI | `bluetap-assistant` |

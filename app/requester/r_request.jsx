@@ -14,7 +14,7 @@ import { onAuthStateChanged } from 'firebase/auth';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 
 import { auth } from '../../firebase';
 import { findLocalUserForAuthRole } from '../../localUsers';
@@ -349,6 +349,8 @@ const RequestCard = ({
 export default function RequesterRequests() {
   const { colors, isDark } = useBlueTapTheme();
   const router = useRouter();
+  const params = useLocalSearchParams();
+  const openedParamRef = React.useRef('');
   const [requests, setRequests] = useState([]);
   const [selectedRequest, setSelectedRequest] = useState(null);
   const [editingRequest, setEditingRequest] = useState(null);
@@ -365,6 +367,27 @@ export default function RequesterRequests() {
     setOrdersLoading(requesterData.loading);
     setOrdersError(requesterData.error);
   }, [requesterData.orders, requesterData.loading, requesterData.error]);
+
+  useEffect(() => {
+    const rawTarget = params.orderId || params.requestId || params.id;
+    const targetId = Array.isArray(rawTarget) ? rawTarget[0] : rawTarget;
+    if (!targetId || openedParamRef.current === String(targetId)) return;
+    const cleanTarget = String(targetId).trim().toLowerCase();
+    const matched = requests.find((r) => {
+      const id = String(r.id || '').trim().toLowerCase();
+      const reqId = String(r.request_id || r.requestId || '').trim().toLowerCase();
+      return id === cleanTarget || reqId === cleanTarget;
+    });
+    if (matched) {
+      openedParamRef.current = String(targetId);
+      if (isHistoryRequesterOrderStatus(matched.status)) {
+        setActiveTab(HISTORY_TAB);
+      } else {
+        setActiveTab(ACTIVE_TAB);
+      }
+      setSelectedRequest(matched);
+    }
+  }, [requests, params.orderId, params.requestId, params.id]);
 
   const displayedRequests = useMemo(
     () =>

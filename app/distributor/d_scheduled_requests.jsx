@@ -11,7 +11,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import BlueTapHeader from '../../components/BlueTapHeader';
 import DistributorPortalBackground from '../../components/DistributorPortalBackground';
 import RequestDetailsModal from '../../components/RequestDetailsModal';
@@ -220,6 +220,8 @@ const ScheduledRequestCard = ({
 export default function DistributorScheduledRequests() {
   const { colors, isDark } = useBlueTapTheme();
   const router = useRouter();
+  const params = useLocalSearchParams();
+  const openedParamRef = React.useRef('');
   const [selectedRequestId, setSelectedRequestId] = useState(null);
   const [processingRequestId, setProcessingRequestId] = useState('');
   const [actionError, setActionError] = useState('');
@@ -240,6 +242,23 @@ export default function DistributorScheduledRequests() {
         .filter((request) => UPCOMING_STATUSES.has(normalizeDistributorOrderStatus(request.status))),
     [orders]
   );
+
+  React.useEffect(() => {
+    const rawTarget = params.orderId || params.id;
+    const targetId = Array.isArray(rawTarget) ? rawTarget[0] : rawTarget;
+    if (!targetId || openedParamRef.current === String(targetId)) return;
+    const cleanTarget = String(targetId).trim().toLowerCase();
+    const matched = scheduledRequests.find((r) => {
+      const sourceId = String(r.sourceId || '').trim().toLowerCase();
+      const id = String(r.id || '').trim().toLowerCase();
+      return sourceId === cleanTarget || id === cleanTarget;
+    });
+    if (matched) {
+      openedParamRef.current = String(targetId);
+      setSelectedRequestId(matched.sourceId);
+    }
+  }, [scheduledRequests, params.orderId, params.id]);
+
   const selectedRequest = scheduledRequests.find((request) => String(request.sourceId) === String(selectedRequestId)) || null;
   const selectedDetailsRequest = getDetailsRequestData(selectedRequest);
 

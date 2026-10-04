@@ -155,12 +155,28 @@ function messageActionTriggerVisible({ hovered = false, focused = false, menuOpe
   return Boolean(hovered || focused || menuOpen);
 }
 
+function mapResolveError(error) {
+  const code = String(error?.code || error?.error || error?.message || '').toUpperCase();
+  const message = String(error?.message || '').toLowerCase();
+  if (code.includes('CHAT_BRANCH_REQUIRED') || message.includes('branch is required') || message.includes('no branch')) {
+    return 'No water station is currently assigned to your account.';
+  }
+  if (code.includes('CHAT_RESTRICTED') || message.includes('restricted')) {
+    return 'Chat is temporarily restricted for your account.';
+  }
+  if (code.includes('CHAT_NOT_AUTHORIZED') && (message.includes('unavailable') || message.includes('branch'))) {
+    return 'Your water station is currently unavailable.';
+  }
+  return 'Unable to open conversation. Please try again.';
+}
+
 module.exports = {
   conversationAvailability,
   conversationLifecycleNotice,
   createClientMutationId,
   formatBadge,
   isOwnMessage,
+  mapResolveError,
   messageFailurePresentation,
   mergeMessages,
   messageActionNames,
