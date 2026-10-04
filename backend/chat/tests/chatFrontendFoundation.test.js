@@ -171,8 +171,10 @@ test('message bubbles keep incoming and outgoing alignment with semantic theme s
   assert.match(source, /colors\.surfaceAlt/);
   assert.match(source, /\(hover: hover\) and \(pointer: fine\)/);
   assert.match(source, /window\.matchMedia/);
-  assert.match(source, /onHoverIn/);
-  assert.match(source, /onHoverOut/);
+  assert.match(source, /<View\s+ref=\{groupRef\}/);
+  assert.match(source, /onMouseEnter/);
+  assert.match(source, /onMouseLeave/);
+  assert.doesNotMatch(source, /ref=\{groupRef\}[\s\S]{0,160}onHoverIn/);
   assert.doesNotMatch(source, /width < 700/);
   assert.match(source, /onFocus/);
   assert.match(source, /delayLongPress=\{500\}/);
@@ -186,6 +188,25 @@ test('desktop message action visibility survives focus and an open menu while mo
   assert.equal(model.messageActionTriggerVisible({ focused: true }), true);
   assert.equal(model.messageActionTriggerVisible({ menuOpen: true }), true);
   assert.equal(model.messageActionTriggerVisible({ hovered: false, focused: false, menuOpen: false }), false);
+});
+
+test('message action presentation keeps fine-pointer hover, touch long-press, and mirrored action slots', () => {
+  const bubble = read('components/chat/ChatMessageBubble.jsx');
+  const conversation = read('components/chat/ChatConversationView.jsx');
+  assert.match(bubble, /const useActionSheet = Platform\.OS !== 'web' \|\| !finePointer/);
+  assert.match(bubble, /onLongPress=\{useActionSheet && hasOptions/);
+  assert.match(bubble, /\{own && desktopControl\}[\s\S]*styles\.bubble[\s\S]*\{!own && desktopControl\}/);
+  assert.match(bubble, /pointerEvents=\{buttonVisible \? 'auto' : 'none'\}/);
+  assert.match(conversation, /\['requester', 'distributor'\]\.includes\(role\) && currentConversation\?\.type === 'requester_distributor'/);
+  assert.match(conversation, /onReport=\{reportingAllowed \? \(item\) => setReportTarget/);
+});
+
+test('message action controls preserve compact metadata and receipts', () => {
+  const source = read('components/chat/ChatMessageBubble.jsx');
+  assert.match(source, /\{'Edited \\u00B7'\}/);
+  assert.match(source, /\{formatTime\(message\.createdAt\)\}/);
+  assert.match(source, /own && <ChatReceipt state=\{receipt\}/);
+  assert.match(source, /meta: \{ flexDirection: 'row', flexWrap: 'nowrap'/);
 });
 
 test('message action derivation and failed-delivery UI remain role and lifecycle specific', () => {

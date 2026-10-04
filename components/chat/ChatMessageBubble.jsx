@@ -112,10 +112,10 @@ export default function ChatMessageBubble({ message, own, receipt, colors, onRet
 
   return (
     <View style={[styles.row, own ? styles.outgoingRow : styles.incomingRow]}>
-      <Pressable
+      <View
         ref={groupRef}
-        onHoverIn={Platform.OS === 'web' ? () => setHovered(true) : undefined}
-        onHoverOut={Platform.OS === 'web' ? () => setHovered(false) : undefined}
+        onMouseEnter={Platform.OS === 'web' ? () => setHovered(true) : undefined}
+        onMouseLeave={Platform.OS === 'web' ? () => setHovered(false) : undefined}
         style={[styles.messageGroup, own ? styles.outgoingGroup : styles.incomingGroup]}
       >
         {own && desktopControl}
@@ -142,7 +142,7 @@ export default function ChatMessageBubble({ message, own, receipt, colors, onRet
           {message.failed && <Pressable accessibilityRole="button" accessibilityLabel="Retry sending message" onPress={() => onRetry?.(message)}><Text style={[styles.retry, { color: colors.onPrimary }]}>Tap to retry</Text></Pressable>}
         </Pressable>
         {!own && desktopControl}
-      </Pressable>
+      </View>
       <Modal visible={useActionSheet && menuOpen} transparent animationType="fade" onRequestClose={() => setMenuOpen(false)}>
         <View style={styles.sheetBackdrop}>
           <Pressable accessibilityRole="button" accessibilityLabel="Cancel message actions" onPress={() => setMenuOpen(false)} style={StyleSheet.absoluteFill} />
