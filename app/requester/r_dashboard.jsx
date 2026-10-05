@@ -25,6 +25,7 @@ import SoftStatusBadge from '../../components/SoftStatusBadge';
 import { createShadow } from '../../components/shadowStyles';
 import ProductCard from '../../components/ProductCard';
 import BlueTapEmptyState from '../../components/BlueTapEmptyState';
+import LocalTimeCard from '../../components/LocalTimeCard';
 import PortalSwipeContainer, { PortalSwipeIgnore, REQUESTER_TABS } from '../../components/PortalSwipeContainer';
 import { createPortalStyleSheet, useBlueTapTheme } from '../../components/BlueTapTheme';
 import { RequesterOrderChatActions } from '../../components/chat/ChatOrderActions';
@@ -43,20 +44,13 @@ import {
 const REQUESTER_APP_MAX_WIDTH = USER_PORTAL_LAYOUT.maxWidth;
 const DASHBOARD_HORIZONTAL_PADDING = USER_PORTAL_LAYOUT.gutter;
 const PRODUCT_CARD_WIDTH_RATIO = 0.88;
-const PRODUCT_CAROUSEL_HEIGHT = 325;
+const PRODUCT_CAROUSEL_HEIGHT = 368;
 const BLUE = BLUETAP_COLORS.primary;
 const BLUE_LIGHT = BLUETAP_COLORS.primarySoft;
 const CARD_BORDER = BLUETAP_COLORS.border;
 const TEXT_MUTED = BLUETAP_COLORS.textSecondary;
 const TEXT_DARK = BLUETAP_COLORS.textPrimary;
 const formatPrice = (price) => `₱${Number(price || 0).toFixed(2)}`;
-const formatDashboardDate = (date) =>
-  new Intl.DateTimeFormat('en-US', {
-    weekday: 'long',
-    month: 'long',
-    day: 'numeric',
-    year: 'numeric',
-  }).format(date);
 const formatRequestDate = (value) => {
   if (!value) return 'Not set';
 
@@ -283,7 +277,6 @@ export default function RequesterDashboard() {
   const productCarouselRef = useRef(null);
   const { width: windowWidth } = useWindowDimensions();
   const liveGreeting = useLiveGreeting();
-  const todayText = formatDashboardDate(new Date());
   const [products, setProducts] = useState([]);
   const [productsLoading, setProductsLoading] = useState(true);
   const [productsError, setProductsError] = useState('');
@@ -526,13 +519,15 @@ export default function RequesterDashboard() {
             showsVerticalScrollIndicator={false}
           >
 
-            <View style={styles.welcomeSection}>
-              <Text style={[styles.welcomeText, isDark && { color: colors.textPrimary }]}>WELCOME!</Text>
-              <TypewriterGreeting
-                text={`${liveGreeting}, ${requesterName}`}
-                style={[styles.greetingText, isDark && { color: colors.textPrimary }]}
-              />
-              <Text style={[styles.dateText, isDark && { color: colors.muted }]}>{todayText}</Text>
+            <View style={styles.welcomeRow}>
+              <View style={styles.welcomeSection}>
+                <Text style={[styles.welcomeText, isDark && { color: colors.textPrimary }]}>WELCOME!</Text>
+                <TypewriterGreeting
+                  text={`${liveGreeting}, ${requesterName}`}
+                  style={[styles.greetingText, isDark && { color: colors.textPrimary }]}
+                />
+              </View>
+              <LocalTimeCard compact={windowWidth < 430} onBrand={!isDark} />
             </View>
             <ModerationNoticeBanner />
 
@@ -862,8 +857,11 @@ const styles = createPortalStyleSheet({
     paddingTop: 20,
     paddingBottom: USER_PORTAL_BOTTOM_CONTENT_INSET,
   },
+  welcomeRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 },
   welcomeSection: {
     marginTop: 0,
+    flex: 1,
+    minWidth: 0,
   },
   welcomeText: {
     color: '#FFFFFF',
@@ -875,12 +873,6 @@ const styles = createPortalStyleSheet({
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '700',
-    marginTop: 4,
-  },
-  dateText: {
-    color: '#E3F2FD',
-    fontSize: 13,
-    fontWeight: '600',
     marginTop: 4,
   },
   productsSection: {
@@ -1263,7 +1255,8 @@ const styles = createPortalStyleSheet({
   viewAllProductsRow: {
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 10,
+    marginTop: 14,
+    paddingTop: 4,
   },
   viewAllProductsBtn: {
     paddingHorizontal: 16,

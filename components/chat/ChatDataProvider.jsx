@@ -79,7 +79,7 @@ export default function ChatDataProvider({ children, role }) {
   const moderation = useModerationNotices();
   const roleData = role === 'requester' ? requesterData : role === 'distributor' ? distributorData : managerData;
   const colors = role === 'manager' ? managerTheme.colors : portalTheme.colors;
-  const isDark = role === 'manager' ? Boolean(managerTheme.isDark) : Boolean(portalTheme.isDark);
+  const isDark = role === 'manager' ? managerTheme.resolvedTheme === 'dark' : Boolean(portalTheme.isDark);
   const [uid, setUid] = React.useState('');
   const [authReady, setAuthReady] = React.useState(false);
   const branchId = role === 'manager' ? clean(managerData.branchId) : '';

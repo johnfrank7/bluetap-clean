@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Animated, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -8,6 +8,7 @@ import { BLUETAP_COLORS, BLUETAP_LAYOUT } from '../../constants/bluetapTheme';
 import { createPortalStyleSheet, useBlueTapTheme } from '../../components/BlueTapTheme';
 import BlueTapEmptyState from '../../components/BlueTapEmptyState';
 import NotificationCard from '../../components/NotificationCard';
+import NotificationBackButton from '../../components/NotificationBackButton';
 import RequestDetailsModal from '../../components/RequestDetailsModal';
 import { USER_PORTAL_BOTTOM_CONTENT_INSET, USER_PORTAL_LAYOUT } from '../../constants/userPortalLayout';
 import { normalizeRequesterOrderStatus, requesterOrderStatusLabel } from '../../constants/requesterOrderStatus';
@@ -15,6 +16,10 @@ import { refreshRequesterRequests } from '../../services/requests';
 import { formatNotificationTime, getOrderLifecycleTimestamp, parseTimestamp } from '../../services/notificationTimestamp';
 import { useRoleNotifications } from '../../components/RoleNotifications';
 import { useModerationNotices } from '../../components/ModerationNotices';
+import AnimatedPresenceItem from '../../components/AnimatedPresenceItem';
+import { useAnimatedPresenceList } from '../../components/useAnimatedPresenceList';
+import useNotificationPageMotion, { NOTIFICATION_LIST_MOTION_DURATION_MS } from '../../components/useNotificationPageMotion';
+import useSingleFlightNavigation from '../../components/useSingleFlightNavigation';
 
 const NOTIFICATION_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -41,6 +46,7 @@ const messageFor = (order) => {
 export default function RequesterNotification() {
   const { colors, isDark } = useBlueTapTheme();
   const router = useRouter();
+  const { navigateOnce } = useSingleFlightNavigation();
   const params = useLocalSearchParams();
   const { orders, branches, loading, error: orderError, uid, readiness } = useRequesterData();
   const { events, markAllSeen, markSeen } = useRoleNotifications();
@@ -49,6 +55,8 @@ export default function RequesterNotification() {
   const error = orderError || retryError;
   const [selectedOrderId, setSelectedOrderId] = useState(null);
   const openedParamRef = useRef('');
+  const pageMotion = useNotificationPageMotion(() => router.back());
+  const notificationEntries = useAnimatedPresenceList(events, (event) => event.id, NOTIFICATION_LIST_MOTION_DURATION_MS);
 
   const retry = async () => {
     if (!uid || readiness !== 'READY') return;
@@ -76,13 +84,16 @@ export default function RequesterNotification() {
       end={{ x: 0, y: 1 }}
       style={styles.gradient}
     >
+      <Animated.View style={[styles.motionRoot, pageMotion.style]}>
       <SafeAreaView edges={['left', 'right', 'bottom']} style={styles.safe}>
         <ScrollView contentContainerStyle={styles.content}>
-        <TouchableOpacity accessibilityRole="button" onPress={() => router.back()} style={styles.back}>
-          <Text style={styles.backText}>‹ Back</Text>
-        </TouchableOpacity>
-        <Text style={styles.eyebrow}>REQUESTER</Text>
-        <Text style={styles.title}>Notifications</Text>
+        <View style={styles.headingRow}>
+          <View style={styles.headingCopy}>
+            <Text style={styles.eyebrow}>REQUESTER</Text>
+            <Text style={styles.title}>Notifications</Text>
+          </View>
+          <NotificationBackButton colors={colors} inverse onPress={pageMotion.goBack} />
+        </View>
         <Text style={styles.subtitle}>Updates generated from your real BlueTap orders.</Text>
 
         {loading ? (
@@ -103,29 +114,31 @@ export default function RequesterNotification() {
             title="No Notifications Yet"
             description="Order status updates will appear here."
             actionLabel="Place an Order"
-            onAction={() => router.push('/requester/requestform')}
+            onAction={() => navigateOnce('/requester/requestform')}
           />
         ) : (
           <View style={styles.list}>
-            {events.map((event) => (
+            {notificationEntries.map((entry, index) => (
+              <AnimatedPresenceItem key={entry.id} phase={entry.phase} delay={Math.min(index * 30, 120)}>
               <NotificationCard
-                key={event.id}
+                accessibilityLabel={entry.item.message}
                 colors={colors}
                 dark={isDark}
-                status={event.status}
-                time={formatNotificationTime(event.at)}
-                message={event.message}
+                status={entry.item.status}
+                time={formatNotificationTime(entry.item.at)}
+                message={entry.item.message}
                 onPress={() => {
-                  markSeen([event.id]);
-                  if (event.noticeId) { openNotice(event.noticeId); return; }
-                  if (event.orderId) {
-                    setSelectedOrderId(event.orderId);
+                  markSeen([entry.item.id]);
+                  if (entry.item.noticeId) { openNotice(entry.item.noticeId); return; }
+                  if (entry.item.orderId) {
+                    setSelectedOrderId(entry.item.orderId);
                   } else {
                     // Graceful fallback: no order data resolvable
-                    router.push('/requester/r_request');
+                    navigateOnce('/requester/r_request');
                   }
                 }}
               />
+              </AnimatedPresenceItem>
             ))}
           </View>
         )}
@@ -137,6 +150,7 @@ export default function RequesterNotification() {
           branches={branches}
         />
       </SafeAreaView>
+      </Animated.View>
     </LinearGradient>
   );
 }
@@ -145,6 +159,7 @@ const styles = createPortalStyleSheet({
   gradient: {
     flex: 1,
   },
+  motionRoot: { flex: 1, minWidth: 0 },
   safe: {
     flex: 1,
     minWidth: 0,
@@ -159,15 +174,8 @@ const styles = createPortalStyleSheet({
     paddingTop: 20,
     paddingBottom: USER_PORTAL_BOTTOM_CONTENT_INSET,
   },
-  back: {
-    alignSelf: 'flex-start',
-    paddingVertical: 8,
-    marginBottom: 10,
-  },
-  backText: {
-    color: BLUETAP_COLORS.white,
-    fontWeight: '900',
-  },
+  headingRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  headingCopy: { flex: 1, minWidth: 0 },
   eyebrow: {
     color: BLUETAP_COLORS.white,
     fontSize: 11,

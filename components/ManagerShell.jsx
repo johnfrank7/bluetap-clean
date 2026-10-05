@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Animated,
-  Image,
   Modal,
   Pressable,
   ScrollView,
@@ -13,7 +12,7 @@ import {
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { usePathname } from 'expo-router';
 import { BLUETAP_COLORS } from '../constants/bluetapTheme';
 import { useAdminTheme } from './AdminTheme';
 import AdminIcon from './AdminIcon';
@@ -21,6 +20,12 @@ import { getModuleSession, signOutAndClearSessions } from '../services/authSessi
 import { useManagerRealtimeData } from './ManagerRealtimeData';
 import { useManagerNotifications } from './ManagerNotifications';
 import useModerationActivityBadge from './useModerationActivityBadge';
+import ThemeSwitchVisual from './ThemeSwitchVisual';
+import BlueTapBrandMark from './BlueTapBrandMark';
+import BlueTapIcon from './BlueTapIcon';
+import PageEnterTransition from './PageEnterTransition';
+import useSingleFlightNavigation from './useSingleFlightNavigation';
+const { clearManagerNotificationOrigin, recordManagerNotificationOrigin } = require('../services/managerNotificationNavigation');
 
 export const MANAGER_COLORS = {
   navy: BLUETAP_COLORS.primary,
@@ -104,7 +109,7 @@ export function ManagerPill({ children, tone = 'blue' }) {
 }
 
 function SidebarThemeToggle({ collapsed, colors }) {
-  const { resolvedTheme, setPreference } = useAdminTheme();
+  const { isTransitioning, resolvedTheme, setPreference } = useAdminTheme();
   const isDark = resolvedTheme === 'dark';
   const label = isDark ? 'Dark mode' : 'Light mode';
 
@@ -113,17 +118,12 @@ function SidebarThemeToggle({ collapsed, colors }) {
       <TouchableOpacity
         accessibilityRole="switch"
         accessibilityLabel={isDark ? 'Switch to light theme' : 'Switch to dark theme'}
-        accessibilityState={{ checked: isDark }}
-        onPress={() => setPreference(isDark ? 'light' : 'dark')}
+        accessibilityState={{ checked: isDark, disabled: isTransitioning }}
+        disabled={isTransitioning}
+        onPress={(event) => setPreference(isDark ? 'light' : 'dark', event)}
         style={[styles.themeToggle, collapsed && styles.themeToggleCollapsed]}
       >
-        <View style={[styles.themeTrack, { backgroundColor: isDark ? colors.primary : 'rgba(255,255,255,0.28)' }]}>
-          <View style={[styles.themeThumb, isDark && styles.themeThumbDark]}>
-            <Text style={{ fontSize: 10, textAlign: 'center', lineHeight: 22, color: isDark ? '#0F172A' : '#F59E0B' }}>
-              {isDark ? '☾' : '☀'}
-            </Text>
-          </View>
-        </View>
+        <ThemeSwitchVisual colors={colors} isDark={isDark} />
         {!collapsed && <Text style={styles.themeLabel}>{label}</Text>}
       </TouchableOpacity>
     </View>
@@ -150,11 +150,14 @@ function SidebarLogoutControl({ collapsed, onPress, colors }) {
 export default function ManagerShell({
   active = 'dashboard',
   children,
+  contentScrollRef,
+  headerAction,
   subtitle,
   title,
 }) {
   const { colors, resolvedTheme } = useAdminTheme();
-  const router = useRouter();
+  const { navigateOnce, replaceOnce } = useSingleFlightNavigation();
+  const pathname = usePathname();
   const { width } = useWindowDimensions();
   const compact = width < 900;
   const managerSession = getModuleSession('manager');
@@ -208,14 +211,20 @@ export default function ManagerShell({
   };
 
   const navigate = (path) => {
-    router.replace(path);
+    if (pathname === '/manager/notifications') clearManagerNotificationOrigin();
+    replaceOnce(path);
     if (compact) setDrawerOpen(false);
+  };
+
+  const openNotifications = () => {
+    if (navigateOnce('/manager/notifications')) recordManagerNotificationOrigin(pathname);
   };
 
   const completeLogout = async () => {
     setConfirmLogout(false);
+    clearManagerNotificationOrigin();
     await signOutAndClearSessions();
-    router.replace('/login');
+    replaceOnce('/login');
   };
 
   const renderSidebar = (isCollapsed, mobile = false) => (
@@ -241,10 +250,11 @@ export default function ManagerShell({
       ]}
     >
       <View style={[styles.brand, { borderBottomColor: colors.sidebarBorder }, isCollapsed && styles.brandCollapsed]}>
-        <Image
-          source={require('../assets/icons/bluetapwhitelogo.png')}
+        <BlueTapBrandMark
+          inverse
+          color={colors.iconOnPrimary}
+          size={isCollapsed ? 38 : 34}
           style={[styles.brandLogo, isCollapsed && styles.brandLogoCollapsed]}
-          resizeMode="contain"
         />
         {!isCollapsed && (
           <View style={{ flex: 1 }}>
@@ -318,7 +328,7 @@ export default function ManagerShell({
   );
 
   return (
-    <SafeAreaView style={[styles.root, { backgroundColor: colors.background }]}>
+    <SafeAreaView dataSet={{ bluetapTheme: resolvedTheme }} style={[styles.root, { backgroundColor: colors.background }]}>
       <StatusBar style={resolvedTheme === 'dark' ? 'light' : 'dark'} />
       <View style={styles.layout}>
         {!compact && renderSidebar(collapsed)}
@@ -349,19 +359,18 @@ export default function ManagerShell({
               )}
             </View>
 
+            {headerAction}
+
             <TouchableOpacity
               accessibilityRole="button"
               accessibilityLabel={`Notifications: ${unreadCount} unread`}
               activeOpacity={0.85}
               hitSlop={8}
-              onPress={() => navigate('/manager/notifications')}
+              onPress={openNotifications}
               style={styles.notificationButton}
             >
-              <Image
-                source={require('../assets/icons/notif.png')}
-                style={[styles.notificationIcon, { tintColor: colors.primary }]}
-              />
-              {unreadCount > 0 && <View style={[styles.notificationCount, { backgroundColor: colors.danger }]}><Text style={styles.notificationCountText}>{unreadCount > 99 ? '99+' : unreadCount}</Text></View>}
+              <BlueTapIcon name="notifications" size={22} color={colors.iconInteractive || colors.primary} />
+              {unreadCount > 0 && <View style={[styles.notificationCount, { backgroundColor: colors.danger, borderColor: colors.header }]}><Text style={styles.notificationCountText}>{unreadCount > 99 ? '99+' : unreadCount}</Text></View>}
             </TouchableOpacity>
             {!compact && <View style={[styles.managerBadge, { backgroundColor: colors.primarySoft, borderColor: colors.border }]}>
               <AdminIcon name="security" color={colors.primary} size={16} />
@@ -369,8 +378,10 @@ export default function ManagerShell({
             </View>}
           </View>
 
-          <ScrollView contentContainerStyle={[styles.content, compact && styles.compactContent]} keyboardShouldPersistTaps="handled">
-            {children}
+          <ScrollView ref={contentScrollRef} contentContainerStyle={[styles.content, compact && styles.compactContent]} keyboardShouldPersistTaps="handled">
+            <PageEnterTransition axis="y" distance={8} duration={230} resetKey={pathname} style={styles.contentEntry}>
+              {children}
+            </PageEnterTransition>
           </ScrollView>
         </View>
 
@@ -452,9 +463,10 @@ const styles = StyleSheet.create({
   managerBadgeText: { fontSize: 12, fontWeight: '900' },
   notificationButton: { width: 22, height: 22, alignItems: 'center', justifyContent: 'center', position: 'relative' },
   notificationIcon: { width: 22, height: 22 },
-  notificationCount: { position: 'absolute', right: -5, top: -6, minWidth: 18, height: 18, paddingHorizontal: 3, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  notificationCount: { position: 'absolute', right: -7, top: -7, minWidth: 18, height: 18, paddingHorizontal: 3, borderRadius: 10, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
   notificationCountText: { color: '#FFFFFF', fontSize: 10, fontWeight: '900' },
   content: { paddingHorizontal: 28, paddingBottom: 32, paddingTop: 14, flexGrow: 1 },
+  contentEntry: { flexGrow: 1 },
   compactContent: { paddingHorizontal: 14 },
   backdrop: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, zIndex: 3 },
   modalBackdrop: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 20 },

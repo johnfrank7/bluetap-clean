@@ -24,17 +24,20 @@ export function calculateMobileChatDimensions({ width = 360, height = 700, inset
 }
 
 function PanelSurface({ mobile, onClose }) {
-  const { closeChat, colors, currentConversation, role } = useChat();
+  const { closeChat, colors, currentConversation, isDark, role } = useChat();
   const handleClose = onClose || closeChat;
+  const brandHeader = !isDark && role !== 'manager';
+  const headerText = brandHeader ? (colors.onPrimary || '#FFFFFF') : colors.textPrimary;
+  const headerMuted = brandHeader ? 'rgba(255,255,255,0.84)' : colors.textSecondary;
 
   return (
     <View style={[styles.panel, mobile ? styles.mobilePanel : styles.desktopPanel, { backgroundColor: colors.surface, borderColor: colors.border }]}>
       <KeyboardAvoidingView style={styles.keyboardArea} behavior={mobile ? (Platform.OS === 'ios' ? 'padding' : 'height') : undefined}>
         {!currentConversation && (
           <View style={[styles.header, { backgroundColor: colors.header || colors.surface, borderBottomColor: colors.border }]}>
-            <View style={[styles.iconBadge, { backgroundColor: colors.primaryAction }]}><BlueTapChatIcon size={24} /></View>
-            <View style={{ flex: 1 }}><Text style={[styles.heading, { color: colors.textPrimary }]}>Messages</Text><Text style={[styles.subheading, { color: colors.textSecondary }]}>Secure BlueTap conversations</Text></View>
-            <Pressable accessibilityRole="button" accessibilityLabel="Close messages" onPress={handleClose} style={styles.close}><Text style={[styles.closeText, { color: colors.textPrimary }]}>×</Text></Pressable>
+            <View style={[styles.iconBadge, { backgroundColor: brandHeader ? (colors.surface || '#FFFFFF') : colors.primaryAction }]}><BlueTapChatIcon size={24} color={brandHeader ? colors.primary : '#FFFFFF'} bubbleColor={brandHeader ? colors.primarySoft : colors.surface} detailColor={brandHeader ? colors.primaryDark : colors.primary} /></View>
+            <View style={{ flex: 1 }}><Text style={[styles.heading, { color: headerText }]}>Messages</Text><Text style={[styles.subheading, { color: headerMuted }]}>Secure BlueTap conversations</Text></View>
+            <Pressable accessibilityRole="button" accessibilityLabel="Close messages" onPress={handleClose} style={styles.close}><Text style={[styles.closeText, { color: headerText }]}>×</Text></Pressable>
           </View>
         )}
         {currentConversation ? <ChatConversationView /> : <ChatConversationList role={role} />}

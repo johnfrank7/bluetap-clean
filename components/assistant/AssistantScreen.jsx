@@ -7,7 +7,6 @@ import {
   ScrollView,
   KeyboardAvoidingView,
   Platform,
-  Image,
   Alert,
   useWindowDimensions,
 } from 'react-native';
@@ -20,6 +19,12 @@ import { useBlueTapTheme } from '../BlueTapTheme';
 import { createShadow } from '../shadowStyles';
 import { USER_PORTAL_LAYOUT } from '../../constants/userPortalLayout';
 import { useChat } from '../chat/ChatContext';
+import RequestDetailsModal from '../RequestDetailsModal';
+import { useCurrentPageRequestDetails } from '../useCurrentPageRequestDetails';
+import PageEnterTransition from '../PageEnterTransition';
+import BlueTapBrandMark from '../BlueTapBrandMark';
+import BlueTapIcon from '../BlueTapIcon';
+import useSingleFlightNavigation from '../useSingleFlightNavigation';
 
 import { defaultAssistantEngine } from '../../services/assistant/assistantEngine';
 import { executeAssistantAction } from '../../services/assistant/assistantActions';
@@ -41,9 +46,12 @@ export function AssistantScreen({
   title = 'BlueTap Assistant',
   subtitle: propSubtitle,
   placeholder: propPlaceholder,
+  detailOrders = [],
+  detailBranches = [],
 }) {
   const { colors, isDark } = useBlueTapTheme();
   const router = useRouter();
+  const { replaceOnce } = useSingleFlightNavigation();
   const chat = useChat();
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
@@ -60,8 +68,7 @@ export function AssistantScreen({
       USER_PORTAL_LAYOUT.navHeight +
       USER_PORTAL_LAYOUT.navBottomOffset +
       (isMobile ? 12 : 14) +
-      (insets.bottom || 0) -
-      6
+      (insets.bottom || 0)
     );
   }, [isMobile, insets.bottom]);
 
@@ -85,6 +92,13 @@ export function AssistantScreen({
   const [loading, setLoading] = useState(false);
   const [sessionLoaded, setSessionLoaded] = useState(false);
   const scrollViewRef = useRef(null);
+  const scrollTimeoutRef = useRef(null);
+  const {
+    selectedRequest,
+    requestDetailsVisible,
+    openRequestDetails,
+    closeRequestDetails,
+  } = useCurrentPageRequestDetails(detailOrders);
 
   const seedWelcomeConversation = useCallback(() => {
     if (isDistributor) {
@@ -207,9 +221,15 @@ export function AssistantScreen({
   }, [messages, effectiveUserId, role, sessionLoaded]);
 
   const scrollToBottom = useCallback(() => {
-    setTimeout(() => {
+    if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
+    scrollTimeoutRef.current = setTimeout(() => {
       scrollViewRef.current?.scrollToEnd({ animated: true });
+      scrollTimeoutRef.current = null;
     }, 120);
+  }, []);
+
+  useEffect(() => () => {
+    if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
   }, []);
 
   const handleSendQuery = useCallback(
@@ -286,13 +306,18 @@ export function AssistantScreen({
   const handleAction = useCallback(
     async (action) => {
       if (!action || !action.type) return;
+      if (['VIEW_ORDER', 'VIEW_REQUEST', 'VIEW_DELIVERY'].includes(action.type)) {
+        if (action.orderId && openRequestDetails(action.orderId)) return;
+        Alert.alert('Details unavailable', 'This order is not available in your current authorized order list.');
+        return;
+      }
       try {
         await executeAssistantAction(action, { router, chat, role });
       } catch (err) {
         Alert.alert('Action Error', 'Unable to complete this action right now.');
       }
     },
-    [router, chat, role]
+    [router, chat, role, openRequestDetails]
   );
 
   const handleResetConversation = useCallback(() => {
@@ -337,7 +362,14 @@ export function AssistantScreen({
       <SafeAreaView edges={['left', 'right']} style={styles.container}>
         <StatusBar style="light" />
 
-        <View style={styles.phoneWrapper}>
+        <PageEnterTransition
+          axis="y"
+          distance={10}
+          duration={260}
+          scaleFrom={0.99}
+          style={styles.phoneWrapper}
+          resetKey={role}
+        >
           {/* Sub-header Card */}
           <View
             style={[
@@ -351,7 +383,7 @@ export function AssistantScreen({
             ]}
           >
             <TouchableOpacity
-              onPress={() => router.replace(effectiveBackRoute)}
+              onPress={() => replaceOnce(effectiveBackRoute)}
               style={[
                 styles.headerBtn,
                 { backgroundColor: isDark ? colors.surfaceAlt : '#F0F6FD' },
@@ -360,7 +392,7 @@ export function AssistantScreen({
               accessibilityRole="button"
               accessibilityLabel="Close assistant and return to profile"
             >
-              <Text style={[styles.headerBtnIcon, { color: colors.textPrimary }]}>✕</Text>
+              <BlueTapIcon name="close" size={18} color={colors.iconSecondary || colors.textPrimary} />
             </TouchableOpacity>
 
             <View style={styles.headerTitleContainer}>
@@ -371,12 +403,7 @@ export function AssistantScreen({
                     { backgroundColor: isDark ? colors.primarySoft : '#EAF6FF' },
                   ]}
                 >
-                  <Image
-                    source={require('../../assets/icons/bluetapwhitelogo.png')}
-                    style={styles.headerAvatarIcon}
-                    tintColor={colors.primary}
-                    resizeMode="contain"
-                  />
+                  <BlueTapBrandMark color={colors.iconInteractive || colors.primary} size={14} style={styles.headerAvatarIcon} />
                 </View>
                 <Text style={[styles.headerTitle, { color: colors.textPrimary }]}>
                   {title}
@@ -397,7 +424,7 @@ export function AssistantScreen({
               accessibilityRole="button"
               accessibilityLabel="Start a new conversation"
             >
-              <Text style={[styles.headerBtnIcon, { color: colors.textPrimary }]}>↺</Text>
+              <BlueTapIcon name="reset" size={18} color={colors.iconSecondary || colors.textPrimary} />
             </TouchableOpacity>
           </View>
 
@@ -432,12 +459,7 @@ export function AssistantScreen({
                       },
                     ]}
                   >
-                    <Image
-                      source={require('../../assets/icons/bluetapwhitelogo.png')}
-                      style={styles.loadingAvatarIcon}
-                      tintColor={colors.primary}
-                      resizeMode="contain"
-                    />
+                    <BlueTapBrandMark color={colors.iconInteractive || colors.primary} size={16} style={styles.loadingAvatarIcon} />
                   </View>
                   <View
                     style={[
@@ -473,7 +495,13 @@ export function AssistantScreen({
               />
             </View>
           </KeyboardAvoidingView>
-        </View>
+          <RequestDetailsModal
+            visible={requestDetailsVisible}
+            request={selectedRequest}
+            branches={detailBranches}
+            onClose={closeRequestDetails}
+          />
+        </PageEnterTransition>
       </SafeAreaView>
     </LinearGradient>
   );

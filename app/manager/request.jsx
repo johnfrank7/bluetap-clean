@@ -27,6 +27,8 @@ import { useManagerRealtimeData } from '../../components/ManagerRealtimeData';
 import { parseTimestamp } from '../../services/notificationTimestamp';
 import LocationMap from '../../components/LocationMap';
 import { ManagerOrderChatAction } from '../../components/chat/ChatOrderActions';
+import AnimatedPresenceItem from '../../components/AnimatedPresenceItem';
+import { useAnimatedPresenceList } from '../../components/useAnimatedPresenceList';
 const { getManagerQueues, toManagerOrder } = require('../../services/managerOperational');
 
 
@@ -67,6 +69,7 @@ const orderDistance = (order) =>
 function OutsideRadiusApprovalQueue({ orders, loading, styles, colors, isDark, onShowToast, onOpenOrder }) {
   const [error, setError] = useState('');
   const [updatingId, setUpdatingId] = useState('');
+  const presentedOrders = useAnimatedPresenceList(orders, (order) => order.id);
 
   const decide = async (order, action) => {
     if (updatingId) return;
@@ -109,7 +112,7 @@ function OutsideRadiusApprovalQueue({ orders, loading, styles, colors, isDark, o
         <View style={styles.emptyContainer}>
           <ActivityIndicator color={colors.primary} />
         </View>
-      ) : orders.length === 0 ? (
+      ) : presentedOrders.length === 0 ? (
         <BlueTapEmptyState
           compact
           variant="exceptions"
@@ -121,14 +124,16 @@ function OutsideRadiusApprovalQueue({ orders, loading, styles, colors, isDark, o
         />
       ) : (
         <ScrollView nestedScrollEnabled style={styles.sectionScroll} contentContainerStyle={styles.sectionContent}>
-        {orders.map((order) => {
+        {presentedOrders.map((entry) => {
+          const order = entry.item;
           const isUpdating = updatingId === order.id;
           const products =
             order.items?.map((item) => `${item.quantity} × ${item.productNameSnapshot}`).filter(Boolean).join(', ') ||
             'Order products';
 
           return (
-            <View key={order.id} style={styles.orderItem}>
+            <AnimatedPresenceItem key={entry.id} phase={entry.phase}>
+            <View style={styles.orderItem}>
               <View style={styles.orderHeaderRow}>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.requesterName}>{order.requesterName || 'Requester'}</Text>
@@ -155,27 +160,28 @@ function OutsideRadiusApprovalQueue({ orders, loading, styles, colors, isDark, o
               </View>
 
               <View style={styles.actionRow}>
-                <View style={{ flexGrow: 1, flexBasis: 150, minWidth: 0 }}><ManagerOrderChatAction order={order} /></View>
-                <TouchableOpacity onPress={() => onOpenOrder(order)} style={styles.viewDetailsBtn}>
+                <View style={styles.chatActionWrap}><ManagerOrderChatAction order={order} disabled={entry.actionsDisabled} /></View>
+                <TouchableOpacity disabled={entry.actionsDisabled} onPress={() => onOpenOrder(order)} style={[styles.actionButton, styles.viewDetailsBtn, entry.actionsDisabled && styles.actionDisabled]}>
                   <Text style={styles.viewDetailsBtnText}>View Details</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
-                  disabled={isUpdating}
+                  disabled={isUpdating || entry.actionsDisabled}
                   onPress={() => decide(order, 'approve')}
-                  style={[styles.approveButton, isUpdating && styles.actionDisabled]}
+                  style={[styles.actionButton, styles.approveButton, (isUpdating || entry.actionsDisabled) && styles.actionDisabled]}
                 >
                   <Text style={styles.approveButtonText}>{isUpdating ? 'Saving…' : 'Approve'}</Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity
-                  disabled={isUpdating}
+                  disabled={isUpdating || entry.actionsDisabled}
                   onPress={() => decide(order, 'decline')}
-                  style={[styles.declineButton, isUpdating && styles.actionDisabled]}
+                  style={[styles.actionButton, styles.declineButton, (isUpdating || entry.actionsDisabled) && styles.actionDisabled]}
                 >
                   <Text style={styles.declineButtonText}>Reject</Text>
                 </TouchableOpacity>
               </View>
             </View>
+            </AnimatedPresenceItem>
           );
         })}
         </ScrollView>
@@ -542,13 +548,13 @@ function BranchTransfersQueue({ data, styles, colors, isDark, onShowToast, onOpe
               </Text>
 
               <View style={styles.actionRow}>
-                <TouchableOpacity onPress={() => onOpenOrder(order)} style={styles.viewDetailsBtn}>
+                <TouchableOpacity onPress={() => onOpenOrder(order)} style={[styles.actionButton, styles.viewDetailsBtn]}>
                   <Text style={styles.viewDetailsBtnText}>View Details</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   disabled={isUpdating}
                   onPress={() => act(order.id, 'accept-transfer')}
-                  style={[styles.approveButton, isUpdating && styles.actionDisabled]}
+                  style={[styles.actionButton, styles.approveButton, isUpdating && styles.actionDisabled]}
                 >
                   <Text style={styles.approveButtonText}>{isUpdating ? 'Saving…' : 'Accept Transfer'}</Text>
                 </TouchableOpacity>
@@ -556,7 +562,7 @@ function BranchTransfersQueue({ data, styles, colors, isDark, onShowToast, onOpe
                 <TouchableOpacity
                   disabled={isUpdating}
                   onPress={() => setDecliningOrderId(isDeclining ? '' : order.id)}
-                  style={styles.declineButton}
+                  style={[styles.actionButton, styles.declineButton]}
                 >
                   <Text style={styles.declineButtonText}>Decline</Text>
                 </TouchableOpacity>
@@ -626,6 +632,7 @@ function ReceivedRequestsQueue({ orders, loading, styles, colors, isDark, onShow
   const [rejectingId, setRejectingId] = useState('');
   const [reason, setReason] = useState('');
   const [error, setError] = useState('');
+  const presentedOrders = useAnimatedPresenceList(orders, (order) => order.id);
 
   const decide = async (order, action) => {
     if (updatingId) return;
@@ -658,7 +665,7 @@ function ReceivedRequestsQueue({ orders, loading, styles, colors, isDark, onShow
         </View>
       </View>
       {!!error && <View accessibilityRole="alert" style={styles.errorBanner}><Text style={styles.errorBannerText}>{error}</Text></View>}
-      {loading ? <View style={styles.emptyContainer}><ActivityIndicator color={colors.primary} /></View> : orders.length === 0 ? (
+      {loading ? <View style={styles.emptyContainer}><ActivityIndicator color={colors.primary} /></View> : presentedOrders.length === 0 ? (
         <BlueTapEmptyState
           compact
           variant="orders"
@@ -670,7 +677,9 @@ function ReceivedRequestsQueue({ orders, loading, styles, colors, isDark, onShow
         />
       ) : (
         <ScrollView nestedScrollEnabled style={styles.sectionScroll} contentContainerStyle={styles.sectionContent}>
-          {orders.map((order) => <View key={order.id} style={styles.orderItem}>
+          {presentedOrders.map((entry) => {
+            const order = entry.item;
+            return <AnimatedPresenceItem key={entry.id} phase={entry.phase}><View style={styles.orderItem}>
             <View style={styles.orderHeaderRow}>
               <View style={{ flex: 1 }}>
                 <Text style={styles.requesterName}>{order.requesterName || 'Requester'}</Text>
@@ -683,23 +692,24 @@ function ReceivedRequestsQueue({ orders, loading, styles, colors, isDark, onShow
             <Text style={styles.detailLine}>Distance: {orderDistance(order)}</Text>
             <Text style={styles.amountText}>{formatAmount(order.totalAtOrder)}</Text>
             <View style={styles.actionRow}>
-              <TouchableOpacity onPress={() => onOpenOrder(order)} style={styles.viewDetailsBtn}>
+              <TouchableOpacity disabled={entry.actionsDisabled} onPress={() => onOpenOrder(entry.item)} style={[styles.actionButton, styles.viewDetailsBtn, entry.actionsDisabled && styles.actionDisabled]}>
                 <Text style={styles.viewDetailsBtnText}>View Details</Text>
               </TouchableOpacity>
-              <TouchableOpacity disabled={!!updatingId} onPress={() => decide(order, 'accept-order')} style={[styles.approveButton, !!updatingId && styles.actionDisabled]}>
-                <Text style={styles.approveButtonText}>{updatingId === order.id ? 'Saving?' : 'Accept'}</Text>
+              <TouchableOpacity disabled={!!updatingId || entry.actionsDisabled} onPress={() => decide(entry.item, 'accept-order')} style={[styles.actionButton, styles.approveButton, (!!updatingId || entry.actionsDisabled) && styles.actionDisabled]}>
+                <Text style={styles.approveButtonText}>{updatingId === entry.id ? 'Saving?' : 'Accept'}</Text>
               </TouchableOpacity>
-              <TouchableOpacity disabled={!!updatingId} onPress={() => { setRejectingId(rejectingId === order.id ? '' : order.id); setReason(''); setError(''); }} style={styles.declineButton}>
+              <TouchableOpacity disabled={!!updatingId || entry.actionsDisabled} onPress={() => { setRejectingId(rejectingId === entry.id ? '' : entry.id); setReason(''); setError(''); }} style={[styles.actionButton, styles.declineButton, entry.actionsDisabled && styles.actionDisabled]}>
                 <Text style={styles.declineButtonText}>Reject</Text>
               </TouchableOpacity>
             </View>
-            {rejectingId === order.id && <View style={styles.declineBox}>
+            {rejectingId === entry.id && !entry.actionsDisabled && <View style={styles.declineBox}>
               <TextInput value={reason} onChangeText={setReason} maxLength={240} multiline placeholder="Reason shown to the requester" placeholderTextColor={colors.placeholder} style={styles.inputField} />
-              <TouchableOpacity disabled={!!updatingId} onPress={() => decide(order, 'reject-order')} style={styles.confirmDeclineBtn}>
+              <TouchableOpacity disabled={!!updatingId} onPress={() => decide(entry.item, 'reject-order')} style={styles.confirmDeclineBtn}>
                 <Text style={styles.confirmDeclineText}>Confirm Rejection</Text>
               </TouchableOpacity>
             </View>}
-          </View>)}
+          </View></AnimatedPresenceItem>;
+          })}
         </ScrollView>
       )}
     </View>
@@ -720,6 +730,7 @@ function BranchOrdersOverview({ data, loading, styles, colors, isDark, onOpenOrd
         (o.address && o.address.toLowerCase().includes(term))
     );
   }, [data.orders, filter]);
+  const presentedOrders = useAnimatedPresenceList(orders, (order) => order.id);
 
   return (
     <View style={styles.card}>
@@ -743,7 +754,7 @@ function BranchOrdersOverview({ data, loading, styles, colors, isDark, onOpenOrd
         />
       </View>
 
-      {loading ? <View style={styles.emptyContainer}><ActivityIndicator color={colors.primary} /></View> : orders.length === 0 ? (
+      {loading ? <View style={styles.emptyContainer}><ActivityIndicator color={colors.primary} /></View> : presentedOrders.length === 0 ? (
         <BlueTapEmptyState
           compact
           variant="management"
@@ -755,10 +766,12 @@ function BranchOrdersOverview({ data, loading, styles, colors, isDark, onOpenOrd
         />
       ) : (
         <ScrollView nestedScrollEnabled style={styles.sectionScroll} contentContainerStyle={styles.sectionContent}>
-        {orders.map((order) => {
+        {presentedOrders.map((entry) => {
+          const order = entry.item;
           const isEditable = EDITABLE_STATUSES.has(order.status);
           return (
-            <View key={order.id} style={styles.orderItem}>
+            <AnimatedPresenceItem key={entry.id} phase={entry.phase}>
+            <View style={styles.orderItem}>
               <View style={styles.orderHeaderRow}>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.requesterName}>{order.requesterName || 'Requester'}</Text>
@@ -772,13 +785,14 @@ function BranchOrdersOverview({ data, loading, styles, colors, isDark, onOpenOrd
               <Text style={styles.amountText}>{formatAmount(order.totalAtOrder)}</Text>
 
               <View style={styles.actionRow}>
-                <TouchableOpacity onPress={() => onOpenOrder(order)} style={styles.editOrderBtn}>
+                <TouchableOpacity disabled={entry.actionsDisabled} onPress={() => onOpenOrder(order)} style={[styles.actionButton, styles.editOrderBtn, entry.actionsDisabled && styles.actionDisabled]}>
                   <Text style={styles.editOrderBtnText}>
                     {isEditable ? 'Edit Order Details' : 'View Order Details'}
                   </Text>
                 </TouchableOpacity>
               </View>
             </View>
+            </AnimatedPresenceItem>
           );
         })}
         </ScrollView>
@@ -794,8 +808,12 @@ export default function ManagerRequestPage() {
   const styles = createStyles(colors, width);
   const [toast, setToast] = useState({ visible: false, message: '', type: 'success' });
   const [selectedOrderSnapshot, setSelectedOrder] = useState(null);
+  const [notificationTargetSnapshot, setNotificationTarget] = useState(null);
+  const [targetHighlighted, setTargetHighlighted] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
   const openedParamRef = useRef('');
+  const contentScrollRef = useRef(null);
+  const targetHighlightTimerRef = useRef(null);
   const realtime = useManagerRealtimeData();
   const dispatchData = useMemo(() => {
     const queues = getManagerQueues(realtime.requests, realtime.incomingTransfers, realtime.branchId);
@@ -823,15 +841,28 @@ export default function ManagerRequestPage() {
       : null;
     return live ? { ...toManagerOrder(live.id, live, realtime.branch?.name || ''), branchLocation } : selectedOrderSnapshot;
   }, [realtime.branch?.name, realtime.requests, selectedOrderSnapshot]);
+  const notificationTarget = useMemo(() => {
+    if (!notificationTargetSnapshot) return null;
+    const live = [...realtime.requests, ...realtime.incomingTransfers].find((order) => String(order.id || order.requestId) === String(notificationTargetSnapshot.id || notificationTargetSnapshot.requestId));
+    const branchLocation = Number.isFinite(Number(realtime.branch?.latitude)) && Number.isFinite(Number(realtime.branch?.longitude))
+      ? { latitude: Number(realtime.branch.latitude), longitude: Number(realtime.branch.longitude) }
+      : null;
+    return live ? { ...toManagerOrder(live.id, live, realtime.branch?.name || ''), branchLocation } : notificationTargetSnapshot;
+  }, [notificationTargetSnapshot, realtime.branch?.latitude, realtime.branch?.longitude, realtime.branch?.name, realtime.incomingTransfers, realtime.requests]);
 
   const showToast = (message, type = 'success') => {
     setToast({ visible: true, message, type });
   };
 
   const handleOpenOrder = (order) => {
+    setTargetHighlighted(false);
     setSelectedOrder(order);
     setModalVisible(true);
   };
+
+  useEffect(() => () => {
+    if (targetHighlightTimerRef.current) clearTimeout(targetHighlightTimerRef.current);
+  }, []);
 
   useEffect(() => {
     const requestedOrderId = Array.isArray(params.orderId) ? params.orderId[0] : params.orderId;
@@ -847,7 +878,12 @@ export default function ManagerRequestPage() {
         ? { latitude: Number(realtime.branch.latitude), longitude: Number(realtime.branch.longitude) }
         : null;
       openedParamRef.current = String(requestedOrderId);
-      handleOpenOrder({ ...toManagerOrder(authorizedSource.id, authorizedSource, realtime.branch?.name || ''), branchLocation });
+      setNotificationTarget({ ...toManagerOrder(authorizedSource.id, authorizedSource, realtime.branch?.name || ''), branchLocation });
+      setTargetHighlighted(true);
+      setToast({ visible: true, message: 'The order from your notification is highlighted below.', type: 'info' });
+      setTimeout(() => contentScrollRef.current?.scrollTo?.({ y: 0, animated: true }), 60);
+      if (targetHighlightTimerRef.current) clearTimeout(targetHighlightTimerRef.current);
+      targetHighlightTimerRef.current = setTimeout(() => setTargetHighlighted(false), 6000);
     }
   }, [params.orderId, realtime.branch, realtime.branchId, realtime.incomingTransfers, realtime.requests]);
 
@@ -856,6 +892,7 @@ export default function ManagerRequestPage() {
       active="requests"
       title="Requests & Exceptions"
       subtitle="Delivery approvals, branch transfers, and order adjustments"
+      contentScrollRef={contentScrollRef}
     >
       <TopToastFeedback
         visible={toast.visible}
@@ -863,6 +900,23 @@ export default function ManagerRequestPage() {
         type={toast.type}
         onDismiss={() => setToast((t) => ({ ...t, visible: false }))}
       />
+      {!!notificationTarget && (
+        <View style={[styles.notificationTargetCard, targetHighlighted && styles.notificationTargetHighlighted]}>
+          <View style={styles.notificationTargetHeader}>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={styles.notificationTargetEyebrow}>NOTIFICATION TARGET</Text>
+              <Text style={styles.notificationTargetTitle}>Order #{notificationTarget.requestId || notificationTarget.id}</Text>
+              <Text style={styles.notificationTargetText} numberOfLines={2}>
+                {notificationTarget.requesterName || 'Requester'} · {orderProducts(notificationTarget)}
+              </Text>
+            </View>
+            <ManagerPill tone="blue">{String(notificationTarget.status || 'Order').replace(/_/g, ' ')}</ManagerPill>
+          </View>
+          <TouchableOpacity accessibilityRole="button" onPress={() => handleOpenOrder(notificationTarget)} style={[styles.actionButton, styles.notificationTargetButton]}>
+            <Text style={styles.notificationTargetButtonText}>View Target Order</Text>
+          </TouchableOpacity>
+        </View>
+      )}
       {/* 1. Received Requests */}
       <ReceivedRequestsQueue
         orders={dispatchData.review}
@@ -903,11 +957,11 @@ const createStyles = (colors, width = 1200) =>
       borderWidth: 1,
       borderColor: colors.border,
       borderRadius: 16,
-      padding: 20,
+      padding: width < 430 ? 14 : 20,
       marginBottom: 20,
     },
     cardHeaderRow: {
-      flexDirection: 'row',
+      flexDirection: width < 377 ? 'column' : 'row',
       alignItems: 'flex-start',
       justifyContent: 'space-between',
       gap: 12,
@@ -1000,7 +1054,7 @@ const createStyles = (colors, width = 1200) =>
       marginBottom: 10,
     },
     orderHeaderRow: {
-      flexDirection: 'row',
+      flexDirection: width < 377 ? 'column' : 'row',
       justifyContent: 'space-between',
       alignItems: 'flex-start',
       gap: 12,
@@ -1040,29 +1094,35 @@ const createStyles = (colors, width = 1200) =>
       flexDirection: 'row',
       flexWrap: 'wrap',
       justifyContent: width >= 800 ? 'flex-end' : 'flex-start',
+      alignItems: 'stretch',
       gap: 8,
       marginTop: 10,
     },
-    viewDetailsBtn: {
-      minHeight: 42,
-      paddingHorizontal: 14,
+    chatActionWrap: {
+      flexGrow: 1,
+      flexBasis: width < 430 ? '100%' : 150,
+      width: width < 430 ? '100%' : undefined,
+      minWidth: 0,
+    },
+    actionButton: {
+      flexGrow: 1,
+      flexBasis: width < 430 ? '100%' : 118,
+      width: width < 430 ? '100%' : undefined,
+      minWidth: 0,
+      minHeight: 44,
+      paddingHorizontal: 12,
       borderRadius: 10,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    viewDetailsBtn: {
       borderWidth: 1,
       borderColor: colors.primary,
       backgroundColor: colors.surface,
-      alignItems: 'center',
-      justifyContent: 'center',
-      flexGrow: 1,
-      flexBasis: 118,
     },
     viewDetailsBtnText: { color: colors.primary, fontSize: 12, fontWeight: '900' },
     approveButton: {
-      minHeight: 36,
-      paddingHorizontal: 14,
-      borderRadius: 8,
       backgroundColor: colors.successAction,
-      alignItems: 'center',
-      justifyContent: 'center',
     },
     approveButtonText: {
       color: colors.onSuccess,
@@ -1070,14 +1130,9 @@ const createStyles = (colors, width = 1200) =>
       fontWeight: '800',
     },
     declineButton: {
-      minHeight: 36,
-      paddingHorizontal: 14,
-      borderRadius: 8,
       backgroundColor: colors.dangerSoft,
       borderWidth: 1,
       borderColor: colors.danger,
-      alignItems: 'center',
-      justifyContent: 'center',
     },
     declineButtonText: {
       color: colors.danger,
@@ -1085,14 +1140,9 @@ const createStyles = (colors, width = 1200) =>
       fontWeight: '800',
     },
     editOrderBtn: {
-      minHeight: 36,
-      paddingHorizontal: 14,
-      borderRadius: 8,
       borderWidth: 1,
       borderColor: colors.primary,
       backgroundColor: colors.primarySoft,
-      alignItems: 'center',
-      justifyContent: 'center',
     },
     editOrderBtnText: {
       color: colors.primary,
@@ -1302,8 +1352,8 @@ const createStyles = (colors, width = 1200) =>
     },
     locationUnavailableText: { color: colors.textSecondary, fontSize: 12, fontWeight: '700' },
     itemEditRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
+      flexDirection: width < 430 ? 'column' : 'row',
+      alignItems: width < 430 ? 'flex-start' : 'center',
       justifyContent: 'space-between',
       paddingVertical: 8,
       borderBottomWidth: 1,
@@ -1396,7 +1446,7 @@ const createStyles = (colors, width = 1200) =>
       fontStyle: 'italic',
     },
     modalFooterRow: {
-      flexDirection: 'row',
+      flexDirection: width < 430 ? 'column' : 'row',
       justifyContent: 'flex-end',
       gap: 10,
       marginTop: 14,
@@ -1404,6 +1454,31 @@ const createStyles = (colors, width = 1200) =>
       borderTopColor: colors.border,
       paddingTop: 12,
     },
+    notificationTargetCard: {
+      width: '100%',
+      maxWidth: 760,
+      alignSelf: 'center',
+      backgroundColor: colors.primarySoft,
+      borderWidth: 1,
+      borderColor: colors.primary,
+      borderRadius: 16,
+      padding: width < 430 ? 14 : 18,
+      marginBottom: 20,
+    },
+    notificationTargetHighlighted: {
+      borderWidth: 3,
+      shadowColor: colors.primary,
+      shadowOpacity: 0.28,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 0 },
+      elevation: 6,
+    },
+    notificationTargetHeader: { flexDirection: width < 430 ? 'column' : 'row', alignItems: 'flex-start', gap: 10 },
+    notificationTargetEyebrow: { color: colors.primary, fontSize: 10, fontWeight: '900', letterSpacing: 0.9 },
+    notificationTargetTitle: { color: colors.textPrimary, fontSize: 17, fontWeight: '900', marginTop: 3 },
+    notificationTargetText: { color: colors.textSecondary, fontSize: 12, lineHeight: 18, marginTop: 4 },
+    notificationTargetButton: { alignSelf: width < 430 ? 'stretch' : 'flex-start', backgroundColor: colors.primaryAction, marginTop: 12 },
+    notificationTargetButtonText: { color: colors.onPrimary, fontSize: 12, fontWeight: '900' },
     cancelBtn: {
       minHeight: 38,
       paddingHorizontal: 16,

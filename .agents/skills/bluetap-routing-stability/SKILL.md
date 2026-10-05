@@ -20,6 +20,10 @@ Use these rules for every BlueTap route, navigation action, authenticated refres
 11. If a destination is uncertain, stop and inspect the actual route structure rather than guessing.
 12. Keep global modal and overlay features mounted at the role-layout level; do not navigate to fake pages.
 13. Add route regression tests for critical actions and verify both the emitted route string and its destination file.
+14. Route-triggering buttons and icons must use shared single-flight navigation. Repeated presses to the same destination while navigation is pending are ignored, and pressing the current route is a no-op.
+15. Preserve history semantics: use `push` only when the previous screen should remain in history and retain established `replace` behavior for role tabs and redirects. Never solve duplicate history by globally converting pushes to replaces.
+16. Animated in-app Back controls must be single-flight so their exit animation can call `router.back()` at most once. Do not intercept or alter browser and hardware Back behavior for this purpose.
+17. Prefer the shared navigation helper over component-specific timeout flags. Locks must release when the destination settles, include a bounded fallback, and clean up on unmount.
 
 ## Verified Distributor destinations
 

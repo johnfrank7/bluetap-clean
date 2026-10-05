@@ -31,6 +31,38 @@ test('Admin keeps its portal while the legacy Manager login redirects to public 
   assert.equal((managerLayout.match(/<Stack /g) || []).length, 1);
 });
 
+test('public Admin login never mounts privileged data prefetch and protected routes keep the provider', () => {
+  const root = resolve(__dirname, '..', '..', '..');
+  const adminLayout = readFileSync(resolve(root, 'app/admin/_layout.jsx'), 'utf8');
+  assert.match(adminLayout, /pathname === '\/admin\/login' \? \([\s\S]*?routes[\s\S]*?: \([\s\S]*?<AdminDataProvider>/);
+  assert.match(adminLayout, /<AdminDataProvider>[\s\S]*?\{routes\}[\s\S]*?<\/AdminDataProvider>/);
+  assert.doesNotMatch(adminLayout, /bypass=.*?<AdminDataProvider>[\s\S]*?<Stack/s);
+});
+
+test('Administrator login is dedicated dark, viewport-centered, scroll-safe, and uses a restrained gold edge', () => {
+  const root = resolve(__dirname, '..', '..', '..');
+  const login = readFileSync(resolve(root, 'components/PrivilegedLogin.jsx'), 'utf8');
+  assert.doesNotMatch(login, /useAdminTheme\(\)/);
+  assert.match(login, /background: '#041C2C'/);
+  assert.match(login, /surface: '#0E2235'/);
+  assert.match(login, /position: 'fixed'/);
+  assert.match(login, /height: '100dvh'/);
+  assert.equal((login.match(/100dvh/g) || []).length, 1);
+  assert.match(login, /boxSizing: 'border-box'/);
+  assert.match(login, /<ScrollView/);
+  assert.match(login, /scroll: \{ flex: 1 \}/);
+  assert.doesNotMatch(login, /webScrollContent/);
+  assert.match(login, /justifyContent: 'flex-start'/);
+  assert.match(login, /marginVertical: 'auto'/);
+  assert.match(login, /fill=\{false\}/);
+  assert.doesNotMatch(login, /entry: \{[^}]*flex: 0/);
+  const transition = readFileSync(resolve(root, 'components/PageEnterTransition.jsx'), 'utf8');
+  assert.match(transition, /fill = true/);
+  assert.match(transition, /fill && styles\.fill/);
+  assert.match(login, /'#F4B942'/);
+  assert.match(login, /BlueTapBrandMark/);
+});
+
 test('required password change routes every account through a fresh role-based session', () => {
   const root = resolve(__dirname, '..', '..', '..');
   const passwordChangePage = readFileSync(resolve(root, 'app/required-password-change.jsx'), 'utf8');

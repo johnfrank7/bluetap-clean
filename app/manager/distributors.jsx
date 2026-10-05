@@ -220,7 +220,7 @@ function DistributorDispatchQueue({ styles, colors, isDark, onShowToast }) {
   return (
     <View style={styles.dispatchCard}>
       <View style={styles.cardHeaderRow}>
-        <View>
+        <View style={styles.cardHeaderCopy}>
           <Text style={styles.approvalEyebrow}>DISPATCH QUEUE</Text>
           <Text style={styles.cardTitle}>Distributor Dispatch & Scheduling</Text>
           <Text style={styles.approvalHelper}>
@@ -586,7 +586,7 @@ export default function ManagerDistributorsPage() {
           )}
         </View>}
 
-        <ScrollView horizontal showsHorizontalScrollIndicator contentContainerStyle={styles.tableScroll}>
+        <ScrollView horizontal showsHorizontalScrollIndicator style={styles.tableViewport} contentContainerStyle={styles.tableScroll}>
           <View style={styles.table}>
             <View style={[styles.tableRow, styles.tableHeadRow]}>
               <Text style={[styles.th, styles.nameCol]}>NAME</Text>
@@ -667,25 +667,28 @@ const createStyles = (colors, width = 1200) =>
       borderWidth: 1,
       borderColor: colors.border,
       borderRadius: 16,
-      padding: 20,
+      padding: width < 600 ? 14 : 20,
       marginBottom: 20,
+      maxWidth: '100%',
+      minWidth: 0,
     },
     queueScroll: { maxHeight: 460 },
     queueContent: { paddingBottom: 4 },
     applicationsButton: { minHeight: 38, paddingHorizontal: 12, borderRadius: 9, borderWidth: 1, borderColor: colors.primary, backgroundColor: colors.primarySoft, justifyContent: 'center' },
     applicationsButtonText: { color: colors.primary, fontSize: 12, fontWeight: '800' },
     applicationsPanel: { borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceAlt, borderRadius: 12, padding: 12, marginBottom: 12, gap: 8 },
-    applicationRow: { paddingVertical: 9, borderTopWidth: 1, borderTopColor: colors.border, flexDirection: 'row', alignItems: 'center', gap: 12 },
+    applicationRow: { paddingVertical: 9, borderTopWidth: 1, borderTopColor: colors.border, flexDirection: width < 550 ? 'column' : 'row', alignItems: width < 550 ? 'stretch' : 'center', gap: 12 },
     applicationDetails: { flex: 1, minWidth: 0 },
-    approveApplicationButton: { minHeight: 38, minWidth: 92, paddingHorizontal: 14, borderRadius: 9, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
+    approveApplicationButton: { minHeight: 44, minWidth: 92, width: width < 550 ? '100%' : undefined, paddingHorizontal: 14, borderRadius: 9, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
     approveApplicationText: { color: colors.onPrimary || '#FFFFFF', fontSize: 12, fontWeight: '900' },
     cardHeaderRow: {
-      flexDirection: 'row',
-      alignItems: 'flex-start',
+      flexDirection: width < 600 ? 'column' : 'row',
+      alignItems: width < 600 ? 'stretch' : 'flex-start',
       justifyContent: 'space-between',
       gap: 12,
       marginBottom: 14,
     },
+    cardHeaderCopy: { flexGrow: 1, flexShrink: 1, minWidth: 0 },
     approvalEyebrow: {
       color: colors.primary,
       fontSize: 10,
@@ -699,12 +702,13 @@ const createStyles = (colors, width = 1200) =>
       marginTop: 4,
     },
     refreshButton: {
-      minHeight: 36,
+      minHeight: 44,
       paddingHorizontal: 12,
       borderRadius: 8,
       backgroundColor: colors.primarySoft,
       alignItems: 'center',
       justifyContent: 'center',
+      alignSelf: width < 600 ? 'flex-start' : 'auto',
     },
     refreshText: {
       color: colors.primary,
@@ -736,11 +740,12 @@ const createStyles = (colors, width = 1200) =>
       borderRadius: 12,
       padding: 14,
       marginBottom: 10,
+      minWidth: 0,
     },
     approvalOrderHeader: {
-      flexDirection: 'row',
+      flexDirection: width < 550 ? 'column' : 'row',
       justifyContent: 'space-between',
-      alignItems: 'flex-start',
+      alignItems: width < 550 ? 'stretch' : 'flex-start',
       gap: 12,
     },
     approvalOrderMain: { flex: 1, minWidth: 0 },
@@ -801,6 +806,7 @@ const createStyles = (colors, width = 1200) =>
       backgroundColor: colors.primaryAction,
       alignItems: 'center',
       justifyContent: 'center',
+      width: width < 550 ? '100%' : undefined,
     },
     assignButtonText: {
       color: colors.onPrimary,
@@ -816,6 +822,7 @@ const createStyles = (colors, width = 1200) =>
       backgroundColor: colors.surfaceAlt,
       alignItems: 'center',
       justifyContent: 'center',
+      width: width < 550 ? '100%' : undefined,
     },
     transferButtonText: {
       color: colors.textPrimary,
@@ -824,7 +831,7 @@ const createStyles = (colors, width = 1200) =>
     },
     assignmentPanel: {
       marginTop: 14,
-      padding: 16,
+      padding: width < 550 ? 12 : 16,
       borderRadius: 12,
       backgroundColor: colors.surfaceAlt || 'rgba(0,0,0,0.03)',
       borderWidth: 1,
@@ -890,8 +897,8 @@ const createStyles = (colors, width = 1200) =>
       marginTop: 1,
     },
     scheduleRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
+      flexDirection: width < 550 ? 'column' : 'row',
+      alignItems: width < 550 ? 'stretch' : 'center',
       flexWrap: 'wrap',
       gap: 8,
     },
@@ -899,9 +906,9 @@ const createStyles = (colors, width = 1200) =>
       color: colors.textSecondary,
       fontSize: 12,
       fontWeight: '700',
-      minWidth: 70,
+      minWidth: width < 550 ? 0 : 70,
     },
-    dateSelectorWrap: { flex: 1, minWidth: 220, maxWidth: 420, position: 'relative' },
+    dateSelectorWrap: { flexGrow: 1, flexShrink: 1, flexBasis: 'auto', width: width < 550 ? '100%' : undefined, minWidth: 0, maxWidth: 420, position: 'relative' },
     dateSelector: { minHeight: 42, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, borderWidth: 1, borderColor: colors.inputBorder, backgroundColor: colors.input, borderRadius: 9, paddingHorizontal: 12 },
     dateSelectorText: { flex: 1, minWidth: 0, color: colors.textPrimary, fontSize: 12, fontWeight: '800' },
     dateSelectorChevron: { color: colors.primary, fontSize: 11, fontWeight: '900' },
@@ -971,8 +978,8 @@ const createStyles = (colors, width = 1200) =>
       marginBottom: 8,
     },
     transferTarget: {
-      flexDirection: 'row',
-      alignItems: 'center',
+      flexDirection: width < 550 ? 'column' : 'row',
+      alignItems: width < 550 ? 'stretch' : 'center',
       padding: 10,
       borderRadius: 8,
       borderWidth: 1,
@@ -992,9 +999,11 @@ const createStyles = (colors, width = 1200) =>
       borderWidth: 1,
       borderColor: colors.border,
       borderRadius: 16,
-      paddingHorizontal: 20,
-      paddingTop: 20,
-      paddingBottom: 20,
+      paddingHorizontal: width < 600 ? 14 : 20,
+      paddingTop: width < 600 ? 16 : 20,
+      paddingBottom: width < 600 ? 16 : 20,
+      maxWidth: '100%',
+      minWidth: 0,
     },
     cardHeaderWithSearch: {
       flexDirection: 'row',
@@ -1008,6 +1017,7 @@ const createStyles = (colors, width = 1200) =>
       color: colors.textPrimary,
       fontSize: 16,
       fontWeight: 'bold',
+      flexShrink: 1,
     },
     searchContainer: {
       width: width < 550 ? '100%' : 220,
@@ -1024,6 +1034,7 @@ const createStyles = (colors, width = 1200) =>
       fontSize: 12,
       outlineStyle: 'none',
     },
+    tableViewport: { width: '100%', maxWidth: '100%', minWidth: 0 },
     tableScroll: { flexGrow: 1 },
     table: { minWidth: 1050, flexGrow: 1 },
     tableRow: {

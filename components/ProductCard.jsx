@@ -1,13 +1,13 @@
 import React from 'react';
-import { Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { BLUETAP_COLORS, BLUETAP_LAYOUT } from '../constants/bluetapTheme';
+import { USER_PORTAL_LAYOUT } from '../constants/userPortalLayout';
 import { createPortalStyleSheet, useBlueTapTheme } from './BlueTapTheme';
 
 const formatPrice = (price) => `₱${Number(price || 0).toFixed(2)}`;
 
 export default function ProductCard({ product, onOrder, compact = false, selected = false }) {
   const { colors, isDark } = useBlueTapTheme();
-  const [hovered, setHovered] = React.useState(false);
   const imageUrl = product?.imageUrl || product?.image || '';
   const detail = [product?.containerType || product?.capacity, product?.size].filter(Boolean).join(' · ');
   return (
@@ -22,21 +22,20 @@ export default function ProductCard({ product, onOrder, compact = false, selecte
         <Text style={[styles.policyNote, { color: colors.textSecondary }]}>{product?.deliveryDays?.length ? `Delivery days: ${product.deliveryDays.map((day) => day.slice(0, 3).replace(/^./, (letter) => letter.toUpperCase())).join(', ')}` : 'Delivery: Available daily'}</Text>
         {product?.maxQuantityPerRequester != null && <Text style={[styles.policyNote, { color: colors.textSecondary }]}>Order limit: {product.maxQuantityPerRequester}</Text>}
         {!!onOrder && (
-          <TouchableOpacity
+          <Pressable
             accessibilityRole="button"
-            activeOpacity={0.8}
             onPress={() => onOrder(product)}
-            onMouseEnter={() => setHovered(true)}
-            onMouseLeave={() => setHovered(false)}
-            style={[
+            style={({ hovered, pressed }) => [
               styles.button,
               {
                 backgroundColor: selected ? (isDark ? '#0284C7' : '#0369A1') : (hovered ? (colors.primaryDark || '#0A62A7') : colors.primary),
-              }
+              },
+              hovered && styles.buttonHovered,
+              pressed && styles.buttonPressed,
             ]}
           >
             <Text style={styles.buttonText}>{selected ? 'Selected' : 'Order'}</Text>
-          </TouchableOpacity>
+          </Pressable>
         )}
       </View>
     </View>
@@ -44,7 +43,8 @@ export default function ProductCard({ product, onOrder, compact = false, selecte
 }
 
 const styles = createPortalStyleSheet({
-  card:{width:'100%',maxWidth:340,borderWidth:1,borderRadius:BLUETAP_LAYOUT.radius.lg,overflow:'hidden',...BLUETAP_LAYOUT.shadow},compactCard:{maxWidth:280},selectedCard:{borderWidth:2},
-  imageSurface:{height:158,alignItems:'center',justifyContent:'center',padding:14},compactImageSurface:{height:128},image:{width:'100%',height:'100%'},placeholder:{alignItems:'center',justifyContent:'center'},placeholderLogo:{width:62,height:62,opacity:.45},placeholderText:{fontSize:11,fontWeight:'700',marginTop:5},
-  content:{padding:14},name:{fontSize:16,lineHeight:20,fontWeight:'900'},detail:{fontSize:12,marginTop:4},price:{fontSize:18,fontWeight:'900',marginTop:8},policyNote:{fontSize:11,lineHeight:15,marginTop:4},button:{minHeight:42,marginTop:12,borderRadius:10,alignItems:'center',justifyContent:'center'},buttonText:{color:'#FFFFFF',fontSize:13,fontWeight:'900'},
+  card:{width:'100%',maxWidth:320,minHeight:356,borderWidth:1,borderRadius:USER_PORTAL_LAYOUT.cardRadius,overflow:'hidden',...BLUETAP_LAYOUT.shadow},compactCard:{maxWidth:304,minHeight:344},selectedCard:{borderWidth:2},
+  imageSurface:{height:142,alignItems:'center',justifyContent:'center',padding:12},compactImageSurface:{height:124},image:{width:'100%',height:'100%'},placeholder:{alignItems:'center',justifyContent:'center'},placeholderLogo:{width:56,height:56,opacity:.45},placeholderText:{fontSize:11,fontWeight:'700',marginTop:5},
+  content:{flex:1,padding:14},name:{minHeight:38,fontSize:16,lineHeight:19,fontWeight:'900'},detail:{minHeight:16,fontSize:12,marginTop:3},price:{fontSize:18,fontWeight:'900',marginTop:7},policyNote:{fontSize:11,lineHeight:15,marginTop:3},button:{minHeight:44,marginTop:'auto',borderRadius:10,alignItems:'center',justifyContent:'center'},buttonText:{color:'#FFFFFF',fontSize:13,fontWeight:'900'},
+  buttonHovered:{transform:[{translateY:-1},{scale:1.01}]},buttonPressed:{opacity:.84,transform:[{scale:.98}]},
 });

@@ -3,7 +3,6 @@ import React from 'react';
 import {
   View,
   Text,
-  Image,
   StyleSheet,
   TouchableOpacity,
   TextInput,
@@ -35,9 +34,13 @@ import { clearPendingRegistration } from '../services/emailVerification';
 import { prefetchRegistrationPolicy } from '../services/registrationSession';
 import { warmFaceServiceForSignup, warmLoginBackend } from '../services/apiWarmup';
 import PasswordVisibilityButton from '../components/PasswordVisibilityButton';
+import PageEnterTransition from '../components/PageEnterTransition';
+import AdminEntryTransition from '../components/AdminEntryTransition';
+import BlueTapBrandMark from '../components/BlueTapBrandMark';
 
 const { createHiddenAdminEntryTracker } = require('../services/hiddenAdminEntry');
 const { getPublicLoginErrorMessage } = require('../services/publicLoginErrors');
+const { playAdminEntrySound } = require('../services/uiSound');
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const applicationPendingTitle = 'Application Pending';
@@ -127,10 +130,14 @@ export default function LoginPage() {
   const [showRecoveryConfirmation, setShowRecoveryConfirmation] = React.useState(false);
   const [notification, setNotification] = React.useState(null);
   const [keyboardBottomInset, setKeyboardBottomInset] = React.useState(0);
+  const [adminEntryActive, setAdminEntryActive] = React.useState(false);
   const isLoginSuccessVisible = notification?.title === 'Successfully logged in';
   const adminEntryTracker = React.useMemo(() => createHiddenAdminEntryTracker({
-    onTrigger: () => router.push('/admin/login'),
-  }), [router]);
+    onTrigger: () => {
+      playAdminEntrySound();
+      setAdminEntryActive(true);
+    },
+  }), []);
 
   React.useEffect(() => () => adminEntryTracker.reset(), [adminEntryTracker]);
 
@@ -514,7 +521,7 @@ export default function LoginPage() {
     >
       <SafeAreaView style={styles.container}>
         <StatusBar style="light" />
-        <View style={styles.phoneWrapper}>
+        <PageEnterTransition style={styles.phoneWrapper} resetKey="login">
           <ScrollView
             ref={scrollViewRef}
             contentContainerStyle={[
@@ -549,12 +556,7 @@ export default function LoginPage() {
                     accessibilityRole="image"
                     accessibilityLabel="BlueTap logo"
                   >
-                    <Image
-                      accessible={false}
-                      source={require('../assets/icons/bluetapwhitelogo.png')}
-                      style={styles.logo}
-                      resizeMode="contain"
-                    />
+                    <BlueTapBrandMark inverse color={colors.iconOnPrimary || '#FFFFFF'} size={100} style={styles.logo} />
                   </Pressable>
                   <Text style={styles.appName}>BlueTap</Text>
                   <Text style={styles.tagline}>Water Within Reach</Text>
@@ -601,19 +603,25 @@ export default function LoginPage() {
                 </View>
 
                 <View style={styles.buttonContainer}>
-                  <TouchableOpacity
-                    style={[styles.loginButton, loading && styles.buttonDisabled]}
+                  <Pressable
+                    style={({ pressed, hovered }) => [
+                      styles.loginButton,
+                      { backgroundColor: pressed ? '#D7ECFF' : hovered ? '#EAF6FF' : '#FFFFFF', borderColor: '#D7ECFF' },
+                      hovered && !loading && styles.loginButtonHovered,
+                      pressed && !loading && styles.loginButtonPressed,
+                      loading && styles.buttonDisabled,
+                    ]}
                     onPress={handleLogin}
                     disabled={loading}
                   >
-                    <Text style={styles.loginButtonText}>
+                    <Text style={[styles.loginButtonText, { color: colors.primaryDark || colors.primary }]}>
                       {isLoginSuccessVisible
                         ? 'SUCCESSFULLY LOGGED IN'
                         : loading
                           ? 'PLEASE WAIT...'
                           : 'LOG IN'}
                     </Text>
-                  </TouchableOpacity>
+                  </Pressable>
                 </View>
 
                 <TouchableOpacity
@@ -635,7 +643,12 @@ export default function LoginPage() {
               </View>
             </View>
           </ScrollView>
-        </View>
+        </PageEnterTransition>
+
+        <AdminEntryTransition
+          visible={adminEntryActive}
+          onComplete={() => router.push('/admin/login')}
+        />
 
         <Modal visible={!!pendingUser} transparent animationType="slide">
           <View style={styles.modalBackground}>
@@ -842,12 +855,16 @@ const styles = createPortalStyleSheet({
     marginBottom: 16,
   },
   loginButton: {
-    backgroundColor: '#FFFFFF',
     borderRadius: 10,
+    borderWidth: 1,
+    minHeight: 48,
     paddingVertical: 12,
     width: '100%',
     alignItems: 'center',
+    justifyContent: 'center',
   },
+  loginButtonHovered: { transform: [{ translateY: -1 }, { scale: 1.01 }], opacity: 0.96 },
+  loginButtonPressed: { transform: [{ scale: 0.98 }], opacity: 0.88 },
   loginButtonText: {
     color: '#187BCD',
     fontSize: 16,

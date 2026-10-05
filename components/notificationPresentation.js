@@ -88,9 +88,33 @@ const notificationSeverity = (status, dark = false) => {
   return palette.info;
 };
 
+const compactNotificationStatus = (status) => {
+  const normalized = normalizeNotificationStatus(status);
+  if (SUCCESS_STATUSES.has(normalized)) return 'Delivered';
+  if (DELIVERY_STATUSES.has(normalized)) return 'In transit';
+  if (RESTRICTED_STATUSES.has(normalized)) return 'Restricted';
+  if (normalized.includes('failed')) return 'Failed';
+  if (['cancelled', 'canceled'].includes(normalized)) return 'Cancelled';
+  if (normalized.includes('declined') || normalized === 'rejected') return 'Declined';
+  if (WARNING_STATUSES.has(normalized)) return 'Warning';
+  if (normalized.includes('pending') || normalized.includes('review')) return 'Pending';
+  if (normalized === 'scheduled') return 'Scheduled';
+  if (normalized === 'accepted' || normalized === 'approved') return 'Approved';
+  if (normalized.includes('assigned')) return 'Assigned';
+  return 'Update';
+};
+
+const notificationLayoutForWidth = (width) => ({
+  narrow: Number(width) < 420,
+  cardPadding: Number(width) < 420 ? 12 : 16,
+  metadataLines: Number(width) < 420 ? 2 : undefined,
+});
+
 module.exports = {
   normalizeNotificationStatus,
   notificationSeverity,
+  compactNotificationStatus,
+  notificationLayoutForWidth,
   NOTIFICATION_SEVERITIES,
   DARK_NOTIFICATION_SEVERITIES,
 };

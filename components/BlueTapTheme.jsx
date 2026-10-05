@@ -7,6 +7,9 @@ import {
   BLUETAP_LAYOUT,
   BLUETAP_LIGHT_PORTAL_COLORS,
 } from '../constants/bluetapTheme';
+import { useBlueTapThemeTransition } from './BlueTapThemeTransition';
+
+const { playThemeDropSound } = require('../services/uiSound');
 
 export const BLUETAP_THEME_STORAGE_KEY = 'bluetap-theme';
 
@@ -23,6 +26,7 @@ function readWebTheme() {
 }
 
 export function BlueTapThemeProvider({ children }) {
+  const { isTransitioning, startTransition } = useBlueTapThemeTransition();
   const [preference, setPreferenceState] = React.useState(() => {
     const storedTheme = readWebTheme();
     return storedTheme === 'dark' ? 'dark' : 'light';
@@ -46,7 +50,7 @@ export function BlueTapThemeProvider({ children }) {
     };
   }, []);
 
-  const setPreference = React.useCallback((nextTheme) => {
+  const applyPreference = React.useCallback((nextTheme) => {
     if (nextTheme !== 'light' && nextTheme !== 'dark') return;
     setPreferenceState(nextTheme);
     AsyncStorage.setItem(BLUETAP_THEME_STORAGE_KEY, nextTheme).catch(() => {});
@@ -57,8 +61,20 @@ export function BlueTapThemeProvider({ children }) {
     }
   }, []);
 
-  const toggleTheme = React.useCallback(() => {
-    setPreference(preference === 'dark' ? 'light' : 'dark');
+  const setPreference = React.useCallback((nextTheme, event) => {
+    if (nextTheme !== 'light' && nextTheme !== 'dark') return false;
+    if (nextTheme === preference) return true;
+    if (event) playThemeDropSound();
+    return startTransition({
+      applyTheme: () => applyPreference(nextTheme),
+      event,
+      nextTheme,
+    });
+  }, [applyPreference, preference, startTransition]);
+
+  const toggleTheme = React.useCallback((event) => {
+    const nextTheme = preference === 'dark' ? 'light' : 'dark';
+    return setPreference(nextTheme, event);
   }, [preference, setPreference]);
   const colors = preference === 'dark'
     ? BLUETAP_DARK_PORTAL_COLORS
@@ -66,8 +82,8 @@ export function BlueTapThemeProvider({ children }) {
   activePortalTheme = preference;
 
   const value = React.useMemo(
-    () => ({ colors, isDark: preference === 'dark', layout: BLUETAP_LAYOUT, preference, ready, setPreference, toggleTheme }),
-    [colors, preference, ready, setPreference, toggleTheme]
+    () => ({ colors, isDark: preference === 'dark', isTransitioning, layout: BLUETAP_LAYOUT, preference, ready, setPreference, toggleTheme }),
+    [colors, isTransitioning, preference, ready, setPreference, toggleTheme]
   );
 
   return <BlueTapThemeContext.Provider value={value}>{children}</BlueTapThemeContext.Provider>;
@@ -79,6 +95,7 @@ export function useBlueTapTheme() {
   return {
     colors: BLUETAP_LIGHT_PORTAL_COLORS,
     isDark: false,
+    isTransitioning: false,
     layout: BLUETAP_LAYOUT,
     preference: 'light',
     ready: true,
@@ -157,8 +174,10 @@ function mapDarkColor(value, property, colors) {
   const normalized = value.trim().toLowerCase();
 
   if (property === 'shadowColor') return '#000000';
-  if (property === 'color' && ['#fff', '#ffffff', 'white'].includes(normalized)) {
-    return colors.white;
+  if (['#fff', '#ffffff', 'white'].includes(normalized)) {
+    if (property === 'color') return colors.iconOnPrimary || colors.white;
+    if (property.toLowerCase().includes('border')) return colors.border;
+    return colors.surface;
   }
   if (property === 'color' && ['#000', '#000000', 'black'].includes(normalized)) {
     return colors.textPrimary;

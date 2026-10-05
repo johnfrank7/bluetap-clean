@@ -1,13 +1,10 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { useRouter } from 'expo-router';
 import SoftStatusBadge from '../SoftStatusBadge';
-const { orderDetailTarget } = require('../../services/orderNavigation');
 
 const clean = (value) => String(value || '').trim();
 
-export default function ChatOrderContextCard({ order, colors, role, onNavigate, generalInquiry = false }) {
-  const router = useRouter();
+export default function ChatOrderContextCard({ order, colors, role, onViewDetails, generalInquiry = false }) {
   if (!order) return generalInquiry ? (
     <View style={[styles.generalCard, { backgroundColor: colors.surfaceAlt, borderColor: colors.border }]}>
       <Text style={[styles.generalTitle, { color: colors.textPrimary }]}>General inquiry</Text>
@@ -21,14 +18,14 @@ export default function ChatOrderContextCard({ order, colors, role, onNavigate, 
   const total = Number(order.totalAtOrder ?? order.totalSnapshot ?? order.total_cost ?? order.totalAmount);
   const requesterName = clean(order.requesterName || order.requesterNameSnapshot || order.customerName);
   const status = clean(order.status || order.finalStatus);
-  const target = orderDetailTarget(role, order);
-  const Card = target ? Pressable : View;
+  const canViewDetails = typeof onViewDetails === 'function';
+  const Card = canViewDetails ? Pressable : View;
   return (
     <Card
-      accessibilityRole={target ? 'button' : undefined}
-      accessibilityLabel={target && reference ? `Open Order ${reference} details` : undefined}
-      onPress={target ? () => { onNavigate?.(); router.push(target); } : undefined}
-      style={target
+      accessibilityRole={canViewDetails ? 'button' : undefined}
+      accessibilityLabel={canViewDetails && reference ? `Open Order ${reference} details` : undefined}
+      onPress={canViewDetails ? () => onViewDetails(order) : undefined}
+      style={canViewDetails
         ? ({ pressed }) => [styles.card, { backgroundColor: colors.primarySoft, borderColor: colors.border }, pressed && styles.pressed]
         : [styles.card, { backgroundColor: colors.primarySoft, borderColor: colors.border }]}
     >
@@ -41,7 +38,7 @@ export default function ChatOrderContextCard({ order, colors, role, onNavigate, 
       <Text style={[styles.detail, { color: colors.textSecondary }]} numberOfLines={2}>
         {[branch, Number.isFinite(total) ? `\u20B1${total.toFixed(2)}` : ''].filter(Boolean).join(' - ')}
       </Text>
-      {target && <Text style={[styles.openLabel, { color: colors.primary }]}>View details</Text>}
+      {canViewDetails && <Text style={[styles.openLabel, { color: colors.primary }]}>View details</Text>}
     </Card>
   );
 }

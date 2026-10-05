@@ -1,10 +1,11 @@
 import React from 'react';
-import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 
 import { BLUETAP_LAYOUT } from '../constants/bluetapTheme';
 import SoftStatusBadge from './SoftStatusBadge';
+import BlueTapIcon from './BlueTapIcon';
 
-const { notificationSeverity } = require('./notificationPresentation');
+const { compactNotificationStatus, notificationLayoutForWidth, notificationSeverity } = require('./notificationPresentation');
 
 export default function NotificationCard({
   accessibilityLabel,
@@ -16,6 +17,9 @@ export default function NotificationCard({
   status,
   time,
 }) {
+  const { width } = useWindowDimensions();
+  const layout = notificationLayoutForWidth(width);
+  const { narrow } = layout;
   const tone = notificationSeverity(status, dark);
   return (
     <TouchableOpacity
@@ -24,6 +28,8 @@ export default function NotificationCard({
       onPress={onPress}
       style={[
         styles.card,
+        narrow && styles.cardNarrow,
+        { padding: layout.cardPadding },
         {
           backgroundColor: colors.surface,
           borderColor: colors.border,
@@ -35,17 +41,17 @@ export default function NotificationCard({
       <View
         accessibilityRole="image"
         accessibilityLabel={`${tone.label} notification`}
-        style={[styles.severityIcon, { backgroundColor: tone.soft, borderColor: tone.accent }]}
+        style={[styles.severityIcon, narrow && styles.severityIconNarrow, { backgroundColor: tone.soft, borderColor: tone.accent }]}
       >
-        <Text style={[styles.severityIconText, { color: tone.accent }]}>{tone.icon}</Text>
+        <BlueTapIcon name={tone.kind} fallback={tone.icon} size={15} color={tone.accent} />
       </View>
       <View style={styles.cardBody}>
-        <View style={styles.cardHeaderRow}>
-          <SoftStatusBadge status={status} dark={dark} />
-          <Text numberOfLines={1} style={[styles.time, { color: colors.textSecondary || colors.muted }]}>{time}</Text>
+        <View style={[styles.cardHeaderRow, narrow && styles.cardHeaderRowNarrow]}>
+          <SoftStatusBadge status={status} label={compactNotificationStatus(status)} dark={dark} compact numberOfLines={1} />
+          <Text numberOfLines={1} style={[styles.time, narrow && styles.timeNarrow, { color: colors.textSecondary || colors.muted }]}>{time}</Text>
         </View>
         <Text style={[styles.message, { color: colors.textPrimary || colors.text }]}>{message}</Text>
-        {!!metadata && <Text style={[styles.metadata, { color: colors.textSecondary || colors.muted }]}>{metadata}</Text>}
+        {!!metadata && <Text numberOfLines={layout.metadataLines} style={[styles.metadata, { color: colors.textSecondary || colors.muted }]}>{metadata}</Text>}
       </View>
       <Text accessibilityElementsHidden importantForAccessibility="no" style={[styles.chevron, { color: colors.primary }]}>›</Text>
     </TouchableOpacity>
@@ -69,6 +75,7 @@ const styles = StyleSheet.create({
     shadowRadius: BLUETAP_LAYOUT.shadow.shadowRadius,
     width: '100%',
   },
+  cardNarrow: { alignItems: 'flex-start', gap: 8 },
   severityIcon: {
     alignItems: 'center',
     borderRadius: 14,
@@ -78,11 +85,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     width: 28,
   },
-  severityIconText: {
-    fontSize: 12,
-    fontWeight: '900',
-    lineHeight: 16,
-  },
+  severityIconNarrow: { height: 24, width: 24, borderRadius: 12, marginTop: 1 },
   cardBody: {
     flex: 1,
     minWidth: 0,
@@ -96,12 +99,14 @@ const styles = StyleSheet.create({
     marginBottom: 6,
     minWidth: 0,
   },
+  cardHeaderRowNarrow: { alignItems: 'flex-start', justifyContent: 'flex-start' },
   time: {
     flexShrink: 1,
     fontSize: 11,
     fontWeight: '600',
     marginLeft: 'auto',
   },
+  timeNarrow: { marginLeft: 0, paddingTop: 2 },
   message: {
     fontSize: 14,
     fontWeight: '700',

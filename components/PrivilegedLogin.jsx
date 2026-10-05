@@ -1,16 +1,18 @@
 import React from 'react';
-import { ActivityIndicator, Image, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, usePathname, useRootNavigationState, useRouter } from 'expo-router';
 import { getDocFromServer, doc } from 'firebase/firestore';
 import { onAuthStateChanged, signInWithCustomToken, signInWithEmailAndPassword, signOut } from 'firebase/auth';
 
 import { auth, db } from '../firebase';
-import { BLUETAP_LOGIN_GRADIENT } from '../constants/bluetapTheme';
 import { cacheValidatedPrivilegedAccess, clearAllAuthSessions, saveRoleSession } from '../services/authSession';
 import { loginWithUsername } from '../services/usernameAuth';
 import { warmLoginBackend } from '../services/apiWarmup';
 import PasswordVisibilityButton from './PasswordVisibilityButton';
+import PageEnterTransition from './PageEnterTransition';
+import BlueTapBrandMark from './BlueTapBrandMark';
 
 const { hasTrustedRole } = require('../services/privilegedAccess');
 const {
@@ -68,6 +70,11 @@ export default function PrivilegedLogin() {
   const routerRef = React.useRef(router);
   routerRef.current = router;
   const params = useLocalSearchParams();
+  const palette = {
+    background: '#041C2C', backgroundEnd: '#082F49', surface: '#0E2235', input: '#0A1928',
+    border: '#2B4A63', text: '#F5FAFF', secondary: '#9FB4C8', primary: '#70BDF2',
+    action: '#1565C0', success: '#34D399', successSoft: '#103B2A', danger: '#FF8A91', dangerSoft: '#48262A',
+  };
   const currentPathname = usePathname();
   const rootNavigationState = useRootNavigationState();
   const [identifier, setIdentifier] = React.useState('');
@@ -241,38 +248,56 @@ export default function PrivilegedLogin() {
     }
   };
 
-  return <LinearGradient colors={BLUETAP_LOGIN_GRADIENT} style={styles.screen}><View style={styles.card}>
-    <Image source={require('../assets/icons/bluetaplogo.png')} style={styles.logo} resizeMode="contain" />
-    <Text style={styles.title}>BlueTap Administrator</Text>
-    <Text style={styles.subtitle}>Authorized personnel only</Text>
-    <Text style={styles.label}>Username or email</Text>
-    <TextInput value={identifier} onChangeText={setIdentifier} autoCapitalize="none" autoCorrect={false} keyboardType="default" style={styles.input} onSubmitEditing={submit} />
-    <Text style={styles.label}>Password</Text>
-    <View style={styles.passwordField}>
-      <TextInput value={password} onChangeText={setPassword} secureTextEntry={!showPassword} autoCapitalize="none" style={styles.passwordInput} onSubmitEditing={submit} />
-      <PasswordVisibilityButton visible={showPassword} onPress={() => setShowPassword((visible) => !visible)} />
-    </View>
-    {params.passwordChanged === 'true' && !error && <Text style={styles.success}>Password changed successfully. Sign in with your new password.</Text>}
-    {!!error && <Text accessibilityRole="alert" style={styles.error}>{error}</Text>}
-    <TouchableOpacity disabled={loading || (!!pendingDestination && !error)} onPress={pendingDestination ? retryNavigation : submit} style={[styles.button, loading && styles.disabled]}>{loading || (pendingDestination && !error) ? <View style={styles.loadingContent}><ActivityIndicator color="#FFF" size="small" /><Text style={styles.buttonText}>{pendingDestination ? 'Opening dashboard...' : 'Verifying administrator access...'}</Text></View> : <Text style={styles.buttonText}>{pendingDestination ? 'Open dashboard' : 'Sign in as Administrator'}</Text>}</TouchableOpacity>
-    <TouchableOpacity disabled={loading} onPress={() => router.replace('/login')} style={styles.back}><Text style={styles.backText}>Back to public login</Text></TouchableOpacity>
-  </View></LinearGradient>;
+  return <LinearGradient dataSet={{ bluetapTheme: 'dark' }} colors={[palette.background, palette.backgroundEnd]} style={[styles.screen, Platform.OS === 'web' && styles.webViewport]}>
+    <SafeAreaView style={styles.safe}>
+      <ScrollView
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+        style={styles.scroll}
+        contentContainerStyle={styles.scrollContent}
+      >
+        <PageEnterTransition axis="y" distance={8} duration={240} fill={false} scaleFrom={0.99} resetKey="admin-login-dark" style={styles.entry}>
+          <View style={[styles.card, { backgroundColor: palette.surface, borderColor: '#F4B942' }]}>
+            <BlueTapBrandMark accessibilityLabel="BlueTap Administrator" color={palette.primary} size={72} style={styles.logo} />
+            <Text style={[styles.title, { color: palette.text }]}>BlueTap Administrator</Text>
+            <Text style={[styles.subtitle, { color: palette.secondary }]}>Authorized personnel only</Text>
+            <Text style={[styles.label, { color: palette.text }]}>Username or email</Text>
+            <TextInput aria-invalid={Boolean(error)} accessibilityState={{ invalid: Boolean(error) }} value={identifier} onChangeText={setIdentifier} autoCapitalize="none" autoCorrect={false} keyboardType="default" placeholder="Username or email" placeholderTextColor={palette.secondary} selectionColor={palette.primary} style={[styles.input, { backgroundColor: palette.input, borderColor: palette.border, color: palette.text }]} onSubmitEditing={submit} />
+            <Text style={[styles.label, { color: palette.text }]}>Password</Text>
+            <View aria-invalid={Boolean(error)} dataSet={{ inputSurface: 'true' }} style={[styles.passwordField, { backgroundColor: palette.input, borderColor: palette.border }]}>
+              <TextInput aria-invalid={Boolean(error)} accessibilityState={{ invalid: Boolean(error) }} value={password} onChangeText={setPassword} secureTextEntry={!showPassword} autoCapitalize="none" placeholder="Password" placeholderTextColor={palette.secondary} selectionColor={palette.primary} style={[styles.passwordInput, { color: palette.text }]} onSubmitEditing={submit} />
+              <PasswordVisibilityButton color={palette.primary} visible={showPassword} onPress={() => setShowPassword((visible) => !visible)} />
+            </View>
+            {params.passwordChanged === 'true' && !error && <Text style={[styles.success, { color: palette.success, backgroundColor: palette.successSoft }]}>Password changed successfully. Sign in with your new password.</Text>}
+            {!!error && <Text accessibilityRole="alert" style={[styles.error, { color: palette.danger, backgroundColor: palette.dangerSoft }]}>{error}</Text>}
+            <TouchableOpacity disabled={loading || (!!pendingDestination && !error)} onPress={pendingDestination ? retryNavigation : submit} style={[styles.button, { backgroundColor: palette.action }, loading && styles.disabled]}>{loading || (pendingDestination && !error) ? <View style={styles.loadingContent}><ActivityIndicator color="#FFF" size="small" /><Text style={styles.buttonText}>{pendingDestination ? 'Opening dashboard...' : 'Verifying administrator access...'}</Text></View> : <Text style={styles.buttonText}>{pendingDestination ? 'Open dashboard' : 'Sign in as Administrator'}</Text>}</TouchableOpacity>
+            <TouchableOpacity disabled={loading} onPress={() => router.replace('/login')} style={styles.back}><Text style={[styles.backText, { color: palette.primary }]}>Back to public login</Text></TouchableOpacity>
+          </View>
+        </PageEnterTransition>
+      </ScrollView>
+    </SafeAreaView>
+  </LinearGradient>;
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 20 },
-  card: { width: '100%', maxWidth: 430, borderRadius: 22, padding: 26, backgroundColor: '#FFF', shadowColor: '#063B65', shadowOpacity: .22, shadowRadius: 18, shadowOffset: { width: 0, height: 10 }, elevation: 8 },
+  screen: { flex: 1 },
+  webViewport: { position: 'fixed', top: 0, right: 0, bottom: 0, left: 0, height: '100dvh', boxSizing: 'border-box', overflow: 'hidden' },
+  safe: { flex: 1, minWidth: 0 },
+  scroll: { flex: 1 },
+  scrollContent: { flexGrow: 1, alignItems: 'center', justifyContent: 'flex-start', paddingHorizontal: 20, paddingVertical: 24 },
+  entry: { width: '100%', maxWidth: 430, marginVertical: 'auto' },
+  card: { width: '100%', maxWidth: 430, borderRadius: 22, borderWidth: 1, padding: 26, shadowColor: '#063B65', shadowOpacity: .22, shadowRadius: 18, shadowOffset: { width: 0, height: 10 }, elevation: 8 },
   logo: { width: 72, height: 72, alignSelf: 'center' },
-  title: { color: '#17324D', fontSize: 26, fontWeight: '900', textAlign: 'center', marginTop: 8 },
-  subtitle: { color: '#607A90', fontSize: 14, textAlign: 'center', marginTop: 5, marginBottom: 20 },
-  label: { color: '#294C66', fontSize: 13, fontWeight: '800', marginTop: 12, marginBottom: 6 },
-  input: { minHeight: 49, borderWidth: 1, borderColor: '#BDD5E6', backgroundColor: '#FAFCFE', borderRadius: 10, paddingHorizontal: 13, color: '#17324D' },
-  passwordField: { minHeight: 49, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#BDD5E6', backgroundColor: '#FAFCFE', borderRadius: 10 },
-  passwordInput: { flex: 1, minWidth: 0, minHeight: 47, paddingHorizontal: 13, color: '#17324D' },
-  success: { color: '#167347', backgroundColor: '#E3F7EC', borderRadius: 8, padding: 10, marginTop: 14, textAlign: 'center' },
-  error: { color: '#A72C25', backgroundColor: '#FFF1F0', borderRadius: 8, padding: 10, marginTop: 14, textAlign: 'center' },
-  button: { minHeight: 50, borderRadius: 10, backgroundColor: '#187BCD', alignItems: 'center', justifyContent: 'center', marginTop: 20 },
+  title: { fontSize: 26, fontWeight: '900', textAlign: 'center', marginTop: 8 },
+  subtitle: { fontSize: 14, textAlign: 'center', marginTop: 5, marginBottom: 20 },
+  label: { fontSize: 13, fontWeight: '800', marginTop: 12, marginBottom: 6 },
+  input: { minHeight: 49, borderWidth: 1, borderRadius: 10, paddingHorizontal: 13 },
+  passwordField: { minHeight: 49, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderRadius: 10 },
+  passwordInput: { flex: 1, minWidth: 0, minHeight: 47, paddingHorizontal: 13 },
+  success: { borderRadius: 8, padding: 10, marginTop: 14, textAlign: 'center' },
+  error: { borderRadius: 8, padding: 10, marginTop: 14, textAlign: 'center' },
+  button: { minHeight: 50, borderRadius: 10, alignItems: 'center', justifyContent: 'center', marginTop: 20 },
   loadingContent: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 9 },
   buttonText: { color: '#FFF', fontSize: 15, fontWeight: '800' }, disabled: { opacity: .65 },
-  back: { minHeight: 44, alignItems: 'center', justifyContent: 'center', marginTop: 8 }, backText: { color: '#187BCD', fontWeight: '700' },
+  back: { minHeight: 44, alignItems: 'center', justifyContent: 'center', marginTop: 8 }, backText: { fontWeight: '700' },
 });

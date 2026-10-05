@@ -6,6 +6,8 @@ import ChatComposer from './ChatComposer';
 import ChatMessageBubble from './ChatMessageBubble';
 import ChatOrderContextCard from './ChatOrderContextCard';
 import ChatReportDialog from './ChatReportDialog';
+import RequestDetailsModal from '../RequestDetailsModal';
+import { useCurrentPageRequestDetails } from '../useCurrentPageRequestDetails';
 
 export default function ChatConversationView() {
   const {
@@ -21,6 +23,12 @@ export default function ChatConversationView() {
   const [editBody, setEditBody] = React.useState('');
   const [deleteTarget, setDeleteTarget] = React.useState(null);
   const [mutationBusy, setMutationBusy] = React.useState(false);
+  const {
+    selectedRequest,
+    requestDetailsVisible,
+    openRequestDetails,
+    closeRequestDetails,
+  } = useCurrentPageRequestDetails();
   const scrollRef = React.useRef(null);
   const didInitialScroll = React.useRef(false);
   const reportingAllowed = ['requester', 'distributor'].includes(role) && currentConversation?.type === 'requester_distributor';
@@ -41,7 +49,7 @@ export default function ChatConversationView() {
         {reportingAllowed && <View style={styles.headerMenuWrap}><Pressable accessibilityRole="button" accessibilityLabel="Conversation options" onPress={() => setHeaderMenuOpen((open) => !open)} style={styles.headerMenuButton}><Text style={[styles.headerMenuGlyph, { color: colors.textPrimary }]}>{'\u22EE'}</Text></Pressable>{headerMenuOpen && <View style={[styles.headerMenu, { backgroundColor: colors.surface, borderColor: colors.border }]}><Pressable accessibilityRole="button" accessibilityLabel="Report user" onPress={() => { setHeaderMenuOpen(false); setReportTarget({ type: 'user' }); }} style={styles.headerMenuItem}><Text style={[styles.reportUserText, { color: colors.danger }]}>Report user</Text></Pressable></View>}</View>}
         <Pressable accessibilityRole="button" accessibilityLabel="Close messages" onPress={closeChat} style={styles.close}><Text style={[styles.closeText, { color: colors.textPrimary }]}>x</Text></Pressable>
       </View>
-      <ChatOrderContextCard order={currentConversation.orderContextLocal} colors={colors} role={role} onNavigate={closeChat} generalInquiry={currentConversation.type === 'requester_branch' && !currentConversation.orderContextLocal} />
+      <ChatOrderContextCard order={currentConversation.orderContextLocal} colors={colors} role={role} onViewDetails={openRequestDetails} generalInquiry={currentConversation.type === 'requester_branch' && !currentConversation.orderContextLocal} />
       <ScrollView
         ref={scrollRef}
         keyboardShouldPersistTaps="handled"
@@ -78,6 +86,7 @@ export default function ChatConversationView() {
       {!!conversationNotice && <View style={[styles.lifecycleNotice, { backgroundColor: colors.surfaceAlt, borderColor: colors.border }]}><Text style={[styles.lifecycleTitle, { color: colors.textPrimary }]}>{conversationNotice.title}</Text><Text style={[styles.lifecycleBody, { color: colors.textSecondary }]}>{conversationNotice.body}</Text></View>}
       {canSend ? <ChatComposer colors={colors} onSend={sendCurrentMessage} /> : !threadError && !conversationNotice && <Text style={[styles.readOnly, { color: colors.textSecondary, backgroundColor: colors.surfaceAlt }]}>{sendUnavailableReason || 'Sending is unavailable for this conversation.'}</Text>}
       <ChatReportDialog visible={!!reportTarget} conversation={currentConversation} message={reportTarget?.message} colors={colors} onClose={() => setReportTarget(null)} />
+      <RequestDetailsModal visible={requestDetailsVisible} request={selectedRequest} branches={[]} onClose={closeRequestDetails} />
       <Modal visible={!!editTarget} transparent animationType="fade" onRequestClose={() => setEditTarget(null)}><View style={styles.modalBackdrop}><View accessibilityViewIsModal style={[styles.modalCard, { backgroundColor: colors.surface, borderColor: colors.border }]}><Text style={[styles.modalTitle, { color: colors.textPrimary }]}>Edit message</Text><TextInput accessibilityLabel="Edited message" value={editBody} onChangeText={setEditBody} maxLength={2000} multiline style={[styles.editInput, { color: colors.textPrimary, backgroundColor: colors.surfaceAlt, borderColor: colors.border }]} /><View style={styles.modalActions}><Pressable onPress={() => setEditTarget(null)} style={[styles.secondary, { borderColor: colors.border }]}><Text style={{ color: colors.textPrimary, fontWeight: '800' }}>Cancel</Text></Pressable><Pressable disabled={mutationBusy || !editBody.trim()} onPress={async () => { setMutationBusy(true); try { await editCurrentMessage(editTarget, editBody); setEditTarget(null); } catch {} finally { setMutationBusy(false); } }} style={[styles.primary, { backgroundColor: colors.primaryAction, opacity: mutationBusy ? .6 : 1 }]}><Text style={styles.primaryText}>Save edit</Text></Pressable></View></View></View></Modal>
       <Modal visible={!!deleteTarget} transparent animationType="fade" onRequestClose={() => setDeleteTarget(null)}><View style={styles.modalBackdrop}><View accessibilityViewIsModal style={[styles.modalCard, { backgroundColor: colors.surface, borderColor: colors.border }]}><Text style={[styles.modalTitle, { color: colors.textPrimary }]}>Delete this message?</Text><Text style={[styles.modalCopy, { color: colors.textSecondary }]}>The message will become a tombstone. Protected revision and report evidence records are preserved.</Text><View style={styles.modalActions}><Pressable onPress={() => setDeleteTarget(null)} style={[styles.secondary, { borderColor: colors.border }]}><Text style={{ color: colors.textPrimary, fontWeight: '800' }}>Cancel</Text></Pressable><Pressable disabled={mutationBusy} onPress={async () => { setMutationBusy(true); try { await deleteCurrentMessage(deleteTarget); setDeleteTarget(null); } catch {} finally { setMutationBusy(false); } }} style={[styles.primary, { backgroundColor: colors.danger, opacity: mutationBusy ? .6 : 1 }]}><Text style={styles.primaryText}>Delete message</Text></Pressable></View></View></View></Modal>
     </View>

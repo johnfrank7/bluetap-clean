@@ -1,9 +1,9 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
-import { useRouter } from 'expo-router';
+import useSingleFlightNavigation from './useSingleFlightNavigation';
 
 export default function DistributorProfileBanner({ isComplete, loading }) {
-  const router = useRouter();
+  const { navigateOnce } = useSingleFlightNavigation();
 
   if (loading || isComplete) return null;
 
@@ -16,7 +16,7 @@ export default function DistributorProfileBanner({ isComplete, loading }) {
         </Text>
       </View>
       <TouchableOpacity
-        onPress={() => router.push('/distributor/d_profile')}
+        onPress={() => navigateOnce('/distributor/d_profile')}
         style={styles.button}
         accessibilityRole="button"
         accessibilityLabel="Complete Profile"

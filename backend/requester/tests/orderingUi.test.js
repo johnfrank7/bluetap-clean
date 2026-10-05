@@ -88,7 +88,7 @@ test('map renders a clear initial location prompt plus draggable requester and p
 });
 test('map uses OpenStreetMap without a paid routing dependency', () => assert.match(map, /tile\.openstreetmap\.org/));
 test('product card uses a prominent contain image and a placeholder', () => {
-  assert.match(productCard, /resizeMode="contain"/); assert.match(productCard, /placeholder/i); assert.match(productCard, /height:158/);
+  assert.match(productCard, /resizeMode="contain"/); assert.match(productCard, /placeholder/i); assert.match(productCard, /imageSurface:\{height:142/);
 });
 test('Requester floating navigation reserves shared content space instead of covering controls', () => {
   assert.match(layout, /UserPortalShell/); assert.match(distributorLayout, /UserPortalShell/); assert.match(portalShell, /backgroundColor: 'transparent'/); assert.match(portalShell, /navOverlay/); assert.match(portalLayout, /maxWidth: 480/); assert.match(portalLayout, /USER_PORTAL_BOTTOM_CONTENT_INSET/); assert.match(nav, /useSafeAreaInsets/); assert.match(nav, /primaryNavButton/); assert.match(nav, /label: 'Add Request'/); assert.doesNotMatch(nav, /floating=\{false\}/);
@@ -211,7 +211,10 @@ test('floating portal navigation uses theme tokens while its positioning wrapper
 test('Requester Add Request control remains visibly rendered before and after its route is active', () => {
   assert.match(nav, /primaryAction=\{isPrimaryAction\}/);
   assert.match(nav, /primaryActionIcon/);
-  assert.match(nav, /return <Text style=\{styles\.primaryActionIcon\}>\+<\/Text>/);
+  assert.match(nav, /return <Text style=\{\[styles\.primaryActionIcon, \{ color: tintColor \}\]\}>\+<\/Text>/);
+  assert.match(nav, /colors\.primaryAction \|\| colors\.primary/);
+  assert.match(nav, /borderColor: isActive \|\| pressed \? colors\.primaryLight : colors\.primary/);
+  assert.match(nav, /colors\.iconOnPrimary \|\| colors\.onPrimary/);
 });
 
 test('Distributor pages retain their distinct committed layouts while using the scoped assignment API', () => {
@@ -220,7 +223,7 @@ test('Distributor pages retain their distinct committed layouts while using the 
     assert.doesNotMatch(screen, /PENDING_REQUESTS|SCHEDULED_REQUESTS|HISTORY_REQUESTS|CURRENT_REQUEST|DASHBOARD_SUMMARY/);
     assert.doesNotMatch(screen, /Jeanne Ortega|Franz Caliguid|Maylene Minoza|Chane Sarcon|Angelyn Paculba/);
   }
-  assert.match(distributorDashboard, /Current Request/);
+  assert.match(distributorDashboard, /Delivery Request/);
   assert.match(distributorDashboard, /\['pending', 'distributor assigned'\]/);
   assert.match(distributorRequests, /Choose Delivery Schedule/);
   assert.match(distributorScheduled, /Scheduled Requests/);
@@ -254,7 +257,7 @@ test('role changes revalidate securely and product UI never creates or exposes r
   assert.match(roleGate, /invalidatePrivilegedValidationCache/);
   assert.doesNotMatch(uniqueIds, /firebase\/firestore|accountCounters|counters\/unique_ids|runTransaction/);
   assert.doesNotMatch(login, /LOGIN_AUTH_UID|LOGIN_PROFILE_UID|authenticatedUid|profileUid/);
-  assert.match(profile, /label="UID"/);
+  assert.match(profile, /label="Public ID"/);
   assert.match(profile, /getProfileUniqueId/);
   assert.doesNotMatch(adminManagers, /<Info label="UID" value=\{account\.uid\}/);
 });

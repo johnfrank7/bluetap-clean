@@ -1,11 +1,12 @@
 import React, { useMemo } from 'react';
-import { ActivityIndicator, ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Animated, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { BLUETAP_COLORS, BLUETAP_LAYOUT } from '../../constants/bluetapTheme';
 import { createPortalStyleSheet, useBlueTapTheme } from '../../components/BlueTapTheme';
 import BlueTapEmptyState from '../../components/BlueTapEmptyState';
 import NotificationCard from '../../components/NotificationCard';
+import NotificationBackButton from '../../components/NotificationBackButton';
 import { USER_PORTAL_BOTTOM_CONTENT_INSET, USER_PORTAL_LAYOUT } from '../../constants/userPortalLayout';
 import BlueTapHeader from '../../components/BlueTapHeader';
 import DistributorPortalBackground from '../../components/DistributorPortalBackground';
@@ -18,6 +19,10 @@ import {
 import { formatNotificationTime, getOrderLifecycleTimestamp, parseTimestamp } from '../../services/notificationTimestamp';
 import { useRoleNotifications } from '../../components/RoleNotifications';
 import { useModerationNotices } from '../../components/ModerationNotices';
+import AnimatedPresenceItem from '../../components/AnimatedPresenceItem';
+import { useAnimatedPresenceList } from '../../components/useAnimatedPresenceList';
+import useNotificationPageMotion, { NOTIFICATION_LIST_MOTION_DURATION_MS } from '../../components/useNotificationPageMotion';
+import useSingleFlightNavigation from '../../components/useSingleFlightNavigation';
 
 const NOTIFICATION_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -58,12 +63,15 @@ const messageFor = (order) => {
 export default function DistributorNotification() {
   const { colors, isDark } = useBlueTapTheme();
   const router = useRouter();
+  const { replaceOnce } = useSingleFlightNavigation();
   const params = useLocalSearchParams();
   const { orders, loading, error, refresh } = useAssignedDistributorOrders();
   const { events, markAllSeen, markSeen } = useRoleNotifications();
   const { openNotice } = useModerationNotices();
   const [selectedOrderId, setSelectedOrderId] = React.useState(null);
   const openedParamRef = React.useRef('');
+  const pageMotion = useNotificationPageMotion(() => router.back());
+  const notificationEntries = useAnimatedPresenceList(events, (event) => event.id, NOTIFICATION_LIST_MOTION_DURATION_MS);
 
   React.useEffect(() => { if (events.length) markAllSeen(); }, [events, markAllSeen]);
   React.useEffect(() => {
@@ -79,15 +87,17 @@ export default function DistributorNotification() {
 
   return (
     <DistributorPortalBackground>
+    <Animated.View style={[styles.motionRoot, pageMotion.style]}>
     <SafeAreaView edges={['left', 'right', 'bottom']} style={styles.safe}>
       <BlueTapHeader notificationPath="/distributor/d_notification" />
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <TouchableOpacity accessibilityRole="button" onPress={() => router.back()} style={styles.back}>
-          <Text style={styles.backText}>‹ Back</Text>
-        </TouchableOpacity>
-
-        <Text style={styles.eyebrow}>NOTIFICATION</Text>
-        <Text style={styles.title}>Notifications</Text>
+        <View style={styles.headingRow}>
+          <View style={styles.headingCopy}>
+            <Text style={styles.eyebrow}>NOTIFICATION</Text>
+            <Text style={styles.title}>Notifications</Text>
+          </View>
+          <NotificationBackButton colors={colors} inverse onPress={pageMotion.goBack} />
+        </View>
         <Text style={styles.subtitle}>Updates generated from your assigned BlueTap deliveries.</Text>
 
         {loading ? (
@@ -109,20 +119,22 @@ export default function DistributorNotification() {
             title="No Assignment Notifications Yet"
             description="Updates for deliveries assigned to you will appear here."
             actionLabel="View Assigned Requests"
-            onAction={() => router.replace('/distributor/d_requests')}
+            onAction={() => replaceOnce('/distributor/d_requests')}
           />
         ) : (
           <View style={styles.list}>
-            {events.map((event) => (
+            {notificationEntries.map((entry, index) => (
+              <AnimatedPresenceItem key={entry.id} phase={entry.phase} delay={Math.min(index * 30, 120)}>
               <NotificationCard
-                key={event.id}
+                accessibilityLabel={entry.item.message}
                 colors={colors}
                 dark={isDark}
-                status={event.status}
-                time={formatNotificationTime(event.at)}
-                message={event.message}
-                onPress={() => { markSeen([event.id]); if (event.noticeId) openNotice(event.noticeId); else setSelectedOrderId(event.orderId); }}
+                status={entry.item.status}
+                time={formatNotificationTime(entry.item.at)}
+                message={entry.item.message}
+                onPress={() => { markSeen([entry.item.id]); if (entry.item.noticeId) openNotice(entry.item.noticeId); else setSelectedOrderId(entry.item.orderId); }}
               />
+              </AnimatedPresenceItem>
             ))}
           </View>
         )}
@@ -133,11 +145,13 @@ export default function DistributorNotification() {
         onClose={() => setSelectedOrderId(null)}
       />
     </SafeAreaView>
+    </Animated.View>
     </DistributorPortalBackground>
   );
 }
 
 const styles = createPortalStyleSheet({
+  motionRoot: { flex: 1, minWidth: 0 },
   safe: {
     flex: 1,
     minWidth: 0,
@@ -152,15 +166,8 @@ const styles = createPortalStyleSheet({
     paddingTop: 20,
     paddingBottom: USER_PORTAL_BOTTOM_CONTENT_INSET,
   },
-  back: {
-    alignSelf: 'flex-start',
-    paddingVertical: 8,
-    marginBottom: 10,
-  },
-  backText: {
-    color: BLUETAP_COLORS.white,
-    fontWeight: '900',
-  },
+  headingRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  headingCopy: { flex: 1, minWidth: 0 },
   eyebrow: {
     color: BLUETAP_COLORS.white,
     fontSize: 11,

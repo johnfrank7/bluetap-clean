@@ -4,9 +4,11 @@ import {
   Animated,
   Easing,
   Platform,
+  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { getLocalUsers, subscribeLocalUsers } from '../../localUsers';
@@ -796,7 +798,9 @@ const StationsPanel = ({ progress, station }) => {
 };
 
 export default function ManagerDashboard() {
-  const { colors } = useAdminTheme(); styles = createStyles(colors);
+  const { colors } = useAdminTheme();
+  const { width } = useWindowDimensions();
+  styles = createStyles(colors, width);
   const branchId = getModuleSession('manager')?.branchId || '';
   const { users: realtimeUsers, requests: realtimeRequests, branch: realtimeBranch, loading: realtimeLoading, error: realtimeError } = useManagerRealtimeData();
   const [registeredDistributors, setRegisteredDistributors] = useState([]);
@@ -1138,66 +1142,56 @@ export default function ManagerDashboard() {
           </View>
         </View>
 
-        <View style={[styles.tableRow, styles.tableHeadRow]}>
-          <Text style={[styles.th, styles.nameCol]}>NAME</Text>
-          <Text style={[styles.th, styles.idCol]}>UNIQUE ID</Text>
-          <Text style={[styles.th, styles.contactCol]}>CONTACT</Text>
-          <Text style={[styles.th, styles.emailCol]}>EMAIL</Text>
-          <Text style={[styles.th, styles.barangayCol]}>BARANGAY</Text>
-          <Text style={[styles.th, styles.joinedCol]}>JOINED</Text>
-          <Text style={[styles.th, styles.actionsCol]}>ACTIONS</Text>
-        </View>
+        <ScrollView horizontal showsHorizontalScrollIndicator contentContainerStyle={styles.tableScroll}>
+          <View style={styles.table}>
+            <View style={[styles.tableRow, styles.tableHeadRow]}>
+              <Text style={[styles.th, styles.nameCol]}>NAME</Text>
+              <Text style={[styles.th, styles.idCol]}>UNIQUE ID</Text>
+              <Text style={[styles.th, styles.contactCol]}>CONTACT</Text>
+              <Text style={[styles.th, styles.emailCol]}>EMAIL</Text>
+              <Text style={[styles.th, styles.barangayCol]}>BARANGAY</Text>
+              <Text style={[styles.th, styles.joinedCol]}>JOINED</Text>
+              <Text style={[styles.th, styles.actionsCol]}>ACTIONS</Text>
+            </View>
 
-        {loading ? (
-          <View style={styles.emptyState}>
-            <ActivityIndicator color={colors.primary} size="small" />
-          </View>
-        ) : activeAccounts.length === 0 ? (
-          <View style={styles.emptyState}>
-            <Text style={styles.emptyText}>
-              No registered {activeAccountsLabel} yet.
-            </Text>
-            {!!loadError && <Text style={styles.errorText}>Firestore: {loadError}</Text>}
-          </View>
-        ) : (
-          activeAccounts.map((account) => {
-            const fullName = getFullName(account);
-            const accountId = account.uid || account.id;
-            const isDistributorRow = accountsTab === 'distributors';
-
-            return (
-              <View key={accountId || account.email} style={styles.tableRow}>
-                <Text style={[styles.tdName, styles.nameCol]} numberOfLines={1}>
-                  {fullName}
-                </Text>
-                <Text style={[styles.td, styles.idCol]} numberOfLines={1}>
-                  {getProfileUniqueId(account) || 'Not set'}
-                </Text>
-                <Text style={[styles.td, styles.contactCol]} numberOfLines={1}>
-                  {account.phone || 'Not set'}
-                </Text>
-                <Text style={[styles.tdLink, styles.emailCol]} numberOfLines={1}>
-                  {account.email || 'Not set'}
-                </Text>
-                <Text style={[styles.td, styles.barangayCol]} numberOfLines={1}>
-                  {getBarangay(account)}
-                </Text>
-                <Text style={[styles.td, styles.joinedCol]} numberOfLines={1}>
-                  {getJoinedLabel(account)}
-                </Text>
-                <View style={[styles.actionsCell, styles.actionsCol]}>
-                  <Text style={styles.noActionText}>{isDistributorRow ? 'Managed by Admin' : 'View only'}</Text>
-                </View>
+            {loading ? (
+              <View style={styles.emptyState}>
+                <ActivityIndicator color={colors.primary} size="small" />
               </View>
-            );
-          })
-        )}
+            ) : activeAccounts.length === 0 ? (
+              <View style={styles.emptyState}>
+                <Text style={styles.emptyText}>
+                  No registered {activeAccountsLabel} yet.
+                </Text>
+                {!!loadError && <Text style={styles.errorText}>Firestore: {loadError}</Text>}
+              </View>
+            ) : (
+              activeAccounts.map((account) => {
+                const fullName = getFullName(account);
+                const accountId = account.uid || account.id;
+                const isDistributorRow = accountsTab === 'distributors';
+
+                return (
+                  <View key={accountId || account.email} style={styles.tableRow}>
+                    <Text style={[styles.tdName, styles.nameCol]} numberOfLines={1}>{fullName}</Text>
+                    <Text style={[styles.td, styles.idCol]} numberOfLines={1}>{getProfileUniqueId(account) || 'Not set'}</Text>
+                    <Text style={[styles.td, styles.contactCol]} numberOfLines={1}>{account.phone || 'Not set'}</Text>
+                    <Text style={[styles.tdLink, styles.emailCol]} numberOfLines={1}>{account.email || 'Not set'}</Text>
+                    <Text style={[styles.td, styles.barangayCol]} numberOfLines={1}>{getBarangay(account)}</Text>
+                    <Text style={[styles.td, styles.joinedCol]} numberOfLines={1}>{getJoinedLabel(account)}</Text>
+                    <View style={[styles.actionsCell, styles.actionsCol]}><Text style={styles.noActionText}>{isDistributorRow ? 'Managed by Admin' : 'View only'}</Text></View>
+                  </View>
+                );
+              })
+            )}
+          </View>
+        </ScrollView>
       </View>
     </ManagerShell>
   );
 }
 
-const createStyles = (colors) => StyleSheet.create({
+const createStyles = (colors, width = 1200) => StyleSheet.create({
   metricGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -1247,6 +1241,7 @@ const createStyles = (colors) => StyleSheet.create({
     marginBottom: 16,
   },
   panel: {
+    minWidth: 0,
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.border,
@@ -1537,12 +1532,14 @@ const createStyles = (colors) => StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: 8,
-    padding: 20,
+    padding: width < 430 ? 14 : 20,
   },
   tableHeader: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'center',
     justifyContent: 'space-between',
+    gap: 10,
     marginBottom: 16,
   },
   tableTitle: {
@@ -1552,8 +1549,11 @@ const createStyles = (colors) => StyleSheet.create({
   },
   tableTabs: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 8,
   },
+  tableScroll: { flexGrow: 1 },
+  table: { minWidth: 900, flexGrow: 1 },
   tableTabActive: {
     borderRadius: 20,
     backgroundColor: colors.primaryAction,

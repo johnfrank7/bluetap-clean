@@ -6,6 +6,13 @@ import { useChat } from './chat/ChatContext';
 const { getManagerNotifications, unreadManagerNotifications } = require('../services/managerNotifications');
 const { getChatFollowupNotifications } = require('../services/orderNotifications');
 
+const ManagerNotificationsContext = React.createContext({
+  events: [],
+  unreadCount: 0,
+  markRead: () => {},
+  loading: true,
+  error: '',
+});
 const memorySeen = new Map();
 const listeners = new Set();
 const keyFor = (uid, branchId) => `bluetap_manager_notification_seen_${uid}_${branchId}`;
@@ -25,7 +32,7 @@ const writeSeen = (key, ids) => {
   listeners.forEach((listener) => listener());
 };
 
-export function useManagerNotifications() {
+function useManagerNotificationsState() {
   const realtime = useManagerRealtimeData();
   const chat = useChat();
   const session = getModuleSession('manager');
@@ -58,3 +65,10 @@ export function useManagerNotifications() {
     error: realtime.error ? 'Notifications could not be loaded.' : '',
   };
 }
+
+export function ManagerNotificationsProvider({ children }) {
+  const value = useManagerNotificationsState();
+  return <ManagerNotificationsContext.Provider value={value}>{children}</ManagerNotificationsContext.Provider>;
+}
+
+export const useManagerNotifications = () => React.useContext(ManagerNotificationsContext);

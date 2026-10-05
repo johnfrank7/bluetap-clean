@@ -146,7 +146,7 @@ export default function ChatConversationList() {
       ) : error && conversations.length === 0 ? (
         <View style={styles.center}><Text style={[styles.emptyTitle, { color: colors.textPrimary }]}>Messages unavailable</Text><Text style={[styles.helper, { color: colors.textSecondary }]}>{error}</Text><Pressable accessibilityRole="button" onPress={retrySummaries}><Text style={[styles.retry, { color: colors.primary }]}>Try again</Text></Pressable></View>
       ) : groupedCount === 0 ? (
-        <View style={styles.center}><BlueTapChatIcon size={34} color={colors.primary} /><Text style={[styles.emptyTitle, { color: colors.textPrimary }]}>{needle ? 'No matching conversations' : 'Your BlueTap conversations will appear here.'}</Text><Text style={[styles.helper, { color: colors.textSecondary }]}>{needle ? 'Try another name or order reference.' : emptyCopy}</Text></View>
+        <View style={styles.center}><BlueTapChatIcon size={34} color={colors.primary} bubbleColor={colors.surfaceAlt} detailColor={colors.primaryDark || colors.primary} /><Text style={[styles.emptyTitle, { color: colors.textPrimary }]}>{needle ? 'No matching conversations' : 'Your BlueTap conversations will appear here.'}</Text><Text style={[styles.helper, { color: colors.textSecondary }]}>{needle ? 'Try another name or order reference.' : emptyCopy}</Text></View>
       ) : (
         <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.list}>
           {role === 'manager' && <>

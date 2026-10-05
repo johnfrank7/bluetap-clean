@@ -1,8 +1,9 @@
 import React from 'react';
-import { Image, View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BLUETAP_COLORS } from '../constants/bluetapTheme';
 import { useBlueTapTheme } from './BlueTapTheme';
+import BlueTapIcon from './BlueTapIcon';
 
 export default function BlueTapEmptyState({
   title = 'No Water Orders Yet',
@@ -24,7 +25,7 @@ export default function BlueTapEmptyState({
     <View style={[styles.container, compact && styles.containerCompact, style]}>
       <View style={styles.illustrationWrapper}>
         {variant !== 'default' ? (
-          <ContextIllustration variant={variant} styles={styles} />
+          <ContextIllustration variant={variant} styles={styles} colors={colors} />
         ) : <>
         <View style={styles.dropletGlow} />
         <LinearGradient
@@ -70,24 +71,13 @@ export default function BlueTapEmptyState({
   );
 }
 
-const ICON_ASSETS = {
-  orders: require('../assets/icons/ballot.png'),
-  requests: require('../assets/icons/ballot.png'),
-  schedule: require('../assets/icons/calendar-clock.png'),
-  history: require('../assets/icons/time-past.png'),
-  notifications: require('../assets/icons/notif.png'),
-  products: require('../assets/icons/square-plus.png'),
-  analytics: require('../assets/icons/time-past.png'),
-  management: require('../assets/icons/pencil.png'),
-  people: require('../assets/icons/user.png'),
-  applications: require('../assets/icons/square-plus.png'),
-};
+const ASSET_VARIANTS = new Set(['orders', 'requests', 'schedule', 'history', 'notifications', 'products', 'analytics', 'management', 'people', 'applications']);
 
-function ContextIllustration({ variant, styles }) {
-  if (ICON_ASSETS[variant]) {
+function ContextIllustration({ variant, styles, colors }) {
+  if (ASSET_VARIANTS.has(variant) || ['coordination', 'exceptions'].includes(variant)) {
     return (
       <View style={styles.contextIconSurface}>
-        <Image source={ICON_ASSETS[variant]} style={styles.contextAsset} resizeMode="contain" />
+        <BlueTapIcon name={variant} size={32} color={colors.iconPrimary || colors.primary} />
       </View>
     );
   }
@@ -143,11 +133,6 @@ const createStyles = (colors, isDark) =>
       backgroundColor: isDark ? colors.surfaceAlt : colors.primarySoft,
       borderWidth: 1,
       borderColor: colors.border,
-    },
-    contextAsset: {
-      width: 32,
-      height: 32,
-      tintColor: colors.primary,
     },
     contextSymbol: {
       color: colors.primary,

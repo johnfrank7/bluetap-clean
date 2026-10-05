@@ -10,29 +10,35 @@ const normalizedStatus = (value) => clean(value).toLowerCase().replace(/[_-]+/g,
 const TERMINAL = new Set(['delivered', 'completed', 'cancelled', 'canceled', 'rejected', 'declined', 'declined outside service area']);
 const orderIdOf = (order = {}) => clean(order.id || order.sourceId || order.requestId || order.request_id);
 
-function ActionButton({ busy, colors, disabled = false, label, onPress, secondary = false }) {
+function ActionButton({ busy, colors, disabled = false, label, onPress, secondary = false, softPrimary = false, style }) {
+  const foreground = secondary || softPrimary ? colors.primary : colors.onPrimary;
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
-      accessibilityState={{ busy }}
+      accessibilityState={{ busy, disabled: busy || disabled }}
       disabled={busy || disabled}
       onPress={onPress}
-      style={({ pressed }) => [
+      style={({ focused, hovered, pressed }) => [
         styles.button,
+        style,
         secondary
           ? { backgroundColor: colors.surface, borderColor: colors.primary }
-          : { backgroundColor: colors.primaryAction, borderColor: colors.primaryAction },
+          : softPrimary
+            ? { backgroundColor: colors.primarySoft, borderColor: colors.primary }
+            : { backgroundColor: colors.primaryAction, borderColor: colors.primaryAction },
+        hovered && !disabled && !busy && styles.hovered,
+        focused && { borderColor: colors.primaryLight || colors.primary, borderWidth: 2 },
         pressed && styles.pressed,
-        busy && styles.disabled,
+        (busy || disabled) && styles.disabled,
       ]}
     >
-      {busy ? <ActivityIndicator size="small" color={secondary ? colors.primary : colors.onPrimary} /> : <Text style={[styles.label, { color: secondary ? colors.primary : colors.onPrimary }]}>{label}</Text>}
+      {busy ? <ActivityIndicator size="small" color={foreground} /> : <Text style={[styles.label, { color: foreground }]}>{label}</Text>}
     </Pressable>
   );
 }
 
-export function RequesterOrderChatActions({ order, compact = false }) {
+export function RequesterOrderChatActions({ order, compact = false, disabled = false }) {
   const { colors } = useBlueTapTheme();
   const { resolveAndOpen } = useChat();
   const [busy, setBusy] = React.useState('');
@@ -61,14 +67,14 @@ export function RequesterOrderChatActions({ order, compact = false }) {
 
   return (
     <View style={[styles.wrap, compact && styles.compact]}>
-      <ActionButton busy={busy === 'branch'} disabled={Boolean(busy)} colors={colors} label="Follow Up" onPress={() => open('branch')} secondary />
-      {hasDistributor && <ActionButton busy={busy === 'distributor'} disabled={Boolean(busy)} colors={colors} label="Message Distributor" onPress={() => open('distributor')} />}
+      <ActionButton busy={busy === 'branch'} disabled={disabled || Boolean(busy)} colors={colors} label="Follow Up" onPress={() => open('branch')} secondary />
+      {hasDistributor && <ActionButton busy={busy === 'distributor'} disabled={disabled || Boolean(busy)} colors={colors} label="Message Distributor" onPress={() => open('distributor')} />}
       {!!error && <Text accessibilityRole="alert" style={[styles.error, { color: colors.danger }]}>{error}</Text>}
     </View>
   );
 }
 
-export function DistributorOrderChatAction({ order }) {
+export function DistributorOrderChatAction({ order, style, disabled = false }) {
   const { colors } = useBlueTapTheme();
   const { resolveAndOpen } = useChat();
   const [busy, setBusy] = React.useState(false);
@@ -78,10 +84,10 @@ export function DistributorOrderChatAction({ order }) {
     setBusy(true);
     try { await resolveAndOpen({ type: 'requester_distributor', orderId: orderIdOf(order) }, order); } catch {} finally { setBusy(false); }
   };
-  return <ActionButton busy={busy} colors={colors} label="Message Requester" onPress={open} secondary />;
+  return <ActionButton busy={busy} disabled={disabled} colors={colors} label="Message Requester" onPress={open} softPrimary style={style} />;
 }
 
-export function ManagerOrderChatAction({ order }) {
+export function ManagerOrderChatAction({ order, disabled = false }) {
   const { colors } = useAdminTheme();
   const { resolveAndOpen } = useChat();
   const [busy, setBusy] = React.useState(false);
@@ -91,7 +97,7 @@ export function ManagerOrderChatAction({ order }) {
     setBusy(true);
     try { await resolveAndOpen({ type: 'requester_branch', intent: 'order_followup', orderId }, order); } catch {} finally { setBusy(false); }
   };
-  return <ActionButton busy={busy} colors={colors} label="Message Requester" onPress={open} secondary />;
+  return <ActionButton busy={busy} disabled={disabled} colors={colors} label="Message Requester" onPress={open} secondary />;
 }
 
 const styles = StyleSheet.create({
@@ -99,7 +105,8 @@ const styles = StyleSheet.create({
   compact: { marginTop: 8 },
   button: { flexGrow: 1, flexBasis: 124, minWidth: 0, minHeight: 44, paddingHorizontal: 10, borderWidth: 1, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   label: { fontSize: 12, fontWeight: '900' },
-  pressed: { opacity: 0.82, transform: [{ scale: 0.98 }] },
+  hovered: { opacity: 0.94 },
+  pressed: { opacity: 0.82, transform: [{ scale: 0.985 }] },
   disabled: { opacity: 0.7 },
   error: { width: '100%', fontSize: 11, lineHeight: 16 },
 });

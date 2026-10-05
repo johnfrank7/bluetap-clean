@@ -3,7 +3,6 @@ import {
   View,
   TextInput,
   TouchableOpacity,
-  Text,
   StyleSheet,
   Platform,
   ActivityIndicator,
@@ -11,6 +10,7 @@ import {
 } from 'react-native';
 import { useBlueTapTheme } from '../BlueTapTheme';
 import { createShadow } from '../shadowStyles';
+import BlueTapIcon from '../BlueTapIcon';
 
 export function AssistantComposer({
   onSend,
@@ -79,7 +79,7 @@ export function AssistantComposer({
             accessibilityRole="button"
             accessibilityLabel="Clear message text"
           >
-            <Text style={[styles.clearBtnText, { color: colors.textSecondary }]}>✕</Text>
+            <BlueTapIcon name="close" size={14} color={colors.iconMuted || colors.textSecondary} />
           </TouchableOpacity>
         )}
 
@@ -99,14 +99,11 @@ export function AssistantComposer({
           {loading ? (
             <ActivityIndicator size="small" color="#FFFFFF" />
           ) : (
-            <Text
-              style={[
-                styles.sendIcon,
-                { color: canSend ? '#FFFFFF' : (isDark ? '#718096' : '#94A3B8') },
-              ]}
-            >
-              ➤
-            </Text>
+            <BlueTapIcon
+              name="send"
+              size={17}
+              color={canSend ? (colors.iconOnPrimary || '#FFFFFF') : (colors.iconMuted || colors.textSecondary)}
+            />
           )}
         </TouchableOpacity>
       </View>

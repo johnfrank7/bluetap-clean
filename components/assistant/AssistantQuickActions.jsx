@@ -12,6 +12,21 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useBlueTapTheme } from '../BlueTapTheme';
 import { createShadow } from '../shadowStyles';
 import { ASSISTANT_INTENTS } from '../../services/assistant/assistantIntents';
+import BlueTapIcon from '../BlueTapIcon';
+
+const quickActionIcon = (id = '') => {
+  if (id.includes('notification')) return 'notifications';
+  if (id.includes('contact') || id.includes('chat')) return 'message';
+  if (id.includes('schedule') || id.includes('next')) return 'schedule';
+  if (id.includes('history') || id.includes('past')) return 'history';
+  if (id.includes('delivery') || id.includes('track') || id.includes('current')) return 'delivery';
+  if (id.includes('detail') || id.includes('status')) return 'orders';
+  if (id.includes('failed') || id.includes('cancel') || id.includes('restriction')) return 'warning';
+  if (id.includes('order')) return 'add';
+  return 'info';
+};
+
+const quickActionLabel = (label = '') => String(label).replace(/^[^A-Za-z0-9]+/, '').trim();
 
 export function AssistantQuickActions({ safeContext, onSelectAction, disabled, role }) {
   const { colors, isDark } = useBlueTapTheme();
@@ -411,7 +426,9 @@ export function AssistantQuickActions({ safeContext, onSelectAction, disabled, r
         scrollEventThrottle={16}
         style={styles.scroll}
       >
-        {chips.map((chip) => (
+        {chips.map((chip) => {
+          const visibleLabel = quickActionLabel(chip.label);
+          return (
           <TouchableOpacity
             key={chip.id}
             style={[
@@ -426,8 +443,9 @@ export function AssistantQuickActions({ safeContext, onSelectAction, disabled, r
             disabled={disabled}
             activeOpacity={0.7}
             accessibilityRole="button"
-            accessibilityLabel={chip.label}
+            accessibilityLabel={visibleLabel}
           >
+            <BlueTapIcon name={quickActionIcon(chip.id)} size={17} color={colors.iconInteractive || colors.primary} />
             <Text
               style={[
                 styles.chipText,
@@ -435,10 +453,11 @@ export function AssistantQuickActions({ safeContext, onSelectAction, disabled, r
               ]}
               numberOfLines={1}
             >
-              {chip.label}
+              {visibleLabel}
             </Text>
           </TouchableOpacity>
-        ))}
+          );
+        })}
       </ScrollView>
 
       {/* Subtle left edge fade */}
@@ -552,6 +571,9 @@ const styles = StyleSheet.create({
     }),
   },
   chip: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 7,
     paddingHorizontal: 14,
     paddingVertical: 8,
     borderRadius: 20,

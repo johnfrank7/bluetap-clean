@@ -47,6 +47,8 @@ export function RequesterBlueTapAIPage() {
       backRoute="/requester/r_profile"
       title="BlueTap Assistant"
       subtitle="Orders, delivery & account help"
+      detailOrders={requesterData.orders}
+      detailBranches={requesterData.branches}
     />
   );
 }

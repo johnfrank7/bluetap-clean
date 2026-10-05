@@ -2,8 +2,10 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import React from 'react';
 import { useColorScheme } from 'react-native';
 import { BLUETAP_COLORS, BLUETAP_LAYOUT } from '../constants/bluetapTheme';
+import { useBlueTapThemeTransition } from './BlueTapThemeTransition';
 
 const { ROLE_THEME_TOKENS } = require('../constants/rolePresentation');
+const { playThemeDropSound } = require('../services/uiSound');
 
 export const ADMIN_THEME_STORAGE_KEY = 'bluetap-admin-theme';
 export const ADMIN_SIDEBAR_STORAGE_KEY = 'bluetap-admin-sidebar-collapsed';
@@ -27,12 +29,15 @@ const dark = Object.freeze({
   header: '#0A1928', input: '#0A1928', inputBorder: '#1C3C55', placeholder: '#8EA6BB', overlay: 'rgba(2,10,18,.72)',
   tooltip: '#F5FAFF', tooltipText: '#07131F', neutral: '#112A40', successSoft: '#103B2A', warningSoft: '#493814', dangerSoft: '#48262A', disabled: '#6F879C',
   primaryAction: '#1565C0', onPrimary: '#FFFFFF', successAction: '#22C55E', onSuccess: '#07131F', warningAction: '#F59E0B', onWarning: '#07131F', dangerAction: '#B91C1C', onDanger: '#FFFFFF', disabledText: '#9FB4C8',
+  iconPrimary: '#70BDF2', iconSecondary: '#F5FAFF', iconOnPrimary: '#FFFFFF', iconMuted: '#9FB4C8',
+  iconDanger: '#FB7185', iconWarning: '#FBBF24', iconSuccess: '#34D399', iconInteractive: '#70BDF2',
   ...ROLE_THEME_TOKENS.dark,
 });
 
 const AdminThemeContext = React.createContext(null);
 
 export function AdminThemeProvider({ children }) {
+  const { isTransitioning, startTransition } = useBlueTapThemeTransition();
   const systemScheme = useColorScheme();
   const [preference, setPreferenceState] = React.useState('system');
   const [ready, setReady] = React.useState(false);
@@ -48,18 +53,33 @@ export function AdminThemeProvider({ children }) {
     return () => { active = false; };
   }, []);
 
-  const setPreference = React.useCallback((next) => {
+  const applyPreference = React.useCallback((next) => {
     if (!['light', 'dark', 'system'].includes(next)) return;
     setPreferenceState(next);
     AsyncStorage.setItem(ADMIN_THEME_STORAGE_KEY, next).catch(() => {});
   }, []);
   const resolvedTheme = preference === 'system' ? (systemScheme === 'dark' ? 'dark' : 'light') : preference;
-  const value = React.useMemo(() => ({ colors: resolvedTheme === 'dark' ? dark : light, layout: BLUETAP_LAYOUT, preference, resolvedTheme, setPreference, ready }), [preference, ready, resolvedTheme, setPreference]);
+
+  const setPreference = React.useCallback((next, event) => {
+    if (!['light', 'dark', 'system'].includes(next)) return false;
+    const nextResolvedTheme = next === 'system' ? (systemScheme === 'dark' ? 'dark' : 'light') : next;
+    if (next === preference || nextResolvedTheme === resolvedTheme) {
+      applyPreference(next);
+      return true;
+    }
+    if (event) playThemeDropSound();
+    return startTransition({
+      applyTheme: () => applyPreference(next),
+      event,
+      nextTheme: nextResolvedTheme,
+    });
+  }, [applyPreference, preference, resolvedTheme, startTransition, systemScheme]);
+  const value = React.useMemo(() => ({ colors: resolvedTheme === 'dark' ? dark : light, isTransitioning, layout: BLUETAP_LAYOUT, preference, resolvedTheme, setPreference, ready }), [isTransitioning, preference, ready, resolvedTheme, setPreference]);
   return <AdminThemeContext.Provider value={value}>{children}</AdminThemeContext.Provider>;
 }
 
 export function useAdminTheme() {
   const theme = React.useContext(AdminThemeContext);
-  if (!theme) return { colors: light, layout: BLUETAP_LAYOUT, preference: 'light', resolvedTheme: 'light', setPreference: () => {}, ready: true };
+  if (!theme) return { colors: light, isTransitioning: false, layout: BLUETAP_LAYOUT, preference: 'light', resolvedTheme: 'light', setPreference: () => {}, ready: true };
   return theme;
 }

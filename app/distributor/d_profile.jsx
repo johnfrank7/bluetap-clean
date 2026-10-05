@@ -5,6 +5,7 @@ import {
   Animated,
   Image,
   Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -14,6 +15,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import useSingleFlightNavigation from '../../components/useSingleFlightNavigation';
 
 import { auth, db } from '../../firebase';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
@@ -26,6 +28,7 @@ import DistributorPortalBackground from '../../components/DistributorPortalBackg
 import PortalSwipeContainer, { DISTRIBUTOR_TABS } from '../../components/PortalSwipeContainer';
 import { createShadow } from '../../components/shadowStyles';
 import { createPortalStyleSheet, useBlueTapTheme } from '../../components/BlueTapTheme';
+import BlueTapBrandMark from '../../components/BlueTapBrandMark';
 import TopToastFeedback from '../../components/TopToastFeedback';
 import { USER_PORTAL_BOTTOM_CONTENT_INSET, USER_PORTAL_LAYOUT } from '../../constants/userPortalLayout';
 import { BLUETAP_COLORS } from '../../constants/bluetapTheme';
@@ -206,8 +209,9 @@ const ProfileField = memo(function ProfileField({
 });
 
 export default function DistributorProfilePage() {
-  useBlueTapTheme();
+  const { colors } = useBlueTapTheme();
   const router = useRouter();
+  const { replaceOnce } = useSingleFlightNavigation();
   const editFadeAnim = useRef(new Animated.Value(0)).current;
   const toastAnim = useRef(new Animated.Value(0)).current;
   const toastTimerRef = useRef(null);
@@ -482,6 +486,18 @@ export default function DistributorProfilePage() {
             </View>
             <View style={styles.infoDivider} />
 
+            {!loading && userData && (
+              <View style={styles.identityCard}>
+                <View style={styles.identityAvatar}>
+                  <Text style={styles.identityInitials}>{profileDisplay.fullName.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('').toUpperCase() || 'BT'}</Text>
+                </View>
+                <View style={styles.identityCopy}>
+                  <Text style={styles.identityName} numberOfLines={1}>{profileDisplay.fullName}</Text>
+                  <Text style={styles.identityRole}>Distributor · {profileDisplay.distributorId}</Text>
+                </View>
+              </View>
+            )}
+
             {!!profileError && (
               <View accessibilityRole="alert" style={styles.profileError}>
                 <Text style={styles.profileErrorText}>{profileError}</Text>
@@ -499,7 +515,7 @@ export default function DistributorProfilePage() {
             ) : (
               <>
                 <ProfileField
-                  label="UID"
+                  label="Public ID"
                   value={profileDisplay.distributorId}
                 />
 
@@ -599,25 +615,16 @@ export default function DistributorProfilePage() {
           </View>
 
           <View style={styles.helpCard}>
-            <View style={styles.helpRow}>
+            <Pressable style={({ hovered, pressed }) => [styles.helpRow, hovered && styles.helpRowHovered, pressed && styles.helpRowPressed]} onPress={() => replaceOnce('/distributor/bluetap_AI')} accessibilityRole="button" accessibilityLabel="Open BlueTap Assistant">
               <View style={styles.helpTextBlock}>
-                <Text style={styles.helpTitle}>Need Help?</Text>
-                <Text style={styles.helpSubtitle}>Tap BlueTap AI for quick guidance inside the app.</Text>
+                <Text style={styles.helpTitle}>BlueTap Assistant</Text>
+                <Text style={styles.helpSubtitle}>Get quick help with deliveries, schedules, and routes.</Text>
+                <Text style={styles.helpAction}>Open Assistant →</Text>
               </View>
-
-              <TouchableOpacity
-                activeOpacity={0.85}
-                onPress={() => router.replace('/distributor/bluetap_AI')}
-              >
-                <View style={styles.helpIconWrapper}>
-                  <Image
-                    source={require('../../assets/icons/bluetapwhitelogo.png')}
-                    style={styles.helpIcon}
-                    tintColor={BLUE}
-                  />
-                </View>
-              </TouchableOpacity>
-            </View>
+              <View style={styles.helpIconWrapper}>
+                <BlueTapBrandMark color={colors.iconInteractive || BLUE} size={38} style={styles.helpIcon} />
+              </View>
+            </Pressable>
 
             <TouchableOpacity
               activeOpacity={0.85}
@@ -703,6 +710,12 @@ const styles = createPortalStyleSheet({
     backgroundColor: BLUE_LIGHT,
     marginBottom: 2,
   },
+  identityCard: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 14, padding: 12, borderRadius: 16, backgroundColor: BLUE_LIGHT },
+  identityAvatar: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center', backgroundColor: BLUE },
+  identityInitials: { color: '#FFFFFF', fontSize: 16, fontWeight: '900' },
+  identityCopy: { flex: 1, minWidth: 0 },
+  identityName: { color: TEXT_DARK, fontSize: 16, fontWeight: '900' },
+  identityRole: { color: TEXT_MUTED, fontSize: 12, fontWeight: '700', marginTop: 3 },
   infoLoading: {
     minHeight: 160,
     alignItems: 'center',
@@ -804,6 +817,8 @@ const styles = createPortalStyleSheet({
     borderRadius: USER_PORTAL_LAYOUT.cardRadius,
     borderWidth: 1,
     borderColor: CARD_BORDER,
+    borderLeftWidth: 4,
+    borderLeftColor: BLUE,
     padding: 18,
     ...createShadow({
       color: '#0D47A1',
@@ -819,6 +834,8 @@ const styles = createPortalStyleSheet({
     alignItems: 'center',
     gap: 12,
   },
+  helpRowHovered: { transform: [{ translateY: -1 }, { scale: 1.01 }] },
+  helpRowPressed: { opacity: 0.84, transform: [{ scale: 0.98 }] },
   helpTextBlock: {
     flex: 1,
   },
@@ -833,6 +850,7 @@ const styles = createPortalStyleSheet({
     lineHeight: 17,
     marginTop: 6,
   },
+  helpAction: { color: BLUE, fontSize: 12, fontWeight: '900', marginTop: 9 },
   helpIconWrapper: {
     borderWidth: 2,
     borderColor: BLUE,

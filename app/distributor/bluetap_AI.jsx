@@ -32,6 +32,7 @@ export function DistributorBlueTapAIPage() {
       backRoute="/distributor/d_profile"
       title="BlueTap Assistant"
       subtitle="Deliveries, schedule & route help"
+      detailOrders={distributorData.orders}
     />
   );
 }

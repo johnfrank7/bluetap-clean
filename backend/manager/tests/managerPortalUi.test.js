@@ -6,6 +6,7 @@ const test = require('node:test');
 const root = resolve(__dirname, '../../..');
 const read = (path) => readFileSync(resolve(root, path), 'utf8');
 const requests = read('app/manager/request.jsx');
+const managerDashboard = read('app/manager/dashboard.jsx');
 const distributors = read('app/manager/distributors.jsx');
 const notifications = read('app/manager/notifications.jsx');
 const notificationModal = read('components/ManagerNotificationDetailsModal.jsx');
@@ -16,8 +17,16 @@ const managerProducts = read('app/manager/products.jsx');
 const managerAnalytics = read('app/manager/analytics.jsx');
 const emptyState = read('components/BlueTapEmptyState.jsx');
 const notificationHook = read('components/ManagerNotifications.jsx');
+const managerLayout = read('app/manager/_layout.jsx');
 const notificationCard = read('components/NotificationCard.jsx');
 const rules = read('firestore.rules');
+const {
+  clearManagerNotificationOrigin,
+  consumeManagerNotificationOrigin,
+  recordManagerNotificationOrigin,
+  resolveManagerNotificationBack,
+  sanitizeManagerOrigin,
+} = require('../../../services/managerNotificationNavigation');
 
 test('Manager operational queues use shared BlueTap visual empty states with contextual copy', () => {
   assert.match(requests, /BlueTapEmptyState/);
@@ -35,7 +44,8 @@ test('Manager operational queues use shared BlueTap visual empty states with con
     assert.match(distributors, new RegExp(`variant="${variant}"`));
   }
   assert.match(emptyState, /variant = 'default'/);
-  assert.match(emptyState, /ICON_ASSETS/);
+  assert.match(emptyState, /ASSET_VARIANTS/);
+  assert.match(emptyState, /BlueTapIcon/);
 });
 
 test('Manager Profile uses the persistent shared profile and branch cache with scoped retry errors', () => {
@@ -60,11 +70,37 @@ test('Manager Profile exposes only personal edits and canonical public UID displ
   }
 });
 
-test('Manager notification control reuses the canonical BlueTap bell asset and keeps its live badge', () => {
-  assert.match(managerShell, /assets\/icons\/notif\.png/);
+test('Manager notification control reuses the canonical BlueTap bell contract and keeps its live badge', () => {
+  assert.match(managerShell, /BlueTapIcon name="notifications"/);
+  assert.match(managerShell, /colors\.iconInteractive/);
   assert.match(managerShell, /unreadCount/);
   assert.match(managerShell, /notificationCount/);
   assert.doesNotMatch(managerShell, /AdminIcon name="bell"/);
+  assert.match(managerLayout, /ManagerNotificationsProvider/);
+  assert.match(notificationHook, /ManagerNotificationsContext\.Provider/);
+  assert.match(managerShell, /navigateOnce\('\/manager\/notifications'\)/);
+  assert.match(managerShell, /recordManagerNotificationOrigin\(pathname\)/);
+});
+
+test('Manager notification Back returns to a recorded Manager origin and safely falls back to dashboard', () => {
+  recordManagerNotificationOrigin('/manager/distributors');
+  const origin = consumeManagerNotificationOrigin();
+  assert.equal(origin, '/manager/distributors');
+  assert.deepEqual(resolveManagerNotificationBack({ canGoBack: true, origin }), {
+    method: 'back',
+    target: '/manager/distributors',
+  });
+  assert.deepEqual(resolveManagerNotificationBack({ canGoBack: true, origin: '/login' }), {
+    method: 'replace',
+    target: '/manager/dashboard',
+  });
+  assert.equal(sanitizeManagerOrigin('/manager/notifications'), '');
+  recordManagerNotificationOrigin('/manager/request');
+  clearManagerNotificationOrigin();
+  assert.equal(consumeManagerNotificationOrigin(), '');
+  assert.match(notifications, /consumeManagerNotificationOrigin/);
+  assert.match(notifications, /router\.canGoBack/);
+  assert.match(notifications, /replaceOnce\(destination\.target\)/);
 });
 
 test('notification cards navigate to authorized order context with a read-only fallback for non-order events', () => {
@@ -77,10 +113,12 @@ test('notification cards navigate to authorized order context with a read-only f
   assert.match(notificationCard, /borderColor: colors\.border/);
   assert.match(notificationCard, /color: colors\.textPrimary \|\| colors\.text/);
   assert.match(notificationCard, /marginLeft: 'auto'/);
-  assert.match(notifications, /router\.push\(\{ pathname: '\/manager\/request', params: \{ orderId: event\.orderId \} \}\)/);
+  assert.match(notifications, /navigateOnce\(\{ pathname: '\/manager\/request', params: \{ orderId: event\.orderId \} \}\)/);
   assert.match(notifications, /setSelectedEventId\(event\.id\)/);
   assert.match(notifications, /events\.find/);
   assert.match(notifications, /ManagerNotificationDetailsModal/);
+  assert.match(notifications, /style=\{styles\.backRow\}/);
+  assert.doesNotMatch(notifications, /headerAction=/);
   for (const label of ['Order ID', 'Requester UID', 'Delivery address', 'Distributor UID', 'Delivery fee', 'Event time', 'Products']) {
     assert.match(notificationModal, new RegExp(label));
   }
@@ -97,6 +135,22 @@ test('Requests and Exceptions expose responsive branch-authorized detail maps wi
   assert.match(requests, /authorizedSource/);
   assert.match(requests, /branchId === String\(realtime\.branchId\)/);
   assert.doesNotMatch(requests, /Firebase UID|requesterUid/);
+  assert.match(requests, /notificationTargetCard/);
+  assert.match(requests, /contentScrollRef\.current\?\.scrollTo/);
+  assert.match(requests, /setTargetHighlighted\(false\), 6000/);
+  assert.match(requests, /width < 430 \? '100%' : 118/);
+});
+
+test('Manager responsive surfaces stack actions and preserve wide tables with horizontal scrolling', () => {
+  assert.match(requests, /actionButton/);
+  assert.match(requests, /flexDirection: width < 430 \? 'column' : 'row'/);
+  assert.match(managerDashboard, /<ScrollView horizontal/);
+  assert.match(managerDashboard, /table: \{ minWidth: 900/);
+  assert.match(managerProducts, /const compact = useWindowDimensions\(\)\.width < 760/);
+  assert.match(distributors, /<ScrollView horizontal/);
+  assert.match(distributors, /flexDirection: width < 600 \? 'column' : 'row'/);
+  assert.match(distributors, /width: width < 550 \? '100%' : undefined/);
+  assert.match(distributors, /tableViewport: \{ width: '100%', maxWidth: '100%', minWidth: 0 \}/);
 });
 
 test('notification errors are sanitized and raw Firestore permission text is never rendered', () => {

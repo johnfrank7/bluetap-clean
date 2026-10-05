@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Alert,
   Modal,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -33,6 +34,8 @@ import {
 } from '../../services/distributorOrders';
 import { useDistributorProfile } from '../../services/distributorProfile';
 import { formatDisplayUniqueId } from '../../services/uniqueIds';
+import AnimatedPresenceItem from '../../components/AnimatedPresenceItem';
+import { useAnimatedPresenceList } from '../../components/useAnimatedPresenceList';
 
 const BLUE = BLUETAP_COLORS.primary;
 const BLUE_LIGHT = BLUETAP_COLORS.primarySoft;
@@ -114,10 +117,12 @@ const ScheduledRequestCard = ({
   onOpenRescheduleModal,
   onViewDetails,
   processing,
+  actionsDisabled = false,
 }) => {
   const statusNorm = normalizeDistributorOrderStatus(request.status);
   const isDeliveryFailed = statusNorm === 'delivery failed';
   const isScheduledOrAccepted = statusNorm === 'accepted' || statusNorm === 'scheduled';
+  const interactionDisabled = processing || actionsDisabled;
 
   return (
     <View style={styles.requestCard}>
@@ -184,7 +189,8 @@ const ScheduledRequestCard = ({
       <View style={styles.cardActionsRow}>
         <TouchableOpacity
           activeOpacity={0.8}
-          style={styles.secondaryActionButton}
+          disabled={actionsDisabled}
+          style={[styles.secondaryActionButton, actionsDisabled && styles.actionButtonDisabled]}
           onPress={() => onViewDetails(request)}
         >
           <Text style={styles.secondaryActionText}>View Details</Text>
@@ -194,9 +200,9 @@ const ScheduledRequestCard = ({
         {isScheduledOrAccepted && (
           <TouchableOpacity
             activeOpacity={0.85}
-            disabled={processing}
+            disabled={interactionDisabled}
             onPress={() => onAdvance(request, 'start-delivery')}
-            style={[styles.primaryActionButton, processing && styles.actionButtonDisabled]}
+            style={[styles.primaryActionButton, interactionDisabled && styles.actionButtonDisabled]}
           >
             {processing ? <ActivityIndicator color="#FFFFFF" size="small" /> : <Text style={styles.primaryActionText}>Start Delivery</Text>}
           </TouchableOpacity>
@@ -205,9 +211,9 @@ const ScheduledRequestCard = ({
         {isDeliveryFailed && (
           <TouchableOpacity
             activeOpacity={0.85}
-            disabled={processing}
+            disabled={interactionDisabled}
             onPress={() => onOpenRescheduleModal(request)}
-            style={styles.rescheduleActionButton}
+            style={[styles.rescheduleActionButton, interactionDisabled && styles.actionButtonDisabled]}
           >
             <Text style={styles.rescheduleActionText}>Reschedule Delivery</Text>
           </TouchableOpacity>
@@ -242,6 +248,7 @@ export default function DistributorScheduledRequests() {
         .filter((request) => UPCOMING_STATUSES.has(normalizeDistributorOrderStatus(request.status))),
     [orders]
   );
+  const scheduledPresentation = useAnimatedPresenceList(scheduledRequests, (request) => request.sourceId);
 
   React.useEffect(() => {
     const rawTarget = params.orderId || params.id;
@@ -341,21 +348,23 @@ export default function DistributorScheduledRequests() {
             <Text style={styles.subtitle}>Scheduled Requests</Text>
 
             <View style={styles.scheduleTabs}>
-              <TouchableOpacity
-                style={[styles.scheduleTab, styles.scheduleTabActive]}
-                activeOpacity={0.85}
+              <Pressable
+                accessibilityRole="tab"
+                accessibilityState={{ selected: true }}
+                style={({ hovered, pressed, focused }) => [styles.scheduleTab, styles.scheduleTabActive, hovered && { backgroundColor: colors.primaryDark || colors.primary }, focused && styles.scheduleTabFocused, pressed && styles.scheduleTabPressed]}
                 onPress={() => router.replace('/distributor/d_scheduled_requests')}
               >
                 <Text style={[styles.scheduleTabText, styles.scheduleTabTextActive]}>Scheduled</Text>
-              </TouchableOpacity>
+              </Pressable>
 
-              <TouchableOpacity
-                style={styles.scheduleTab}
-                activeOpacity={0.85}
+              <Pressable
+                accessibilityRole="tab"
+                accessibilityState={{ selected: false }}
+                style={({ hovered, pressed, focused }) => [styles.scheduleTab, hovered && { backgroundColor: colors.primarySoft }, focused && styles.scheduleTabFocused, pressed && styles.scheduleTabPressed]}
                 onPress={() => router.replace('/distributor/d_history')}
               >
                 <Text style={styles.scheduleTabText}>History</Text>
-              </TouchableOpacity>
+              </Pressable>
             </View>
           </View>
 
@@ -379,18 +388,19 @@ export default function DistributorScheduledRequests() {
                   <Text style={styles.secondaryActionText}>Try Again</Text>
                 </TouchableOpacity>
               </View>
-            ) : scheduledRequests.length === 0 ? (
+            ) : scheduledPresentation.length === 0 ? (
               <BlueTapEmptyState
                 variant="schedule"
                 title="No Scheduled Deliveries"
                 description="Accepted and upcoming assigned deliveries will appear here."
               />
             ) : (
-              scheduledRequests.map((request) => (
+              scheduledPresentation.map((entry) => (
+                <AnimatedPresenceItem key={entry.id} phase={entry.phase}>
                 <ScheduledRequestCard
-                  key={request.sourceId}
-                  request={request}
-                  processing={processingRequestId === request.sourceId}
+                  request={entry.item}
+                  actionsDisabled={entry.actionsDisabled}
+                  processing={processingRequestId === entry.id}
                   onAdvance={advanceDelivery}
                   onOpenRescheduleModal={(req) => {
                     if (!isComplete) {
@@ -411,6 +421,7 @@ export default function DistributorScheduledRequests() {
                   }}
                   onViewDetails={(request) => setSelectedRequestId(request.sourceId)}
                 />
+                </AnimatedPresenceItem>
               ))
             )}
           </ScrollView>
@@ -549,6 +560,8 @@ const styles = createPortalStyleSheet({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'transparent',
+    borderWidth: 2,
+    borderColor: 'transparent',
   },
   scheduleTabActive: {
     backgroundColor: BLUE,
@@ -561,6 +574,8 @@ const styles = createPortalStyleSheet({
   scheduleTabTextActive: {
     color: '#FFFFFF',
   },
+  scheduleTabFocused: { borderColor: '#7DD3FC' },
+  scheduleTabPressed: { transform: [{ scale: 0.985 }] },
   requestCard: {
     borderWidth: 1.5,
     borderColor: CARD_BORDER,

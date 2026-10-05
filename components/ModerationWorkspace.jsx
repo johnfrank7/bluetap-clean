@@ -5,6 +5,7 @@ import { applyModerationAction, loadExpandedChatReview, loadModerationCases, loa
 import { useAdminTheme } from './AdminTheme';
 import { useModerationActivitySignal } from './useModerationActivityBadge';
 import { formatModerationTimestamp, moderationActionLabel } from '../services/moderationPresentation';
+import BlueTapEmptyState from './BlueTapEmptyState';
 
 const STATUS_TABS = ['active', 'open', 'escalated', 'resolved'];
 const STATUS_LABELS = { active: 'Active', open: 'Open', escalated: 'Escalated', resolved: 'Resolved' };
@@ -31,7 +32,7 @@ const newMutationId = () => globalThis.crypto?.randomUUID?.() || `mod-${Date.now
 const dateLabel = formatModerationTimestamp;
 
 export default function ModerationWorkspace({ role }) {
-  const { colors } = useAdminTheme();
+  const { colors, resolvedTheme } = useAdminTheme();
   const { width } = useWindowDimensions();
   const narrow = width < 760;
   const styles = React.useMemo(() => createStyles(colors), [colors]);
@@ -104,7 +105,7 @@ export default function ModerationWorkspace({ role }) {
     <View style={styles.columns}>
       {(!narrow || !selected) && <View style={[styles.listPanel, narrow && styles.narrowPanel]}>
         <View style={styles.panelHeader}><Text style={styles.panelTitle}>{kind === 'reports' ? 'Report queue' : 'Review queue'}</Text><Pressable onPress={refresh}><Text style={styles.link}>Refresh</Text></Pressable></View>
-        {loading ? <ActivityIndicator color={colors.primary} style={{ margin: 30 }} /> : items.length === 0 ? <View style={styles.emptyState}><Text style={styles.emptyTitle}>{kind === 'reports' ? EMPTY_STATES[status][0] : 'No ordering reviews'}</Text><Text style={styles.empty}>{kind === 'reports' ? EMPTY_STATES[status][1] : 'New order-abuse review signals will appear here.'}</Text></View> : items.map((item) => <Pressable accessibilityRole="button" accessibilityLabel={kind === 'reports' ? `Open report ${item.publicReference}` : 'Open ordering abuse review'} key={item.id} onPress={() => select(item)} style={[styles.case, selected?.id === item.id && styles.caseSelected]}>
+        {loading ? <ActivityIndicator color={colors.primary} style={{ margin: 30 }} /> : items.length === 0 ? <BlueTapEmptyState compact variant={kind === 'reports' ? 'exceptions' : 'management'} title={kind === 'reports' ? EMPTY_STATES[status][0] : 'No ordering reviews'} description={kind === 'reports' ? EMPTY_STATES[status][1] : 'New order-abuse review signals will appear here.'} themeColors={colors} dark={resolvedTheme === 'dark'} style={styles.emptyState} /> : items.map((item) => <Pressable accessibilityRole="button" accessibilityLabel={kind === 'reports' ? `Open report ${item.publicReference}` : 'Open ordering abuse review'} key={item.id} onPress={() => select(item)} style={[styles.case, selected?.id === item.id && styles.caseSelected]}>
           {kind === 'reports' ? <><View style={styles.caseTop}><View style={[styles.statusBadge, item.status === 'resolved' ? styles.resolvedBadge : item.status === 'escalated' ? styles.escalatedBadge : styles.openBadge]}><Text style={styles.statusBadgeText}>{STATUS_LABELS[item.status] || 'Review'}</Text></View><Text style={styles.reference}>{item.publicReference}</Text></View><Text style={styles.caseTitle}>{item.categoryLabel || item.category}</Text><Text style={styles.caseMeta}>Reported: {item.reportedUser?.name || item.reportedUser?.publicUid || 'Account unavailable'}</Text><Text style={styles.caseMeta}>Reporter: {item.reporter?.role || 'User'}{item.reporter?.publicUid ? ` · ${item.reporter.publicUid}` : ''}</Text><Text style={styles.caseMeta}>{item.orderReference ? `Order ${item.orderReference} · ` : ''}Branch {item.branchId || 'unavailable'}</Text></> : <><Text style={styles.caseTitle}>{item.requester?.name || 'Requester'} · {item.severity}</Text><Text style={styles.caseMeta}>{item.incidentCount} incidents in {item.windowDays} days</Text></>}
           <Text style={styles.caseMeta}>Submitted {dateLabel(item.createdAt || item.lastIncidentAt)}</Text>
         </Pressable>)}

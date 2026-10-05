@@ -3,7 +3,7 @@
  *
  * WEB: hover elevation (box-shadow + translateY -1px), smooth CSS transition,
  *      focus-visible ring via :focus-visible (honoured by Expo web's CSS engine).
- * NATIVE: activeOpacity pressed feedback only. No extra packages required.
+ * NATIVE: restrained 0.98 pressed scaling. No extra packages required.
  *
  * Variants (maps to BlueTap semantic palette):
  *   'primary'     — BlueTap action fill with its paired readable text color
@@ -25,8 +25,8 @@
  *   - Disabled-only states that should never hover
  *   - Card rows (use their own onPress)
  */
-import React, { useState } from 'react';
-import { Platform, Text, TouchableOpacity } from 'react-native';
+import React from 'react';
+import { Platform, Pressable, Text } from 'react-native';
 import { useAdminTheme } from './AdminTheme';
 
 const IS_WEB = Platform.OS === 'web';
@@ -56,35 +56,24 @@ const SIZE = {
 };
 
 export function useButtonInteraction({ variant = 'primary', disabled = false, palette } = {}) {
-  const [hovered, setHovered] = useState(false);
-  const [focused, setFocused] = useState(false);
-
   const variantPalette = palette[variant] || palette.primary;
-  const isElevated = IS_WEB && (hovered || focused) && !disabled;
-
-  const interactionStyle = isElevated
-    ? {
-        boxShadow: focused
-          ? `0 0 0 3px ${variantPalette.hoverShadow}, 0 4px 12px ${variantPalette.hoverShadow}`
-          : `0 4px 12px ${variantPalette.hoverShadow}`,
-        transform: [{ translateY: -1 }],
-        transition: 'box-shadow 0.16s ease, transform 0.16s ease',
+  return ({ focused, hovered, pressed }) => {
+    if (disabled) return IS_WEB ? { transition: 'none', outline: 'none' } : {};
+    const focusShadow = focused ? `0 0 0 3px ${variantPalette.hoverShadow}` : null;
+    const liftShadow = hovered ? `0 5px 14px ${variantPalette.hoverShadow}` : null;
+    return {
+      ...(IS_WEB ? {
+        boxShadow: [focusShadow, liftShadow].filter(Boolean).join(', ') || undefined,
+        transition: 'box-shadow 0.17s ease-out, transform 0.17s ease-out, background-color 0.2s ease, border-color 0.2s ease',
         outline: 'none',
-      }
-    : IS_WEB
-    ? { transition: 'box-shadow 0.16s ease, transform 0.16s ease', outline: 'none' }
-    : {};
-
-  const handlers = IS_WEB
-    ? {
-        onMouseEnter: () => setHovered(true),
-        onMouseLeave: () => setHovered(false),
-        onFocus: () => setFocused(true),
-        onBlur: () => setFocused(false),
-      }
-    : {};
-
-  return { interactionStyle, handlers, isElevated, hovered, focused };
+      } : {}),
+      transform: pressed
+        ? [{ scale: 0.98 }]
+        : hovered
+          ? [{ translateY: -1 }, { scale: 1.01 }]
+          : [{ scale: 1 }],
+    };
+  };
 }
 
 export default function PortalButton({
@@ -105,7 +94,7 @@ export default function PortalButton({
   const palette = themePalette[resolvedVariant] || themePalette.primary;
   const sizeStyle = SIZE[size] || SIZE.default;
 
-  const { interactionStyle, handlers } = useButtonInteraction({
+  const interactionStyle = useButtonInteraction({
     variant: resolvedVariant,
     disabled,
     palette: themePalette,
@@ -131,13 +120,12 @@ export default function PortalButton({
   ];
 
   return (
-    <TouchableOpacity
-      activeOpacity={0.82}
+    <Pressable
       disabled={disabled}
       onPress={disabled ? undefined : onPress}
-      {...handlers}
-      style={[containerStyle, interactionStyle, style]}
+      style={(state) => [containerStyle, interactionStyle(state), style]}
       accessibilityRole="button"
+      accessibilityState={{ disabled }}
       {...rest}
     >
       {typeof children === 'string' ? (
@@ -145,6 +133,6 @@ export default function PortalButton({
       ) : (
         children
       )}
-    </TouchableOpacity>
+    </Pressable>
   );
 }

@@ -28,6 +28,8 @@ import PortalSwipeContainer, { REQUESTER_TABS } from '../../components/PortalSwi
 import { createPortalStyleSheet, useBlueTapTheme } from '../../components/BlueTapTheme';
 import TopToastFeedback from '../../components/TopToastFeedback';
 import { RequesterOrderChatActions } from '../../components/chat/ChatOrderActions';
+import AnimatedPresenceItem from '../../components/AnimatedPresenceItem';
+import { useAnimatedPresenceList } from '../../components/useAnimatedPresenceList';
 import { canBuyAgain as isBuyAgainEligible } from '../../services/buyAgain';
 import { USER_PORTAL_BOTTOM_CONTENT_INSET, USER_PORTAL_LAYOUT } from '../../constants/userPortalLayout';
 import { BLUETAP_COLORS } from '../../constants/bluetapTheme';
@@ -236,10 +238,12 @@ const RequestCard = ({
   onEdit,
   onViewDetails,
   onBuyAgain,
+  actionsDisabled = false,
 }) => {
-  const canCancel = !isHistory && isPendingRequest(request);
-  const canEdit = !isHistory && isPendingRequest(request) && typeof onEdit === 'function';
-  const canBuyAgain = isBuyAgainEligible(request, isHistory);
+  const { colors } = useBlueTapTheme();
+  const canCancel = !actionsDisabled && !isHistory && isPendingRequest(request);
+  const canEdit = !actionsDisabled && !isHistory && isPendingRequest(request) && typeof onEdit === 'function';
+  const canBuyAgain = !actionsDisabled && isBuyAgainEligible(request, isHistory);
 
   return (
     <View style={styles.requestCard}>
@@ -305,31 +309,32 @@ const RequestCard = ({
       </View>
 
       <View style={styles.cardActionsRow}>
-        <TouchableOpacity
-          activeOpacity={0.8}
-          style={styles.secondaryActionButton}
+        <Pressable
+          disabled={actionsDisabled}
+          style={({ focused, hovered, pressed }) => [styles.secondaryActionButton, hovered && !actionsDisabled && styles.cardActionHovered, focused && { borderColor: colors.primaryLight || colors.primary, borderWidth: 2 }, pressed && styles.cardActionPressed, actionsDisabled && styles.actionButtonDisabled]}
           onPress={() => onViewDetails(request)}
         >
           <Text style={styles.secondaryActionText}>View Details</Text>
-        </TouchableOpacity>
+        </Pressable>
 
-        {canBuyAgain && <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Buy again from order ${getRequestId(request)}`} activeOpacity={0.8} style={styles.secondaryActionButton} onPress={() => onBuyAgain(request)}><Text style={styles.secondaryActionText}>Buy Again</Text></TouchableOpacity>}
+        {canBuyAgain && <Pressable accessibilityRole="button" accessibilityLabel={`Buy again from order ${getRequestId(request)}`} style={({ focused, hovered, pressed }) => [styles.secondaryActionButton, hovered && styles.cardActionHovered, focused && { borderColor: colors.primaryLight || colors.primary, borderWidth: 2 }, pressed && styles.cardActionPressed]} onPress={() => onBuyAgain(request)}><Text style={styles.secondaryActionText}>Buy Again</Text></Pressable>}
 
         {canEdit && (
-          <TouchableOpacity
-            activeOpacity={0.8}
-            style={styles.editActionButton}
+          <Pressable
+            style={({ focused, hovered, pressed }) => [styles.editActionButton, hovered && styles.cardActionHovered, focused && { borderColor: colors.primaryLight || colors.primary, borderWidth: 2 }, pressed && styles.cardActionPressed]}
             onPress={() => onEdit(request)}
           >
             <Text style={styles.editActionText}>Edit Order</Text>
-          </TouchableOpacity>
+          </Pressable>
         )}
 
         {canCancel && (
-          <TouchableOpacity
-            activeOpacity={0.85}
-            style={[
+          <Pressable
+            style={({ focused, hovered, pressed }) => [
               styles.cancelActionButton,
+              hovered && !isCancelling && styles.cardActionHovered,
+              focused && { borderColor: colors.primaryLight || colors.primary, borderWidth: 2 },
+              pressed && styles.cardActionPressed,
               isCancelling && styles.actionButtonDisabled,
             ]}
             onPress={() => onCancel(request)}
@@ -338,10 +343,10 @@ const RequestCard = ({
             <Text style={styles.cancelActionText}>
               {isCancelling ? 'Cancelling...' : 'Cancel Request'}
             </Text>
-          </TouchableOpacity>
+          </Pressable>
         )}
       </View>
-      {!isHistory && <RequesterOrderChatActions order={request} compact />}
+      {!isHistory && <RequesterOrderChatActions order={request} compact disabled={actionsDisabled} />}
     </View>
   );
 };
@@ -389,15 +394,17 @@ export default function RequesterRequests() {
     }
   }, [requests, params.orderId, params.requestId, params.id]);
 
-  const displayedRequests = useMemo(
-    () =>
-      sortRequesterOrders(requests.filter((request) => (
-        isActiveOrdersTab
-          ? isActiveRequesterOrderStatus(request.status)
-          : isHistoryRequesterOrderStatus(request.status)
-      ))),
-    [isActiveOrdersTab, requests]
+  const activeRequests = useMemo(
+    () => sortRequesterOrders(requests.filter((request) => isActiveRequesterOrderStatus(request.status))),
+    [requests]
   );
+  const historyRequests = useMemo(
+    () => sortRequesterOrders(requests.filter((request) => isHistoryRequesterOrderStatus(request.status))),
+    [requests]
+  );
+  const activePresentation = useAnimatedPresenceList(activeRequests, (request) => request.id);
+  const historyPresentation = useAnimatedPresenceList(historyRequests, (request) => request.id);
+  const displayedRequests = isActiveOrdersTab ? activePresentation : historyPresentation;
   const liveSelectedRequest = selectedRequest
     ? requests.find((request) => request.id === selectedRequest.id) || null
     : null;
@@ -473,7 +480,7 @@ export default function RequesterRequests() {
 
   return (
     <LinearGradient
-      colors={isDark ? [colors.background, colors.header] : [colors.primary, colors.primaryLight]}
+      colors={isDark ? [colors.background, colors.header] : [colors.background, colors.background]}
       style={styles.gradient}
       start={{ x: 0, y: 0 }}
       end={{ x: 0, y: 1 }}
@@ -485,30 +492,31 @@ export default function RequesterRequests() {
           type={toast.type}
           onDismiss={() => setToast((current) => ({ ...current, visible: false }))}
         />
-        <StatusBar style="light" />
+        <StatusBar style={isDark ? 'light' : 'dark'} />
 
         <PortalSwipeContainer tabs={REQUESTER_TABS} currentRoute="/requester/r_request">
           <View style={styles.phoneWrapper}>
-            <View style={[styles.fixedHeaderArea, { backgroundColor: isDark ? colors.background : colors.primary }]}>
-              <Text style={styles.pageTitle}>MY ORDERS</Text>
-              <Text style={styles.subtitle}>View and manage your water orders.</Text>
+            <View style={[styles.fixedHeaderArea, { backgroundColor: colors.background }]}>
+              <Text style={[styles.pageTitle, { color: colors.textPrimary }]}>MY ORDERS</Text>
+              <Text style={[styles.subtitle, { color: colors.textSecondary }]}>View and manage your water orders.</Text>
 
-              <View style={styles.orderTabs}>
+              <View style={[styles.orderTabs, { backgroundColor: colors.surfaceAlt, borderColor: colors.border }]}>
                 <Pressable
                   accessibilityRole="tab"
                   accessibilityState={{ selected: activeTab === ACTIVE_TAB }}
                   onPress={() => setActiveTab(ACTIVE_TAB)}
-                  style={({ pressed, hovered }) => [
+                  style={({ focused, pressed, hovered }) => [
                     styles.orderTab,
-                    activeTab === ACTIVE_TAB && styles.orderTabActive,
-                    hovered && (activeTab === ACTIVE_TAB ? styles.orderTabActiveHovered : styles.orderTabHovered),
+                    activeTab === ACTIVE_TAB && { backgroundColor: colors.primaryAction || colors.primary },
+                    hovered && { backgroundColor: activeTab === ACTIVE_TAB ? (colors.primaryDark || colors.primary) : colors.primarySoft },
+                    focused && { borderColor: colors.primaryLight },
                     pressed && styles.orderTabPressed,
                   ]}
                 >
                   <Text
                     style={[
                       styles.orderTabText,
-                      activeTab === ACTIVE_TAB && styles.orderTabTextActive,
+                      { color: activeTab === ACTIVE_TAB ? (colors.onPrimary || '#FFFFFF') : colors.textSecondary },
                     ]}
                   >
                     Active Orders
@@ -519,17 +527,18 @@ export default function RequesterRequests() {
                   accessibilityRole="tab"
                   accessibilityState={{ selected: activeTab === HISTORY_TAB }}
                   onPress={() => setActiveTab(HISTORY_TAB)}
-                  style={({ pressed, hovered }) => [
+                  style={({ focused, pressed, hovered }) => [
                     styles.orderTab,
-                    activeTab === HISTORY_TAB && styles.orderTabActive,
-                    hovered && (activeTab === HISTORY_TAB ? styles.orderTabActiveHovered : styles.orderTabHovered),
+                    activeTab === HISTORY_TAB && { backgroundColor: colors.primaryAction || colors.primary },
+                    hovered && { backgroundColor: activeTab === HISTORY_TAB ? (colors.primaryDark || colors.primary) : colors.primarySoft },
+                    focused && { borderColor: colors.primaryLight },
                     pressed && styles.orderTabPressed,
                   ]}
                 >
                   <Text
                     style={[
                       styles.orderTabText,
-                      activeTab === HISTORY_TAB && styles.orderTabTextActive,
+                      { color: activeTab === HISTORY_TAB ? (colors.onPrimary || '#FFFFFF') : colors.textSecondary },
                     ]}
                   >
                     History
@@ -538,13 +547,19 @@ export default function RequesterRequests() {
               </View>
 
               {isActiveOrdersTab && (
-                <TouchableOpacity
-                  style={styles.addRequestButton}
-                  activeOpacity={0.85}
+                <Pressable
+                  style={({ pressed, hovered }) => [styles.addRequestButton, hovered && styles.addRequestHovered, pressed && styles.addRequestPressed]}
                   onPress={() => router.replace('/requester/requestform')}
                 >
-                  <Text style={styles.addRequestText}>Add Request</Text>
-                </TouchableOpacity>
+                  <LinearGradient
+                    colors={[colors.primaryAction || colors.primary, colors.primaryDark || '#0D5FA3']}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={styles.addRequestGradient}
+                  >
+                    <Text style={styles.addRequestText}>+ Add Request</Text>
+                  </LinearGradient>
+                </Pressable>
               )}
             </View>
 
@@ -575,17 +590,19 @@ export default function RequesterRequests() {
                   }
                 />
               ) : (
-                displayedRequests.map((request) => (
+                displayedRequests.map((entry) => (
+                  <AnimatedPresenceItem key={entry.id} phase={entry.phase}>
                   <RequestCard
-                    key={request.id}
-                    request={request}
+                    request={entry.item}
                     isHistory={!isActiveOrdersTab}
-                    isCancelling={cancellingRequestId === request.id}
+                    actionsDisabled={entry.actionsDisabled}
+                    isCancelling={cancellingRequestId === entry.id}
                     onCancel={confirmCancelRequest}
                     onEdit={setEditingRequest}
                     onViewDetails={setSelectedRequest}
                     onBuyAgain={(order) => router.push({ pathname: '/requester/requestform', params: { buyAgainOrderId: order.id } })}
                   />
+                  </AnimatedPresenceItem>
                 ))
               )}
             </ScrollView>
@@ -655,19 +672,17 @@ const styles = createPortalStyleSheet({
   pageTitle: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: '#FFFFFF',
     letterSpacing: 0,
   },
   subtitle: {
     fontSize: 14,
-    color: 'rgba(255,255,255,0.9)',
     fontWeight: '600',
     marginTop: 4,
     marginBottom: 14,
   },
   orderTabs: {
     flexDirection: 'row',
-    backgroundColor: 'rgba(255,255,255,0.22)',
+    borderWidth: 1,
     borderRadius: 16,
     padding: 4,
     overflow: 'hidden',
@@ -684,6 +699,8 @@ const styles = createPortalStyleSheet({
     flex: 1,
     minHeight: 38,
     borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'transparent',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -698,7 +715,8 @@ const styles = createPortalStyleSheet({
     opacity: 0.98,
   },
   orderTabPressed: {
-    opacity: 0.78,
+    opacity: 0.84,
+    transform: [{ scale: 0.985 }],
   },
   orderTabText: {
     color: 'rgba(255,255,255,0.9)',
@@ -874,6 +892,8 @@ const styles = createPortalStyleSheet({
   actionButtonDisabled: {
     opacity: 0.7,
   },
+  cardActionHovered: { opacity: 0.94 },
+  cardActionPressed: { transform: [{ scale: 0.985 }] },
   emptyRequestCard: {
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
@@ -915,13 +935,8 @@ const styles = createPortalStyleSheet({
   },
   addRequestButton: {
     minHeight: 48,
-    backgroundColor: 'rgba(255,255,255,0.88)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.35)',
     borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 14,
+    overflow: 'hidden',
     marginTop: 2,
     marginBottom: 16,
     ...createShadow({
@@ -932,8 +947,17 @@ const styles = createPortalStyleSheet({
       offset: { width: 0, height: 3 },
     }),
   },
+  addRequestGradient: {
+    minHeight: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 14,
+    borderRadius: 16,
+  },
+  addRequestHovered: { transform: [{ translateY: -1 }, { scale: 1.01 }] },
+  addRequestPressed: { opacity: 0.86, transform: [{ scale: 0.98 }] },
   addRequestText: {
-    color: BLUE,
+    color: '#FFFFFF',
     fontSize: 15,
     fontWeight: 'bold',
   },

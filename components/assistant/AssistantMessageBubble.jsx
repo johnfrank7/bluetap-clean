@@ -1,6 +1,7 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { useBlueTapTheme } from '../BlueTapTheme';
+import BlueTapBrandMark from '../BlueTapBrandMark';
 import { createShadow } from '../shadowStyles';
 import AssistantCardRenderer, { AssistantCardRenderer as NamedRenderer } from './AssistantCards';
 
@@ -52,12 +53,7 @@ export function AssistantMessageBubble({ message = {}, onAction }) {
           },
         ]}
       >
-        <Image
-          source={require('../../assets/icons/bluetapwhitelogo.png')}
-          style={styles.avatarIcon}
-          tintColor={colors.primary}
-          resizeMode="contain"
-        />
+        <BlueTapBrandMark color={colors.iconInteractive || colors.primary} size={18} style={styles.avatarIcon} />
       </View>
 
       <View style={styles.assistantContent}>

@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -25,6 +26,8 @@ import {
   useAssignedDistributorOrders,
 } from '../../services/distributorOrders';
 import { formatDisplayUniqueId } from '../../services/uniqueIds';
+import AnimatedPresenceItem from '../../components/AnimatedPresenceItem';
+import { useAnimatedPresenceList } from '../../components/useAnimatedPresenceList';
 
 const BLUE = BLUETAP_COLORS.primary;
 const BLUE_LIGHT = BLUETAP_COLORS.primarySoft;
@@ -97,7 +100,7 @@ const getDetailsRequestData = (request) => {
   };
 };
 
-const HistoryRequestCard = ({ request, onViewDetails }) => {
+const HistoryRequestCard = ({ actionsDisabled = false, request, onViewDetails }) => {
   return (
     <View style={styles.requestCard}>
       <View style={styles.requestCardHeader}>
@@ -175,7 +178,8 @@ const HistoryRequestCard = ({ request, onViewDetails }) => {
 
       <TouchableOpacity
         activeOpacity={0.8}
-        style={styles.fullWidthActionButton}
+        disabled={actionsDisabled}
+        style={[styles.fullWidthActionButton, actionsDisabled && styles.actionButtonDisabled]}
         onPress={() => onViewDetails(request)}
       >
         <Text style={styles.secondaryActionText}>View Details</Text>
@@ -192,6 +196,7 @@ export default function DistributorHistory() {
   const historyRequests = useMemo(() => orders
     .map(toDistributorScreenOrder)
     .filter((request) => HISTORY_STATUSES.has(normalizeDistributorOrderStatus(request.status))), [orders]);
+  const historyPresentation = useAnimatedPresenceList(historyRequests, (request) => request.sourceId);
   const selectedRequest = historyRequests.find((request) => String(request.sourceId) === String(selectedRequestId)) || null;
   const selectedDetailsRequest = getDetailsRequestData(selectedRequest);
 
@@ -207,23 +212,25 @@ export default function DistributorHistory() {
             <Text style={styles.subtitle}>Request History</Text>
 
           <View style={styles.scheduleTabs}>
-            <TouchableOpacity
-              style={styles.scheduleTab}
-              activeOpacity={0.85}
+            <Pressable
+              accessibilityRole="tab"
+              accessibilityState={{ selected: false }}
+              style={({ hovered, pressed, focused }) => [styles.scheduleTab, hovered && { backgroundColor: colors.primarySoft }, focused && styles.scheduleTabFocused, pressed && styles.scheduleTabPressed]}
               onPress={() => router.replace('/distributor/d_scheduled_requests')}
             >
               <Text style={styles.scheduleTabText}>Scheduled</Text>
-            </TouchableOpacity>
+            </Pressable>
 
-            <TouchableOpacity
-              style={[styles.scheduleTab, styles.scheduleTabActive]}
-              activeOpacity={0.85}
+            <Pressable
+              accessibilityRole="tab"
+              accessibilityState={{ selected: true }}
+              style={({ hovered, pressed, focused }) => [styles.scheduleTab, styles.scheduleTabActive, hovered && { backgroundColor: colors.primaryDark || colors.primary }, focused && styles.scheduleTabFocused, pressed && styles.scheduleTabPressed]}
               onPress={() => router.replace('/distributor/d_history')}
             >
               <Text style={[styles.scheduleTabText, styles.scheduleTabTextActive]}>
                 History
               </Text>
-            </TouchableOpacity>
+            </Pressable>
           </View>
         </View>
 
@@ -234,19 +241,21 @@ export default function DistributorHistory() {
 
           {loading ? <View style={styles.emptyCard}><ActivityIndicator color={BLUE} /><Text style={styles.emptyText}>Loading assigned history...</Text></View>
             : error ? <View style={styles.emptyCard}><Text style={styles.emptyTitle}>History unavailable.</Text><Text style={styles.emptyText}>{error}</Text><TouchableOpacity onPress={refresh} style={styles.fullWidthActionButton}><Text style={styles.secondaryActionText}>Try Again</Text></TouchableOpacity></View>
-              : historyRequests.length === 0 ? (
+              : historyPresentation.length === 0 ? (
                 <BlueTapEmptyState
                   variant="history"
                   title="No Delivery History"
                   description="Completed assigned deliveries will appear here."
                 />
               )
-                : historyRequests.map((request) => (
+                : historyPresentation.map((entry) => (
+            <AnimatedPresenceItem key={entry.id} phase={entry.phase}>
             <HistoryRequestCard
-              key={request.sourceId}
-              request={request}
+              request={entry.item}
+              actionsDisabled={entry.actionsDisabled}
               onViewDetails={(request) => setSelectedRequestId(request.sourceId)}
             />
+            </AnimatedPresenceItem>
           ))}
         </ScrollView>
       </View>
@@ -314,6 +323,8 @@ const styles = createPortalStyleSheet({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'transparent',
+    borderWidth: 2,
+    borderColor: 'transparent',
   },
   scheduleTabActive: {
     backgroundColor: BLUE,
@@ -326,6 +337,9 @@ const styles = createPortalStyleSheet({
   scheduleTabTextActive: {
     color: '#FFFFFF',
   },
+  scheduleTabFocused: { borderColor: '#7DD3FC' },
+  scheduleTabPressed: { transform: [{ scale: 0.985 }] },
+  actionButtonDisabled: { opacity: 0.55 },
   requestCard: {
     backgroundColor: BLUETAP_COLORS.surface,
     borderRadius: USER_PORTAL_LAYOUT.cardRadius,

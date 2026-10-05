@@ -1,12 +1,14 @@
 import React, { memo, useCallback } from 'react';
-import { Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
-import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { USER_PORTAL_LAYOUT } from '../constants/userPortalLayout';
 import { UserPortalFrame } from './UserPortalFrame';
 import { useBlueTapTheme } from './BlueTapTheme';
 import ThemeIconButton from './ThemeIconButton';
+import BlueTapBrandMark from './BlueTapBrandMark';
+import BlueTapIcon from './BlueTapIcon';
+import useSingleFlightNavigation from './useSingleFlightNavigation';
 import { useRoleNotifications } from './RoleNotifications';
 const { formatNotificationBadge } = require('../services/orderNotifications');
 
@@ -14,19 +16,19 @@ const BlueTapHeader = memo(function BlueTapHeader({
   notificationPath,
   rightContent = null,
 }) {
-  const router = useRouter();
+  const { navigateOnce, replaceOnce } = useSingleFlightNavigation();
   const { colors, isDark } = useBlueTapTheme();
   const { unseenCount } = useRoleNotifications();
 
   const openHome = useCallback(() => {
-    router.replace(notificationPath?.startsWith('/distributor') ? '/distributor/d_dashboard' : '/requester/r_dashboard');
-  }, [notificationPath, router]);
+    replaceOnce(notificationPath?.startsWith('/distributor') ? '/distributor/d_dashboard' : '/requester/r_dashboard');
+  }, [notificationPath, replaceOnce]);
 
   const openNotifications = useCallback(() => {
     if (notificationPath) {
-      router.push(notificationPath);
+      navigateOnce(notificationPath);
     }
-  }, [notificationPath, router]);
+  }, [navigateOnce, notificationPath]);
 
   return (
     <SafeAreaView edges={['top']} style={[styles.safeArea, { backgroundColor: colors.header }]}>
@@ -40,11 +42,7 @@ const BlueTapHeader = memo(function BlueTapHeader({
             onPress={openHome}
             style={styles.brandButton}
           >
-            <Image
-              source={require('../assets/icons/bluetapwhitelogo.png')}
-              style={styles.brandLogo}
-              tintColor="#FFFFFF"
-            />
+            <BlueTapBrandMark inverse color={colors.iconOnPrimary} size={24} style={styles.brandLogo} />
             <Text style={styles.appName}>BlueTap</Text>
           </TouchableOpacity>
 
@@ -61,11 +59,7 @@ const BlueTapHeader = memo(function BlueTapHeader({
               onPress={openNotifications}
               style={styles.notificationButton}
             >
-              <Image
-                source={require('../assets/icons/notif.png')}
-                style={styles.notifIcon}
-                tintColor="#FFFFFF"
-              />
+              <BlueTapIcon name="notifications" size={22} color={colors.iconOnPrimary} />
               {unseenCount > 0 && <View style={styles.notificationBadge}><Text style={styles.notificationBadgeText}>{formatNotificationBadge(unseenCount)}</Text></View>}
             </TouchableOpacity>
           </View>

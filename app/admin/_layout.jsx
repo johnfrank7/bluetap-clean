@@ -19,12 +19,17 @@ const routeCopy = {
 export default function AdminLayout() {
   const pathname = usePathname();
   const [title, subtitle] = routeCopy[pathname] || ['BlueTap Administration', 'Validating administrator access…'];
+  const routes = <Stack screenOptions={{ headerShown: false }} />;
   return (
     <AdminThemeProvider>
       <RoleGate allowedRoles={["admin"]} bypass={pathname === '/admin/login'} loadingFallback={<AdminShell title={title} subtitle={subtitle}><AdminRouteSkeleton /></AdminShell>}>
-        <AdminDataProvider>
-          <Stack screenOptions={{ headerShown: false }} />
-        </AdminDataProvider>
+        {pathname === '/admin/login' ? (
+          routes
+        ) : (
+          <AdminDataProvider>
+            {routes}
+          </AdminDataProvider>
+        )}
       </RoleGate>
     </AdminThemeProvider>
   );

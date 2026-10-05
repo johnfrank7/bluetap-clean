@@ -31,7 +31,8 @@ test('Admin shell owns responsive navigation, theme preference, and confirmed lo
   assert.match(shell, /event\.key !== 'Escape'/);
   assert.match(shell, /Log out of BlueTap\?/);
   assert.match(shell, /signOutAndClearSessions\(\)/);
-  assert.match(shell, /router\.replace\('\/admin\/login'\)/);
+  assert.match(shell, /replaceOnce\('\/admin\/login'\)/);
+  assert.match(shell, /useSingleFlightNavigation/);
   assert.doesNotMatch(shell, /\['D', 'Dashboard'/);
   for (const name of ['dashboard', 'branches', 'accounts', 'distributors', 'security', 'maintenance', 'theme', 'logout']) assert.match(icons, new RegExp(`${name}:`));
 

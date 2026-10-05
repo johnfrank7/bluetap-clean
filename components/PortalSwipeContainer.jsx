@@ -1,6 +1,7 @@
 import React, { useMemo, useRef } from 'react';
 import { View, PanResponder, StyleSheet } from 'react-native';
 import { useRouter } from 'expo-router';
+import PageEnterTransition from './PageEnterTransition';
 
 export const REQUESTER_TABS = [
   '/requester/r_dashboard',
@@ -15,6 +16,8 @@ export const DISTRIBUTOR_TABS = [
   '/distributor/d_history',
   '/distributor/d_profile',
 ];
+
+const lastTabIndex = new Map();
 
 const isIgnoredTarget = (target) => {
   if (!target || typeof target.closest !== 'function') return false;
@@ -50,6 +53,13 @@ export default function PortalSwipeContainer({
   }, [tabs, currentRoute]);
 
   const isNavigatingRef = useRef(false);
+  const groupKey = tabs[0] || 'portal';
+  const previousIndex = lastTabIndex.get(groupKey);
+  const enterDirection = previousIndex == null || previousIndex <= currentIndex ? 1 : -1;
+
+  React.useEffect(() => {
+    lastTabIndex.set(groupKey, currentIndex);
+  }, [currentIndex, groupKey]);
 
   React.useEffect(() => {
     isNavigatingRef.current = false;
@@ -89,7 +99,9 @@ export default function PortalSwipeContainer({
 
   return (
     <View style={[styles.container, style]} {...panResponder.panHandlers}>
-      {children}
+      <PageEnterTransition direction={enterDirection} resetKey={currentRoute}>
+        {children}
+      </PageEnterTransition>
     </View>
   );
 }
