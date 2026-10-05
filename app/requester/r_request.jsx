@@ -480,7 +480,7 @@ export default function RequesterRequests() {
 
   return (
     <LinearGradient
-      colors={isDark ? [colors.background, colors.header] : [colors.background, colors.background]}
+      colors={isDark ? [colors.background, colors.header] : [colors.primary, colors.primaryLight]}
       style={styles.gradient}
       start={{ x: 0, y: 0 }}
       end={{ x: 0, y: 1 }}
@@ -492,13 +492,13 @@ export default function RequesterRequests() {
           type={toast.type}
           onDismiss={() => setToast((current) => ({ ...current, visible: false }))}
         />
-        <StatusBar style={isDark ? 'light' : 'dark'} />
+        <StatusBar style="light" />
 
         <PortalSwipeContainer tabs={REQUESTER_TABS} currentRoute="/requester/r_request">
           <View style={styles.phoneWrapper}>
-            <View style={[styles.fixedHeaderArea, { backgroundColor: colors.background }]}>
-              <Text style={[styles.pageTitle, { color: colors.textPrimary }]}>MY ORDERS</Text>
-              <Text style={[styles.subtitle, { color: colors.textSecondary }]}>View and manage your water orders.</Text>
+            <View style={[styles.fixedHeaderArea, { backgroundColor: isDark ? colors.background : colors.primary }]}>
+              <Text style={[styles.pageTitle, { color: isDark ? colors.textPrimary : colors.onPrimary }]}>MY ORDERS</Text>
+              <Text style={[styles.subtitle, { color: isDark ? colors.textSecondary : colors.onPrimary }]}>View and manage your water orders.</Text>
 
               <View style={[styles.orderTabs, { backgroundColor: colors.surfaceAlt, borderColor: colors.border }]}>
                 <Pressable
