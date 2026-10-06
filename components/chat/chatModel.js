@@ -175,6 +175,19 @@ function mapResolveError(error) {
   if (code.includes('CHAT_NOT_AUTHORIZED') && (message.includes('unavailable') || message.includes('branch'))) {
     return 'Your water station is currently unavailable.';
   }
+  if (
+    code.includes('CHAT_STALE_ASSIGNMENT') ||
+    code.includes('CHAT_ASSIGNMENT_NOT_WRITABLE') ||
+    code.includes('CHAT_ASSIGNMENT_MISMATCH') ||
+    code.includes('CHAT_ORDER_OWNER_MISMATCH') ||
+    code.includes('CHAT_CONVERSATION_NOT_FOUND') ||
+    code.includes('CHAT_READ_ONLY') ||
+    code.includes('CHAT_CLOSED') ||
+    message.includes('assignment has changed') ||
+    message.includes('no longer available')
+  ) {
+    return 'This conversation is no longer available for this delivery.';
+  }
   return 'Unable to open conversation. Please try again.';
 }
 

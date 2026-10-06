@@ -428,6 +428,54 @@ test('Requester chat resolution allows an eligible Branch and assigned Distribut
   assert.equal(noAssignment.body.error.reason, 'CHAT_NOT_AUTHORIZED');
 });
 
+test('Distributor and Requester open canonical conversation by orderId or public requestId', async () => {
+  const f = fixture();
+  // 1. Requester opens requester_distributor conversation
+  const requesterRes = await resolve(f, 'requester-a-token', { type: 'requester_distributor', orderId: 'order-a' });
+  assert.equal(requesterRes.statusCode, 201);
+  assert.equal(requesterRes.body.created, true);
+  const conversationId = requesterRes.body.conversation.id;
+
+  // 2. Distributor opens same conversation using public requestId
+  const distributorRes = await resolve(f, 'distributor-a-token', { type: 'requester_distributor', orderId: 'BT-2026-8B4B75BE' });
+  assert.equal(distributorRes.statusCode, 200);
+
+  // 3. Both resolve SAME conversation ID
+  assert.equal(distributorRes.body.conversation.id, conversationId);
+
+  // 4. Existing conversation reused
+  assert.equal(distributorRes.body.created, false);
+
+  // 5. Repeated open is idempotent
+  const repeatDistributor = await resolve(f, 'distributor-a-token', { type: 'requester_distributor', orderId: 'BT-2026-8B4B75BE' });
+  assert.equal(repeatDistributor.statusCode, 200);
+  assert.equal(repeatDistributor.body.conversation.id, conversationId);
+
+  // 6. Distributor cannot open arbitrary Requester order (not assigned to them)
+  const unassigned = await resolve(f, 'distributor-a-token', { type: 'requester_distributor', orderId: 'order-b' });
+  assert.equal(unassigned.statusCode, 403);
+  assert.equal(unassigned.body.error.reason, 'CHAT_NOT_AUTHORIZED');
+
+  // 7. Former/replaced assignment cannot open or write
+  f.records.set('requests/order-a', { ...f.records.get('requests/order-a'), assignedDistributorUid: 'distributor-b', assignmentVersion: 5 });
+  const replaced = await resolve(f, 'distributor-a-token', { type: 'requester_distributor', orderId: 'BT-2026-8B4B75BE' });
+  assert.equal(replaced.statusCode, 403);
+  assert.equal(replaced.body.error.reason, 'CHAT_NOT_AUTHORIZED');
+
+  // 8. Cross-branch invalid relationship denied
+  f.records.set('users/distributor-b', { ...f.records.get('users/distributor-b'), branchId: 'branch-b' });
+  const crossBranch = await resolve(f, 'distributor-b-token', { type: 'requester_distributor', orderId: 'BT-2026-8B4B75BE' });
+  assert.equal(crossBranch.statusCode, 403);
+
+  // 9. distributor_branch still works
+  const branchConv = await resolve(f, 'distributor-a-token', { type: 'distributor_branch' });
+  assert.equal(branchConv.statusCode, 201);
+  assert.equal(branchConv.body.conversation.type, 'distributor_branch');
+
+  // 10. Route does not return 404 for valid current assignment
+  assert.notEqual(distributorRes.statusCode, 404);
+});
+
 test('malformed legacy conversations with an extra Requester are denied and omitted from normal discovery', async () => {
   const f = fixture();
   const conversationId = await directConversation(f);

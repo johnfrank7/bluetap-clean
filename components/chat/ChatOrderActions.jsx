@@ -8,7 +8,11 @@ import { useChat } from './ChatContext';
 const clean = (value) => String(value || '').trim();
 const normalizedStatus = (value) => clean(value).toLowerCase().replace(/[_-]+/g, ' ');
 const TERMINAL = new Set(['delivered', 'completed', 'cancelled', 'canceled', 'rejected', 'declined', 'declined outside service area']);
-const orderIdOf = (order = {}) => clean(order.id || order.sourceId || order.requestId || order.request_id);
+const orderIdOf = (order = {}) => {
+  const source = clean(order.sourceId);
+  if (source && source !== 'Not set') return source;
+  return clean(order.id || order.requestId || order.request_id);
+};
 
 function ActionButton({ busy, colors, disabled = false, label, onPress, secondary = false, softPrimary = false, style }) {
   const foreground = secondary || softPrimary ? colors.primary : colors.onPrimary;

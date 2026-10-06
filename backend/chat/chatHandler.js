@@ -136,6 +136,38 @@ async function readRequired(reader, ref, reason, message) {
   return withId(snapshot);
 }
 
+async function readAuthoritativeOrder(tx, db, orderReference) {
+  const reference = clean(orderReference, 128);
+  if (!reference) {
+    throw new OtpError(404, 'CHAT_CONVERSATION_NOT_FOUND', 'The order was not found.');
+  }
+
+  const directSnapshot = await tx.get(db.collection('requests').doc(reference));
+  if (directSnapshot.exists) {
+    return withId(directSnapshot);
+  }
+
+  const reqIdQuery = db.collection('requests').where('requestId', '==', reference).limit(1);
+  const reqIdSnap = await tx.get(reqIdQuery);
+  if (!reqIdSnap.empty && (reqIdSnap.docs || [])[0]?.exists) {
+    return withId(reqIdSnap.docs[0]);
+  }
+
+  const publicRefQuery = db.collection('requests').where('publicOrderReference', '==', reference).limit(1);
+  const publicRefSnap = await tx.get(publicRefQuery);
+  if (!publicRefSnap.empty && (publicRefSnap.docs || [])[0]?.exists) {
+    return withId(publicRefSnap.docs[0]);
+  }
+
+  const altReqIdQuery = db.collection('requests').where('request_id', '==', reference).limit(1);
+  const altReqIdSnap = await tx.get(altReqIdQuery);
+  if (!altReqIdSnap.empty && (altReqIdSnap.docs || [])[0]?.exists) {
+    return withId(altReqIdSnap.docs[0]);
+  }
+
+  throw new OtpError(404, 'CHAT_CONVERSATION_NOT_FOUND', 'The order was not found.');
+}
+
 function activeBranch(branch, expectedId = '') {
   try { requireActiveBranch(branch, expectedId); } catch (error) {
     if (error instanceof OtpError) throw new OtpError(403, 'CHAT_NOT_AUTHORIZED', 'The required branch is unavailable.');
@@ -232,7 +264,7 @@ async function resolveConversationIntent(tx, db, callerUid, callerClaims, body, 
 
     requireOnlyFields(body, new Set(['type', 'intent', 'orderId']));
     const orderId = requiredId(body.orderId, 'CHAT_ORDER_REQUIRED', 'Choose an order.');
-    const order = await readRequired(tx, db.collection('requests').doc(orderId), 'CHAT_CONVERSATION_NOT_FOUND', 'The order was not found.');
+    const order = await readAuthoritativeOrder(tx, db, orderId);
     const branchId = owningBranchId(order);
     const branch = activeBranch(await readRequired(tx, db.collection('branches').doc(branchId), 'CHAT_NOT_AUTHORIZED', 'The branch is unavailable.'), branchId);
     const status = normalizedStatus(order.status);
@@ -248,7 +280,7 @@ async function resolveConversationIntent(tx, db, callerUid, callerClaims, body, 
       authorizeRequesterBranch({ requester, branch, order });
     }
     const authority = { requesterUid: callerUid, branchId };
-    const reasonOptions = { orderId, grantedAt: now, ...(reason === AUTHORITY_REASONS.POST_ORDER_FOLLOWUP ? { accessEndsAt } : {}) };
+    const reasonOptions = { orderId: order.id, grantedAt: now, ...(reason === AUTHORITY_REASONS.POST_ORDER_FOLLOWUP ? { accessEndsAt } : {}) };
     return {
       type,
       authority,
@@ -263,7 +295,7 @@ async function resolveConversationIntent(tx, db, callerUid, callerClaims, body, 
   if (type === CONVERSATION_TYPES.REQUESTER_DISTRIBUTOR) {
     requireOnlyFields(body, new Set(['type', 'orderId']));
     const orderId = requiredId(body.orderId, 'CHAT_ORDER_REQUIRED', 'Choose an order.');
-    const order = await readRequired(tx, db.collection('requests').doc(orderId), 'CHAT_CONVERSATION_NOT_FOUND', 'The order was not found.');
+    const order = await readAuthoritativeOrder(tx, db, orderId);
     const requesterUid = orderRequesterUid(order);
     const distributorUid = clean(order.assignedDistributorUid || order.distributor_id, 128);
     if (!requesterUid || !distributorUid || ![requesterUid, distributorUid].includes(callerUid)) {
@@ -491,7 +523,7 @@ async function authorizeConversation(tx, db, conversation, callerUid, callerClai
     else if (callerUid === distributorUid && caller.role === 'distributor') principal = { principalType: 'user', principalId: callerUid };
     else throw new OtpError(403, 'CHAT_NOT_AUTHORIZED', 'This conversation is not available to this account.');
 
-    const order = await readRequired(tx, db.collection('requests').doc(orderId), 'CHAT_CONVERSATION_NOT_FOUND', 'The order was not found.');
+    const order = await readAuthoritativeOrder(tx, db, orderId);
     const branchId = owningBranchId(order);
     const [requester, distributor, branch] = await Promise.all([
       readRequired(tx, db.collection('users').doc(requesterUid), 'CHAT_NOT_AUTHORIZED', 'The Requester is unavailable.'),

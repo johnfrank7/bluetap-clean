@@ -454,6 +454,7 @@ export default function ChatDataProvider({ children, role }) {
 
   const value = React.useMemo(() => ({
     branchDistributors: role === 'manager' && accessReadiness === 'ready' ? (roleData.users || []).filter((user) => user.role === 'distributor' && user.branchId === branchId && ['active', 'approved'].includes(String(user.distributorStatus || user.approvalStatus || user.status || '').toLowerCase()) && (!user.accountStatus || user.accountStatus === 'active') && user.mustChangePassword !== true) : [],
+    distributorOrders: role === 'distributor' ? (roleData.orders || []) : [],
     stationName: clean(roleData.branch?.name || roleData.profile?.branchName || roleData.profile?.branchNameSnapshot) || 'Your BlueTap Station',
     requesterBranches,
     role, colors, isDark, conversations, loading, error, panelOpen, currentConversation, messages,
@@ -481,7 +482,7 @@ export default function ChatDataProvider({ children, role }) {
     loadEarlierMessages,
     isOwnMessage: (message) => isOwnMessage(message, role, uid, branchId),
     receiptForMessage: (message) => receiptFor(message, currentConversation, role, uid, branchId),
-  }), [accessReadiness, roleData.users, branchId, chatRestriction, colors, isDark, conversationNotice, conversations, currentConversation, deleteCurrentMessage, editCurrentMessage, error, hasEarlierMessages, loading, loadingEarlier, messageActionError, messages, openChat, closeChat, openStationChat, openConversation, panelOpen, requesterBranches, resolveAndOpen, resolveError, resolvingConversation, retryMessage, role, sendCurrentMessage, threadError, uid, loadEarlierMessages]);
+  }), [accessReadiness, roleData.users, roleData.orders, branchId, chatRestriction, colors, isDark, conversationNotice, conversations, currentConversation, deleteCurrentMessage, editCurrentMessage, error, hasEarlierMessages, loading, loadingEarlier, messageActionError, messages, openChat, closeChat, openStationChat, openConversation, panelOpen, requesterBranches, resolveAndOpen, resolveError, resolvingConversation, retryMessage, role, sendCurrentMessage, threadError, uid, loadEarlierMessages]);
 
   return (
     <ChatContext.Provider value={value}>

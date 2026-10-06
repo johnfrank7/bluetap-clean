@@ -85,7 +85,7 @@ function ConversationSection({ colors, label, rows, openConversation, resolveAnd
 }
 
 export default function ChatConversationList() {
-  const { colors, conversations, branchDistributors = [], error, loading, openConversation, requesterBranches = [], resolveAndOpen, resolveError, resolvingConversation, retrySummaries, role, stationName } = useChat();
+  const { colors, conversations, branchDistributors = [], distributorOrders = [], error, loading, openConversation, requesterBranches = [], resolveAndOpen, resolveError, resolvingConversation, retrySummaries, role, stationName } = useChat();
   const [search, setSearch] = React.useState('');
   const needle = search.trim().toLowerCase();
   const filtered = conversations.filter((conversation) => matchesSearch(conversation, needle));
@@ -112,7 +112,61 @@ export default function ChatConversationList() {
     emptyPreview: 'Message your station',
     ...(stationConversation ? {} : { resolveIntent: { type: 'distributor_branch' }, unreadCount: 0 }),
   }].filter((row) => matchesSearch(row, needle)) : [];
-  const distributorRequesterRows = role === 'distributor' ? filtered.filter((conversation) => conversation.type === 'requester_distributor') : [];
+  const distributorRequesterRows = role === 'distributor' ? (() => {
+    const existingRows = filtered.filter((conversation) => conversation.type === 'requester_distributor');
+    const existingMap = new Map();
+    existingRows.forEach((c) => {
+      const orderId = String(c.orderId || '').trim();
+      if (orderId) existingMap.set(orderId, c);
+      const orderRef = String(c.orderReference || c.orderContext?.requestId || c.orderContext?.id || '').trim();
+      if (orderRef) existingMap.set(orderRef, c);
+    });
+
+    const rows = [];
+    const seenConversationIds = new Set();
+    const TERMINAL = new Set(['delivered', 'completed', 'cancelled', 'canceled', 'rejected', 'declined']);
+
+    distributorOrders.forEach((order) => {
+      const status = String(order.status || order.finalStatus || '').trim().toLowerCase().replace(/[\s_-]+/g, ' ');
+      if (TERMINAL.has(status)) return;
+      const rawSource = String(order.sourceId || '').trim();
+      const docId = rawSource && rawSource !== 'Not set' ? rawSource : String(order.id || '').trim();
+      const publicId = String(order.requestId || order.request_id || order.publicOrderReference || '').trim();
+      const existing = (docId && existingMap.get(docId)) || (publicId && existingMap.get(publicId)) || null;
+
+      if (existing) {
+        if (!seenConversationIds.has(existing.id)) {
+          seenConversationIds.add(existing.id);
+          rows.push(existing);
+        }
+      } else {
+        const rowId = docId || publicId;
+        if (!rowId) return;
+        const displayName = String(order.customerName || order.requesterName || order.requesterNameSnapshot || 'Requester').trim();
+        const contextLabel = publicId ? `Order ${publicId}` : 'Assigned order';
+        rows.push({
+          key: `assigned-order-${rowId}`,
+          id: `assigned-order-${rowId}`,
+          displayName,
+          contextLabel,
+          orderStatus: String(order.status || '').trim(),
+          emptyPreview: 'Message this Requester',
+          unreadCount: 0,
+          resolveIntent: { type: 'requester_distributor', orderId: rowId },
+          orderContextLocal: order,
+        });
+      }
+    });
+
+    existingRows.forEach((c) => {
+      if (!seenConversationIds.has(c.id)) {
+        seenConversationIds.add(c.id);
+        rows.push(c);
+      }
+    });
+
+    return rows.filter((row) => matchesSearch(row, needle));
+  })() : [];
   const requesterGroups = role === 'requester' ? buildRequesterConversationGroups(conversations, requesterBranches) : { branchRows: [], distributorRows: [] };
   const requesterBranchRows = requesterGroups.branchRows.filter((row) => matchesSearch(row, needle));
   const requesterDistributorRows = requesterGroups.distributorRows.filter((row) => matchesSearch(row, needle));
