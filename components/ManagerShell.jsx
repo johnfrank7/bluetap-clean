@@ -43,10 +43,11 @@ export const MANAGER_COLORS = {
 
 const NAV_ITEMS = [
   { key: 'dashboard', label: 'Dashboard', path: '/manager/dashboard', icon: 'dashboard' },
-  { key: 'requests', label: 'Requests', path: '/manager/request', icon: 'security' },
+  { key: 'requests', label: 'Requests', path: '/manager/request', icon: 'requests' },
   { key: 'distributors', label: 'Distributors', path: '/manager/distributors', icon: 'distributors' },
+  { key: 'accounts', label: 'Accounts', path: '/manager/accounts', icon: 'accounts' },
   { key: 'products', label: 'Products', path: '/manager/products', icon: 'products' },
-  { key: 'analytics', label: 'Analytics', path: '/manager/analytics', icon: 'accounts' },
+  { key: 'analytics', label: 'Analytics', path: '/manager/analytics', icon: 'analytics' },
   { key: 'reports', label: 'Reports & Safety', path: '/manager/reports-safety', icon: 'security' },
   { key: 'profile', label: 'Profile', path: '/manager/profile', icon: 'theme' },
 ];

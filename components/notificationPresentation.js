@@ -4,7 +4,7 @@ const normalizeNotificationStatus = (status) =>
     .toLowerCase()
     .replace(/[\s-]+/g, '_');
 
-const SUCCESS_STATUSES = new Set(['delivered', 'completed', 'success']);
+const SUCCESS_STATUSES = new Set(['delivered', 'completed', 'success', 'restored']);
 const ERROR_STATUSES = new Set([
   'cancelled',
   'canceled',
@@ -90,6 +90,7 @@ const notificationSeverity = (status, dark = false) => {
 
 const compactNotificationStatus = (status) => {
   const normalized = normalizeNotificationStatus(status);
+  if (normalized === 'restored') return 'Restored';
   if (SUCCESS_STATUSES.has(normalized)) return 'Delivered';
   if (DELIVERY_STATUSES.has(normalized)) return 'In transit';
   if (RESTRICTED_STATUSES.has(normalized)) return 'Restricted';

@@ -523,7 +523,7 @@ export default function ManagerDistributorsPage() {
   }, [registeredDistributors, search]);
 
   return (
-    <ManagerShell active="distributors" title="Distributors" subtitle="Order dispatch, assignment and registered roster">
+    <ManagerShell active="distributors" title="Distributors" subtitle="Order dispatch, scheduling and pending applications">
       <TopToastFeedback
         visible={toast.visible}
         message={toast.message}
@@ -533,128 +533,64 @@ export default function ManagerDistributorsPage() {
       {/* Dispatch & Scheduling Queue */}
       <DistributorDispatchQueue styles={styles} colors={colors} isDark={resolvedTheme === 'dark'} onShowToast={showToast} />
 
-      {/* Registered Distributors Roster */}
+      {/* Pending Applications Section */}
       <View style={styles.card}>
         <View style={styles.cardHeaderWithSearch}>
-          <Text style={styles.cardTitle}>Registered distributors ({registeredDistributors.length})</Text>
-          <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Pending applications: ${pendingApplications.length}`} onPress={() => setApplicationsVisible((value) => !value)} style={styles.applicationsButton}>
-            <Text style={styles.applicationsButtonText}>Pending applications ({pendingApplications.length})</Text>
+          <Text style={styles.cardTitle}>Pending applications ({pendingApplications.length})</Text>
+          <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel={`Pending applications: ${pendingApplications.length}`}
+            onPress={() => setApplicationsVisible((value) => !value)}
+            style={styles.applicationsButton}
+          >
+            <Text style={styles.applicationsButtonText}>
+              {applicationsVisible ? 'Hide applications' : `View applications (${pendingApplications.length})`}
+            </Text>
           </TouchableOpacity>
-          <View style={styles.searchContainer}>
-            <TextInput
-              style={styles.searchInput}
-              placeholder="Search distributors..."
-              placeholderTextColor={colors.placeholder}
-              value={search}
-              onChangeText={setSearch}
-            />
-          </View>
         </View>
 
-        {applicationsVisible && <View style={styles.applicationsPanel}>
-          <Text style={styles.approvalHelper}>Approve only verified Distributor applications requesting your assigned branch.</Text>
-          {pendingApplications.length === 0 ? (
-            <BlueTapEmptyState
-              compact
-              variant="applications"
-              title="No Pending Applications"
-              description="Distributor applications requesting this branch will appear here."
-              themeColors={colors}
-              dark={resolvedTheme === 'dark'}
-              style={styles.inlineVisualEmpty}
-            />
-          ) : pendingApplications.map((applicant) =>
-            <View key={applicant.uid || applicant.id} style={styles.applicationRow}>
-              <View style={styles.applicationDetails}>
-              <Text style={styles.distributorName}>{getFullName(applicant)}</Text>
-              <Text style={styles.distributorSub}>{getProfileUniqueId(applicant) || applicant.email || 'ID pending'}</Text>
-              <Text style={styles.distributorSub}>{applicant.email || applicant.phone || 'Contact not set'} · {getBarangay(applicant)}</Text>
-              <Text style={styles.distributorSub}>Applied {getJoinedLabel(applicant)} · Pending branch review</Text>
-              </View>
-              <TouchableOpacity
-                accessibilityRole="button"
-                accessibilityLabel={`Approve ${getFullName(applicant)}`}
-                disabled={Boolean(approvingUid)}
-                onPress={() => approveApplication(applicant)}
-                style={[styles.approveApplicationButton, Boolean(approvingUid) && styles.actionDisabled]}
-              >
-                {approvingUid === (applicant.uid || applicant.id)
-                  ? <ActivityIndicator size="small" color={colors.onPrimary || '#FFFFFF'} />
-                  : <Text style={styles.approveApplicationText}>Approve</Text>}
-              </TouchableOpacity>
-            </View>
-          )}
-        </View>}
-
-        <ScrollView horizontal showsHorizontalScrollIndicator style={styles.tableViewport} contentContainerStyle={styles.tableScroll}>
-          <View style={styles.table}>
-            <View style={[styles.tableRow, styles.tableHeadRow]}>
-              <Text style={[styles.th, styles.nameCol]}>NAME</Text>
-              <Text style={[styles.th, styles.idCol]}>UNIQUE ID</Text>
-              <Text style={[styles.th, styles.contactCol]}>CONTACT</Text>
-              <Text style={[styles.th, styles.emailCol]}>EMAIL</Text>
-              <Text style={[styles.th, styles.barangayCol]}>BARANGAY</Text>
-              <Text style={[styles.th, styles.joinedCol]}>JOINED</Text>
-              <Text style={[styles.th, styles.statusCol]}>STATUS</Text>
-              <Text style={[styles.th, styles.actionsCol]}>ACTIONS</Text>
-            </View>
-
-            {loading ? (
-              <View style={styles.emptyState}>
-                <ActivityIndicator color={colors.primary} size="small" />
-              </View>
-            ) : filteredDistributors.length === 0 ? (
-              <View style={styles.emptyState}>
-                <BlueTapEmptyState
-                  compact
-                  variant="people"
-                  title={registeredDistributors.length === 0 ? 'No Registered Distributors' : 'No Matching Distributors'}
-                  description={registeredDistributors.length === 0
-                    ? 'Approved distributors assigned to this branch will appear here.'
-                    : 'Try a different name, UID, or contact search.'}
-                  themeColors={colors}
-                  dark={resolvedTheme === 'dark'}
-                  style={styles.tableEmptyVisual}
-                />
-                {!!loadError && <Text style={styles.errorText}>Distributor records could not be loaded.</Text>}
-              </View>
+        {applicationsVisible && (
+          <View style={styles.applicationsPanel}>
+            <Text style={styles.approvalHelper}>
+              Approve only verified Distributor applications requesting your assigned branch.
+            </Text>
+            {pendingApplications.length === 0 ? (
+              <BlueTapEmptyState
+                compact
+                variant="applications"
+                title="No Pending Applications"
+                description="Distributor applications requesting this branch will appear here."
+                themeColors={colors}
+                dark={resolvedTheme === 'dark'}
+                style={styles.inlineVisualEmpty}
+              />
             ) : (
-              filteredDistributors.map((distributor) => {
-                const fullName = getFullName(distributor);
-                const distributorId = distributor.uid || distributor.id;
-
-                return (
-                  <View key={distributorId || distributor.email} style={styles.tableRow}>
-                    <Text style={[styles.tdName, styles.nameCol]} numberOfLines={1}>
-                      {fullName}
-                    </Text>
-                    <Text style={[styles.td, styles.idCol]} numberOfLines={1}>
-                      {getProfileUniqueId(distributor) || 'Not set'}
-                    </Text>
-                    <Text style={[styles.td, styles.contactCol]} numberOfLines={1}>
-                      {distributor.phone || 'Not set'}
-                    </Text>
-                    <Text style={[styles.tdLink, styles.emailCol]} numberOfLines={1}>
-                      {distributor.email || 'Not set'}
-                    </Text>
-                    <Text style={[styles.td, styles.barangayCol]} numberOfLines={1}>
-                      {getBarangay(distributor)}
-                    </Text>
-                    <Text style={[styles.td, styles.joinedCol]} numberOfLines={1}>
-                      {getJoinedLabel(distributor)}
-                    </Text>
-                    <View style={[styles.statusCell, styles.statusCol]}>
-                      <ManagerPill tone="green">Active</ManagerPill>
-                    </View>
-                    <View style={[styles.actionsCell, styles.actionsCol]}>
-                      <Text style={styles.noActionText}>Branch Assigned</Text>
-                    </View>
+              pendingApplications.map((applicant) => (
+                <View key={applicant.uid || applicant.id} style={styles.applicationRow}>
+                  <View style={styles.applicationDetails}>
+                    <Text style={styles.distributorName}>{getFullName(applicant)}</Text>
+                    <Text style={styles.distributorSub}>{getProfileUniqueId(applicant) || applicant.email || 'ID pending'}</Text>
+                    <Text style={styles.distributorSub}>{applicant.email || applicant.phone || 'Contact not set'} · {getBarangay(applicant)}</Text>
+                    <Text style={styles.distributorSub}>Applied {getJoinedLabel(applicant)} · Pending branch review</Text>
                   </View>
-                );
-              })
+                  <TouchableOpacity
+                    accessibilityRole="button"
+                    accessibilityLabel={`Approve ${getFullName(applicant)}`}
+                    disabled={Boolean(approvingUid)}
+                    onPress={() => approveApplication(applicant)}
+                    style={[styles.approveApplicationButton, Boolean(approvingUid) && styles.actionDisabled]}
+                  >
+                    {approvingUid === (applicant.uid || applicant.id) ? (
+                      <ActivityIndicator size="small" color={colors.onPrimary || '#FFFFFF'} />
+                    ) : (
+                      <Text style={styles.approveApplicationText}>Approve</Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              ))
             )}
           </View>
-        </ScrollView>
+        )}
       </View>
     </ManagerShell>
   );

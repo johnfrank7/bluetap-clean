@@ -15,6 +15,7 @@ const managerRealtime = read('components/ManagerRealtimeData.jsx');
 const managerProfile = read('app/manager/profile.jsx');
 const managerProducts = read('app/manager/products.jsx');
 const managerAnalytics = read('app/manager/analytics.jsx');
+const accounts = read('app/manager/accounts.jsx');
 const emptyState = read('components/BlueTapEmptyState.jsx');
 const notificationHook = read('components/ManagerNotifications.jsx');
 const managerLayout = read('app/manager/_layout.jsx');
@@ -34,15 +35,17 @@ test('Manager operational queues use shared BlueTap visual empty states with con
     assert.match(requests, new RegExp(title));
   }
   assert.match(distributors, /BlueTapEmptyState/);
-  for (const title of ['No Orders Awaiting Assignment', 'No Registered Distributors', 'No Pending Applications']) {
+  for (const title of ['No Orders Awaiting Assignment', 'No Pending Applications']) {
     assert.match(distributors, new RegExp(title));
   }
+  assert.match(accounts, /No Registered Distributors/);
   for (const variant of ['orders', 'exceptions', 'management', 'coordination']) {
     assert.match(requests, new RegExp(`variant="${variant}"`));
   }
-  for (const variant of ['dispatch', 'people', 'applications']) {
+  for (const variant of ['dispatch', 'applications']) {
     assert.match(distributors, new RegExp(`variant="${variant}"`));
   }
+  assert.match(accounts, /variant="people"/);
   assert.match(emptyState, /variant = 'default'/);
   assert.match(emptyState, /ASSET_VARIANTS/);
   assert.match(emptyState, /BlueTapIcon/);
@@ -147,9 +150,8 @@ test('Manager responsive surfaces stack actions and preserve wide tables with ho
   assert.match(managerDashboard, /<ScrollView horizontal/);
   assert.match(managerDashboard, /table: \{ minWidth: 900/);
   assert.match(managerProducts, /const compact = useWindowDimensions\(\)\.width < 760/);
-  assert.match(distributors, /<ScrollView horizontal/);
+  assert.match(accounts, /<ScrollView horizontal/);
   assert.match(distributors, /flexDirection: width < 600 \? 'column' : 'row'/);
-  assert.match(distributors, /width: width < 550 \? '100%' : undefined/);
   assert.match(distributors, /tableViewport: \{ width: '100%', maxWidth: '100%', minWidth: 0 \}/);
 });
 

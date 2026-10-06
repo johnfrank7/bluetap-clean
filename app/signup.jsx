@@ -23,6 +23,7 @@ import { RegistrationActions, RegistrationBrand, RegistrationHeading, Registrati
 import { auth } from '../firebase';
 import { signInWithCustomToken } from 'firebase/auth';
 import { getRoleHomePath, saveRoleSession } from '../services/authSession';
+import useUnsavedChangesGuard from '../components/useUnsavedChangesGuard';
 
 const { isTrustedRegistrationFaceVerification } = require('../services/webFaceCaptureCore');
 const { REGISTRATION_STEP: STEP, REGISTRATION_STEP_LABELS, buildRegistrationDisplaySteps, buildRegistrationSteps, adjacentRegistrationStep, registrationEntryStep } = require('../services/registrationStepStatus');
@@ -100,6 +101,34 @@ export default function SignupPage() {
     registrationSessionId,
     securityPolicyReady && securityPolicy?.faceVerificationRequired === true,
   );
+
+  const isDirty = React.useMemo(() => {
+    if (loading || submitting.current) return false;
+    return Boolean(
+      (form.role && form.role !== initialRole) ||
+      form.firstName.trim() ||
+      form.lastName.trim() ||
+      form.phone.trim() ||
+      form.barangay.trim() ||
+      form.address.trim() ||
+      form.requestedBranchId.trim() ||
+      form.username.trim() ||
+      form.email.trim() ||
+      form.password.trim() ||
+      form.confirmPassword.trim() ||
+      registrationSessionId
+    );
+  }, [loading, form, initialRole, registrationSessionId]);
+
+  const { confirmLeave, UnsavedModal } = useUnsavedChangesGuard({
+    isDirty,
+    onDiscard: () => {
+      clearPendingRegistration();
+      if (registrationSessionId) {
+        clearPendingFaceEnrollment(registrationSessionId);
+      }
+    },
+  });
 
   React.useEffect(() => {
     Animated.timing(entrance, {
@@ -342,7 +371,7 @@ export default function SignupPage() {
 
   const back = () => {
     if (loading) return;
-    if (step === STEP.account) router.replace('/login');
+    if (step === STEP.account) confirmLeave(() => router.replace('/login'));
     else transitionToStep(adjacentRegistrationStep(visibleRegistrationSteps, step, -1) ?? STEP.account);
   };
 
@@ -492,7 +521,7 @@ export default function SignupPage() {
                   <TouchableOpacity style={styles.checkboxTouch} onPress={() => { setTermsAccepted((value) => !value); setErrors((current) => ({ ...current, terms: '' })); }} accessibilityRole="checkbox" accessibilityState={{ checked: termsAccepted }}>
                     <View style={[styles.checkboxBox, termsAccepted && styles.checkboxTouchChecked]}><Text style={styles.checkboxMark}>{termsAccepted ? '✓' : ''}</Text></View>
                   </TouchableOpacity>
-                  <Text style={styles.termsText}>I agree to the BlueTap <Text style={styles.termsLink} onPress={() => router.push('/terms')}>Terms of Service</Text> and <Text style={styles.termsLink} onPress={() => router.push('/privacy')}>Privacy Policy</Text>.</Text>
+                  <Text style={styles.termsText}>I agree to the BlueTap <Text style={styles.termsLink} onPress={() => confirmLeave(() => router.push('/terms'))}>Terms of Service</Text> and <Text style={styles.termsLink} onPress={() => confirmLeave(() => router.push('/privacy'))}>Privacy Policy</Text>.</Text>
                 </View>
               </View>}
 
@@ -509,12 +538,13 @@ export default function SignupPage() {
                   ? `Try again in ${Math.floor(retrySeconds / 60)}:${String(retrySeconds % 60).padStart(2, '0')}`
                   : !securityPolicyReady && step === STEP.personal ? 'Preparing secure registration…' : step === STEP.verifyEmail ? 'Continue' : step === STEP.credentials && !securityPolicy.emailOtpRequired ? 'Complete Registration' : 'Next'}
               />
-              <Text style={styles.loginPrompt}>Already have an account? <Text style={styles.loginLink} onPress={() => router.replace('/login')}>Log in.</Text></Text>
+              <Text style={styles.loginPrompt}>Already have an account? <Text style={styles.loginLink} onPress={() => confirmLeave(() => router.replace('/login'))}>Log in.</Text></Text>
               </Animated.View>}
             </View>
           </Animated.View>
         </ScrollView>
         <Modal visible={!!notice} transparent animationType="fade"><View style={styles.modalBg}><View style={styles.modal}><RegistrationNotice tone={notice?.tone || 'error'} title={notice?.title} message={notice?.message} /><TouchableOpacity style={styles.primary} onPress={() => setNotice(null)}><Text style={styles.primaryText}>OK</Text></TouchableOpacity></View></View></Modal>
+        <UnsavedModal />
       </SafeAreaView>
     </LinearGradient>
   );

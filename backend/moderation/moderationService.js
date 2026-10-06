@@ -56,12 +56,12 @@ function durationDays(value, role) {
 
 function restrictionBranch(record = {}, branchId = '', now = Date.now()) {
   const branch = record.branches?.[clean(branchId, 128)] || null;
-  return branch && timeOf(branch.endsAt) > timeOf(now) ? branch : null;
+  return branch && (!branch.endsAt || timeOf(branch.endsAt) > timeOf(now)) ? branch : null;
 }
 
 function restrictionPlatform(record = {}, now = Date.now()) {
   const platform = record.platform || null;
-  return platform && timeOf(platform.endsAt) > timeOf(now) ? platform : null;
+  return platform && (!platform.endsAt || timeOf(platform.endsAt) > timeOf(now)) ? platform : null;
 }
 
 function effectiveRestriction(record = {}, branchId = '', now = Date.now()) {

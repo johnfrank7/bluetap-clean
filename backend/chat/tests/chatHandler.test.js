@@ -801,3 +801,30 @@ test('report validation, duplicate protection, and persistent hourly rate limiti
   assert.equal(limited.statusCode, 429);
   assert.equal(limited.body.error.reason, 'REPORT_RATE_LIMITED');
 });
+
+test('Manager can report Requester or Distributor within own branch conversations, but cross-branch and privileged reports fail closed', async () => {
+  const f = fixture();
+  const reqBranchConv = await resolve(f, 'requester-a-token', { type: 'requester_branch', intent: 'order_followup', orderId: 'order-a' });
+  const reqBranchId = reqBranchConv.body.conversation.id;
+
+  const msg = await call(f.messages, 'POST', 'requester-a-token', {
+    conversationId: reqBranchId, clientMutationId: 'req-msg-1', body: 'Message from requester to branch',
+  });
+  assert.equal(msg.statusCode, 201);
+
+  const managerReportReq = await call(f.reports, 'POST', 'manager-a-token', {
+    conversationId: reqBranchId,
+    messageId: msg.body.message.id,
+    category: 'SPAM',
+  });
+  assert.equal(managerReportReq.statusCode, 201);
+  assert.equal(f.records.get(`chatReports/${managerReportReq.body.reportId}`).reportedUid, 'requester-a');
+  assert.equal(f.records.get(`chatReports/${managerReportReq.body.reportId}`).reporterUid, 'manager-a');
+  assert.equal(f.records.get(`chatReports/${managerReportReq.body.reportId}`).jurisdictionBranchId, 'branch-a');
+
+  const crossBranchReport = await call(f.reports, 'POST', 'manager-b-token', {
+    conversationId: reqBranchId,
+    category: 'SPAM',
+  });
+  assert.equal(crossBranchReport.statusCode, 403);
+});

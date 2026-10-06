@@ -1,11 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Image, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Image, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 
 import { useAdminTheme } from '../../components/AdminTheme';
 import ManagerShell, { ManagerPill, ManagerWaterDrop } from '../../components/ManagerShell';
 import { useManagerRealtimeData } from '../../components/ManagerRealtimeData';
 import TopToastFeedback from '../../components/TopToastFeedback';
+import useUnsavedChangesGuard from '../../components/useUnsavedChangesGuard';
 import { getModuleSession } from '../../services/authSession';
 import { formatPhilippinePhone, normalizePhilippinePhone } from '../../services/phoneUtils';
 import { updateManagerProfile } from '../../services/managerProfile';
@@ -46,7 +47,9 @@ function ProfileField({ editable, label, multiline, onChangeText, value, themedS
 
 export default function ManagerProfilePage() {
   const { colors } = useAdminTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const { width } = useWindowDimensions();
+  const compact = width < 700;
+  const styles = useMemo(() => createStyles(colors, compact), [colors, compact]);
   const session = getModuleSession('manager');
   const realtime = useManagerRealtimeData();
   const manager = realtime.profile;
@@ -59,6 +62,27 @@ export default function ManagerProfilePage() {
   useEffect(() => {
     if (!editing) setDraft(draftFor(manager || {}));
   }, [editing, manager]);
+
+  const isProfileDirty = useMemo(() => {
+    if (!editing || !manager) return false;
+    const initial = draftFor(manager);
+    return (
+      draft.fullName !== initial.fullName ||
+      draft.phone !== initial.phone ||
+      draft.address !== initial.address ||
+      Boolean(selectedImage)
+    );
+  }, [editing, manager, draft, selectedImage]);
+
+  const { confirmLeave, UnsavedModal } = useUnsavedChangesGuard({
+    isDirty: isProfileDirty,
+    isSubmitting: saving,
+    onDiscard: () => {
+      setDraft(draftFor(manager || {}));
+      setSelectedImage(null);
+      setEditing(false);
+    },
+  });
 
   const managerFullName = fullNameFor(manager || {});
   const resolvedManagerUid = getProfileUniqueId(manager || {});
@@ -83,9 +107,11 @@ export default function ManagerProfilePage() {
 
   const cancelEditing = () => {
     if (saving) return;
-    setDraft(draftFor(manager || {}));
-    setSelectedImage(null);
-    setEditing(false);
+    confirmLeave(() => {
+      setDraft(draftFor(manager || {}));
+      setSelectedImage(null);
+      setEditing(false);
+    });
   };
 
   const choosePhoto = async () => {
@@ -138,107 +164,111 @@ export default function ManagerProfilePage() {
         type={toast.type}
         onDismiss={() => setToast((current) => ({ ...current, visible: false }))}
       />
-      <View style={styles.card}>
-        <View style={styles.avatarRow}>
-          <View style={styles.avatarArea}>
-            <View style={styles.avatar}>
-              {photoUri ? (
-                <Image accessibilityLabel="Manager profile picture" source={{ uri: photoUri }} style={styles.avatarImage} />
-              ) : (
-                <ManagerWaterDrop color={colors.primary} size={34} />
+      <View style={styles.container}>
+        <View style={styles.card}>
+          <View style={styles.avatarRow}>
+            <View style={styles.avatarArea}>
+              <View style={styles.avatar}>
+                {photoUri ? (
+                  <Image accessibilityLabel="Manager profile picture" source={{ uri: photoUri }} style={styles.avatarImage} />
+                ) : (
+                  <ManagerWaterDrop color={colors.primary} size={34} />
+                )}
+              </View>
+              {editing && (
+                <TouchableOpacity accessibilityRole="button" onPress={choosePhoto} style={styles.changePhotoButton}>
+                  <Text style={styles.changePhotoText}>{selectedImage ? 'Change photo' : 'Choose photo'}</Text>
+                </TouchableOpacity>
               )}
             </View>
-            {editing && (
-              <TouchableOpacity accessibilityRole="button" onPress={choosePhoto} style={styles.changePhotoButton}>
-                <Text style={styles.changePhotoText}>{selectedImage ? 'Change photo' : 'Choose photo'}</Text>
-              </TouchableOpacity>
-            )}
-          </View>
 
-          <View style={styles.profileText}>
-            {realtime.profileLoading && !managerFullName ? (
-              <ActivityIndicator color={colors.primary} size="small" style={styles.nameLoader} />
-            ) : (
-              <Text style={styles.profileName}>{managerFullName || managerEmail || 'Manager'}</Text>
-            )}
-            <Text style={styles.profileMeta}>Branch Manager · {branchName}</Text>
-          </View>
-          <View style={styles.headerActions}>
-            <ManagerPill tone="blue">Manager</ManagerPill>
-            {!editing && (
-              <TouchableOpacity
-                accessibilityRole="button"
-                disabled={!manager || realtime.profileLoading}
-                onPress={beginEditing}
-                style={[styles.editButton, (!manager || realtime.profileLoading) && styles.disabledButton]}
-              >
-                <Text style={styles.editButtonText}>Edit Profile</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-        </View>
-
-        {!!loadError && (
-          <View accessibilityRole="alert" style={styles.errorBanner}>
-            <View style={styles.errorCopy}>
-              <Text style={styles.errorTitle}>Profile details need another try</Text>
-              <Text style={styles.errorText}>{loadError}</Text>
+            <View style={styles.profileText}>
+              {realtime.profileLoading && !managerFullName ? (
+                <ActivityIndicator color={colors.primary} size="small" style={styles.nameLoader} />
+              ) : (
+                <Text style={styles.profileName}>{managerFullName || managerEmail || 'Manager'}</Text>
+              )}
+              <Text style={styles.profileMeta}>Branch Manager · {branchName}</Text>
             </View>
-            <TouchableOpacity accessibilityRole="button" onPress={realtime.retry} style={styles.retryButton}>
-              <Text style={styles.retryText}>Retry</Text>
-            </TouchableOpacity>
+            <View style={styles.headerActions}>
+              <ManagerPill tone="blue">Manager</ManagerPill>
+              {!editing && (
+                <TouchableOpacity
+                  accessibilityRole="button"
+                  disabled={!manager || realtime.profileLoading}
+                  onPress={beginEditing}
+                  style={[styles.editButton, (!manager || realtime.profileLoading) && styles.disabledButton]}
+                >
+                  <Text style={styles.editButtonText}>Edit Profile</Text>
+                </TouchableOpacity>
+              )}
+            </View>
           </View>
-        )}
 
-        {missingRequiredData ? (
-          <View style={styles.unavailableState}>
-            <Text style={styles.errorTitle}>Profile details are unavailable</Text>
-            <Text style={styles.emptyCopy}>Your cached profile could not be loaded. Try reconnecting to BlueTap.</Text>
-            <TouchableOpacity accessibilityRole="button" onPress={realtime.retry} style={styles.primaryButton}>
-              <Text style={styles.primaryButtonText}>Try Again</Text>
-            </TouchableOpacity>
-          </View>
-        ) : (
-          <View style={styles.detailGrid}>
-            <ProfileField label="UID" themedStyles={styles} value={managerUid} />
-            <ProfileField editable={editing} label="Full Name" onChangeText={(value) => changeDraft('fullName', value)} themedStyles={styles} value={editing ? draft.fullName : managerFullName || 'Not set'} />
-            <ProfileField editable={editing} label="Contact Number" onChangeText={(value) => changeDraft('phone', value)} themedStyles={styles} value={editing ? draft.phone : managerContact} />
-            <ProfileField label="Email Address" themedStyles={styles} value={managerEmail} />
-            <ProfileField editable={editing} label="Complete Address / Location" multiline onChangeText={(value) => changeDraft('address', value)} themedStyles={styles} value={editing ? draft.address : managerAddress} />
-            <ProfileField label="Branch" themedStyles={styles} value={branchName} />
-            <ProfileField label="Access Level" themedStyles={styles} value="Manager panel" />
-          </View>
-        )}
+          {!!loadError && (
+            <View accessibilityRole="alert" style={styles.errorBanner}>
+              <View style={styles.errorCopy}>
+                <Text style={styles.errorTitle}>Profile details need another try</Text>
+                <Text style={styles.errorText}>{loadError}</Text>
+              </View>
+              <TouchableOpacity accessibilityRole="button" onPress={realtime.retry} style={styles.retryButton}>
+                <Text style={styles.retryText}>Retry</Text>
+              </TouchableOpacity>
+            </View>
+          )}
 
-        {editing && (
-          <View style={styles.formActions}>
-            <TouchableOpacity accessibilityRole="button" disabled={saving} onPress={cancelEditing} style={styles.cancelButton}>
-              <Text style={styles.cancelButtonText}>Cancel</Text>
-            </TouchableOpacity>
-            <TouchableOpacity accessibilityRole="button" disabled={saving} onPress={saveProfile} style={[styles.primaryButton, saving && styles.disabledButton]}>
-              {saving ? <ActivityIndicator color={colors.onPrimary} size="small" /> : <Text style={styles.primaryButtonText}>Save Changes</Text>}
-            </TouchableOpacity>
-          </View>
-        )}
-        <Text style={styles.securityNote}>Email, branch assignment, public UID, account status, and access level are managed securely by BlueTap.</Text>
+          {missingRequiredData ? (
+            <View style={styles.unavailableState}>
+              <Text style={styles.errorTitle}>Profile details are unavailable</Text>
+              <Text style={styles.emptyCopy}>Your cached profile could not be loaded. Try reconnecting to BlueTap.</Text>
+              <TouchableOpacity accessibilityRole="button" onPress={realtime.retry} style={styles.primaryButton}>
+                <Text style={styles.primaryButtonText}>Try Again</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <View style={styles.detailGrid}>
+              <ProfileField label="UID" themedStyles={styles} value={managerUid} />
+              <ProfileField editable={editing} label="Full Name" onChangeText={(value) => changeDraft('fullName', value)} themedStyles={styles} value={editing ? draft.fullName : managerFullName || 'Not set'} />
+              <ProfileField editable={editing} label="Contact Number" onChangeText={(value) => changeDraft('phone', value)} themedStyles={styles} value={editing ? draft.phone : managerContact} />
+              <ProfileField label="Email Address" themedStyles={styles} value={managerEmail} />
+              <ProfileField editable={editing} label="Complete Address / Location" multiline onChangeText={(value) => changeDraft('address', value)} themedStyles={styles} value={editing ? draft.address : managerAddress} />
+              <ProfileField label="Branch" themedStyles={styles} value={branchName} />
+              <ProfileField label="Access Level" themedStyles={styles} value="Manager panel" />
+            </View>
+          )}
+
+          {editing && (
+            <View style={styles.formActions}>
+              <TouchableOpacity accessibilityRole="button" disabled={saving} onPress={cancelEditing} style={styles.cancelButton}>
+                <Text style={styles.cancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity accessibilityRole="button" disabled={saving} onPress={saveProfile} style={[styles.primaryButton, saving && styles.disabledButton]}>
+                {saving ? <ActivityIndicator color={colors.onPrimary} size="small" /> : <Text style={styles.primaryButtonText}>Save Changes</Text>}
+              </TouchableOpacity>
+            </View>
+          )}
+          <Text style={styles.securityNote}>Email, branch assignment, public UID, account status, and access level are managed securely by BlueTap.</Text>
+        </View>
       </View>
+      <UnsavedModal />
     </ManagerShell>
   );
 }
 
-const createStyles = (colors) => StyleSheet.create({
-  card: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: 18, padding: 22 },
-  avatarRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 14, alignItems: 'center', borderBottomWidth: 1, borderBottomColor: colors.border, paddingBottom: 20 },
+const createStyles = (colors, compact) => StyleSheet.create({
+  container: { maxWidth: 640, alignSelf: 'center', width: '100%' },
+  card: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: 18, padding: compact ? 16 : 22 },
+  avatarRow: { flexDirection: compact ? 'column' : 'row', alignItems: compact ? 'flex-start' : 'center', gap: 14, borderBottomWidth: 1, borderBottomColor: colors.border, paddingBottom: 20 },
   avatarArea: { alignItems: 'center', gap: 7 },
   avatar: { width: 76, height: 76, borderRadius: 38, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.primarySoft, borderWidth: 2, borderColor: colors.border, overflow: 'hidden' },
   avatarImage: { width: '100%', height: '100%', resizeMode: 'cover' },
   changePhotoButton: { minHeight: 32, justifyContent: 'center', paddingHorizontal: 8 },
   changePhotoText: { color: colors.primary, fontSize: 12, fontWeight: '800' },
-  profileText: { flex: 1, minWidth: 180 },
+  profileText: { flex: 1, minWidth: compact ? '100%' : 180 },
   nameLoader: { alignSelf: 'flex-start', marginBottom: 4 },
   profileName: { color: colors.textPrimary, fontSize: 21, fontWeight: '800' },
   profileMeta: { color: colors.textSecondary, fontSize: 13, marginTop: 5 },
-  headerActions: { alignItems: 'flex-end', gap: 10 },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 10, width: compact ? '100%' : 'auto', justifyContent: compact ? 'space-between' : 'flex-end', marginTop: compact ? 8 : 0 },
   editButton: { backgroundColor: colors.primaryAction, borderRadius: 10, minHeight: 40, justifyContent: 'center', paddingHorizontal: 16 },
   editButtonText: { color: colors.onPrimary, fontSize: 13, fontWeight: '800' },
   disabledButton: { opacity: 0.55 },
@@ -250,10 +280,10 @@ const createStyles = (colors) => StyleSheet.create({
   retryText: { color: colors.danger, fontSize: 12, fontWeight: '800' },
   unavailableState: { alignItems: 'center', backgroundColor: colors.surfaceAlt, borderRadius: 12, marginTop: 18, padding: 24 },
   emptyCopy: { color: colors.textSecondary, fontSize: 13, lineHeight: 19, marginBottom: 16, marginTop: 5, textAlign: 'center' },
-  detailGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginTop: 18 },
-  fieldWrap: { flex: 1, flexBasis: 220, minWidth: 0, backgroundColor: colors.surfaceAlt, borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 15 },
+  detailGrid: { flexDirection: 'column', gap: 10, marginTop: 18 },
+  fieldWrap: { width: '100%', backgroundColor: colors.surfaceAlt, borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 14 },
   detailLabel: { color: colors.textSecondary, fontSize: 11, fontWeight: '800', letterSpacing: 0.35, textTransform: 'uppercase' },
-  detailValue: { color: colors.textPrimary, fontSize: 15, fontWeight: '700', lineHeight: 21, marginTop: 8 },
+  detailValue: { color: colors.textPrimary, fontSize: 15, fontWeight: '700', lineHeight: 21, marginTop: 6 },
   input: { backgroundColor: colors.input || colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: 10, color: colors.textPrimary, fontSize: 15, marginTop: 7, minHeight: 44, paddingHorizontal: 12, paddingVertical: 10 },
   multilineInput: { minHeight: 82, textAlignVertical: 'top' },
   formActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, justifyContent: 'flex-end', marginTop: 18 },

@@ -72,3 +72,13 @@ test('every active Admin workspace route inherits the shared shell and themed da
   assert.match(dashboardUi, /colors\.border/);
   assert.match(dashboardUi, /colors\.inputBorder/);
 });
+
+test('Admin Dashboard safely imports useWindowDimensions and parses without ReferenceErrors', () => {
+  const dashboard = read('app', 'admin', 'dashboard.jsx');
+  assert.match(dashboard, /useWindowDimensions/);
+  assert.match(dashboard, /import\s*\{[^}]*useWindowDimensions[^}]*\}\s*from\s*['"]react-native['"]/);
+  const parser = require('@babel/parser');
+  assert.doesNotThrow(() => {
+    parser.parse(dashboard, { sourceType: 'module', plugins: ['jsx'] });
+  });
+});

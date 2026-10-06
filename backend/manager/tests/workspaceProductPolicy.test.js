@@ -20,7 +20,12 @@ function fixture() {
   const collection = (name) => ({
     doc(id = `auto-${++nextId}`) {
       const path = `${name}/${id}`;
-      return { id, path, get: async () => snapshot(path) };
+      return {
+        id,
+        path,
+        get: async () => snapshot(path),
+        collection: (subName) => collection(`${path}/${subName}`),
+      };
     },
     get: async () => ({ docs: docs(name) }),
     where(field, _operator, value) {
@@ -148,4 +153,111 @@ test('Manager Distributor approval rejects another branch and inactive Manager o
   const inactiveBranch = await call(handler, 'POST', { action: 'approveDistributor', distributorUid: 'pending-north' });
   assert.equal(inactiveBranch.statusCode, 403);
   assert.equal(inactiveBranch.body.error.reason, 'BRANCH_INACTIVE');
+});
+
+test('Manager delivery pricing update is scoped to own branch and audited', async () => {
+  const f = fixture();
+  const handler = createManagerWorkspaceHandler(f.getAdmin);
+  const result = await call(handler, 'POST', {
+    action: 'updateDeliveryPricing',
+    baseDeliveryFee: 45,
+    includedRadiusKm: 4,
+    outsideRadiusFeePerKm: 12,
+    serviceRadiusKm: 15,
+  });
+
+  assert.equal(result.statusCode, 200);
+  assert.equal(result.body.branchId, 'north');
+  assert.equal(result.body.pricing.baseDeliveryFee, 45);
+  const northBranch = f.records.get('branches/north');
+  assert.equal(northBranch.baseDeliveryFee, 45);
+  assert.equal(northBranch.includedRadiusKm, 4);
+  assert.equal(northBranch.outsideRadiusFeePerKm, 12);
+  assert.equal(northBranch.serviceRadiusKm, 15);
+  assert.ok([...f.records.values()].some((r) => r.action === 'MANAGER_BRANCH_DELIVERY_PRICING_UPDATED' && r.branchId === 'north'));
+});
+
+test('Manager branch suspension and restoration are branch-scoped and audited', async () => {
+  const f = fixture();
+  f.records.set('users/requester-test', { role: 'requester', fullName: 'Test Requester', accountStatus: 'active' });
+  f.records.set('users/admin-test', { role: 'admin', fullName: 'Test Admin', accountStatus: 'active' });
+  f.records.set('users/dist-south', { role: 'distributor', branchId: 'south', distributorStatus: 'active' });
+  f.records.set('users/dist-north', { role: 'distributor', branchId: 'north', distributorStatus: 'active' });
+
+  const handler = createManagerWorkspaceHandler(f.getAdmin);
+
+  // Privileged target rejected
+  const privResult = await call(handler, 'POST', { action: 'suspendBranchUser', targetUid: 'admin-test', reason: 'Misconduct' });
+  assert.equal(privResult.statusCode, 403);
+  assert.equal(privResult.body.error.reason, 'PRIVILEGED_TARGET_FORBIDDEN');
+
+  // Cross-branch distributor rejected
+  const crossDist = await call(handler, 'POST', { action: 'suspendBranchUser', targetUid: 'dist-south', reason: 'Misconduct' });
+  assert.equal(crossDist.statusCode, 403);
+  assert.equal(crossDist.body.error.reason, 'CROSS_BRANCH_FORBIDDEN');
+
+  // Missing reason rejected
+  const noReason = await call(handler, 'POST', { action: 'suspendBranchUser', targetUid: 'requester-test' });
+  assert.equal(noReason.statusCode, 400);
+  assert.equal(noReason.body.error.reason, 'REASON_REQUIRED');
+
+  // Invalid structured reason code rejected
+  const badReason = await call(handler, 'POST', { action: 'suspendBranchUser', targetUid: 'requester-test', reasonCode: 'invalid_code' });
+  assert.equal(badReason.statusCode, 400);
+  assert.equal(badReason.body.error.reason, 'INVALID_SUSPENSION_REASON');
+
+  // Suspend own-branch requester with structured reason code
+  const suspReq = await call(handler, 'POST', { action: 'suspendBranchUser', targetUid: 'requester-test', reasonCode: 'suspected_fraud' });
+  assert.equal(suspReq.statusCode, 200);
+  const updatedReq = f.records.get('users/requester-test');
+  assert.equal(updatedReq.branchSuspensions?.north?.suspended, true);
+  assert.equal(updatedReq.branchSuspensions?.north?.reasonCode, 'suspected_fraud');
+  assert.equal(updatedReq.branchSuspensions?.north?.reason, 'Suspected fraud or scam');
+  assert.ok([...f.records.values()].some((r) => r.action === 'MANAGER_REQUESTER_BRANCH_SUSPENDED' && r.targetUid === 'requester-test'));
+  assert.ok([...f.records.keys()].some((k) => k.startsWith('moderationNotices/requester-test/items/')));
+  assert.ok(f.records.has('moderationActivity/user_requester-test'));
+
+  // Restore requester
+  const restReq = await call(handler, 'POST', { action: 'restoreBranchUser', targetUid: 'requester-test', reason: 'Resolved' });
+  assert.equal(restReq.statusCode, 200);
+  assert.equal(f.records.get('users/requester-test').branchSuspensions?.north, undefined);
+  assert.ok([...f.records.values()].some((r) => r.action === 'MANAGER_REQUESTER_BRANCH_RESTORED' && r.targetUid === 'requester-test'));
+
+  // Suspend own-branch distributor with structured reason
+  const suspDist = await call(handler, 'POST', { action: 'suspendBranchUser', targetUid: 'dist-north', reasonCode: 'branch_policy_violation' });
+  assert.equal(suspDist.statusCode, 200);
+  assert.equal(f.records.get('users/dist-north').distributorStatus, 'suspended');
+  assert.equal(f.records.get('users/dist-north').branchSuspended, true);
+  assert.equal(f.records.get('users/dist-north').branchSuspensionReasonCode, 'branch_policy_violation');
+  assert.equal(f.records.get('users/dist-north').branchSuspensionReason, 'Branch policy violation');
+  assert.ok([...f.records.values()].some((r) => r.action === 'MANAGER_DISTRIBUTOR_SUSPENDED' && r.targetUid === 'dist-north'));
+
+  // Restore own-branch distributor
+  const restDist = await call(handler, 'POST', { action: 'restoreBranchUser', targetUid: 'dist-north', reason: 'Reinstated' });
+  assert.equal(restDist.statusCode, 200);
+  assert.equal(f.records.get('users/dist-north').distributorStatus, 'active');
+  assert.equal(f.records.get('users/dist-north').branchSuspended, false);
+  assert.ok([...f.records.values()].some((r) => r.action === 'MANAGER_DISTRIBUTOR_RESTORED' && r.targetUid === 'dist-north'));
+});
+
+test('Manager workspace POST safely parses raw JSON string body without 400', async () => {
+  const f = fixture();
+  const handler = createManagerWorkspaceHandler(f.getAdmin);
+
+  // Stringified delivery pricing payload (as received from HTTP body parser)
+  const rawPricingBody = JSON.stringify({
+    action: 'updateDeliveryPricing',
+    baseDeliveryFee: 45,
+    includedRadiusKm: 5,
+    outsideRadiusFeePerKm: 15,
+    serviceRadiusKm: 20,
+  });
+
+  const res = await call(handler, 'POST', rawPricingBody);
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.branchId, 'north');
+  assert.equal(res.body.pricing.baseDeliveryFee, 45);
+  const north = f.records.get('branches/north');
+  assert.equal(north.baseDeliveryFee, 45);
+  assert.equal(north.outsideRadiusFeePerKm, 15);
 });

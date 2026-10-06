@@ -15,6 +15,7 @@ import { getRequesterCatalog, getRequesterOrders } from '../../services/requeste
 import { buildBuyAgainDraft } from '../../services/buyAgain';
 import { createRequest, subscribeRequesterCurrentRequests } from '../../services/requests';
 import { auth } from '../../firebase';
+import useUnsavedChangesGuard from '../../components/useUnsavedChangesGuard';
 
 const containers = ['New Container', 'Exchange'];
 const formatPrice = (value) => `₱${Number(value || 0).toFixed(2)}`;
@@ -126,10 +127,62 @@ const rankedBranches = React.useMemo(()=>deliveryLocation?rankBranchesByDistance
   const addProduct = (product) => setItems((current)=>{ const found=current.find((item)=>item.productId===product.id); return found?current.map((item)=>item.productId===product.id?{...item,quantity:Math.min(100,item.quantity+1)}:item):[...current,{productId:product.id,quantity:1}]; });
   const changeQuantity = (productId,delta) => setItems((current)=>current.map((item)=>item.productId===productId?{...item,quantity:item.quantity+delta}:item).filter((item)=>item.quantity>0));
   const canReview = !hasActiveOrder&&!orderingRestriction&&profileComplete&&deliveryLocation&&selectedBranch&&items.length>0;
+  const scrollViewRef = React.useRef(null);
+
+  const isFormDirty = Boolean(
+    items.length > 0 ||
+    selectedBranchId ||
+    container !== containers[0] ||
+    saveAsDefaultLocation ||
+    locationState === 'ready'
+  );
+
+  const resetDraft = React.useCallback(() => {
+    setSelectedBranchId('');
+    setItems([]);
+    setContainer(containers[0]);
+    setSaveAsDefaultLocation(false);
+    setReviewing(false);
+    if (catalog?.profile?.defaultDeliveryLocation) {
+      const def = catalog.profile.defaultDeliveryLocation;
+      if (def.latitude != null && def.longitude != null) {
+        setDeliveryLocation({
+          latitude: Number(def.latitude),
+          longitude: Number(def.longitude),
+          ...(def.accuracy != null ? { accuracy: Number(def.accuracy) } : {}),
+        });
+        setLocationState('saved');
+      } else {
+        setDeliveryLocation(null);
+        setLocationState('idle');
+      }
+    } else {
+      setDeliveryLocation(null);
+      setLocationState('idle');
+    }
+  }, [catalog?.profile?.defaultDeliveryLocation]);
+
+  const handleContinueEditing = React.useCallback(() => {
+    if (!deliveryLocation) {
+      scrollViewRef.current?.scrollTo?.({ y: 0, animated: true });
+    } else if (!selectedBranchId) {
+      scrollViewRef.current?.scrollTo?.({ y: 280, animated: true });
+    } else if (items.length === 0) {
+      scrollViewRef.current?.scrollTo?.({ y: 550, animated: true });
+    }
+  }, [deliveryLocation, selectedBranchId, items.length]);
+
+  const { confirmLeave, UnsavedModal } = useUnsavedChangesGuard({
+    isDirty: isFormDirty,
+    isSubmitting: submitting,
+    onDiscard: resetDraft,
+    onContinueEditing: handleContinueEditing,
+  });
+
   const submit = async () => { if(!canReview||submitting) return; setSubmitting(true); setSubmitError(''); try { await createRequest({branchId:selectedBranch.id,deliveryLocation,container,saveAsDefaultLocation,items:items.map(({productId,quantity})=>({product_id:productId,quantity}))}); router.replace('/requester/r_request'); } catch(error){setSubmitError(error.message); setToast({ visible: true, message: error.message || 'Unable to submit order.', type: 'error' });} finally{setSubmitting(false);} };
 
-  return <LinearGradient colors={isDark?[colors.background,colors.header]:[colors.primary,colors.primaryLight]} style={styles.gradient} start={{x:0,y:0}} end={{x:0,y:1}}><SafeAreaView edges={['left','right','bottom']} style={styles.safe}><TopToastFeedback visible={toast.visible} message={toast.message} type={toast.type} onDismiss={() => setToast((t) => ({ ...t, visible: false }))} /><KeyboardAvoidingView behavior={Platform.OS==='ios'?'padding':undefined} style={styles.flex}><ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
-    <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.canGoBack?.() ? router.back() : router.replace('/requester/r_dashboard')} style={{alignSelf:'flex-start',minHeight:44,justifyContent:'center',marginBottom:4}}><Text style={{color:'#FFFFFF',fontSize:14,fontWeight:'900'}}>‹ Back</Text></TouchableOpacity>
+  return <LinearGradient colors={isDark?[colors.background,colors.header]:[colors.primary,colors.primaryLight]} style={styles.gradient} start={{x:0,y:0}} end={{x:0,y:1}}><SafeAreaView edges={['left','right','bottom']} style={styles.safe}><TopToastFeedback visible={toast.visible} message={toast.message} type={toast.type} onDismiss={() => setToast((t) => ({ ...t, visible: false }))} /><KeyboardAvoidingView behavior={Platform.OS==='ios'?'padding':undefined} style={styles.flex}><ScrollView ref={scrollViewRef} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
+    <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => confirmLeave(() => router.canGoBack?.() ? router.back() : router.replace('/requester/r_dashboard'))} style={{alignSelf:'flex-start',minHeight:44,justifyContent:'center',marginBottom:4}}><Text style={{color:'#FFFFFF',fontSize:14,fontWeight:'900'}}>‹ Back</Text></TouchableOpacity>
     <View style={styles.pageHeading}><Text style={styles.eyebrow}>NEW REQUEST</Text><Text style={styles.title}>Place a water order</Text><Text style={styles.subtitle}>Choose a delivery point, nearby provider, and products. Final pricing is verified by BlueTap.</Text></View>
     <ModerationNoticeBanner scope="ordering" />
     {!!buyAgainMessage && <View style={{ backgroundColor: colors.primarySoft, borderColor: colors.border, borderWidth: 1, borderRadius: 10, padding: 12, marginBottom: 12 }}><Text style={{ color: colors.textPrimary, fontSize: 12 }}>{buyAgainMessage}</Text></View>}
@@ -171,7 +224,7 @@ const rankedBranches = React.useMemo(()=>deliveryLocation?rankBranchesByDistance
       <Section number="4" title="Order details"><View style={styles.choiceRow}>{containers.map((option)=><TouchableOpacity key={option} onPress={()=>setContainer(option)} style={[styles.choice,container===option&&styles.choiceActive]}><Text style={[styles.choiceText,container===option&&styles.choiceTextActive]}>{option}</Text></TouchableOpacity>)}</View></Section>
       <Section number="5" title="Review request"><LimitWarning items={itemDetails} colors={colors} /><View style={styles.reviewRow}><Text style={styles.reviewLabel}>Provider</Text><Text style={styles.reviewValue}>{selectedBranch?.name||'Not selected'}</Text></View><View style={styles.reviewRow}><Text style={styles.reviewLabel}>Distance</Text><Text style={styles.reviewValue}>{selectedDistance==null?'—':`Approx. ${selectedDistance.toFixed(1)} km`}</Text></View><View style={styles.reviewRow}><Text style={styles.reviewLabel}>Normal radius</Text><Text style={styles.reviewValue}>{selectedBranch?`${selectedRadius} km`:'—'}</Text></View><View style={styles.reviewRow}><Text style={styles.reviewLabel}>Items</Text><Text style={styles.reviewValue}>{items.reduce((sum,item)=>sum+item.quantity,0)}</Text></View><View style={styles.reviewRow}><Text style={styles.reviewLabel}>Items Subtotal</Text><Text style={styles.reviewValue}>{formatPrice(clientEstimate)}</Text></View><View style={styles.reviewRow}><Text style={styles.reviewLabel}>Delivery Fee</Text><Text style={styles.reviewValue}>{selectedBranch?formatPrice(estimatedDeliveryFee):'—'}</Text></View><View style={styles.reviewRow}><Text style={styles.reviewLabel}>Estimated total</Text><Text style={styles.total}>{formatPrice(estimatedTotal)}</Text></View>{selectedBranch&&<View style={[styles.reviewCoverage,selectedOutsideServiceArea?styles.reviewOutside:styles.reviewWithin]}><Text style={styles.reviewCoverageTitle}>{selectedOutsideServiceArea?'Outside normal delivery area':'Within delivery area'}</Text><Text style={styles.reviewCoverageText}>{needsManagerApproval?'Your request will wait for branch approval before it is confirmed.':'This provider can receive your order normally.'}</Text></View>}<Text style={styles.securityNote}>The backend reloads branch coverage, distance, product prices, delivery fees, and the final total when you submit.</Text>{reviewing&&<View style={styles.confirm}><Text style={styles.confirmTitle}>{needsManagerApproval?'Request branch approval?':'Ready to submit?'}</Text><Text style={styles.confirmText}>{needsManagerApproval?'The branch Manager must approve this request before delivery can proceed.':'Your delivery location and order snapshots will be shared only with authorized fulfillment roles.'}</Text></View>}{!!submitError&&<Text accessibilityRole="alert" style={styles.submitError}>{submitError}</Text>}<TouchableOpacity disabled={!canReview||submitting} onPress={reviewing?submit:()=>setReviewing(true)} style={[styles.submitButton,(!canReview||submitting)&&styles.disabled]}><Text style={styles.submitText}>{submitting?'Submitting…':hasActiveOrder?'Active order in progress':reviewing?(needsManagerApproval?'Confirm approval request':'Confirm order'):(needsManagerApproval?'Request branch approval':'Review request')}</Text></TouchableOpacity>{reviewing&&<TouchableOpacity onPress={()=>setReviewing(false)} style={styles.cancel}><Text style={styles.cancelText}>Back to edit</Text></TouchableOpacity>}</Section>
     </>}
-  </ScrollView></KeyboardAvoidingView></SafeAreaView></LinearGradient>;
+  </ScrollView></KeyboardAvoidingView><UnsavedModal /></SafeAreaView></LinearGradient>;
 }
 
 const restrictionStyles = createPortalStyleSheet({

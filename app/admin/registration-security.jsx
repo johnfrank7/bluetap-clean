@@ -7,6 +7,7 @@ import { useAdminTheme } from '../../components/AdminTheme';
 import { getRegistrationSecurity, updateRegistrationSecurity } from '../../services/adminRegistrationSecurity';
 import { ADMIN_CACHE_KEYS, useAdminData } from '../../services/adminDataCache';
 import TopToastFeedback from '../../components/TopToastFeedback';
+import useUnsavedChangesGuard from '../../components/useUnsavedChangesGuard';
 
 const IDLE_OPTIONS = [[5, '5 minutes'], [10, '10 minutes'], [15, '15 minutes'], [30, '30 minutes'], [60, '1 hour'], [120, '2 hours']];
 const ABSOLUTE_OPTIONS = [[8, '8 hours'], [12, '12 hours'], [24, '24 hours'], [168, '7 days']];
@@ -47,6 +48,17 @@ export default function SecuritySettingsPage() {
   const [toast, setToast] = React.useState({ visible: false, message: '', type: 'success' });
   const showToast = (toastMessage, type) => setToast({ visible: true, message: toastMessage, type });
 
+  const { confirmLeave, UnsavedModal } = useUnsavedChangesGuard({
+    isDirty: dirty,
+    isSubmitting: saving,
+    onDiscard: () => {
+      setDraftSettings(savedSettings);
+      setDirty(false);
+      setMessage('');
+      setIsError(false);
+    },
+  });
+
   React.useEffect(() => {
     if (!data || dirty) return;
     setSavedSettings(data); setDraftSettings(data); setIsError(false);
@@ -66,7 +78,7 @@ export default function SecuritySettingsPage() {
     try {
       const authoritative = await updateRegistrationSecurity(next);
       await refresh();
-      setSavedSettings(authoritative); setDraftSettings(authoritative); setDirty(false); setMessage('Security settings saved.'); setIsError(false); showToast('Security settings saved.', 'success');
+      setSavedSettings(authoritative); setDraftSettings(authoritative); setDirty(false); setMessage(''); setIsError(false); showToast('Security settings saved.', 'success');
     } catch (error) { setDraftSettings(savedSettings); setDirty(false); setMessage(error.message); setIsError(true); showToast(error.message || 'Unable to save security settings.', 'error'); }
     finally { setSaving(false); }
   };
@@ -92,10 +104,11 @@ export default function SecuritySettingsPage() {
       <SectionCard><Text style={styles.sectionEyebrow}>SESSION SECURITY</Text><Text style={styles.title}>Automatic logout policy</Text><Text style={styles.help}>Idle warnings and absolute session limits apply to Requester, Distributor, and Manager sessions. Administrator sessions are unchanged.</Text><View style={styles.roleGrid}>{ROLES.map(([role, label]) => { const policy = settings.sessionSecurity[role]; return <View key={role} style={styles.roleCard}><Text style={styles.roleTitle}>{label}</Text><PolicySelect label="Idle timeout" value={policy.idleTimeoutMinutes} options={IDLE_OPTIONS} onChange={(value) => updateSession(role, 'idleTimeoutMinutes', value)} colors={colors} styles={styles} /><PolicySelect label="Absolute session lifetime" value={policy.absoluteSessionHours} options={ABSOLUTE_OPTIONS} onChange={(value) => updateSession(role, 'absoluteSessionHours', value)} colors={colors} styles={styles} /><View style={styles.forceRow}><View style={styles.forceCopy}><Text style={styles.label}>Force logout after password change</Text><Text style={styles.help}>Revoke other Firebase sessions after a required password change.</Text></View><Switch value={policy.forceLogoutAfterPasswordChange} onValueChange={(value) => updateSession(role, 'forceLogoutAfterPasswordChange', value)} trackColor={{ false: colors.neutral, true: colors.primaryLight }} thumbColor={policy.forceLogoutAfterPasswordChange ? colors.primary : colors.surface} /></View></View>; })}</View></SectionCard>
       <SectionCard><Text style={styles.sectionEyebrow}>SECURITY NOTE</Text><Text style={styles.help}>Individual account session termination remains available in Accounts & Audit. Policy changes are Admin-only and recorded in the audit log.</Text></SectionCard>
       {!!error && !message && <View accessibilityRole="alert" style={[styles.notice, styles.errorNotice]}><Text style={[styles.noticeText, styles.errorText]}>{error}</Text><TouchableOpacity onPress={() => refresh({ force: true })}><Text style={styles.retry}>Retry refresh</Text></TouchableOpacity></View>}
-      {!!message && <View accessibilityRole="alert" style={[styles.notice, isError ? styles.errorNotice : styles.successNotice]}><Text style={[styles.noticeText, isError ? styles.errorText : styles.successText]}>{message}</Text></View>}
+      {!!message && isError && <View accessibilityRole="alert" style={[styles.notice, styles.errorNotice]}><Text style={[styles.noticeText, styles.errorText]}>{message}</Text></View>}
       <TouchableOpacity disabled={saving} onPress={save} style={[styles.button, saving && styles.disabled]}><Text style={styles.buttonText}>{saving ? 'Saving…' : 'Save changes'}</Text></TouchableOpacity>
       {refreshing && !dirty && <Text style={styles.refreshing}>Refreshing saved policy…</Text>}
     </>}</View>
+    <UnsavedModal />
   </AdminShell>;
 }
 

@@ -62,3 +62,72 @@ Analytics metric grids must use consistent responsive card bounds so a final or 
 Analytics dashboards should progress from balanced KPI summaries to compact real-data visualizations and then detailed tables. Visualizations must never fabricate data or combine incompatible units on a misleading axis.
 
 Interactive dashboard cards must expose a real destination and provide accessible keyboard focus plus restrained hover and pressed feedback; decorative cards must not imply navigation.
+
+## Cross-Platform Responsive Visibility Contract
+
+This contract is mandatory whenever adding or modifying UI components across BlueTap: Text, Buttons, Pressables, Inputs, Cards, Views, Containers, Modals, Tabs, Badges, Toolbars, Navigation controls, and List/Table cells.
+
+### 1. Text Visibility Invariants
+- Every Text element must use theme-safe foreground colors (`colors.textPrimary`, `colors.textSecondary`, `colors.onPrimary`, etc.) and be verified readable in both Light and Dark modes.
+- Never rely on inherited web text colors or browser defaults for critical action labels or tabs.
+- Selected and active controls must explicitly define selected text colors (e.g. `#FFFFFF` on filled primary buttons or tabs).
+- Text must wrap safely (`flexShrink: 1`, `minWidth: 0`), never overflow parents, and never disappear or blend into backgrounds during selected, hovered, focused, or disabled states.
+
+### 2. Button and Pressable State Contract
+- Every interactive element must account for all lifecycle states: `default`, `hover` (where applicable), `focus`, `pressed`, `selected` (where applicable), and `disabled`.
+- Critical action labels must remain readable in every state.
+- Target a minimum touch area of ~44x44px for touch targets. Avoid text-only interactions unless deliberately designed as inline text links.
+- Use explicit semantic styling: `primary`, `secondary`, `success`, `warning`, `danger`.
+- **Visible-Disabled over Invisible:** Never hide required next-step action buttons (such as "Confirm", "Submit", "Save") before prerequisite inputs are filled; render them visible with clear, readable disabled styling (e.g. muted semantic tint and legible contrast text), enabling them once prerequisites are satisfied.
+
+### 3. Container Responsiveness and Fluid Layout
+- Avoid rigid desktop-only widths. Prefer `flex`, `flexGrow`, `flexShrink: 1`, `minWidth: 0`, `maxWidth`, and `width: '100%'`.
+- Containers must never overlap siblings, escape parent boundaries, clip critical action buttons, or induce unmanaged horizontal body scrolling.
+- Narrow viewports (< 440px) must intentionally wrap or stack horizontal controls and button rows.
+
+### 4. Text and Long Content Safety
+- All dynamic content fields (user names, emails, Public IDs, addresses, order identifiers) must wrap safely.
+- Supplemental web styling such as `overflowWrap: 'anywhere'` or `wordBreak: 'break-word'` may be used, but core React Native compatibility (`flexShrink: 1`, `numberOfLines`, `ellipsizeMode`) must remain authoritative.
+
+### 5. Viewport-Safe Modal Contract
+Every modal dialog must adhere to a strict three-tier layout:
+1. **Fixed Header:** Stable, non-scrolling, with clear title hierarchy and accessible close control.
+2. **Scrollable Body:** Must use `flex: 1`, `flexShrink: 1`, `flexGrow: 1` on the `ScrollView` so tall content (such as long option lists) scrolls cleanly without pushing the modal beyond the viewport.
+3. **Fixed Footer Actions:** Always visible and reachable, never clipped or pushed offscreen. Must support mobile button stacking (`flexDirection: 'column-reverse'` or wrap) on narrow viewports (< 440px), maintaining touch targets >= 44px.
+- The modal wrapper must respect `maxHeight: '90%'` or viewport height bounds with adequate margins on 320px screens.
+
+### 6. Light and Dark Theme Contrast Contract
+Every UI modification must be verified in both Light Mode and Dark Mode:
+- Validate text, selected tab fills and labels, enabled buttons, disabled buttons, inputs, badges, borders, backgrounds, overlays, and table headers.
+- Never use raw hardcoded light or dark colors where semantic tokens (`colors.surface`, `colors.border`, `colors.primaryAction`, `colors.dangerSoft`, etc.) exist.
+- If a custom semantic color or tint is necessary, verify contrast meets accessibility standards in both themes (no dark text on dark surfaces, no white text on light surfaces).
+
+### 7. Responsive Breakpoint Matrix
+Validate across standard BlueTap breakpoints:
+- Narrow Mobile: 320px, 360px, 390px, 430px
+- Phablet / Small Tablet: 550px
+- Tablet / Small Laptop: 768px
+- Desktop / Full Display: 1024px, 1440px
+User portals and mobile dialogs prioritize 320–430px stability. Desktop dashboards must provide clean tablet-to-desktop transitions without broken tables or dead whitespace.
+
+### 8. Cross-Platform Parity (Web, Android, iOS)
+- Every component must run reliably on React Native Web, Android, and iOS using core React Native primitives (`View`, `Text`, `Pressable`, `TouchableOpacity`, `ScrollView`, `Modal`).
+- Never rely on browser-only CSS properties as the sole mechanism for visibility, layout, scrolling, or button placement. Platform web enhancements may supplement, but baseline React Native behavior must remain complete and unbroken.
+
+### 9. Safe Area and Navigation Clearance
+- Content and interactive controls must never be obscured by floating navigation pills, sticky headers, mobile browser chrome, software keyboards, or platform safe areas.
+
+### 10. Required Verification Checklist Before Reporting Done
+Before declaring any UI task complete, the agent must verify:
+1. Light theme contrast & readability
+2. Dark theme contrast & readability
+3. Narrow mobile viewport (320px–390px) integrity
+4. Desktop viewport (1024px+) integrity
+5. Button action labels visibly rendered in all states
+6. Selected state labels visible with high contrast
+7. Disabled state labels clearly readable (not invisible or washed out)
+8. No clipping or cut-off action controls
+9. No unmanaged horizontal page scrolling
+10. Modal headers stable, bodies scrollable, and footers reachable
+11. Touch targets >= 44px on mobile
+12. Web build and automated regression tests compile cleanly

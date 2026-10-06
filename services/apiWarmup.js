@@ -4,11 +4,23 @@ const { faceServiceWarmupStore } = require('./faceServiceWarmupStore');
 
 const warmed = new Set();
 const inFlight = new Map();
+const failureState = new Map();
 let facePrewarmInFlight = null;
 
 function warm(path, stage, requestUrl = () => getApiUrl(path)) {
-  if (warmed.has(path)) return Promise.resolve({ reused: true });
+  if (warmed.has(path)) return Promise.resolve({ reused: true, ready: true });
   if (inFlight.has(path)) return inFlight.get(path);
+
+  if (typeof document !== 'undefined' && document.hidden) {
+    return Promise.resolve({ ready: false, tabHidden: true });
+  }
+
+  const fail = failureState.get(path);
+  const now = Date.now();
+  if (fail && now < fail.nextRetryAt) {
+    return Promise.resolve({ ready: false, backoff: true });
+  }
+
   const startedAt = Date.now();
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 12_000);
@@ -17,10 +29,24 @@ function warm(path, stage, requestUrl = () => getApiUrl(path)) {
     ...(path === '/health' ? {} : { headers: { 'Content-Type': 'application/json' }, body: '{}' }),
     signal: controller.signal,
   }).then((response) => {
-    if (response.ok) warmed.add(path);
+    if (response.ok) {
+      warmed.add(path);
+      failureState.delete(path);
+    } else {
+      const prevCount = fail?.count || 0;
+      const count = prevCount + 1;
+      const delay = Math.min(120_000, 10_000 * Math.pow(2, prevCount));
+      failureState.set(path, { count, nextRetryAt: Date.now() + delay });
+    }
     logDevelopmentTiming('[client-warmup]', { stage: `${stage}_${response.ok ? 'READY' : 'PENDING'}`, durationMs: Date.now() - startedAt });
     return { ready: response.ok };
-  }).catch(() => ({ ready: false })).finally(() => {
+  }).catch(() => {
+    const prevCount = fail?.count || 0;
+    const count = prevCount + 1;
+    const delay = Math.min(120_000, 10_000 * Math.pow(2, prevCount));
+    failureState.set(path, { count, nextRetryAt: Date.now() + delay });
+    return { ready: false };
+  }).finally(() => {
     clearTimeout(timeout);
     inFlight.delete(path);
   });

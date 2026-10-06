@@ -210,7 +210,7 @@ export default function ChatMessageBubble({ message, own, receipt, colors, onRet
               </View>
             </Animated.View>
           )}
-          <Animated.View style={{ transform: [{ translateX: panX }] }}>
+          <Animated.View style={{ transform: [{ translateX: panX }], maxWidth: '100%', flexShrink: 1, minWidth: 0 }}>
             <Pressable
               accessibilityRole="text"
               accessibilityActions={hasOptions ? [{ name: 'activate', label: 'More message actions' }] : undefined}

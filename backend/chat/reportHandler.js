@@ -40,15 +40,45 @@ function withId(snapshot) {
   return snapshot?.exists ? { id: snapshot.id, ...(snapshot.data() || {}) } : null;
 }
 
-function oppositeParticipant(conversation, callerUid, callerRole) {
-  if (conversation.type !== 'requester_distributor' || !['requester', 'distributor'].includes(callerRole)) {
-    throw new OtpError(403, 'REPORT_RELATIONSHIP_REQUIRED', 'This conversation does not provide a reportable user relationship.');
-  }
+function oppositeParticipant(conversation, callerUid, callerRole, reportedMessageSenderUid = null) {
   const requesterUid = clean(conversation.requesterUid, 128);
   const distributorUid = clean(conversation.distributorUid, 128);
-  if (callerRole === 'requester' && callerUid === requesterUid && distributorUid) return { uid: distributorUid, role: 'distributor' };
-  if (callerRole === 'distributor' && callerUid === distributorUid && requesterUid) return { uid: requesterUid, role: 'requester' };
-  throw new OtpError(403, 'REPORT_RELATIONSHIP_REQUIRED', 'This user relationship is not reportable.');
+
+  if (callerRole === 'requester') {
+    if (conversation.type === 'requester_distributor' && callerUid === requesterUid && distributorUid) {
+      return { uid: distributorUid, role: 'distributor' };
+    }
+    throw new OtpError(403, 'REPORT_RELATIONSHIP_REQUIRED', 'This conversation does not provide a reportable user relationship.');
+  }
+
+  if (callerRole === 'distributor') {
+    if (conversation.type === 'requester_distributor' && callerUid === distributorUid && requesterUid) {
+      return { uid: requesterUid, role: 'requester' };
+    }
+    throw new OtpError(403, 'REPORT_RELATIONSHIP_REQUIRED', 'This conversation does not provide a reportable user relationship.');
+  }
+
+  if (callerRole === 'manager') {
+    if (conversation.type === 'requester_branch') {
+      if (!requesterUid) throw new OtpError(403, 'REPORT_RELATIONSHIP_REQUIRED', 'Requester participant not found in this conversation.');
+      if (requesterUid === callerUid) throw new OtpError(403, 'REPORT_SELF_FORBIDDEN', 'You cannot report yourself.');
+      return { uid: requesterUid, role: 'requester' };
+    }
+    if (conversation.type === 'distributor_branch') {
+      if (!distributorUid) throw new OtpError(403, 'REPORT_RELATIONSHIP_REQUIRED', 'Distributor participant not found in this conversation.');
+      if (distributorUid === callerUid) throw new OtpError(403, 'REPORT_SELF_FORBIDDEN', 'You cannot report yourself.');
+      return { uid: distributorUid, role: 'distributor' };
+    }
+    if (conversation.type === 'requester_distributor') {
+      if (reportedMessageSenderUid) {
+        if (reportedMessageSenderUid === requesterUid) return { uid: requesterUid, role: 'requester' };
+        if (reportedMessageSenderUid === distributorUid) return { uid: distributorUid, role: 'distributor' };
+      }
+      throw new OtpError(400, 'REPORT_TARGET_REQUIRED', 'Choose a message from the requester or distributor to report in this order conversation.');
+    }
+  }
+
+  throw new OtpError(403, 'REPORT_RELATIONSHIP_REQUIRED', 'This conversation does not provide a reportable user relationship.');
 }
 
 function evidenceMessage(message = {}) {
@@ -110,16 +140,40 @@ async function submitReport({ db, callerUid, callerClaims, body, now, createRepo
     const conversation = withId(conversationSnapshot);
     const authorization = await authorizeConversation(tx, db, conversation, callerUid, callerClaims, 'read', nowMs);
     const reporter = authorization.caller;
-    const target = oppositeParticipant(conversation, callerUid, reporter.role);
+
+    let reportedMessageSenderUid = null;
+    if (messageId) {
+      const reportedSnapshot = await tx.get(conversationRef.collection('messages').doc(messageId));
+      if (!reportedSnapshot.exists) throw new OtpError(404, 'REPORT_MESSAGE_NOT_FOUND', 'The selected message was not found.');
+      const reportedMsg = withId(reportedSnapshot);
+      reportedMessageSenderUid = clean(reportedMsg.senderUid, 128);
+    }
+
+    const target = oppositeParticipant(conversation, callerUid, reporter.role, reportedMessageSenderUid);
+    if (target.uid === callerUid) {
+      throw new OtpError(403, 'REPORT_SELF_FORBIDDEN', 'You cannot report yourself.');
+    }
+
     const targetSnapshot = await tx.get(db.collection('users').doc(target.uid));
     const targetProfile = targetSnapshot.exists ? targetSnapshot.data() || {} : null;
     if (!targetProfile || clean(targetProfile.role, 30) !== target.role) {
       throw new OtpError(403, 'REPORT_RELATIONSHIP_REQUIRED', 'The reported user relationship is no longer valid.');
     }
+    if (['admin', 'manager'].includes(clean(targetProfile.role, 30))) {
+      throw new OtpError(403, 'REPORT_PRIVILEGED_FORBIDDEN', 'Administrative accounts cannot be reported through chat.');
+    }
+
     const orderId = clean(conversation.orderId, 128);
     if (suppliedOrderId && suppliedOrderId !== orderId) throw new OtpError(400, 'REPORT_ORDER_INVALID', 'The order does not belong to this reportable relationship.');
-    const branchId = clean(conversation.branchIds?.[0] || conversation.participantBranchIds?.[0], 128);
+    const branchId = clean(conversation.branchId || conversation.branchIds?.[0] || conversation.participantBranchIds?.[0] || reporter?.branchId, 128);
     if (!branchId) throw new OtpError(409, 'REPORT_JURISDICTION_UNAVAILABLE', 'The report jurisdiction could not be established.');
+
+    if (reporter.role === 'manager') {
+      const managerBranchId = clean(callerClaims?.branchId || reporter?.branchId, 128);
+      if (managerBranchId && branchId !== managerBranchId) {
+        throw new OtpError(403, 'CROSS_BRANCH_FORBIDDEN', 'You can only report users within your branch.');
+      }
+    }
     const orderSnapshot = orderId ? await tx.get(db.collection('requests').doc(orderId)) : null;
     const order = orderSnapshot?.exists ? orderSnapshot.data() || {} : {};
 

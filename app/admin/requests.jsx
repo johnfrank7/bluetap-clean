@@ -154,8 +154,9 @@ const compactPageItems = (current, total) => {
 
 export default function AdminRequestsPage() {
   const { colors, resolvedTheme } = useAdminTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
   const { width: viewportWidth } = useWindowDimensions();
+  const isMobile = viewportWidth < 768;
+  const styles = useMemo(() => createStyles(colors, isMobile), [colors, isMobile]);
   const orderColumnStyle = viewportWidth >= 1180
     ? styles.gridColumnDesktop
     : viewportWidth >= 680
@@ -505,7 +506,7 @@ export default function AdminRequestsPage() {
         {/* Filters Row: Branch Picker + Search Bar */}
         <View style={styles.filtersRow}>
           <View style={styles.branchSelectWrap}>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.branchScroll}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.branchScroll} contentContainerStyle={styles.branchScrollContent}>
               <Pressable
                 dataSet={{
                   adminRequestsFilterSelected:
@@ -1228,7 +1229,7 @@ export default function AdminRequestsPage() {
   );
 }
 
-const createStyles = (colors) =>
+const createStyles = (colors, isMobile = false) =>
   StyleSheet.create({
     metricsRow: {
       flexDirection: 'row',
@@ -1261,7 +1262,7 @@ const createStyles = (colors) =>
       borderRadius: 16,
       borderWidth: 1,
       borderColor: colors.border,
-      padding: 20,
+      padding: isMobile ? 14 : 20,
     },
     tabsRow: {
       flexDirection: 'row',
@@ -1312,6 +1313,11 @@ const createStyles = (colors) =>
     branchScroll: {
       flexDirection: 'row',
     },
+    branchScrollContent: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingRight: 16,
+    },
     branchChip: {
       paddingHorizontal: 11,
       paddingVertical: 6,
@@ -1343,14 +1349,16 @@ const createStyles = (colors) =>
       color: colors.textPrimary,
     },
     controlRow: {
-      flexDirection: 'row',
+      flexDirection: isMobile ? 'column' : 'row',
       flexWrap: 'wrap',
-      alignItems: 'flex-start',
+      alignItems: isMobile ? 'stretch' : 'flex-start',
       gap: 10,
+      width: '100%',
     },
     searchWrap: {
-      flex: 1,
-      minWidth: 260,
+      flex: isMobile ? undefined : 1,
+      width: isMobile ? '100%' : undefined,
+      minWidth: isMobile ? '100%' : 260,
       minHeight: 42,
       flexDirection: 'row',
       alignItems: 'center',
@@ -1384,7 +1392,12 @@ const createStyles = (colors) =>
     },
     clearSearchButtonActive: { backgroundColor: colors.primarySoft },
     clearSearchText: { color: colors.primary, fontSize: 12, fontWeight: '900' },
-    sortWrap: { width: 190, minWidth: 170, position: 'relative', zIndex: 5 },
+    sortWrap: {
+      width: isMobile ? '100%' : 190,
+      minWidth: isMobile ? '100%' : 170,
+      position: 'relative',
+      zIndex: 5,
+    },
     sortButton: {
       minHeight: 42,
       borderWidth: 1,
@@ -1619,11 +1632,11 @@ const createStyles = (colors) =>
       backgroundColor: colors.surfaceAlt,
     },
     pageNavButton: { minWidth: 76 },
-    pageButtonActive: { backgroundColor: colors.primaryAction, borderColor: colors.primaryAction },
+    pageButtonActive: { backgroundColor: colors.primaryAction || '#0B67AD', borderColor: colors.primaryAction || '#0B67AD' },
     pageButtonInteractive: { backgroundColor: colors.primarySoft, borderColor: colors.primary, transform: [{ translateY: -1 }] },
     pageButtonDisabled: { backgroundColor: colors.neutral, borderColor: colors.border, opacity: 0.62 },
     pageButtonText: { color: colors.textPrimary, fontSize: 12, fontWeight: '800' },
-    pageButtonTextActive: { color: colors.onPrimary, fontWeight: '900' },
+    pageButtonTextActive: { color: colors.onPrimary || '#FFFFFF', fontWeight: '900' },
     pageButtonTextDisabled: { color: colors.textSecondary },
     pageEllipsis: { color: colors.textSecondary, minWidth: 18, textAlign: 'center', fontWeight: '800' },
     modalBackdrop: {

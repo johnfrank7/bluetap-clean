@@ -87,6 +87,7 @@ export default function ChatConversationView() {
       <ScrollView
         ref={scrollRef}
         keyboardShouldPersistTaps="handled"
+        style={styles.messagesScroll}
         contentContainerStyle={styles.messages}
         scrollEventThrottle={32}
         onScroll={(event) => {
@@ -194,6 +195,7 @@ const styles = StyleSheet.create({
   headerMenu: { position: 'absolute', right: 4, top: 46, minWidth: 140, borderWidth: 1, borderRadius: 10, zIndex: 100, elevation: 24, shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 10, shadowOffset: { width: 0, height: 4 } },
   headerMenuItem: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 13 },
   reportUserText: { fontSize: 11, fontWeight: '900' },
+  messagesScroll: { flex: 1, minHeight: 0 },
   messages: { flexGrow: 1, paddingHorizontal: 12, paddingTop: 8, paddingBottom: 16 },
   earlier: { minHeight: 36, alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
   earlierText: { fontSize: 12, fontWeight: '900' },

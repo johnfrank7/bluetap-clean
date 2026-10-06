@@ -12,6 +12,7 @@ import {
 import { createPortalStyleSheet, useBlueTapTheme } from './BlueTapTheme';
 import { createShadow } from './shadowStyles';
 import { updateRequest } from '../services/requests';
+import useUnsavedChangesGuard from './useUnsavedChangesGuard';
 
 const formatPrice = (val) => `₱${Number(val || 0).toFixed(2)}`;
 
@@ -30,13 +31,16 @@ export default function RequesterEditOrderModal({
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const initialSnapshotRef = React.useRef(null);
 
   useEffect(() => {
     if (!request || !visible) return;
 
     setError('');
-    setContainer(request.container || '');
-    setNotes(request.notes || request.specialInstructions || '');
+    const initContainer = request.container || '';
+    const initNotes = request.notes || request.specialInstructions || '';
+    setContainer(initContainer);
+    setNotes(initNotes);
 
     const rawItems = Array.isArray(request.items) && request.items.length > 0
       ? request.items
@@ -52,16 +56,39 @@ export default function RequesterEditOrderModal({
           },
         ];
 
-    setItems(
-      rawItems.map((item, idx) => ({
-        id: item.product_id || item.productId || `item-${idx}`,
-        productId: item.product_id || item.productId || '',
-        name: item.product_name || item.productName || item.productNameSnapshot || 'Water',
-        unitPrice: Number(item.product_price ?? item.price ?? item.unitPriceAtOrder ?? item.unitPrice ?? 0),
-        quantity: Math.max(1, Number(item.quantity || 1)),
-      }))
-    );
+    const mappedItems = rawItems.map((item, idx) => ({
+      id: item.product_id || item.productId || `item-${idx}`,
+      productId: item.product_id || item.productId || '',
+      name: item.product_name || item.productName || item.productNameSnapshot || 'Water',
+      unitPrice: Number(item.product_price ?? item.price ?? item.unitPriceAtOrder ?? item.unitPrice ?? 0),
+      quantity: Math.max(1, Number(item.quantity || 1)),
+    }));
+
+    setItems(mappedItems);
+    initialSnapshotRef.current = {
+      container: initContainer.trim(),
+      notes: initNotes.trim(),
+      items: mappedItems.map((i) => ({ productId: i.productId, quantity: i.quantity })),
+    };
   }, [request, visible]);
+
+  const isDirty = React.useMemo(() => {
+    if (!visible || !request || !initialSnapshotRef.current) return false;
+    const snap = initialSnapshotRef.current;
+    if (container.trim() !== snap.container) return true;
+    if (notes.trim() !== snap.notes) return true;
+    if (items.length !== snap.items.length) return true;
+    return items.some((item, idx) => {
+      const orig = snap.items[idx];
+      return !orig || item.productId !== orig.productId || item.quantity !== orig.quantity;
+    });
+  }, [visible, request, container, notes, items]);
+
+  const { confirmLeave, UnsavedModal } = useUnsavedChangesGuard({
+    isDirty,
+    isSubmitting: saving,
+    onDiscard: onClose,
+  });
 
   if (!visible || !request) return null;
 
@@ -121,7 +148,7 @@ export default function RequesterEditOrderModal({
       visible={visible}
       transparent
       animationType="fade"
-      onRequestClose={saving ? undefined : onClose}
+      onRequestClose={saving ? undefined : () => confirmLeave(onClose)}
     >
       <View style={styles.backdrop}>
         <View style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
@@ -134,7 +161,7 @@ export default function RequesterEditOrderModal({
               </Text>
             </View>
             <TouchableOpacity
-              onPress={onClose}
+              onPress={() => confirmLeave(onClose)}
               disabled={saving}
               style={styles.closeBtn}
             >
@@ -258,7 +285,7 @@ export default function RequesterEditOrderModal({
           {/* Footer Actions */}
           <View style={[styles.footer, { borderTopColor: colors.border }]}>
             <TouchableOpacity
-              onPress={onClose}
+              onPress={() => confirmLeave(onClose)}
               disabled={saving}
               style={[styles.cancelBtn, { borderColor: colors.border }]}
             >
@@ -279,6 +306,7 @@ export default function RequesterEditOrderModal({
           </View>
         </View>
       </View>
+      <UnsavedModal />
     </Modal>
   );
 }

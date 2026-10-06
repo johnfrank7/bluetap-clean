@@ -23,8 +23,10 @@ function NoticeDetailModal({ notice, onClose, onAcknowledge }) {
         <Text style={[styles.modalEyebrow, { color: colors.warning }]}>REPORTS &amp; SAFETY</Text>
         <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>{notice.title || 'BlueTap safety notice'}</Text>
         <Text style={[styles.modalBody, { color: colors.textSecondary }]}>{restriction
-          ? `This ${categoryLabel(notice.scope)} restriction${notice.branchName ? ` applies to ${notice.branchName}` : ' applies across BlueTap'}${notice.endsAt ? ` until ${new Date(notice.endsAt).toLocaleString()}` : ''}.`
-          : `A moderator issued a warning related to ${categoryLabel(notice.category)}. Please follow BlueTap's safety and conduct requirements.`}</Text>
+          ? `This ${categoryLabel(notice.scope)} restriction${notice.branchName ? ` applies to ${notice.branchName}` : ' applies across BlueTap'}${notice.endsAt ? ` until ${new Date(notice.endsAt).toLocaleString()}` : ' until restored by branch management'}. ${notice.reasonLabel ? `Reason: ${notice.reasonLabel}.` : ''}`
+          : notice.type === 'restore_branch_access'
+            ? `Your access to ${notice.branchName || 'the branch'} has been restored. You may now resume orders and communications.`
+            : `A moderator issued a warning related to ${categoryLabel(notice.category)}. Please follow BlueTap's safety and conduct requirements.`}</Text>
         <Text style={[styles.modalMeta, { color: colors.textSecondary }]}>Reporter identity and private moderator notes are never disclosed.</Text>
         <View style={styles.modalActions}>
           <Pressable accessibilityRole="button" onPress={onClose} style={[styles.secondaryButton, { borderColor: colors.border }]}><Text style={{ color: colors.textPrimary, fontWeight: '800' }}>Close</Text></Pressable>
@@ -61,7 +63,7 @@ export function ModerationNoticeProvider({ children }) {
     setNotices((items) => items.map((item) => item.id === noticeId ? result.notice : item));
   }, []);
   const openNotice = React.useCallback((noticeId) => setSelectedId(noticeId), []);
-  const activeRestrictions = React.useMemo(() => notices.filter((notice) => notice.type?.startsWith('suspend_') && timeOf(notice.endsAt) > Date.now()), [notices]);
+  const activeRestrictions = React.useMemo(() => notices.filter((notice) => notice.type?.startsWith('suspend_') && (!notice.endsAt || timeOf(notice.endsAt) > Date.now())), [notices]);
   const selected = notices.find((notice) => notice.id === selectedId) || null;
   const value = React.useMemo(() => ({ notices, activeRestrictions, loading, acknowledge, openNotice, refresh }), [acknowledge, activeRestrictions, loading, notices, openNotice, refresh]);
   return <Context.Provider value={value}>{children}<NoticeDetailModal notice={selected} onClose={() => setSelectedId('')} onAcknowledge={(noticeId) => acknowledge(noticeId).then(() => setSelectedId('')).catch(() => {})} /></Context.Provider>;
@@ -72,7 +74,7 @@ export const useModerationNotices = () => React.useContext(Context);
 export function ModerationNoticeBanner({ scope }) {
   const { colors } = useBlueTapTheme();
   const { notices, activeRestrictions, acknowledge, openNotice } = useModerationNotices();
-  const restrictions = activeRestrictions.filter((item) => !scope || item.scope?.includes(scope));
+  const restrictions = activeRestrictions.filter((item) => !scope || !item.scope || item.scope?.includes(scope) || item.scope === 'branch');
   const warning = notices.find((item) => item.type === 'warn' && !item.acknowledgedAt);
   const visible = [...restrictions, ...(warning ? [warning] : [])].slice(0, 3);
   if (!visible.length) return null;
@@ -82,12 +84,16 @@ export function ModerationNoticeBanner({ scope }) {
       <View style={[styles.noticeIcon, { borderColor: colors.warning }]}><Text style={[styles.noticeIconText, { color: colors.warning }]}>!</Text></View>
       <View style={styles.statusRow}><Text style={[styles.statusBadge, { color: colors.warning, borderColor: colors.warning }]}>{restriction ? 'ACTIVE RESTRICTION' : 'SAFETY WARNING'}</Text></View>
       <View style={styles.noticeContent}>
-        <Text style={[styles.title, { color: colors.textPrimary }]}>{notice.title || (restriction ? 'Account restriction' : 'Safety notice')}</Text>
-        <Text style={[styles.body, { color: colors.textSecondary }]}>{restriction ? `This restriction remains active${notice.endsAt ? ' until the time shown below' : ''}.` : 'Please review BlueTap safety and conduct requirements.'}</Text>
+        <Text style={[styles.title, { color: colors.title || colors.textPrimary }]}>{notice.title || (restriction ? 'Account restriction' : 'Safety notice')}</Text>
+        <Text style={[styles.body, { color: colors.textSecondary }]}>{restriction ? `This restriction remains active${notice.endsAt ? ' until the time shown below' : ' until restored by branch management'}.` : 'Please review BlueTap safety and conduct requirements.'}</Text>
         <View style={[styles.metadata, { borderTopColor: colors.border }]}>
           {!!notice.branchName && <View style={styles.metaRow}><Text style={[styles.metaLabel, { color: colors.textSecondary }]}>Branch</Text><Text style={[styles.metaValue, { color: colors.textPrimary }]}>{notice.branchName}</Text></View>}
-          <View style={styles.metaRow}><Text style={[styles.metaLabel, { color: colors.textSecondary }]}>Reason</Text><Text style={[styles.metaValue, { color: colors.textPrimary }]}>{categoryLabel(notice.category)}</Text></View>
-          {!!notice.endsAt && <View style={styles.metaRow}><Text style={[styles.metaLabel, { color: colors.textSecondary }]}>Until</Text><Text style={[styles.metaValue, { color: colors.textPrimary }]}>{formatNoticeTime(notice.endsAt)}</Text></View>}
+          <View style={styles.metaRow}><Text style={[styles.metaLabel, { color: colors.textSecondary }]}>Reason</Text><Text style={[styles.metaValue, { color: colors.textPrimary }]}>{notice.reasonLabel || notice.reason || categoryLabel(notice.category)}</Text></View>
+          {notice.endsAt ? (
+            <View style={styles.metaRow}><Text style={[styles.metaLabel, { color: colors.textSecondary }]}>Until</Text><Text style={[styles.metaValue, { color: colors.textPrimary }]}>{formatNoticeTime(notice.endsAt)}</Text></View>
+          ) : (
+            <View style={styles.metaRow}><Text style={[styles.metaLabel, { color: colors.textSecondary }]}>Duration</Text><Text style={[styles.metaValue, { color: colors.textPrimary }]}>Until restored</Text></View>
+          )}
         </View>
       </View>
       <View style={styles.bannerActions}><Pressable accessibilityRole="button" accessibilityLabel="View safety notice details" onPress={() => openNotice(notice.id)} style={[styles.detailsButton, { borderColor: colors.warning }]}><Text style={[styles.detailsText, { color: colors.warning }]}>View details</Text></Pressable>

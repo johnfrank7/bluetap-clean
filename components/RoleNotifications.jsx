@@ -48,9 +48,13 @@ export function RoleNotificationProvider({ role, children }) {
     ...getChatFollowupNotifications(chat.conversations || [], role),
     ...moderation.notices.map((notice) => ({
       id: `moderation:${notice.id}`, kind: 'moderation', noticeId: notice.id,
-      status: notice.type === 'warn' ? 'warning' : 'restricted',
+      status: notice.type === 'warn' ? 'warning' : notice.type === 'restore_branch_access' ? 'restored' : 'restricted',
       at: notice.createdAt?.toDate?.() || new Date(notice.createdAt || Date.now()),
-      message: notice.type === 'warn' ? `${notice.title}: review your BlueTap conduct notice.` : `${notice.title}${notice.branchName ? ` for ${notice.branchName}` : ''}.`,
+      message: notice.type === 'warn'
+        ? `${notice.title}: review your BlueTap conduct notice.`
+        : notice.type === 'restore_branch_access'
+          ? `Branch access restored${notice.branchName ? ` for ${notice.branchName}` : ''}.`
+          : `${notice.title}${notice.branchName ? ` for ${notice.branchName}` : ''}${notice.reasonLabel ? ` (${notice.reasonLabel})` : ''}.`,
     })),
   ].sort((left, right) => right.at.getTime() - left.at.getTime()).slice(0, 150), [chat.conversations, moderation.notices, role, roleData.orders]);
 

@@ -18,6 +18,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { StatusBar } from 'expo-status-bar';
 import { useRouter } from 'expo-router';
 import useSingleFlightNavigation from '../../components/useSingleFlightNavigation';
+import useUnsavedChangesGuard from '../../components/useUnsavedChangesGuard';
 
 import { auth, db } from '../../firebase';
 import { doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
@@ -256,6 +257,22 @@ export default function ProfilePage() {
     setEditingProfile(false);
   };
 
+  const initialDraft = useMemo(() => buildProfileDraft(userData || {}), [userData]);
+  const isProfileDirty = useMemo(() => {
+    if (!editingProfile) return false;
+    return (
+      profileDraft.fullName.trim() !== initialDraft.fullName.trim() ||
+      profileDraft.phone.trim() !== initialDraft.phone.trim() ||
+      profileDraft.address.trim() !== initialDraft.address.trim()
+    );
+  }, [editingProfile, profileDraft, initialDraft]);
+
+  const { confirmLeave, UnsavedModal } = useUnsavedChangesGuard({
+    isDirty: isProfileDirty,
+    isSubmitting: savingProfile,
+    onDiscard: cancelProfileEdit,
+  });
+
   const updateProfileDraft = (field, value) => {
     setProfileDraft((currentDraft) => ({
       ...currentDraft,
@@ -457,7 +474,7 @@ export default function ProfilePage() {
                         styles.cancelEditButton,
                         savingProfile && styles.buttonDisabled,
                       ]}
-                      onPress={cancelProfileEdit}
+                      onPress={() => confirmLeave(cancelProfileEdit)}
                       disabled={savingProfile}
                     >
                       <Text style={styles.cancelEditText}>Cancel</Text>
@@ -499,7 +516,7 @@ export default function ProfilePage() {
             <TouchableOpacity
               activeOpacity={0.85}
               style={styles.logoutButton}
-              onPress={handleLogout}
+              onPress={() => confirmLeave(handleLogout)}
               disabled={savingProfile}
             >
               <Text style={styles.logoutIcon}>{'\u21AA'}</Text>
@@ -510,6 +527,7 @@ export default function ProfilePage() {
           </ScrollView>
         </View>
         </PortalSwipeContainer>
+        <UnsavedModal />
       </SafeAreaView>
     </LinearGradient>
   );

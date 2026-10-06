@@ -77,3 +77,49 @@ test('restriction projection prefers platform scope and expires by server time w
   await assert.rejects(assertOrderingAllowed(platform.tx, platform.db, 'requester-a', 'branch-any', startsAt), (error) => error.reason === 'ORDERING_SUSPENDED');
   await assert.doesNotReject(assertOrderingAllowed(platform.tx, platform.db, 'requester-a', 'branch-any', new Date('2026-10-03T00:00:00Z')));
 });
+
+test('indefinite branch suspension blocks ordering and chat for the target branch while other branches remain open', async () => {
+  const now = new Date('2026-10-01T00:00:00Z');
+  const future = new Date('2030-01-01T00:00:00Z');
+  const indefiniteOrdering = {
+    branches: {
+      'branch-north': {
+        restricted: true,
+        scope: 'branch_ordering',
+        branchId: 'branch-north',
+        branchNameSnapshot: 'North Branch',
+        startsAt: now,
+        endsAt: null,
+      },
+    },
+  };
+  const fOrdering = storeFixture({ 'orderingRestrictions/requester-test': indefiniteOrdering });
+  await assert.rejects(
+    assertOrderingAllowed(fOrdering.tx, fOrdering.db, 'requester-test', 'branch-north', future),
+    (error) => error.reason === 'ORDERING_BRANCH_SUSPENDED'
+  );
+  await assert.doesNotReject(
+    assertOrderingAllowed(fOrdering.tx, fOrdering.db, 'requester-test', 'branch-south', future)
+  );
+
+  const indefiniteChat = {
+    branches: {
+      'branch-north': {
+        restricted: true,
+        scope: 'branch_chat',
+        branchId: 'branch-north',
+        branchNameSnapshot: 'North Branch',
+        startsAt: now,
+        endsAt: null,
+      },
+    },
+  };
+  const fChat = storeFixture({ 'chatRestrictions/requester-test': indefiniteChat });
+  await assert.rejects(
+    assertChatSendAllowed(fChat.tx, fChat.db, 'requester-test', 'branch-north', future),
+    (error) => error.reason === 'CHAT_BRANCH_SUSPENDED'
+  );
+  await assert.doesNotReject(
+    assertChatSendAllowed(fChat.tx, fChat.db, 'requester-test', 'branch-south', future)
+  );
+});

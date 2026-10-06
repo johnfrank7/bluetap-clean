@@ -27,6 +27,7 @@ import {
 } from '../../services/adminProducts';
 import { getBranches } from '../../services/branchManagement';
 import TopToastFeedback from '../../components/TopToastFeedback';
+import useUnsavedChangesGuard from '../../components/useUnsavedChangesGuard';
 const { WEEKDAYS } = require('../../services/productOrderPolicy');
 
 const empty = {
@@ -204,28 +205,95 @@ export default function AdminProductsPage() {
     return filtered.slice(start, start + PAGE_SIZE);
   }, [filtered, page]);
 
+  const initialDraftRef = React.useRef(null);
+
+  const isDirty = React.useMemo(() => {
+    if (!modal || saving) return false;
+    const initial = initialDraftRef.current;
+    if (!initial) {
+      return Boolean(
+        form.product_name?.trim() ||
+        form.description?.trim() ||
+        form.price?.trim() ||
+        form.containerType?.trim() ||
+        form.size?.trim() ||
+        form.maxQuantityPerRequester?.trim() ||
+        form.deliveryDays?.length > 0 ||
+        form.branchIds?.length > 0 ||
+        form.imageFile ||
+        !form.active
+      );
+    }
+    const nameChanged = (form.product_name || '').trim() !== (initial.product_name || '').trim();
+    const descChanged = (form.description || '').trim() !== (initial.description || '').trim();
+    const priceChanged = (form.price || '').trim() !== (initial.price || '').trim();
+    const containerChanged = (form.containerType || '').trim() !== (initial.containerType || '').trim();
+    const sizeChanged = (form.size || '').trim() !== (initial.size || '').trim();
+    const limitChanged =
+      String(form.maxQuantityPerRequester ?? '').trim() !==
+      String(initial.maxQuantityPerRequester ?? '').trim();
+    const activeChanged = Boolean(form.active) !== Boolean(initial.active);
+    const imageChanged = Boolean(form.imageFile);
+    const daysChanged =
+      [...(form.deliveryDays || [])].sort().join(',') !==
+      [...(initial.deliveryDays || [])].sort().join(',');
+    const branchesChanged =
+      [...(form.branchIds || [])].sort().join(',') !==
+      [...(initial.branchIds || [])].sort().join(',');
+
+    return (
+      nameChanged ||
+      descChanged ||
+      priceChanged ||
+      containerChanged ||
+      sizeChanged ||
+      limitChanged ||
+      activeChanged ||
+      imageChanged ||
+      daysChanged ||
+      branchesChanged
+    );
+  }, [modal, saving, form]);
+
+  const { confirmLeave, UnsavedModal } = useUnsavedChangesGuard({
+    isDirty,
+    onDiscard: () => {
+      initialDraftRef.current = null;
+      setModal(false);
+      setEditing(null);
+      setForm(empty);
+    },
+  });
+
   const open = (product = null) => {
     setEditing(product);
-    setForm(
-      product
-        ? {
-            ...empty,
-            ...product,
-            price: String(product.price),
-            maxQuantityPerRequester:
-              product.maxQuantityPerRequester == null
-                ? ''
-                : String(product.maxQuantityPerRequester),
-            imagePreview: product.imageUrl || product.image || '',
-          }
-        : empty
-    );
+    const initialForm = product
+      ? {
+          ...empty,
+          ...product,
+          price: String(product.price ?? ''),
+          maxQuantityPerRequester:
+            product.maxQuantityPerRequester == null
+              ? ''
+              : String(product.maxQuantityPerRequester),
+          imagePreview: product.imageUrl || product.image || '',
+          branchIds: Array.isArray(product.branchIds) ? [...product.branchIds] : [],
+          deliveryDays: Array.isArray(product.deliveryDays) ? [...product.deliveryDays] : [],
+        }
+      : {
+          ...empty,
+          branchIds: [],
+          deliveryDays: [],
+        };
+    initialDraftRef.current = initialForm;
+    setForm(initialForm);
     setMessage('');
     setModal(true);
   };
 
   const close = () => {
     if (!saving) {
+      initialDraftRef.current = null;
       setModal(false);
       setEditing(null);
       setForm(empty);
@@ -303,6 +371,7 @@ export default function AdminProductsPage() {
       };
       if (editing) await updateAdminProduct(editing.id, payload, form.imageFile);
       else await createAdminProduct(payload, form.imageFile);
+      initialDraftRef.current = null;
       setModal(false);
       setEditing(null);
       setForm(empty);
@@ -646,7 +715,7 @@ export default function AdminProductsPage() {
       )}
 
       {/* MODAL */}
-      <Modal visible={modal} transparent animationType="fade" onRequestClose={close}>
+      <Modal visible={modal} transparent animationType="fade" onRequestClose={() => confirmLeave(close)}>
         <View style={styles.backdrop}>
           <ScrollView contentContainerStyle={styles.modalScroll}>
             <View style={styles.modal}>
@@ -780,7 +849,7 @@ export default function AdminProductsPage() {
                 <TouchableOpacity
                   accessibilityRole="button"
                   accessibilityLabel="Cancel"
-                  onPress={close}
+                  onPress={() => confirmLeave(close)}
                   style={styles.modalCancelBtn}
                 >
                   <Text style={styles.modalCancelText}>Cancel</Text>
@@ -801,6 +870,7 @@ export default function AdminProductsPage() {
           </ScrollView>
         </View>
       </Modal>
+      <UnsavedModal />
     </AdminShell>
   );
 }

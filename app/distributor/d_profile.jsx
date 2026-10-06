@@ -16,6 +16,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import useSingleFlightNavigation from '../../components/useSingleFlightNavigation';
+import useUnsavedChangesGuard from '../../components/useUnsavedChangesGuard';
 
 import { auth, db } from '../../firebase';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
@@ -376,6 +377,22 @@ export default function DistributorProfilePage() {
     setEditingProfile(false);
   };
 
+  const initialProfileDraft = useMemo(() => buildProfileDraft(userData || {}), [userData]);
+  const isProfileDirty = useMemo(() => {
+    if (!editingProfile) return false;
+    return (
+      (profileDraft.fullName || '').trim() !== (initialProfileDraft.fullName || '').trim() ||
+      (profileDraft.contactNumber || '').trim() !== (initialProfileDraft.contactNumber || '').trim() ||
+      (profileDraft.address || '').trim() !== (initialProfileDraft.address || '').trim()
+    );
+  }, [editingProfile, profileDraft, initialProfileDraft]);
+
+  const { confirmLeave, UnsavedModal } = useUnsavedChangesGuard({
+    isDirty: isProfileDirty,
+    isSubmitting: savingProfile,
+    onDiscard: cancelProfileEdit,
+  });
+
   const saveProfileChanges = async () => {
     if (savingProfile) return;
 
@@ -587,7 +604,7 @@ export default function DistributorProfilePage() {
                         styles.cancelEditButton,
                         savingProfile && styles.buttonDisabled,
                       ]}
-                      onPress={cancelProfileEdit}
+                      onPress={() => confirmLeave(cancelProfileEdit)}
                       disabled={savingProfile}
                     >
                       <Text style={styles.cancelEditText}>Cancel</Text>
@@ -629,7 +646,7 @@ export default function DistributorProfilePage() {
             <TouchableOpacity
               activeOpacity={0.85}
               style={styles.logoutButton}
-              onPress={handleLogout}
+              onPress={() => confirmLeave(handleLogout)}
               disabled={savingProfile}
             >
               <Text style={styles.logoutIcon}>{'\u21AA'}</Text>
@@ -647,6 +664,7 @@ export default function DistributorProfilePage() {
         type={toast.type}
         onDismiss={() => setToast((t) => ({ ...t, visible: false }))}
       />
+      <UnsavedModal />
     </SafeAreaView>
     </DistributorPortalBackground>
   );

@@ -58,9 +58,16 @@ const playAdminEntrySound = () => safelyPlay('admin', (context, startAt) => {
 });
 
 const playIncomingMessageSound = ({ subtle = false } = {}) => safelyPlay('chat', (context, startAt) => {
-  const gainMultiplier = subtle ? 0.45 : 1.0;
-  playTone(context, { frequency: 540, endFrequency: 720, startAt, duration: 0.11, gain: 0.024 * gainMultiplier, type: 'sine' });
-  playTone(context, { frequency: 720, endFrequency: 960, startAt: startAt + 0.04, duration: 0.13, gain: 0.028 * gainMultiplier, type: 'sine' });
+  const gainMultiplier = subtle ? 0.5 : 1.0;
+  playTone(context, { frequency: 1046, endFrequency: 1046, startAt, duration: 0.22, gain: 0.065 * gainMultiplier, type: 'sine' });
+  playTone(context, { frequency: 1318, endFrequency: 1318, startAt: startAt + 0.035, duration: 0.26, gain: 0.075 * gainMultiplier, type: 'sine' });
+  playTone(context, { frequency: 2093, endFrequency: 2093, startAt: startAt + 0.045, duration: 0.18, gain: 0.032 * gainMultiplier, type: 'sine' });
 });
 
-module.exports = { playAdminEntrySound, playIncomingMessageSound, playThemeDropSound };
+const playNotificationSound = ({ subtle = false } = {}) => safelyPlay('chat', (context, startAt) => {
+  const gainMultiplier = subtle ? 0.5 : 1.0;
+  playTone(context, { frequency: 1318, endFrequency: 1318, startAt, duration: 0.18, gain: 0.068 * gainMultiplier, type: 'sine' });
+  playTone(context, { frequency: 1760, endFrequency: 1760, startAt: startAt + 0.05, duration: 0.25, gain: 0.078 * gainMultiplier, type: 'sine' });
+});
+
+module.exports = { playAdminEntrySound, playIncomingMessageSound, playNotificationSound, playThemeDropSound };
