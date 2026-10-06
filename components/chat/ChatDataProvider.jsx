@@ -296,8 +296,10 @@ export default function ChatDataProvider({ children, role }) {
     setThreadVersion((version) => version + 1);
     setPanelOpen(true);
   }, []);
-  const resolveAndOpen = React.useCallback((intent, orderContextLocal = null) => {
+  const resolveAndOpen = React.useCallback((rawIntent, orderContextLocal = null) => {
     if (resolveInFlightRef.current) return resolveInFlightRef.current;
+    const intent = chatModel.normalizeChatIntent(rawIntent);
+    const effectiveOrderContext = orderContextLocal || rawIntent?.order || null;
     let attempt;
     attempt = (async () => {
       setThreadError('');
@@ -311,7 +313,7 @@ export default function ChatDataProvider({ children, role }) {
           ? requesterBranches.find((branch) => clean(branch.id || branch.branchId) === clean(intent.branchId))
           : null;
         const presentationLocal = inquiryBranch ? { branchNameSnapshot: clean(inquiryBranch.name) } : null;
-        const next = { ...conversation, ...(presentationLocal || {}), ...(orderContextLocal ? { orderContextLocal } : {}) };
+        const next = { ...conversation, ...(presentationLocal || {}), ...(effectiveOrderContext ? { orderContextLocal: effectiveOrderContext } : {}) };
         setSummaries((items) => [conversation, ...items.filter((item) => item.id !== conversation.id)]);
         setSelectedSeed(next);
         setThreadVersion((version) => version + 1);
@@ -327,6 +329,11 @@ export default function ChatDataProvider({ children, role }) {
     resolveInFlightRef.current = attempt;
     return attempt;
   }, [requesterBranches]);
+
+  const openBlueTapConversation = React.useCallback((options = {}) => {
+    const normalizedIntent = chatModel.normalizeChatIntent(options);
+    return resolveAndOpen(normalizedIntent, options.order || null);
+  }, [resolveAndOpen]);
 
   const commitMessage = React.useCallback(async (optimistic) => {
     try {
@@ -473,6 +480,7 @@ export default function ChatDataProvider({ children, role }) {
     openStationChat,
     backToList: () => { setSelectedSeed(null); setThreadError(''); },
     openConversation,
+    openBlueTapConversation,
     resolveAndOpen,
     retrySummaries: () => setRetryVersion((version) => version + 1),
     sendCurrentMessage,
@@ -482,7 +490,7 @@ export default function ChatDataProvider({ children, role }) {
     loadEarlierMessages,
     isOwnMessage: (message) => isOwnMessage(message, role, uid, branchId),
     receiptForMessage: (message) => receiptFor(message, currentConversation, role, uid, branchId),
-  }), [accessReadiness, roleData.users, roleData.orders, branchId, chatRestriction, colors, isDark, conversationNotice, conversations, currentConversation, deleteCurrentMessage, editCurrentMessage, error, hasEarlierMessages, loading, loadingEarlier, messageActionError, messages, openChat, closeChat, openStationChat, openConversation, panelOpen, requesterBranches, resolveAndOpen, resolveError, resolvingConversation, retryMessage, role, sendCurrentMessage, threadError, uid, loadEarlierMessages]);
+  }), [accessReadiness, roleData.users, roleData.orders, branchId, chatRestriction, colors, isDark, conversationNotice, conversations, currentConversation, deleteCurrentMessage, editCurrentMessage, error, hasEarlierMessages, loading, loadingEarlier, messageActionError, messages, openChat, closeChat, openStationChat, openConversation, openBlueTapConversation, panelOpen, requesterBranches, resolveAndOpen, resolveError, resolvingConversation, retryMessage, role, sendCurrentMessage, threadError, uid, loadEarlierMessages]);
 
   return (
     <ChatContext.Provider value={value}>

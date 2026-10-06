@@ -163,6 +163,61 @@ function messageActionTriggerVisible({ hovered = false, focused = false, menuOpe
   return Boolean(hovered || focused || menuOpen);
 }
 
+function orderIdOf(order) {
+  if (!order || typeof order !== 'object') return '';
+  const source = clean(order.sourceId);
+  if (source && source !== 'Not set') return source;
+  return clean(order.id || order.requestId || order.request_id || order.orderId);
+}
+
+function normalizeChatIntent(options = {}) {
+  const type = clean(options.type);
+  const order = options.order || null;
+  const target = options.target || null;
+  const orderId = orderIdOf(order) || clean(options.orderId);
+
+  if (type === 'requester_branch') {
+    if (orderId) {
+      return {
+        type: 'requester_branch',
+        intent: clean(options.intent) || 'order_followup',
+        orderId,
+      };
+    }
+    const branchId = clean(options.branchId || target?.branchId || target?.id || target);
+    return {
+      type: 'requester_branch',
+      intent: 'inquiry',
+      branchId,
+    };
+  }
+
+  if (type === 'requester_distributor') {
+    return {
+      type: 'requester_distributor',
+      orderId,
+    };
+  }
+
+  if (type === 'distributor_branch') {
+    const distributorId = clean(options.distributorId || target?.distributorId || target?.uid || target?.id);
+    return {
+      type: 'distributor_branch',
+      ...(distributorId ? { distributorId } : {}),
+    };
+  }
+
+  if (type === 'branch_coordination') {
+    const targetBranchId = clean(options.targetBranchId || target?.branchId || target?.id || target);
+    return {
+      type: 'branch_coordination',
+      targetBranchId,
+    };
+  }
+
+  return { ...options, ...(orderId ? { orderId } : {}) };
+}
+
 function mapResolveError(error) {
   const code = String(error?.code || error?.error || error?.message || '').toUpperCase();
   const message = String(error?.message || '').toLowerCase();
@@ -171,6 +226,13 @@ function mapResolveError(error) {
   }
   if (code.includes('CHAT_RESTRICTED') || message.includes('restricted')) {
     return 'Chat is temporarily restricted for your account.';
+  }
+  if (
+    code.includes('CHAT_BRANCH_MISMATCH') ||
+    message.includes('another branch') ||
+    message.includes('not available for this branch')
+  ) {
+    return 'This conversation is not available for this branch.';
   }
   if (code.includes('CHAT_NOT_AUTHORIZED') && (message.includes('unavailable') || message.includes('branch'))) {
     return 'Your water station is currently unavailable.';
@@ -202,6 +264,8 @@ module.exports = {
   mergeMessages,
   messageActionNames,
   messageActionTriggerVisible,
+  normalizeChatIntent,
+  orderIdOf,
   principalFor,
   principalStateFor,
   receiptFor,

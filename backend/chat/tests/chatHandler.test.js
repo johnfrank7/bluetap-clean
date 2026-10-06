@@ -876,3 +876,23 @@ test('Manager can report Requester or Distributor within own branch conversation
   });
   assert.equal(crossBranchReport.statusCode, 403);
 });
+
+test('Manager can resolve and open requester_branch order followup for their branch order, but not for another branch order', async () => {
+  const f = fixture();
+  // Manager A resolving order-a (which belongs to branch-a)
+  const managerAOrderA = await resolve(f, 'manager-a-token', { type: 'requester_branch', intent: 'order_followup', orderId: 'order-a' });
+  assert.equal(managerAOrderA.statusCode, 201);
+  assert.equal(managerAOrderA.body.conversation.type, 'requester_branch');
+  assert.equal(managerAOrderA.body.conversation.requesterUid, 'requester-a');
+  assert.deepEqual(managerAOrderA.body.conversation.branchIds, ['branch-a']);
+
+  // Requester A resolving same order gets the exact same canonical conversation (200 OK)
+  const reqAOrderA = await resolve(f, 'requester-a-token', { type: 'requester_branch', intent: 'order_followup', orderId: 'order-a' });
+  assert.equal(reqAOrderA.statusCode, 200);
+  assert.equal(reqAOrderA.body.conversation.id, managerAOrderA.body.conversation.id);
+
+  // Manager B (branch-b) trying to resolve order-a (branch-a) fails closed
+  const managerBOrderA = await resolve(f, 'manager-b-token', { type: 'requester_branch', intent: 'order_followup', orderId: 'order-a' });
+  assert.equal(managerBOrderA.statusCode, 403);
+  assert.equal(managerBOrderA.body.error.reason, 'CHAT_NOT_AUTHORIZED');
+});

@@ -34,6 +34,7 @@ import {
 } from '../../services/distributorOrders';
 import { useDistributorProfile } from '../../services/distributorProfile';
 import { formatDisplayUniqueId } from '../../services/uniqueIds';
+import { DistributorOrderChatAction } from '../../components/chat/ChatOrderActions';
 import AnimatedPresenceItem from '../../components/AnimatedPresenceItem';
 import { useAnimatedPresenceList } from '../../components/useAnimatedPresenceList';
 
@@ -195,6 +196,7 @@ const ScheduledRequestCard = ({
         >
           <Text style={styles.secondaryActionText}>View Details</Text>
         </TouchableOpacity>
+        <DistributorOrderChatAction order={request} disabled={actionsDisabled} style={styles.secondaryActionButton} />
 
         {/* Status-specific action buttons */}
         {isScheduledOrAccepted && (

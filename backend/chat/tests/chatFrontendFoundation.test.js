@@ -308,3 +308,48 @@ test('older history uses one bounded API page and merges without duplicate realt
   assert.match(provider, /setOlderMessages\(\(items\) => mergeMessages\(items, page\.messages \|\| \[\]\)\)/);
   assert.match(api, /beforeSeq/);
 });
+
+test('Shared openBlueTapConversation normalizes requester_branch, requester_distributor, and distributor_branch', () => {
+  const provider = read('components/chat/ChatDataProvider.jsx');
+  assert.match(provider, /const openBlueTapConversation =/);
+  assert.match(provider, /openBlueTapConversation,/);
+
+  const normalizeChatIntent = model.normalizeChatIntent;
+  assert.equal(typeof normalizeChatIntent, 'function');
+
+  // requester_branch with order defaults to order_followup
+  const reqBranchOrder = normalizeChatIntent({ type: 'requester_branch', order: { id: 'order-123' } });
+  assert.deepEqual(reqBranchOrder, { type: 'requester_branch', intent: 'order_followup', orderId: 'order-123' });
+
+  // requester_branch without order defaults to inquiry with branchId
+  const reqBranchInquiry = normalizeChatIntent({ type: 'requester_branch', target: { id: 'branch-xyz' } });
+  assert.deepEqual(reqBranchInquiry, { type: 'requester_branch', intent: 'inquiry', branchId: 'branch-xyz' });
+
+  // requester_distributor normalizes orderId
+  const reqDist = normalizeChatIntent({ type: 'requester_distributor', order: { requestId: 'BT-999' } });
+  assert.deepEqual(reqDist, { type: 'requester_distributor', orderId: 'BT-999' });
+
+  // distributor_branch normalizes distributorId
+  const distBranch = normalizeChatIntent({ type: 'distributor_branch', target: { uid: 'dist-456' } });
+  assert.deepEqual(distBranch, { type: 'distributor_branch', distributorId: 'dist-456' });
+});
+
+test('Mobile chat composer bounded height and keyboard avoiding behavior', () => {
+  const composer = read('components/chat/ChatComposer.jsx');
+  assert.match(composer, /minHeight:\s*44/);
+  assert.match(composer, /maxHeight:\s*110/);
+  assert.match(composer, /height:\s*44/);
+
+  const panel = read('components/chat/ChatPanel.jsx');
+  assert.match(panel, /behavior=\{mobile \? \(Platform\.OS === 'ios' \? 'padding' : undefined\) : undefined\}/);
+  assert.match(panel, /keyboardVisible/);
+  assert.match(panel, /calculateMobileChatDimensions/);
+
+  // calculateMobileChatDimensions adjusts bottomMargin when keyboard is open
+  const withKeyboard = model.calculateMobileChatDimensions
+    ? model.calculateMobileChatDimensions({ width: 390, height: 800, insets: { top: 40, bottom: 30 }, keyboardVisible: true })
+    : null;
+  if (withKeyboard) {
+    assert.equal(withKeyboard.bottomMargin, 6);
+  }
+});

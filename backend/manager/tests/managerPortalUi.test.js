@@ -141,7 +141,7 @@ test('Requests and Exceptions expose responsive branch-authorized detail maps wi
   assert.match(requests, /notificationTargetCard/);
   assert.match(requests, /contentScrollRef\.current\?\.scrollTo/);
   assert.match(requests, /setTargetHighlighted\(false\), 6000/);
-  assert.match(requests, /width < 430 \? '100%' : 118/);
+  assert.match(requests, /width < 430 \? '48%' : 118/);
 });
 
 test('Manager responsive surfaces stack actions and preserve wide tables with horizontal scrolling', () => {

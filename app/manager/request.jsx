@@ -93,7 +93,7 @@ function OutsideRadiusApprovalQueue({ orders, loading, styles, colors, isDark, o
   return (
     <View style={styles.card}>
       <View style={styles.cardHeaderRow}>
-        <View>
+        <View style={{ flex: 1, minWidth: 0 }}>
           <Text style={styles.eyebrow}>DELIVERY EXCEPTIONS</Text>
           <Text style={styles.cardTitle}>Order Approvals</Text>
           <Text style={styles.helperText}>
@@ -160,7 +160,7 @@ function OutsideRadiusApprovalQueue({ orders, loading, styles, colors, isDark, o
               </View>
 
               <View style={styles.actionRow}>
-                <View style={styles.chatActionWrap}><ManagerOrderChatAction order={order} disabled={entry.actionsDisabled} /></View>
+                <View style={styles.chatActionWrap}><ManagerOrderChatAction order={order} disabled={entry.actionsDisabled} style={styles.managerChatButton} /></View>
                 <TouchableOpacity disabled={entry.actionsDisabled} onPress={() => onOpenOrder(order)} style={[styles.actionButton, styles.viewDetailsBtn, entry.actionsDisabled && styles.actionDisabled]}>
                   <Text style={styles.viewDetailsBtnText}>View Details</Text>
                 </TouchableOpacity>
@@ -501,7 +501,7 @@ function BranchTransfersQueue({ data, styles, colors, isDark, onShowToast, onOpe
   return (
     <View style={styles.card}>
       <View style={styles.cardHeaderRow}>
-        <View>
+        <View style={{ flex: 1, minWidth: 0 }}>
           <Text style={styles.eyebrow}>COORDINATION</Text>
           <Text style={styles.cardTitle}>Branch Transfer Reviews & Outcomes</Text>
           <Text style={styles.helperText}>
@@ -735,7 +735,7 @@ function BranchOrdersOverview({ data, loading, styles, colors, isDark, onOpenOrd
   return (
     <View style={styles.card}>
       <View style={styles.cardHeaderRow}>
-        <View>
+        <View style={{ flex: 1, minWidth: 0 }}>
           <Text style={styles.eyebrow}>BRANCH MANAGEMENT</Text>
           <Text style={styles.cardTitle}>Branch Orders & Situational Edits</Text>
           <Text style={styles.helperText}>
@@ -966,6 +966,8 @@ const createStyles = (colors, width = 1200) =>
       justifyContent: 'space-between',
       gap: 12,
       marginBottom: 14,
+      width: '100%',
+      minWidth: 0,
     },
     eyebrow: {
       color: colors.primary,
@@ -984,6 +986,8 @@ const createStyles = (colors, width = 1200) =>
       fontSize: 12,
       lineHeight: 17,
       marginTop: 4,
+      flexShrink: 1,
+      minWidth: 0,
     },
     subSectionTitle: {
       color: colors.textPrimary,
@@ -1058,11 +1062,15 @@ const createStyles = (colors, width = 1200) =>
       justifyContent: 'space-between',
       alignItems: 'flex-start',
       gap: 12,
+      width: '100%',
+      minWidth: 0,
     },
     requesterName: {
       color: colors.textPrimary,
       fontSize: 14,
       fontWeight: '800',
+      flexShrink: 1,
+      minWidth: 0,
     },
     orderIdText: {
       color: colors.textSecondary,
@@ -1074,15 +1082,21 @@ const createStyles = (colors, width = 1200) =>
       fontSize: 13,
       fontWeight: '700',
       marginTop: 6,
+      flexShrink: 1,
+      minWidth: 0,
     },
     detailsBlock: {
       gap: 3,
       marginTop: 6,
+      width: '100%',
+      minWidth: 0,
     },
     detailLine: {
       color: colors.textSecondary,
       fontSize: 12,
       lineHeight: 17,
+      flexShrink: 1,
+      minWidth: 0,
     },
     amountText: {
       color: colors.primary,
@@ -1100,14 +1114,17 @@ const createStyles = (colors, width = 1200) =>
     },
     chatActionWrap: {
       flexGrow: 1,
-      flexBasis: width < 430 ? '100%' : 150,
-      width: width < 430 ? '100%' : undefined,
+      flexBasis: width < 430 ? '48%' : 150,
       minWidth: 0,
+    },
+    managerChatButton: {
+      width: '100%',
+      minHeight: 44,
+      borderRadius: 10,
     },
     actionButton: {
       flexGrow: 1,
-      flexBasis: width < 430 ? '100%' : 118,
-      width: width < 430 ? '100%' : undefined,
+      flexBasis: width < 430 ? '48%' : 118,
       minWidth: 0,
       minHeight: 44,
       paddingHorizontal: 12,
@@ -1166,8 +1183,8 @@ const createStyles = (colors, width = 1200) =>
     },
     confirmDeclineBtn: {
       alignSelf: 'flex-start',
-      minHeight: 36,
-      paddingHorizontal: 12,
+      minHeight: 44,
+      paddingHorizontal: 14,
       borderRadius: 8,
       backgroundColor: colors.dangerAction,
       alignItems: 'center',

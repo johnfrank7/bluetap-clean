@@ -241,12 +241,16 @@ async function resolveConversationIntent(tx, db, callerUid, callerClaims, body, 
   const createdBy = { uid: callerUid, role: caller.role };
 
   if (type === CONVERSATION_TYPES.REQUESTER_BRANCH) {
-    const requester = activeRequester(caller, callerUid);
+    const isManager = caller.role === 'manager';
+    const requester = isManager ? null : activeRequester(caller, callerUid);
     const intent = clean(body.intent, 64);
     if (!['inquiry', 'order_followup'].includes(intent)) {
       throw new OtpError(400, 'CHAT_INTENT_INVALID', 'Choose inquiry or order_followup.');
     }
     if (intent === 'inquiry') {
+      if (isManager) {
+        throw new OtpError(403, 'CHAT_NOT_AUTHORIZED', 'Branch inquiries must be initiated by the Requester.');
+      }
       requireOnlyFields(body, new Set(['type', 'intent', 'branchId']));
       const branchId = requiredId(body.branchId, 'CHAT_BRANCH_REQUIRED', 'Choose a branch.');
       const branch = activeBranch(await readRequired(tx, db.collection('branches').doc(branchId), 'CHAT_NOT_AUTHORIZED', 'The branch is unavailable.'), branchId);
@@ -267,19 +271,41 @@ async function resolveConversationIntent(tx, db, callerUid, callerClaims, body, 
     const order = await readAuthoritativeOrder(tx, db, orderId);
     const branchId = owningBranchId(order);
     const branch = activeBranch(await readRequired(tx, db.collection('branches').doc(branchId), 'CHAT_NOT_AUTHORIZED', 'The branch is unavailable.'), branchId);
+
+    let effectiveRequester;
+    let requesterUid;
+    if (isManager) {
+      if (clean(caller.branchId) !== branchId) {
+        throw new OtpError(403, 'CHAT_NOT_AUTHORIZED', 'This order belongs to another branch.');
+      }
+      activeManager(caller, callerUid, branch, callerClaims);
+      requesterUid = orderRequesterUid(order);
+      if (!requesterUid) {
+        throw new OtpError(404, 'CHAT_NOT_AUTHORIZED', 'The Requester for this order could not be resolved.');
+      }
+      const requesterDoc = await readRequired(tx, db.collection('users').doc(requesterUid), 'CHAT_NOT_AUTHORIZED', 'The Requester is unavailable.');
+      effectiveRequester = activeRequester(requesterDoc, requesterUid);
+    } else {
+      effectiveRequester = requester;
+      requesterUid = callerUid;
+      if (orderRequesterUid(order) !== requesterUid) {
+        throw new OtpError(403, 'CHAT_NOT_AUTHORIZED', 'This order belongs to another requester.');
+      }
+    }
+
     const status = normalizedStatus(order.status);
     const delivered = ['delivered', 'completed'].includes(status);
     const accessEndsAt = order.chatAccessEndsAt || order.postOrderChatAccessEndsAt || null;
     let reason = AUTHORITY_REASONS.ACTIVE_ORDER;
     if (TERMINAL_ORDER_STATUSES.has(status)) {
-      if (!delivered || timeOf(accessEndsAt) <= timeOf(now) || orderRequesterUid(order) !== callerUid || owningBranchId(order) !== branchId) {
+      if (!delivered || timeOf(accessEndsAt) <= timeOf(now) || owningBranchId(order) !== branchId) {
         throw new OtpError(403, 'CHAT_NOT_AUTHORIZED', 'This order no longer grants branch chat access.');
       }
       reason = AUTHORITY_REASONS.POST_ORDER_FOLLOWUP;
     } else {
-      authorizeRequesterBranch({ requester, branch, order });
+      authorizeRequesterBranch({ requester: effectiveRequester, branch, order });
     }
-    const authority = { requesterUid: callerUid, branchId };
+    const authority = { requesterUid, branchId };
     const reasonOptions = { orderId: order.id, grantedAt: now, ...(reason === AUTHORITY_REASONS.POST_ORDER_FOLLOWUP ? { accessEndsAt } : {}) };
     return {
       type,
@@ -288,7 +314,7 @@ async function resolveConversationIntent(tx, db, callerUid, callerClaims, body, 
       reason,
       reasonOptions,
       createdBy,
-      presentation: { requesterDisplayName: profileDisplayName(requester), orderContext: safeOrderContext(order, requester) },
+      presentation: { requesterDisplayName: profileDisplayName(effectiveRequester), orderContext: safeOrderContext(order, effectiveRequester) },
     };
   }
 

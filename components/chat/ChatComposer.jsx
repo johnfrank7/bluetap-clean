@@ -42,9 +42,9 @@ export default function ChatComposer({ colors, disabled, onSend }) {
 }
 
 const styles = StyleSheet.create({
-  wrap: { flexDirection: 'row', alignItems: 'flex-end', gap: 8, padding: 12, borderTopWidth: 1 },
-  input: { flex: 1, minHeight: 42, maxHeight: 108, borderWidth: 1, borderRadius: 15, paddingHorizontal: 12, paddingTop: 10, paddingBottom: 10, fontSize: 14 },
-  send: { minHeight: 42, paddingHorizontal: 14, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
+  wrap: { flexDirection: 'row', alignItems: 'flex-end', gap: 8, paddingHorizontal: 12, paddingVertical: 8, borderTopWidth: 1 },
+  input: { flex: 1, minHeight: 44, maxHeight: 110, borderWidth: 1, borderRadius: 16, paddingHorizontal: 12, paddingTop: 10, paddingBottom: 10, fontSize: 14, lineHeight: 18 },
+  send: { height: 44, minHeight: 44, paddingHorizontal: 14, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
   sendText: { fontSize: 13, fontWeight: '900' },
   pressed: { opacity: 0.82, transform: [{ scale: 0.98 }] },
 });

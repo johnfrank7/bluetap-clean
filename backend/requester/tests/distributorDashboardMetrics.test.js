@@ -43,3 +43,66 @@ test('Distributor dashboard counts recompute from the latest subscription array'
     deliveredToday: 1,
   });
 });
+
+test('Distributor schedule date formatting parses serialized JSON timestamps and does not show Not set', () => {
+  const babel = require('@babel/core');
+  const path = require('node:path');
+  const vm = require('node:vm');
+  const root = path.resolve(__dirname, '../../..');
+  const source = require('node:fs').readFileSync(path.join(root, 'services/distributorOrders.js'), 'utf8');
+
+  assert.match(source, /formatDistributorOrderDate/);
+  assert.match(source, /parseTimestamp/);
+
+  // Parse serialized JSON timestamp from Node backend: { _seconds: 1775000000, _nanoseconds: 0 }
+  const serialized = { _seconds: 1775000000, _nanoseconds: 0 };
+  const notifSource = require('node:fs').readFileSync(path.join(root, 'services/notificationTimestamp.js'), 'utf8');
+  const notifTransformed = babel.transformSync(notifSource, {
+    babelrc: false, configFile: false,
+    plugins: ['@babel/plugin-transform-modules-commonjs'],
+  }).code;
+  const notifMod = {};
+  vm.runInNewContext(notifTransformed, { Date, exports: notifMod, module: { exports: notifMod } });
+  const parsed = notifMod.parseTimestamp(serialized);
+  assert.ok(parsed instanceof Date);
+  assert.equal(parsed.getTime(), 1775000000000);
+
+  // Transform distributorOrders
+  const transformed = babel.transformSync(source, {
+    babelrc: false, configFile: false,
+    plugins: ['@babel/plugin-transform-modules-commonjs', '@babel/plugin-transform-react-jsx'],
+  }).code;
+  const modExports = {};
+  vm.runInNewContext(transformed, {
+    Date,
+    exports: modExports,
+    module: { exports: modExports },
+    require: (id) => {
+      if (id.includes('notificationTimestamp')) return notifMod;
+      if (id.includes('uniqueIds')) {
+        return {
+          isPublicOrFormattedUniqueId: (v) => Boolean(v && typeof v === 'string' && /^(Req|Dis|Man)\d+/i.test(v)),
+          formatDisplayUniqueId: (v) => v || 'Not set',
+        };
+      }
+      if (id.includes('deliveryFailureReasons')) {
+        return { formatDeliveryFailureReason: (v) => v || '' };
+      }
+      return {};
+    },
+  });
+
+  const { formatDistributorOrderDate, toDistributorScreenOrder } = modExports;
+  assert.equal(typeof formatDistributorOrderDate, 'function');
+  const formatted = formatDistributorOrderDate(serialized);
+  assert.notEqual(formatted, 'Not set');
+  assert.ok(formatted.length > 5);
+
+  const screenOrder = toDistributorScreenOrder({
+    id: 'order-1',
+    scheduledAt: serialized,
+    requesterUid: 'req-1',
+  });
+  assert.notEqual(screenOrder.scheduledDateTime, 'Not set');
+  assert.equal(screenOrder.requesterUid, 'req-1');
+});

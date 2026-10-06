@@ -8,11 +8,9 @@ import { useChat } from './ChatContext';
 const clean = (value) => String(value || '').trim();
 const normalizedStatus = (value) => clean(value).toLowerCase().replace(/[_-]+/g, ' ');
 const TERMINAL = new Set(['delivered', 'completed', 'cancelled', 'canceled', 'rejected', 'declined', 'declined outside service area']);
-const orderIdOf = (order = {}) => {
-  const source = clean(order.sourceId);
-  if (source && source !== 'Not set') return source;
-  return clean(order.id || order.requestId || order.request_id);
-};
+import { mapResolveError, orderIdOf } from './chatModel';
+
+export { orderIdOf };
 
 function ActionButton({ busy, colors, disabled = false, label, onPress, secondary = false, softPrimary = false, style }) {
   const foreground = secondary || softPrimary ? colors.primary : colors.onPrimary;
@@ -44,7 +42,7 @@ function ActionButton({ busy, colors, disabled = false, label, onPress, secondar
 
 export function RequesterOrderChatActions({ order, compact = false, disabled = false }) {
   const { colors } = useBlueTapTheme();
-  const { resolveAndOpen } = useChat();
+  const { openBlueTapConversation } = useChat();
   const [busy, setBusy] = React.useState('');
   const [error, setError] = React.useState('');
   const orderId = orderIdOf(order);
@@ -56,14 +54,13 @@ export function RequesterOrderChatActions({ order, compact = false, disabled = f
     setBusy(kind);
     setError('');
     try {
-      await resolveAndOpen(
+      await openBlueTapConversation(
         kind === 'branch'
-          ? { type: 'requester_branch', intent: 'order_followup', orderId }
-          : { type: 'requester_distributor', orderId },
-        order
+          ? { type: 'requester_branch', intent: 'order_followup', orderId, order }
+          : { type: 'requester_distributor', orderId, order }
       );
     } catch (openError) {
-      setError('Unable to open conversation. Please try again.');
+      setError(mapResolveError(openError) || 'Unable to open conversation. Please try again.');
     } finally {
       setBusy('');
     }
@@ -80,28 +77,36 @@ export function RequesterOrderChatActions({ order, compact = false, disabled = f
 
 export function DistributorOrderChatAction({ order, style, disabled = false }) {
   const { colors } = useBlueTapTheme();
-  const { resolveAndOpen } = useChat();
+  const { openBlueTapConversation } = useChat();
   const [busy, setBusy] = React.useState(false);
-  const active = orderIdOf(order) && !TERMINAL.has(normalizedStatus(order?.status)) && Boolean(clean(order?.requesterUid || order?.requester_id));
+  const active = orderIdOf(order) && !TERMINAL.has(normalizedStatus(order?.status)) && Boolean(clean(order?.requesterUid || order?.requester_id || order?.userId || order?.user_id));
   if (!active) return null;
   const open = async () => {
     setBusy(true);
-    try { await resolveAndOpen({ type: 'requester_distributor', orderId: orderIdOf(order) }, order); } catch {} finally { setBusy(false); }
+    try {
+      await openBlueTapConversation({ type: 'requester_distributor', orderId: orderIdOf(order), order });
+    } catch {} finally {
+      setBusy(false);
+    }
   };
   return <ActionButton busy={busy} disabled={disabled} colors={colors} label="Message Requester" onPress={open} softPrimary style={style} />;
 }
 
-export function ManagerOrderChatAction({ order, disabled = false }) {
+export function ManagerOrderChatAction({ order, style, disabled = false }) {
   const { colors } = useAdminTheme();
-  const { resolveAndOpen } = useChat();
+  const { openBlueTapConversation } = useChat();
   const [busy, setBusy] = React.useState(false);
   const orderId = orderIdOf(order);
-  if (!orderId || !clean(order?.requesterUid || order?.requester_id)) return null;
+  if (!orderId || !clean(order?.requesterUid || order?.requester_id || order?.userId || order?.user_id)) return null;
   const open = async () => {
     setBusy(true);
-    try { await resolveAndOpen({ type: 'requester_branch', intent: 'order_followup', orderId }, order); } catch {} finally { setBusy(false); }
+    try {
+      await openBlueTapConversation({ type: 'requester_branch', intent: 'order_followup', orderId, order });
+    } catch {} finally {
+      setBusy(false);
+    }
   };
-  return <ActionButton busy={busy} disabled={disabled} colors={colors} label="Message Requester" onPress={open} secondary />;
+  return <ActionButton busy={busy} disabled={disabled} colors={colors} label="Message Requester" onPress={open} secondary style={style} />;
 }
 
 const styles = StyleSheet.create({

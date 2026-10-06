@@ -1,5 +1,5 @@
 import React from 'react';
-import { KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { Keyboard, KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import BlueTapChatIcon from './BlueTapChatIcon';
@@ -7,9 +7,9 @@ import { useChat } from './ChatContext';
 import ChatConversationList from './ChatConversationList';
 import ChatConversationView from './ChatConversationView';
 
-export function calculateMobileChatDimensions({ width = 360, height = 700, insets = {} } = {}) {
+export function calculateMobileChatDimensions({ width = 360, height = 700, insets = {}, keyboardVisible = false } = {}) {
   const topMargin = Math.max(14, (insets.top || 0) + 10);
-  const bottomMargin = Math.max(14, (insets.bottom || 0) + 10);
+  const bottomMargin = keyboardVisible ? 6 : Math.max(14, (insets.bottom || 0) + 10);
   const horizontalMargin = width < 360 ? 10 : 12;
   const mobileWidth = Math.min(width - (horizontalMargin * 2), 440);
   const mobileHeight = Math.min(height - (topMargin + bottomMargin), 720);
@@ -32,7 +32,7 @@ function PanelSurface({ mobile, onClose }) {
 
   return (
     <View style={[styles.panel, mobile ? styles.mobilePanel : styles.desktopPanel, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-      <KeyboardAvoidingView style={styles.keyboardArea} behavior={mobile ? (Platform.OS === 'ios' ? 'padding' : 'height') : undefined}>
+      <KeyboardAvoidingView style={styles.keyboardArea} behavior={mobile ? (Platform.OS === 'ios' ? 'padding' : undefined) : undefined}>
         {!currentConversation && (
           <View style={[styles.header, { backgroundColor: colors.header || colors.surface, borderBottomColor: colors.border }]}>
             <View style={[styles.iconBadge, { backgroundColor: brandHeader ? (colors.surface || '#FFFFFF') : colors.primaryAction }]}><BlueTapChatIcon size={24} color={brandHeader ? colors.primary : '#FFFFFF'} bubbleColor={brandHeader ? colors.primarySoft : colors.surface} detailColor={brandHeader ? colors.primaryDark : colors.primary} /></View>
@@ -51,6 +51,18 @@ export default function ChatPanel() {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const mobile = width < 720;
+  const [keyboardVisible, setKeyboardVisible] = React.useState(false);
+
+  React.useEffect(() => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const showSub = Keyboard.addListener(showEvent, () => setKeyboardVisible(true));
+    const hideSub = Keyboard.addListener(hideEvent, () => setKeyboardVisible(false));
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
 
   const safeClose = React.useCallback(() => {
     if (Platform.OS === 'web' && typeof document !== 'undefined') {
@@ -64,7 +76,7 @@ export default function ChatPanel() {
   if (!panelOpen) return null;
 
   if (mobile) {
-    const { mobileWidth, mobileHeight, topMargin, bottomMargin } = calculateMobileChatDimensions({ width, height, insets });
+    const { mobileWidth, mobileHeight, topMargin, bottomMargin } = calculateMobileChatDimensions({ width, height, insets, keyboardVisible });
 
     return (
       <Modal visible transparent animationType="fade" statusBarTranslucent onRequestClose={safeClose}>

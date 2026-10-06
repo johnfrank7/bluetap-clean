@@ -6,6 +6,7 @@ import { getApiUrl } from './apiClient';
 import { formatDisplayUniqueId, isPublicOrFormattedUniqueId } from './uniqueIds';
 import { subscribeProtectedReadSession, useProtectedReadSession } from './useProtectedReadSession';
 const { protectedReadReadiness } = require('./protectedReadReadiness');
+import { parseTimestamp } from './notificationTimestamp';
 const { formatDeliveryFailureReason } = require('../constants/deliveryFailureReasons');
 
 export async function getAssignedDistributorOrders() {
@@ -50,8 +51,7 @@ export const failAssignedDelivery = (orderId, reason = {}) => updateAssignedDist
 export const rescheduleAssignedDelivery = (orderId, scheduledAt) => updateAssignedDistributorOrder(orderId, 'reschedule-delivery', { scheduledAt });
 export const completeAssignedDelivery = (orderId) => updateAssignedDistributorOrder(orderId, 'mark-delivered');
 
-const dateFrom = (value) => value?.toDate?.()
-  || (value?.seconds ? new Date(value.seconds * 1000) : value ? new Date(value) : null);
+const dateFrom = (value) => parseTimestamp(value);
 
 export const normalizeDistributorOrderStatus = (status) => String(status || '')
   .trim()
@@ -60,7 +60,7 @@ export const normalizeDistributorOrderStatus = (status) => String(status || '')
   .replace(/\s+/g, ' ');
 
 export const formatDistributorOrderDate = (value, fallback = 'Not set') => {
-  const date = dateFrom(value);
+  const date = parseTimestamp(value);
   return date && !Number.isNaN(date.getTime())
     ? date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
     : fallback;
@@ -93,7 +93,10 @@ export function toDistributorScreenOrder(order = {}) {
   const quantity = items.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0);
   const productNames = items.map((item) => safeString(item.productNameSnapshot || item.product_name || item.name)).filter(Boolean);
   const totalAmount = Number(order.totalAtOrder || order.total_cost || order.totalAmount || 0);
-  const deliveryDate = formatDistributorOrderDate(order.expectedDeliveryDate || order.delivery_date, 'Not set');
+  const scheduledRaw = order.scheduledAt || order.scheduledDateTime || order.expectedDeliveryDate || order.delivery_date || order.deliveryDate || order.scheduledDate || order.scheduleDate;
+  const deliveryRaw = order.expectedDeliveryDate || order.delivery_date || order.deliveryDate || order.scheduledAt || order.scheduledDate;
+  const deliveryDate = formatDistributorOrderDate(deliveryRaw, 'Not set');
+  const scheduledDateTime = formatDistributorOrderDate(scheduledRaw, 'Not set');
   const status = safeString(order.status, 'distributor_assigned');
   const requestId = safeString(order.requestId || order.id || order.request_id, 'Not set');
   const requesterName = safeString(order.requesterName || order.customerName || order.requester_name, 'Not set');
@@ -126,7 +129,7 @@ export function toDistributorScreenOrder(order = {}) {
     requester: requesterName,
     customerName: requesterName,
     requesterName,
-    requesterUid: safeString(order.requesterUid || order.requester_id, ''),
+    requesterUid: safeString(order.requesterUid || order.requester_id || order.userId || order.user_id, ''),
     requesterId: formattedRequesterId,
     requesterUniqueId: formattedRequesterId,
     contact: safeString(order.contactNumber || order.contact_number || order.phone, 'Not set'),
@@ -143,7 +146,7 @@ export function toDistributorScreenOrder(order = {}) {
     amountDue: `₱${totalAmount.toFixed(2)}`,
     amountPaid: `₱${totalAmount.toFixed(2)}`,
     deliveryDate,
-    scheduledDateTime: formatDistributorOrderDate(order.scheduledAt || order.expectedDeliveryDate, 'Not set'),
+    scheduledDateTime,
     deliveredDateTime: formatDistributorOrderDate(order.deliveredAt || order.updatedAt, 'Not set'),
     orderDate: formatDistributorOrderDate(order.createdAt, 'Not set'),
     waterStation: safeString(order.currentBranchName || order.branchNameSnapshot || order.waterStation || order.water_station, 'Not set'),

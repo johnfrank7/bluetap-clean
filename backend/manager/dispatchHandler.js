@@ -65,6 +65,7 @@ function safeOrder(id, data = {}, branchNames = new Map()) {
     id,
     requestId: clean(data.requestId || data.request_id, 80),
     requesterName: clean(data.requesterNameSnapshot || data.requester_name, 160),
+    requesterUid: clean(data.requesterUid || data.requester_id || data.userId || data.user_id, 128),
     requesterUniqueId: clean(data.requesterUniqueIdSnapshot || data.requester_unique_id || data.requesterPublicUid, 80),
     contactNumber: clean(data.contactNumberSnapshot || data.contact_number, 40),
     address: clean(data.addressSnapshot || data.address, 300),
