@@ -24,6 +24,7 @@ const { createAdminDashboardOverviewHandler } = require('../admin/dashboardOverv
 const { createAdminProductsHandler } = require('../admin/productManagementHandler');
 const { createAdminDispatchOverrideHandler } = require('../admin/adminDispatchOverrideHandler');
 const { createRequesterCatalogHandler, createRequesterOrdersHandler } = require('../requester/orderingHandler');
+const { createOrderDetailsHandler } = require('../orders/orderDetailsHandler');
 const { createChatConversationsHandler, createChatMessagesHandler, createChatReadStateHandler } = require('../chat/chatHandler');
 const { createChatReportsHandler } = require('../chat/reportHandler');
 const {
@@ -67,6 +68,7 @@ const routes = new Map([
   ['/api/manager/outside-radius-orders', createOutsideRadiusApprovalsHandler()],
   ['/api/manager/dispatch-orders', createManagerDispatchHandler()],
   ['/api/distributor/orders', createDistributorAssignedOrdersHandler()],
+  ['/api/orders/details', createOrderDetailsHandler()],
   ['/api/auth/complete-required-password-change', createRequiredPasswordChangeHandler()],
   ['/api/auth/password-recovery', createPasswordRecoveryHandler()],
   ['/api/auth/session-policy', createSessionPolicyHandler()],

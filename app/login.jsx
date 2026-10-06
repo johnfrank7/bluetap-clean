@@ -24,6 +24,7 @@ import { signInWithCustomToken, signOut } from 'firebase/auth';
 import { saveLocalUser } from '../localUsers';
 import {
   clearAllAuthSessions,
+  fetchFirestoreUserProfile,
   getPostAuthenticationDestination,
   saveRoleSession,
 } from '../services/authSession';
@@ -154,6 +155,26 @@ export default function LoginPage() {
       setNotification({ title: 'Password changed', message: 'Your password was changed. Sign in with your new password.', onConfirm: null });
     }
   }, [passwordChanged]);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    const checkActiveSession = async () => {
+      const user = auth.currentUser;
+      if (!user?.uid || loginInFlight.current || loginSucceeded.current) return;
+      try {
+        const profile = await fetchFirestoreUserProfile(user);
+        if (cancelled || !profile?.role) return;
+        const destination = getPostAuthenticationDestination(profile);
+        if (destination && destination !== '/login') {
+          router.replace(destination);
+        }
+      } catch {
+        // Leave user on login form if profile check fails
+      }
+    };
+    checkActiveSession();
+    return () => { cancelled = true; };
+  }, [router]);
 
   const clearFocusScrollTimeout = React.useCallback(() => {
     if (focusScrollTimeoutRef.current) {

@@ -11,6 +11,7 @@ import SoftStatusBadge from './SoftStatusBadge';
 import { createShadow } from './shadowStyles';
 import { createPortalStyleSheet, useBlueTapTheme } from './BlueTapTheme';
 import { formatDisplayUniqueId } from '../services/uniqueIds';
+import { formatCurrency, normalizeRequestDetails } from '../services/orderNormalizer';
 const { formatDeliveryFailureReason } = require('../constants/deliveryFailureReasons');
 const { branchMapDataForRequest } = require('./locationMapModel');
 
@@ -21,19 +22,7 @@ const TEXT_MUTED = '#6F8EA8';
 const TEXT_DARK = '#20384D';
 const LazyLocationMap = React.lazy(() => import('./LocationMap'));
 
-const formatAmount = (amount) => {
-  if (amount === undefined || amount === null || amount === '') {
-    return 'Not set';
-  }
-
-  if (typeof amount === 'string' && amount.trim()) {
-    return amount.trim().startsWith('\u20B1')
-      ? amount.trim()
-      : `\u20B1${Number(amount || 0).toFixed(2)}`;
-  }
-
-  return `\u20B1${Number(amount || 0).toFixed(2)}`;
-};
+const formatAmount = (amount) => formatCurrency(amount);
 
 const displayValue = (value) => {
   if (value === undefined || value === null || value === '') return 'Not set';
@@ -63,48 +52,50 @@ export default function RequestDetailsModal({
   const { height, width } = useWindowDimensions();
   const compact = width < 600;
   const modalMaxHeight = Math.max(1, height - (compact ? 24 : 40));
-  const requestReference = request?.requestId || request?.request_id || request?.id;
-  const waterStation = request?.waterStation || request?.currentBranchName || request?.currentBranchNameSnapshot || request?.branchNameSnapshot || request?.water_station;
-  const deliveryAddress = request?.deliveryAddress || request?.addressSnapshot || request?.address || request?.deliveryLocation?.address;
+  const normalized = React.useMemo(() => normalizeRequestDetails(request), [request]);
+  const activeRequest = normalized || request;
+  const requestReference = activeRequest?.requestId || activeRequest?.request_id || activeRequest?.id;
+  const waterStation = activeRequest?.waterStation || activeRequest?.currentBranchName || activeRequest?.currentBranchNameSnapshot || activeRequest?.branchNameSnapshot || activeRequest?.water_station;
+  const deliveryAddress = activeRequest?.deliveryAddress || activeRequest?.addressSnapshot || activeRequest?.address || activeRequest?.deliveryLocation?.address;
   const branchMapData = branchMapDataForRequest(request, branches);
   const failureReason = formatDeliveryFailureReason(request, '');
   const requesterUniqueId = formatDisplayUniqueId(
-    request?.requesterUniqueId || request?.requester_unique_id || request?.requesterId,
+    activeRequest?.requesterUniqueId || activeRequest?.requester_unique_id || activeRequest?.requesterId,
     'Not assigned'
   );
-  const distributorName = request?.distributorNameSnapshot ||
-    request?.distributorName || request?.distributor_name || '';
+  const distributorName = activeRequest?.distributorNameSnapshot ||
+    activeRequest?.distributorName || activeRequest?.distributor_name || '';
   const distributorUniqueId = formatDisplayUniqueId(
-    request?.distributorPublicUidSnapshot || request?.distributorUniqueId || request?.distributor_unique_id,
+    activeRequest?.distributorPublicUidSnapshot || activeRequest?.distributorUniqueId || activeRequest?.distributor_unique_id,
     'Not assigned'
   );
-  const products = Array.isArray(request?.items)
-    ? request.items.map(normalizeProduct)
+  const products = Array.isArray(activeRequest?.items) && activeRequest.items.length
+    ? activeRequest.items.map(normalizeProduct)
     : [];
   const topRows = [
     [
       { label: 'Request ID', value: requestReference },
-      { label: 'Status', status: request?.status },
+      { label: 'Status', status: activeRequest?.status || request?.status },
     ],
     [
-      { label: 'Order Date', value: request?.orderDate },
-      { label: 'Delivery Date', value: request?.deliveryDate },
+      { label: 'Order Date', value: activeRequest?.orderDate },
+      { label: 'Delivery Date', value: activeRequest?.deliveryDate },
     ],
     [
       { label: 'Water Station', value: waterStation },
-      { label: 'Payment Method', value: 'Cash on Delivery' },
+      { label: 'Payment Method', value: activeRequest?.paymentMethod || 'Cash on Delivery' },
     ],
   ];
   const customerRows = [
     [
-      { label: 'Requester Name', value: request?.requesterName || request?.customerName },
+      { label: 'Requester Name', value: activeRequest?.requesterName || activeRequest?.customerName },
       { label: 'Requester ID', value: requesterUniqueId },
     ],
     [
       { label: 'Distributor Name', value: distributorName || 'Not assigned' },
       { label: 'Distributor ID', value: distributorUniqueId },
     ],
-    [{ label: 'Contact Number', value: request?.contactNumber }],
+    [{ label: 'Contact Number', value: activeRequest?.contactNumber }],
   ];
 
   return (
@@ -299,15 +290,15 @@ export default function RequestDetailsModal({
               <View style={styles.totalsCard}>
                 <View style={styles.totalRow}>
                   <Text style={styles.totalLabel}>Subtotal</Text>
-                  <Text style={styles.totalValue}>{formatAmount(request?.subtotalAtOrder ?? request?.subtotal ?? products.reduce((sum, item) => sum + Number(item.subtotal || 0), 0))}</Text>
+                  <Text style={styles.totalValue}>{formatAmount(activeRequest?.subtotal ?? activeRequest?.subtotalAtOrder ?? products.reduce((sum, item) => sum + Number(item.subtotal || 0), 0))}</Text>
                 </View>
                 <View style={styles.totalRow}>
                   <Text style={styles.totalLabel}>Delivery Fee</Text>
-                  <Text style={styles.totalValue}>{formatAmount(request?.deliveryFeeAtOrder ?? request?.deliveryFee ?? 0)}</Text>
+                  <Text style={styles.totalValue}>{formatAmount(activeRequest?.deliveryFee ?? activeRequest?.deliveryFeeAtOrder ?? 0)}</Text>
                 </View>
                 <View style={[styles.totalRow, styles.grandTotalRow]}>
                   <Text style={styles.grandTotalLabel}>Grand Total</Text>
-                  <Text style={styles.grandTotalValue}>{formatAmount(request?.grandTotalAmount ?? request?.totalAmount)}</Text>
+                  <Text style={styles.grandTotalValue}>{formatAmount(activeRequest?.grandTotal ?? activeRequest?.grandTotalAmount ?? activeRequest?.total_cost ?? activeRequest?.totalAtOrder ?? activeRequest?.totalAmount)}</Text>
                 </View>
               </View>
 

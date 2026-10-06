@@ -41,6 +41,7 @@ export default function LocalTimeCard({ compact = false, onBrand = false, style 
   const { time, period } = clockParts(now);
   const { weekday, date } = calendarParts(now);
   const daytime = now.getHours() >= 6 && now.getHours() < 18;
+  const sunColor = onBrand ? '#FFD54F' : '#F59E0B';
   const primaryColor = onBrand ? '#FFFFFF' : (colors.iconInteractive || colors.primary);
   const secondaryColor = onBrand ? '#DDF2FF' : colors.textSecondary;
   return (
@@ -57,7 +58,7 @@ export default function LocalTimeCard({ compact = false, onBrand = false, style 
     >
       <View style={styles.timeRow}>
         <View style={[styles.periodIcon, { width: compact ? 15 : 17, height: compact ? 15 : 17 }]}>
-          <BlueTapIcon name={daytime ? 'sun' : 'moon'} size={compact ? 14 : 16} color={primaryColor} />
+          <BlueTapIcon name={daytime ? 'sun' : 'moon'} size={compact ? 14 : 16} color={daytime ? sunColor : primaryColor} />
           {!daytime && <BlueTapIcon name="star" size={6} color="#F4B942" style={styles.periodStar} />}
         </View>
         <Text style={[styles.time, compact && styles.timeCompact, { color: primaryColor }]}>{time}</Text>

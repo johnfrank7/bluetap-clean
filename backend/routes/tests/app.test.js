@@ -46,6 +46,7 @@ const EXPECTED_ROUTES = [
   '/api/manager/profile',
   '/api/manager/workspace',
   '/api/moderation/notices',
+  '/api/orders/details',
   '/api/requester/catalog',
   '/api/requester/orders',
   '/api/verification/face-service-status',
@@ -117,7 +118,7 @@ test('Render routes accept configured origins and reject unlisted production ori
       });
       assert.equal(allowed.status, 204);
       assert.equal(allowed.headers.get('access-control-allow-origin'), 'https://bluetap.example');
-      assert.equal(allowed.headers.get('access-control-allow-methods'), 'GET, POST, PATCH, OPTIONS');
+      assert.equal(allowed.headers.get('access-control-allow-methods'), 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
 
       const productionWeb = await fetch(`${baseUrl}/api/auth/check-username`, {
         method: 'OPTIONS',

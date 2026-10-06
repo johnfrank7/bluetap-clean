@@ -146,8 +146,16 @@ function conversationLifecycleNotice(conversation, now = Date.now()) {
   return { state: 'closed', title: 'Messaging window ended', body: 'Contact the station if you still need assistance.' };
 }
 
-function messageActionNames({ own = false, withinWindow = false, reportable = false } = {}) {
-  if (own) return withinWindow ? ['Edit', 'Delete'] : [];
+function messageActionNames({ own = false, withinWindow = false, reportable = false, replyable = false } = {}) {
+  if (replyable) {
+    if (own) {
+      return withinWindow ? ['Reply', 'Edit', 'Delete'] : ['Reply'];
+    }
+    return reportable ? ['Reply', 'Report'] : ['Reply'];
+  }
+  if (own) {
+    return withinWindow ? ['Edit', 'Delete'] : [];
+  }
   return reportable ? ['Report'] : [];
 }
 

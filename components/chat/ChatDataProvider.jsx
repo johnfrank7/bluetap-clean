@@ -12,6 +12,7 @@ import { useDistributorData, useRequesterData } from '../RoleDataProviders';
 import { ChatContext } from './ChatContext';
 import ChatFloatingLauncher from './ChatFloatingLauncher';
 import { useModerationNotices } from '../ModerationNotices';
+import { playIncomingMessageSound } from '../../services/uiSound';
 
 const chatModel = require('./chatModel');
 const { chatAccessReadiness } = require('./chatAccessReadiness');
@@ -111,11 +112,18 @@ export default function ChatDataProvider({ children, role }) {
     setAuthReady(true);
   }), []);
 
+  const hydratedSummariesRef = React.useRef(false);
+  const summaryIncomingSeqsRef = React.useRef(new Map());
+  const hydratedOpenThreadRef = React.useRef(false);
+  const lastOpenThreadSeqRef = React.useRef(0);
+
   React.useEffect(() => {
     setSelectedSeed(null);
     setPanelOpen(false);
     setSummaries([]);
     readCursorRef.current.clear();
+    hydratedSummariesRef.current = false;
+    summaryIncomingSeqsRef.current.clear();
   }, [uid, branchId]);
 
   const accessReadiness = chatAccessReadiness({ authReady, branchId, role, roleData, uid });
@@ -140,7 +148,34 @@ export default function ChatDataProvider({ children, role }) {
       role,
       uid,
       branchId,
-      onData: (items) => { setSummaries(items); setLoading(false); setError(''); },
+      onData: (items) => {
+        if (!hydratedSummariesRef.current) {
+          hydratedSummariesRef.current = true;
+          (items || []).forEach((c) => {
+            const pState = principalStateFor(c, role, uid, branchId);
+            summaryIncomingSeqsRef.current.set(c.id, Number(pState?.lastIncomingSeq || 0));
+          });
+        } else {
+          let hasNewIncoming = false;
+          (items || []).forEach((c) => {
+            const pState = principalStateFor(c, role, uid, branchId);
+            const incomingSeq = Number(pState?.lastIncomingSeq || 0);
+            const previous = summaryIncomingSeqsRef.current.get(c.id) || 0;
+            if (incomingSeq > previous) {
+              summaryIncomingSeqsRef.current.set(c.id, incomingSeq);
+              if (!panelOpen || currentConversation?.id !== c.id) {
+                hasNewIncoming = true;
+              }
+            }
+          });
+          if (hasNewIncoming) {
+            playIncomingMessageSound({ subtle: false });
+          }
+        }
+        setSummaries(items);
+        setLoading(false);
+        setError('');
+      },
       onError: (listenerError) => {
         setLoading(false);
         setError(listenerError?.code === 'permission-denied' ? 'Your message access could not be verified.' : 'Messages are temporarily unavailable.');
@@ -194,10 +229,27 @@ export default function ChatDataProvider({ children, role }) {
     setLocalMessages([]);
     setThreadError('');
     setMessageActionError('');
+    hydratedOpenThreadRef.current = false;
+    lastOpenThreadSeqRef.current = 0;
     if (!panelOpen || !currentConversation?.id || accessReadiness !== 'ready' || !availability.readable) return undefined;
     const unsubscribe = subscribeOpenConversationMessages({
       conversationId: currentConversation.id,
       onData: (items) => {
+        if (!hydratedOpenThreadRef.current) {
+          hydratedOpenThreadRef.current = true;
+          const maxSeq = (items || []).reduce((max, m) => Math.max(max, Number(m.seq || 0)), 0);
+          lastOpenThreadSeqRef.current = maxSeq;
+        } else {
+          const maxSeq = (items || []).reduce((max, m) => Math.max(max, Number(m.seq || 0)), 0);
+          if (maxSeq > lastOpenThreadSeqRef.current) {
+            const newMessages = (items || []).filter((m) => Number(m.seq) > lastOpenThreadSeqRef.current);
+            const hasNewIncoming = newMessages.some((m) => !isOwnMessage(m, role, uid, branchId));
+            lastOpenThreadSeqRef.current = maxSeq;
+            if (hasNewIncoming) {
+              playIncomingMessageSound({ subtle: true });
+            }
+          }
+        }
         setLiveMessages(items);
         setHasEarlierMessages(items.length === 40);
         setThreadError('');
@@ -283,6 +335,7 @@ export default function ChatDataProvider({ children, role }) {
         clientMutationId: optimistic.clientMutationId,
         body: optimistic.body,
         orderId: sendContextOrderId(currentConversation),
+        replyToMessageId: optimistic.replyToMessageId || optimistic.replyTo?.messageId,
       });
       setLocalMessages((items) => mergeMessages(items.filter((item) => item.clientMutationId !== optimistic.clientMutationId), committed));
       setSummaries((items) => items.map((item) => item.id === currentConversation.id ? { ...item, lastMessagePreview: committed.body, lastMessageAt: committed.createdAt, updatedAt: committed.createdAt, lastMessageSeq: committed.seq } : item));
@@ -291,12 +344,17 @@ export default function ChatDataProvider({ children, role }) {
     }
   }, [currentConversation]);
 
-  const sendCurrentMessage = React.useCallback((body) => {
+  const sendCurrentMessage = React.useCallback((body, options = {}) => {
     if (!currentConversation?.id || !availability.sendable || accessReadiness !== 'ready') return;
     const clientMutationId = createClientMutationId();
+    const replyToMessageId = options.replyToMessageId || options.replyTo?.id || options.replyTo?.messageId;
     const optimistic = {
       id: '', clientMutationId, body, createdAt: new Date(), pending: true, failed: false,
       senderUid: uid, senderPrincipalType: role === 'manager' ? 'branch' : 'user', ...(role === 'manager' ? { senderBranchId: branchId } : {}),
+      ...(replyToMessageId ? {
+        replyToMessageId,
+        ...(options.replyTo ? { replyTo: options.replyTo } : {}),
+      } : {}),
     };
     setLocalMessages((items) => mergeMessages(items, optimistic));
     commitMessage(optimistic);
@@ -341,7 +399,13 @@ export default function ChatDataProvider({ children, role }) {
       replaceCommittedMessage(updated);
       return updated;
     } catch (mutationError) {
-      setMessageActionError(mutationError.message || 'The message could not be deleted.');
+      const isExpired = mutationError?.code === 'CHAT_MESSAGE_MUTATION_WINDOW_EXPIRED'
+        || mutationError?.code === 'CHAT_MUTATION_EXPIRED'
+        || String(mutationError?.message || '').toLowerCase().includes('15 minutes');
+      const friendlyMessage = isExpired
+        ? 'This message can no longer be deleted.'
+        : (mutationError.message || 'The message could not be deleted.');
+      setMessageActionError(friendlyMessage);
       throw mutationError;
     }
   }, [currentConversation?.id, replaceCommittedMessage]);

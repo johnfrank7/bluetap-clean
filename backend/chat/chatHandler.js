@@ -637,16 +637,51 @@ async function conversationPresentation(tx, db, conversation, authorization) {
 
 async function sendMessage({ db, callerUid, callerClaims, body, now, createMessageId }) {
   requireNoClientSenderFields(body);
-  requireOnlyFields(body, new Set(['conversationId', 'clientMutationId', 'body', 'orderId']));
+  requireOnlyFields(body, new Set(['conversationId', 'clientMutationId', 'clientMessageId', 'body', 'orderId', 'replyToMessageId']));
   const conversationId = requiredId(body.conversationId, 'CHAT_CONVERSATION_REQUIRED', 'conversationId is required.');
-  const clientMutationId = normalizeClientMutationId(body.clientMutationId);
+  const clientMutationId = normalizeClientMutationId(body.clientMutationId || body.clientMessageId);
   const normalizedBody = normalizeMessageBody(body.body);
+  const replyToMessageId = typeof body.replyToMessageId === 'string' ? clean(body.replyToMessageId, 128) : '';
   const conversationRef = db.collection('chatConversations').doc(conversationId);
 
   return db.runTransaction(async (tx) => {
     const conversation = await readRequired(tx, conversationRef, 'CHAT_CONVERSATION_NOT_FOUND', 'The conversation was not found.');
     const authorization = await authorizeConversation(tx, db, conversation, callerUid, callerClaims, 'send', timeOf(now));
     const orderId = contextualOrderId(conversation, body.orderId, authorization);
+
+    let replyTo = null;
+    if (replyToMessageId) {
+      const replySnapshot = await tx.get(conversationRef.collection('messages').doc(replyToMessageId));
+      if (!replySnapshot.exists) {
+        throw new OtpError(404, 'CHAT_REPLY_TARGET_NOT_FOUND', 'The message you are replying to was not found.');
+      }
+      const target = withId(replySnapshot);
+      if (!Number.isSafeInteger(Number(target.seq)) || Number(target.seq) < 1) {
+        throw new OtpError(400, 'CHAT_REPLY_TARGET_INVALID', 'The reply target is invalid.');
+      }
+      let senderDisplayName = '';
+      if (target.senderRole === 'manager') {
+        senderDisplayName = clean(conversation.branchDisplayName || 'Station', 80);
+      } else if (target.senderUid) {
+        const senderSnapshot = await tx.get(db.collection('users').doc(clean(target.senderUid, 128)));
+        senderDisplayName = senderSnapshot.exists ? profileDisplayName(withId(senderSnapshot)) : '';
+      }
+      if (!senderDisplayName) {
+        senderDisplayName = target.senderRole === 'distributor' ? 'Distributor' : 'Requester';
+      }
+      const isDeleted = Boolean(target.deletedAt);
+      const snippet = isDeleted ? 'Message deleted' : clean(target.body, 140);
+      replyTo = {
+        messageId: target.id,
+        seq: Number(target.seq),
+        senderUid: clean(target.senderUid, 128),
+        senderRole: clean(target.senderRole, 30),
+        senderPublicUidSnapshot: clean(target.senderPublicUidSnapshot, 80),
+        senderDisplayName,
+        snippet,
+      };
+    }
+
     const mutationId = mutationRegistryId(authorization.principal, clientMutationId);
     const mutationRef = db.collection('chatMutationIds').doc(mutationId);
     const mutationSnapshot = await tx.get(mutationRef);
@@ -682,6 +717,7 @@ async function sendMessage({ db, callerUid, callerClaims, body, now, createMessa
       type: 'text',
       body: normalizedBody,
       ...(orderId ? { orderId } : {}),
+      ...(replyTo ? { replyTo } : {}),
       createdAt: now,
       retentionHold: false,
       retentionClass: clean(conversation.retentionClass, 64) || 'standard',

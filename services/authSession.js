@@ -431,11 +431,16 @@ const validateRoleAccessOnce = async (expectedRole) => {
       ? token.claims?.admin === true || token.claims?.role === 'admin'
       : token.claims?.manager === true || token.claims?.role === 'manager';
     if (!trustedClaim) {
+      const activeSession = getActiveSession();
+      const redirectDestination =
+        activeSession?.role && isValidRole(activeSession.role)
+          ? getRoleHomePath(activeSession.role)
+          : getRoleLoginPath(expected);
       return {
         status: 'unauthorized',
         message: expected === 'admin' ? 'Administrator access is required.' : 'Manager access is required.',
-        redirectTo: getRoleLoginPath(expected),
-        shouldSignOut: true,
+        redirectTo: redirectDestination,
+        shouldSignOut: false,
         clearRole: expected,
       };
     }
@@ -460,7 +465,7 @@ const validateRoleAccessOnce = async (expectedRole) => {
           ? 'Manager profile could not be verified. Please contact support.'
           : 'Unauthorized Access',
       redirectTo: getRoleLoginPath(expected),
-      shouldSignOut: true,
+      shouldSignOut: false,
       clearRole: expected,
     };
   }
@@ -471,6 +476,19 @@ const validateRoleAccessOnce = async (expectedRole) => {
       message: 'Unauthorized Access',
       redirectTo: getRoleLoginPath(expected),
       clearRole: expected,
+    };
+  }
+
+  if (profile?.role && isValidRole(profile.role) && profile.role !== expected) {
+    saveRoleSession(profile);
+
+    return {
+      status: 'role-mismatch',
+      message: 'Unauthorized Access',
+      redirectTo: getRoleHomePath(profile.role),
+      clearRole: expected,
+      actualRole: profile.role,
+      shouldSignOut: false,
     };
   }
 
@@ -530,19 +548,6 @@ const validateRoleAccessOnce = async (expectedRole) => {
       clearRole: expected,
     };
   }
-
-  if (profile.role !== expected) {
-    saveRoleSession(profile);
-
-    return {
-      status: 'role-mismatch',
-      message: 'Unauthorized Access',
-      redirectTo: getRoleHomePath(profile.role),
-      clearRole: expected,
-      actualRole: profile.role,
-    };
-  }
-
 
   if (expected === 'manager') {
     try {

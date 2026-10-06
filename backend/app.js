@@ -66,7 +66,7 @@ function createRequestListener(routeMap = routes) {
 
     try {
       const maxBytes = pathname === '/api/admin/products' ? MAX_PRODUCT_IMAGE_REQUEST_BYTES : MAX_REQUEST_BYTES;
-      req.body = ['POST', 'PUT', 'PATCH'].includes(req.method) ? await readBody(req, maxBytes) : '';
+      req.body = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method) ? await readBody(req, maxBytes) : '';
       await handler(req, res);
     } catch (error) {
       if (res.writableEnded) return;

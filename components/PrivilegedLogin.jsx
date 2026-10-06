@@ -7,7 +7,7 @@ import { getDocFromServer, doc } from 'firebase/firestore';
 import { onAuthStateChanged, signInWithCustomToken, signInWithEmailAndPassword, signOut } from 'firebase/auth';
 
 import { auth, db } from '../firebase';
-import { cacheValidatedPrivilegedAccess, clearAllAuthSessions, saveRoleSession } from '../services/authSession';
+import { cacheValidatedPrivilegedAccess, clearAllAuthSessions, fetchFirestoreUserProfile, getRoleHomePath, isValidRole, saveRoleSession } from '../services/authSession';
 import { loginWithUsername } from '../services/usernameAuth';
 import { warmLoginBackend } from '../services/apiWarmup';
 import PasswordVisibilityButton from './PasswordVisibilityButton';
@@ -199,7 +199,17 @@ export default function PrivilegedLogin() {
       try {
         await runPrivilegedLoginValidation(role, user, () => finishAuthenticatedLogin(user));
       }
-      catch (loginError) { if (active) await rejectLogin(loginError); }
+      catch (loginError) {
+        if (!active) return;
+        try {
+          const profile = await fetchFirestoreUserProfile(user);
+          if (profile && isValidRole(profile.role) && profile.role !== role) {
+            routerRef.current.replace(getRoleHomePath(profile.role));
+            return;
+          }
+        } catch {}
+        await rejectLogin(loginError);
+      }
       finally { if (active) setLoading(false); }
     });
     return () => { active = false; unsubscribe(); };

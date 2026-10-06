@@ -112,6 +112,13 @@ Use this skill for BlueTap product catalogs, provider selection, order creation,
 - Active platform ordering restrictions block the ordering flow. Active branch restrictions visibly disable only the matching provider while preserving unrelated provider discovery and station messaging. Manager approval cards may open only the canonical `requester_branch` order-follow-up conversation.
 - Restricted provider cards retain branch name, distance, and delivery-radius context while adding a non-color-only warning, expiry when available, an error accent/surface, and a disabled Select action. The New Request form does not expose station messaging; Requester branch inquiries remain available from the grouped chat panel.
 
+## Unified Request Details Model and Grand Total Integrity
+
+- Shared normalization layer `services/orderNormalizer.js` provides `formatCurrency`, `normalizeRequestDetails`, and `resolveOrderFromList`.
+- Authoritative Grand Total extraction priority: `totalAtOrder` -> `total_cost` -> `grandTotalAmount` -> `grandTotal` -> `totalAmount` -> `total`, followed by line-item fallback calculation (`subtotal + deliveryFee - discount`).
+- Safe money formatting: format valid numbers as `₱300.00`; missing/invalid/NaN as `'—'` (never NaN, ₱undefined, or fake ₱0.00 unless explicitly 0).
+- All global consumers (`RequestDetailsModal.jsx`, `useCurrentPageRequestDetails.js`, `r_notification.jsx`, `d_notification.jsx`, and BlueTap Assistant `sanitizeOrder`) consume normalized request details and authoritative grand totals.
+
 ## Verification
 
 - Test location grant, denial, unavailable and manual selection; Haversine ordering; inactive/unlocated branch exclusion; markers, selection and fit view; missing images; multiple products; Admin product and branch lifecycle; price recalculation and snapshots; inactive product/branch rejection; trusted UID; exact order snapshots; bottom-nav/keyboard safety; notifications; profile fallbacks; and supported theme behavior.

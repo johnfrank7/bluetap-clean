@@ -38,10 +38,16 @@ export const loadConversationSummaries = async () => (
   await chatRequest('/api/chat/conversations')
 ).conversations || [];
 
-export const sendMessage = async ({ conversationId, clientMutationId, body, orderId }) => (
+export const sendMessage = async ({ conversationId, clientMutationId, clientMessageId, body, orderId, replyToMessageId }) => (
   await chatRequest('/api/chat/messages', {
     method: 'POST',
-    body: { conversationId, clientMutationId, body, ...(orderId ? { orderId } : {}) },
+    body: {
+      conversationId,
+      clientMutationId: clientMutationId || clientMessageId,
+      body,
+      ...(orderId ? { orderId } : {}),
+      ...(replyToMessageId ? { replyToMessageId } : {}),
+    },
   })
 ).message;
 

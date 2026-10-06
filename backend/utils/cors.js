@@ -43,7 +43,7 @@ function applyCors(req, res, env = process.env) {
   const vary = String(res.getHeader?.('Vary') || '').split(',').map((value) => value.trim()).filter(Boolean);
   if (!vary.some((value) => value.toLowerCase() === 'origin')) vary.push('Origin');
   res.setHeader('Vary', vary.join(', '));
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
 
   if (!isAllowedOrigin(req, origin, env)) {

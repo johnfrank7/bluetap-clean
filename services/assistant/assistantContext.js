@@ -5,6 +5,7 @@ import {
 } from '../../constants/requesterOrderStatus';
 import { formatDeliveryFailureReason } from '../../constants/deliveryFailureReasons';
 import { getLocalDateKey } from './assistantStorage';
+import { normalizeRequestDetails } from '../orderNormalizer';
 
 const clean = (value) => String(value || '').trim();
 
@@ -72,7 +73,8 @@ export function sanitizeOrder(order = {}) {
     (order.quantity ? `${order.quantity} container(s)` : 'Mineral Water')
   );
 
-  const totalAmount = Number(order.totalAmount ?? order.total ?? order.price ?? 0);
+  const normalized = normalizeRequestDetails(order);
+  const totalAmount = normalized?.grandTotal ?? Number(order.totalAmount ?? order.total ?? order.price ?? 0);
   const total = Number.isFinite(totalAmount) && totalAmount > 0 ? `₱${totalAmount.toFixed(2)}` : '';
 
   const scheduleRaw = order.scheduledAt || order.scheduled_at || order.delivery_date || order.deliverySchedule;

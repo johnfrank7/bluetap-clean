@@ -1,5 +1,5 @@
-const SOUND_COOLDOWN_MS = Object.freeze({ admin: 700, theme: 120 });
-const lastPlayedAt = { admin: 0, theme: 0 };
+const SOUND_COOLDOWN_MS = Object.freeze({ admin: 700, theme: 120, chat: 400 });
+const lastPlayedAt = { admin: 0, theme: 0, chat: 0 };
 let sharedAudioContext = null;
 
 const getWebAudioContext = () => {
@@ -57,4 +57,10 @@ const playAdminEntrySound = () => safelyPlay('admin', (context, startAt) => {
   playTone(context, { frequency: 390, endFrequency: 780, startAt: startAt + 0.075, duration: 0.22, gain: 0.022, type: 'sine' });
 });
 
-module.exports = { playAdminEntrySound, playThemeDropSound };
+const playIncomingMessageSound = ({ subtle = false } = {}) => safelyPlay('chat', (context, startAt) => {
+  const gainMultiplier = subtle ? 0.45 : 1.0;
+  playTone(context, { frequency: 540, endFrequency: 720, startAt, duration: 0.11, gain: 0.024 * gainMultiplier, type: 'sine' });
+  playTone(context, { frequency: 720, endFrequency: 960, startAt: startAt + 0.04, duration: 0.13, gain: 0.028 * gainMultiplier, type: 'sine' });
+});
+
+module.exports = { playAdminEntrySound, playIncomingMessageSound, playThemeDropSound };

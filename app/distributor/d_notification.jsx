@@ -23,6 +23,7 @@ import AnimatedPresenceItem from '../../components/AnimatedPresenceItem';
 import { useAnimatedPresenceList } from '../../components/useAnimatedPresenceList';
 import useNotificationPageMotion, { NOTIFICATION_LIST_MOTION_DURATION_MS } from '../../components/useNotificationPageMotion';
 import useSingleFlightNavigation from '../../components/useSingleFlightNavigation';
+import { resolveOrderFromList } from '../../services/orderNormalizer';
 
 const NOTIFICATION_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -76,12 +77,14 @@ export default function DistributorNotification() {
   React.useEffect(() => { if (events.length) markAllSeen(); }, [events, markAllSeen]);
   React.useEffect(() => {
     const orderId = Array.isArray(params.orderId) ? params.orderId[0] : params.orderId;
-    if (!orderId || openedParamRef.current === orderId || !orders.some((order) => String(order.id || order.sourceId) === String(orderId))) return;
+    if (!orderId || openedParamRef.current === orderId) return;
+    const resolved = resolveOrderFromList(orderId, orders);
+    if (!resolved) return;
     openedParamRef.current = String(orderId);
     setSelectedOrderId(String(orderId));
   }, [orders, params.orderId]);
   const selectedOrder = useMemo(
-    () => orders.find((order) => String(order.id || order.sourceId) === String(selectedOrderId)) || null,
+    () => (selectedOrderId ? resolveOrderFromList(orders.find((order) => String(order.id || order.sourceId) === String(selectedOrderId)) || selectedOrderId, orders) : null),
     [orders, selectedOrderId]
   );
 
