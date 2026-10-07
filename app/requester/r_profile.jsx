@@ -347,7 +347,6 @@ export default function ProfilePage() {
     } catch (error) {
       console.log('Requester profile edit error:', error.message);
       setToast({ visible: true, message: error.message || 'Profile could not be saved.', type: 'error' });
-      Alert.alert('Profile not saved', error.message);
     } finally {
       setSavingProfile(false);
     }

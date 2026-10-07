@@ -25,6 +25,8 @@ function sanitizedPolicy(policy) {
     verificationRetentionHours: policy.verificationRetentionHours,
     rateLimitRetentionDays: policy.rateLimitRetentionDays,
     completedOrderArchiveDays: policy.completedOrderArchiveDays,
+    chatMessageRetentionDays: policy.chatMessageRetentionDays,
+    chatReportEvidenceRetentionDays: policy.chatReportEvidenceRetentionDays,
     version: policy.version,
   };
 }
@@ -91,6 +93,9 @@ function createAdminSystemMaintenanceHandler(getAdmin = getFirebaseAdmin) {
       throw new OtpError(400, 'INVALID_MAINTENANCE_ACTION', 'Choose a supported System Maintenance action.');
     } catch (error) {
       const known = error instanceof OtpError;
+      if (!known) {
+        console.error('[admin-system-maintenance]', error);
+      }
       return res.status(known ? error.status : 500).json({ error: {
         reason: known ? error.reason : 'service-unavailable',
         message: known ? error.message : 'System Maintenance is temporarily unavailable.',

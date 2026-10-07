@@ -46,7 +46,7 @@ function AdminShellLayout({ title, subtitle, children }) {
   const { actionableRequestsCount, pendingDistributorCount } = useAdminRealtimeData();
   const moderationCount = useModerationActivityBadge('admin');
   const sidebarWidth = React.useRef(new Animated.Value(DESKTOP_WIDTH)).current, drawerProgress = React.useRef(new Animated.Value(0)).current;
-  React.useEffect(() => { warmAdminBackend(); }, []);
+  React.useEffect(() => { warmAdminBackend().catch(() => {}); }, []);
   React.useEffect(() => { let active = true; AsyncStorage.getItem(ADMIN_SIDEBAR_STORAGE_KEY).then((value) => { if (active && value === 'true') setCollapsed(true); }).catch(() => {}); return () => { active = false; }; }, []);
   React.useEffect(() => { Animated.timing(sidebarWidth, { toValue: collapsed ? COLLAPSED_WIDTH : DESKTOP_WIDTH, duration: 240, useNativeDriver: false }).start(); AsyncStorage.setItem(ADMIN_SIDEBAR_STORAGE_KEY, String(collapsed)).catch(() => {}); }, [collapsed, sidebarWidth]);
   React.useEffect(() => { if (!compact) setDrawerOpen(false); }, [compact]);

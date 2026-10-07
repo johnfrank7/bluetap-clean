@@ -331,3 +331,38 @@ test('unsupported browser-selected cleanup categories are rejected safely', asyn
   assert.equal(result.body.error.reason, 'UNSUPPORTED_CLEANUP_CATEGORY');
   assert.equal(f.records.has('users/user-1'), true);
 });
+
+test('GET overview returns lastCleanupAt: null and all 7 policy fields when never run', async () => {
+  const f = fixture();
+  const result = await f.invoke('GET', 'admin-token');
+  assert.equal(result.statusCode, 200);
+  assert.equal(result.body.lastCleanupAt, null);
+  assert.equal(result.body.cleanupMode, 'Manual');
+  assert.equal(typeof result.body.policy.chatMessageRetentionDays, 'number');
+  assert.equal(typeof result.body.policy.chatReportEvidenceRetentionDays, 'number');
+  assert.equal(typeof result.body.policy.completedOrderArchiveDays, 'number');
+  assert.equal(typeof result.body.policy.incompleteRegistrationRetentionHours, 'number');
+  assert.equal(typeof result.body.policy.notificationRetentionDays, 'number');
+  assert.equal(typeof result.body.policy.rateLimitRetentionDays, 'number');
+  assert.equal(typeof result.body.policy.verificationRetentionHours, 'number');
+});
+
+test('previewCleanup and runCleanup degrade safely without throwing 500 when queries fail or indexes are missing', async () => {
+  const f = fixture();
+  f.db.collectionGroup = () => ({
+    where: () => ({
+      orderBy: () => ({
+        limit: () => ({
+          get: async () => { throw new Error('9 FAILED_PRECONDITION: The query requires an index.'); },
+        }),
+      }),
+    }),
+  });
+  const preview = await previewCleanup(f.db, DEFAULT_RETENTION_POLICY, NOW);
+  assert.ok(preview);
+  assert.equal(typeof preview.counts.temporaryRecordsEligible, 'number');
+
+  const run = await runCleanup(f.db, DEFAULT_RETENTION_POLICY, 'admin-1', NOW);
+  assert.ok(run);
+  assert.equal(typeof run.summary.totalTemporaryRecordsRemoved, 'number');
+});

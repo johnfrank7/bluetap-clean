@@ -28,7 +28,7 @@ export default function AdminBranchesPage() {
   const { colors } = useAdminTheme(); const styles = createStyles(colors);
   const { data, loading, refreshing, error, refresh } = useAdminData(ADMIN_CACHE_KEYS.branches, getBranches);
   const branches = data || [];
-  const [form, setForm] = React.useState(empty); const [editingId, setEditingId] = React.useState(''); const [saving, setSaving] = React.useState(false); const [message, setMessage] = React.useState('');
+  const [form, setForm] = React.useState(empty); const [editingId, setEditingId] = React.useState(''); const [saving, setSaving] = React.useState(false);
   const [toast, setToast] = React.useState({ visible: false, message: '', type: 'info' });
   const showToast = (msg, type = 'info') => setToast({ visible: true, message: msg, type });
   const [barangayOpen, setBarangayOpen] = React.useState(false); const [barangayQuery, setBarangayQuery] = React.useState(''); const [locating, setLocating] = React.useState(false); const [locationError, setLocationError] = React.useState('');
@@ -55,9 +55,8 @@ export default function AdminBranchesPage() {
     setCoordinateText(branch.latitude == null ? '' : `${Number(branch.latitude).toFixed(6)}, ${Number(branch.longitude).toFixed(6)}`);
     setBarangayOpen(false);
     setLocationError('');
-    setMessage('');
   };
-  const cancel = () => { setEditingId(''); setForm(empty); setBarangayQuery(''); setCoordinateText(''); setBarangayOpen(false); setLocationError(''); setMessage(''); };
+  const cancel = () => { setEditingId(''); setForm(empty); setBarangayQuery(''); setCoordinateText(''); setBarangayOpen(false); setLocationError(''); };
 
   const editingBranch = React.useMemo(() => branches.find((b) => b.id === editingId) || null, [branches, editingId]);
   const isBranchDirty = React.useMemo(() => {
@@ -105,14 +104,14 @@ export default function AdminBranchesPage() {
   };
   const selectBarangay = (barangay) => { setForm((current) => ({ ...current, barangay })); setBarangayQuery(barangay); setBarangayOpen(false); };
   const save = async () => {
-    setSaving(true); setMessage('');
+    setSaving(true);
     try {
       const payload = { name: form.name, barangay: form.barangay, city: TOLEDO_CITY, address: form.address, latitude: Number(form.latitude), longitude: Number(form.longitude), serviceRadiusKm: Number(form.serviceRadiusKm), baseDeliveryFee: Number(form.baseDeliveryFee || 0), includedRadiusKm: Number(form.includedRadiusKm || form.serviceRadiusKm), outsideRadiusFeePerKm: Number(form.outsideRadiusFeePerKm || 0) };
       if (editingId) await updateBranch(editingId, payload); else await createBranch({ ...payload, code: form.code });
-      const wasEditing = Boolean(editingId); cancel(); await refresh({ force: true }); const branchMsg = wasEditing ? 'Branch updated.' : 'Branch created.'; setMessage(branchMsg); showToast(branchMsg, 'success');
-    } catch (saveError) { setMessage(saveError.message); showToast(saveError.message, 'error'); } finally { setSaving(false); }
+      const wasEditing = Boolean(editingId); cancel(); await refresh({ force: true }); const branchMsg = wasEditing ? 'Branch updated.' : 'Branch created.'; showToast(branchMsg, 'success');
+    } catch (saveError) { showToast(saveError.message, 'error'); } finally { setSaving(false); }
   };
-  const toggle = async (branch) => { setSaving(true); setMessage(''); try { await updateBranch(branch.id, { status: branch.status === 'active' ? 'inactive' : 'active' }); await refresh({ force: true }); const toggleMsg = branch.status === 'active' ? 'Branch deactivated.' : 'Branch activated.'; setMessage(toggleMsg); showToast(toggleMsg, 'success'); } catch (toggleError) { setMessage(toggleError.message); showToast(toggleError.message, 'error'); } finally { setSaving(false); } };
+  const toggle = async (branch) => { setSaving(true); try { await updateBranch(branch.id, { status: branch.status === 'active' ? 'inactive' : 'active' }); await refresh({ force: true }); const toggleMsg = branch.status === 'active' ? 'Branch deactivated.' : 'Branch activated.'; showToast(toggleMsg, 'success'); } catch (toggleError) { showToast(toggleError.message, 'error'); } finally { setSaving(false); } };
   const previewLocation = isValidLocation(form) ? { latitude: Number(form.latitude), longitude: Number(form.longitude) } : null;
 
   return <AdminShell title="Branches" subtitle="Create provider locations and set their normal delivery coverage.">
@@ -142,7 +141,6 @@ export default function AdminBranchesPage() {
       <View style={styles.coordinates}><Text style={styles.coordinatesLabel}>Coordinates</Text><Text style={styles.coordinatesValue}>{previewLocation ? `${previewLocation.latitude.toFixed(6)}, ${previewLocation.longitude.toFixed(6)}` : 'Pin the branch using GPS or the map.'}</Text></View>
       <View style={styles.actions}>{editingId && <TouchableOpacity style={styles.secondary} onPress={() => confirmLeave(cancel)}><Text style={styles.secondaryText}>Cancel</Text></TouchableOpacity>}<TouchableOpacity disabled={saving} style={[styles.primary, saving && styles.buttonDisabled]} onPress={save}><Text style={styles.primaryText}>{saving ? 'Saving…' : editingId ? 'Save changes' : 'Create branch'}</Text></TouchableOpacity></View>
     </View>
-    {!!message && <View accessibilityRole="alert" style={styles.notice}><Text style={styles.noticeText}>{message}</Text></View>}
     <View style={styles.listHeader}><View><Text style={styles.listTitle}>Existing branches</Text><Text style={styles.listHelp}>Only active branches with coordinates are shown to Requesters.</Text></View><Text style={styles.total}>{refreshing ? 'Refreshing…' : `${branches.length} total`}</Text></View>
     {error ? <View style={styles.empty}><Text style={styles.noticeText}>{error}</Text><TouchableOpacity onPress={() => refresh({ force: true })}><Text style={styles.retry}>Try again</Text></TouchableOpacity></View> : loading && !data ? <View style={styles.grid}>{[1, 2, 3].map((key) => <CardSkeleton key={key} style={styles.skeleton} />)}</View> : branches.length === 0 ? <View style={styles.empty}><Text style={styles.emptyTitle}>No branches yet</Text></View> : <View style={styles.grid}>{branches.map((branch) => {
       const pricing = normalizeBranchDeliveryPricing(branch);

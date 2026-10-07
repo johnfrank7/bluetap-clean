@@ -1,5 +1,5 @@
 import React from 'react';
-import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
+import { ActivityIndicator, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import AdminShell from '../../components/AdminShell';
 import { useAdminRealtimeData } from '../../components/AdminDataProvider';
 import { TableSkeleton } from '../../components/AdminSkeleton';
@@ -10,6 +10,33 @@ import TopToastFeedback from '../../components/TopToastFeedback';
 import { getBranches, manageAdminAccount, updateDistributor } from '../../services/branchManagement';
 import { ADMIN_CACHE_KEYS, useAdminData } from '../../services/adminDataCache';
 import { formatPhilippinePhone } from '../../services/phoneUtils';
+
+function DistributorsFilterWebStyles({ colors }) {
+  if (Platform.OS !== 'web') return null;
+
+  const primary = colors.primaryAction || '#0B67AD';
+  const primaryStrong = colors.primaryDeep || primary;
+
+  return React.createElement('style', {
+    dangerouslySetInnerHTML: {
+      __html: `
+        button[data-admin-distributors-filter-selected="true"] {
+          background-color: ${primary} !important;
+          border-color: ${primary} !important;
+        }
+        button[data-admin-distributors-filter-selected="true"]:hover,
+        button[data-admin-distributors-filter-selected="true"]:active {
+          background-color: ${primaryStrong} !important;
+          border-color: ${primaryStrong} !important;
+        }
+        button[data-admin-distributors-filter-selected="false"]:hover {
+          background-color: ${colors.primarySoft || '#EAF6FF'} !important;
+          border-color: ${colors.primary || '#187BCD'} !important;
+        }
+      `,
+    },
+  });
+}
 
 const PAGE_SIZE = 10;
 const STATUSES = [['pending', 'Pending', 'Applications waiting for review'], ['active', 'Active', 'Approved and available accounts'], ['inactive', 'Inactive', 'Temporarily disabled accounts'], ['rejected', 'Rejected', 'Applications that were declined']];
@@ -25,7 +52,24 @@ const phoneText = (value) => value ? formatPhilippinePhone(value) || String(valu
 const publicUidText = (item) => item.publicUid || 'Not assigned';
 
 function Action({ label, tone = 'neutral', disabled, onPress, styles }) { return <Pressable accessibilityRole="button" accessibilityLabel={label} disabled={disabled} onPress={onPress} style={({ hovered, focused, pressed }) => [styles.action, styles[`action${tone}`], (hovered || focused) && styles.hovered, pressed && styles.pressed, disabled && styles.disabled]}><Text style={[styles.actionText, styles[`actionText${tone}`]]}>{label}</Text></Pressable>; }
-function Choice({ label, selected, onPress, styles }) { return <Pressable accessibilityRole="button" accessibilityState={{ selected }} onPress={onPress} style={({ hovered, focused, pressed }) => [styles.choice, selected && styles.choiceSelected, (hovered || focused) && !selected && styles.hovered, pressed && styles.pressed]}><Text style={[styles.choiceText, selected && styles.choiceTextSelected]}>{label}</Text></Pressable>; }
+function Choice({ label, selected, onPress, styles }) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityState={{ selected }}
+      dataSet={{ adminDistributorsFilterSelected: selected ? 'true' : 'false' }}
+      onPress={onPress}
+      style={({ hovered, focused, pressed }) => [
+        styles.choice,
+        selected ? styles.choiceSelected : styles.choiceUnselected,
+        (hovered || focused) && !selected && styles.hovered,
+        pressed && styles.pressed,
+      ]}
+    >
+      <Text style={[styles.choiceText, selected ? styles.choiceTextSelected : styles.choiceTextUnselected]}>{label}</Text>
+    </Pressable>
+  );
+}
 function Field({ label, value, styles }) { return <View style={styles.field}><Text style={styles.fieldLabel}>{label}</Text><Text selectable style={styles.fieldValue}>{value || 'Not recorded'}</Text></View>; }
 function RowActions({ item, busy, onView, onEdit, onApprove, onAction, styles }) {
   const status = statusOf(item);
@@ -56,6 +100,7 @@ export default function DistributorManagement() {
   const saveEdit = async () => { if (!edit?.fullName.trim() || !edit?.email.trim() || !edit?.branchId) return; setBusy(`${edit.item.uid}:edit`); setActionError(''); try { await manageAdminAccount(edit.item.uid, 'updateAccount', { fullName: edit.fullName.trim(), email: edit.email.trim(), role: 'distributor', branchId: edit.branchId, active: statusOf(edit.item) === 'active' }); await refreshDistributors({ force: true }); setEdit(null); notify('Distributor account changes saved and audited.', 'success'); } catch (error) { const message = error.message || 'Unable to save this Distributor.'; setActionError(message); notify(message, 'error'); } finally { setBusy(''); } };
   const branchChoices = branches.filter((branch) => `${branch.name} ${branch.code || ''}`.toLowerCase().includes(branchQuery.trim().toLowerCase())); const loadError = actionError || distributorsError || branchState.error; const resetFilters = () => { setQuery(''); setBranchFilter('all'); }; const actions = (item) => <RowActions item={item} busy={busy.startsWith(`${item.uid}:`)} onView={setDetails} onEdit={openEdit} onApprove={openApproval} onAction={act} styles={styles} />;
   return <AdminShell title="Distributor Management" subtitle="Review applications and manage authorized Distributor accounts.">
+    <DistributorsFilterWebStyles colors={colors} />
     <TopToastFeedback visible={toast.visible} message={toast.message} type={toast.type} onDismiss={() => setToast((value) => ({ ...value, visible: false }))} />
     <View style={styles.summaryGrid}>{STATUSES.map(([value, label, help]) => {
       const tone = statusTones[value] || { color: colors.textPrimary, bg: colors.surface, border: colors.border };
@@ -80,7 +125,7 @@ function EditModal({ state, setState, branches, busy, onSave, colors, styles }) 
 
 const createStyles = (colors, isMobile) => StyleSheet.create({
   summaryGrid:{flexDirection:'row',flexWrap:'wrap',gap:10,marginBottom:16},summary:{flexGrow:1,flexBasis:isMobile ? '47%' : 190,minWidth:isMobile ? '45%' : undefined,maxWidth:isMobile ? '49%' : undefined,minHeight:isMobile ? 84 : 104,backgroundColor:colors.surface,borderWidth:1,borderColor:colors.border,borderRadius:14,padding:isMobile ? 12 : 16,justifyContent:isMobile ? 'center' : 'space-between'},summarySelected:{borderWidth:2},summaryTop:{flexDirection:'row',justifyContent:'space-between',alignItems:'center',gap:12},summaryColumn:{flexDirection:'column',gap:3},summaryLabel:{color:colors.textPrimary,fontSize:isMobile ? 13 : 15,fontWeight:'900'},summaryCount:{color:colors.textPrimary,fontSize:isMobile ? 22 : 25,fontWeight:'900'},selectedText:{color:colors.primary},summaryHelp:{color:colors.textSecondary,fontSize:12,lineHeight:17,marginTop:10},
-  card:{backgroundColor:colors.surface,borderRadius:18,padding:20,borderWidth:1,borderColor:colors.border},toolbar:{flexDirection:'row',flexWrap:'wrap',gap:16,alignItems:'flex-end'},searchWrap:{flexGrow:1,flexBasis:320,minWidth:0},sortWrap:{flexGrow:1,flexBasis:370},controlLabel:{color:colors.textPrimary,fontSize:12,fontWeight:'900',marginBottom:7},searchRow:{flexDirection:'row',gap:8},input:{flex:1,minWidth:0,minHeight:44,borderWidth:1,borderColor:colors.inputBorder,borderRadius:10,paddingHorizontal:12,color:colors.textPrimary,backgroundColor:colors.input,outlineStyle:'none'},choiceRow:{flexDirection:'row',flexWrap:'wrap',gap:7},choice:{minHeight:40,justifyContent:'center',paddingHorizontal:11,borderRadius:9,borderWidth:1,borderColor:colors.border,backgroundColor:colors.surfaceAlt},choiceSelected:{backgroundColor:colors.primaryAction || '#0B67AD',borderColor:colors.primaryAction || '#0B67AD'},choiceText:{color:colors.textSecondary,fontSize:12,fontWeight:'800'},choiceTextSelected:{color:colors.onPrimary || '#FFFFFF',fontWeight:'900'},hovered:{borderColor:colors.primary},pressed:{opacity:.82},branchFilters:{marginTop:16},results:{minHeight:50,flexDirection:'row',alignItems:'center',justifyContent:'space-between',gap:12,borderBottomWidth:1,borderBottomColor:colors.border},resultText:{color:colors.textSecondary,fontSize:13,fontWeight:'700'},resetText:{color:colors.primary,fontSize:12,fontWeight:'900'},error:{borderWidth:1,borderColor:colors.danger,backgroundColor:colors.dangerSoft,borderRadius:10,padding:12,marginVertical:10},errorText:{color:colors.danger,fontWeight:'700'},retryText:{color:colors.primary,fontWeight:'900',marginTop:7},
+  card:{backgroundColor:colors.surface,borderRadius:18,padding:20,borderWidth:1,borderColor:colors.border},toolbar:{flexDirection:'row',flexWrap:'wrap',gap:16,alignItems:'flex-end'},searchWrap:{flexGrow:1,flexBasis:320,minWidth:0},sortWrap:{flexGrow:1,flexBasis:370},controlLabel:{color:colors.textPrimary,fontSize:12,fontWeight:'900',marginBottom:7},searchRow:{flexDirection:'row',gap:8},input:{flex:1,minWidth:0,minHeight:44,borderWidth:1,borderColor:colors.inputBorder,borderRadius:10,paddingHorizontal:12,color:colors.textPrimary,backgroundColor:colors.input,outlineStyle:'none'},choiceRow:{flexDirection:'row',flexWrap:'wrap',gap:8},choice:{minHeight:44,justifyContent:'center',alignItems:'center',paddingHorizontal:14,paddingVertical:10,borderRadius:10,borderWidth:1,borderColor:colors.border,backgroundColor:colors.surfaceAlt},choiceSelected:{backgroundColor:colors.primaryAction || '#0B67AD',borderColor:colors.primaryAction || '#0B67AD'},choiceUnselected:{backgroundColor:colors.surfaceAlt,borderColor:colors.border},choiceText:{fontSize:13,fontWeight:'800'},choiceTextSelected:{color:colors.onPrimary || '#FFFFFF',fontWeight:'900'},choiceTextUnselected:{color:colors.textPrimary,fontWeight:'800'},hovered:{borderColor:colors.primary},pressed:{opacity:.82},branchFilters:{marginTop:16},results:{minHeight:50,flexDirection:'row',alignItems:'center',justifyContent:'space-between',gap:12,borderBottomWidth:1,borderBottomColor:colors.border},resultText:{color:colors.textSecondary,fontSize:13,fontWeight:'700'},resetText:{color:colors.primary,fontSize:12,fontWeight:'900'},error:{borderWidth:1,borderColor:colors.danger,backgroundColor:colors.dangerSoft,borderRadius:10,padding:12,marginVertical:10},errorText:{color:colors.danger,fontWeight:'700'},retryText:{color:colors.primary,fontWeight:'900',marginTop:7},
   table:{minWidth:1160},tableRow:{minHeight:86,flexDirection:'row',alignItems:'center',borderBottomWidth:1,borderBottomColor:colors.border},tableHeader:{minHeight:48,backgroundColor:colors.surfaceAlt},cell:{paddingHorizontal:10},col0:{width:180},col1:{width:120},col2:{width:160},col3:{width:210},col4:{width:150},col5:{width:125},col6:{width:215},headerText:{color:colors.textSecondary,fontSize:11,fontWeight:'900',textTransform:'uppercase'},name:{color:colors.textPrimary,fontSize:14,fontWeight:'900'},muted:{color:colors.textSecondary,fontSize:12,marginTop:3},body:{color:colors.textPrimary,fontSize:12,lineHeight:17},publicUid:{color:colors.primary,fontSize:12,fontWeight:'900'},requested:{color:colors.warning,fontSize:10,fontWeight:'900',marginTop:4,textTransform:'uppercase'},actions:{flexDirection:'row',flexWrap:'wrap',alignItems:'center',gap:6},action:{minHeight:36,justifyContent:'center',alignItems:'center',borderRadius:8,borderWidth:1,borderColor:colors.border,paddingHorizontal:10,backgroundColor:colors.surfaceAlt},actionprimary:{backgroundColor:colors.primaryAction,borderColor:colors.primaryAction},actionsuccess:{backgroundColor:colors.successAction,borderColor:colors.successAction},actiondanger:{backgroundColor:colors.dangerSoft,borderColor:colors.danger},actionText:{color:colors.textPrimary,fontSize:11,fontWeight:'900'},actionTextprimary:{color:colors.onPrimary},actionTextsuccess:{color:colors.onSuccess},actionTextdanger:{color:colors.danger},disabled:{opacity:.5},
   mobileList:{gap:12,marginTop:14},mobileCard:{borderWidth:1,borderColor:colors.border,backgroundColor:colors.surfaceAlt,borderRadius:14,padding:15},mobileHeader:{flexDirection:'row',alignItems:'flex-start',justifyContent:'space-between',gap:12},identity:{flex:1,minWidth:0},fieldGrid:{flexDirection:'row',flexWrap:'wrap',gap:12,marginVertical:14},field:{flexGrow:1,flexBasis:150,minWidth:0},fieldLabel:{color:colors.textSecondary,fontSize:10,fontWeight:'900',textTransform:'uppercase',marginBottom:4},fieldValue:{color:colors.textPrimary,fontSize:13,lineHeight:18,fontWeight:'700'},pagination:{flexDirection:'row',justifyContent:'flex-end',alignItems:'center',gap:12,marginTop:18},backdrop:{flex:1,backgroundColor:colors.overlay,padding:20,justifyContent:'center',alignItems:'center'},modal:{width:'100%',maxWidth:620,maxHeight:'90%',backgroundColor:colors.surface,borderColor:colors.border,borderWidth:1,borderRadius:18,padding:20},modalHeading:{flexDirection:'row',justifyContent:'space-between',gap:12},modalTitle:{color:colors.textPrimary,fontSize:20,fontWeight:'900'},modalCopy:{color:colors.textSecondary,fontSize:13,lineHeight:19,marginTop:7,marginBottom:14},close:{width:36,height:36,borderRadius:9,borderWidth:1,borderColor:colors.border,backgroundColor:colors.surfaceAlt,alignItems:'center',justifyContent:'center'},closeText:{color:colors.textPrimary,fontSize:22},modalContent:{paddingTop:14},section:{borderTopWidth:1,borderTopColor:colors.border,paddingTop:13,marginBottom:13,flexDirection:'row',flexWrap:'wrap',gap:14},sectionTitle:{width:'100%',color:colors.primary,fontSize:11,fontWeight:'900'},inputLabel:{color:colors.textPrimary,fontSize:12,fontWeight:'900',marginBottom:6,marginTop:10},branchList:{maxHeight:240,marginTop:12},branchOption:{borderWidth:1,borderColor:colors.border,borderRadius:10,padding:12,marginBottom:8,backgroundColor:colors.surfaceAlt},branchSelected:{borderColor:colors.primary,backgroundColor:colors.primarySoft,borderWidth:2},branchName:{color:colors.textPrimary,fontWeight:'900'},inlineEmpty:{color:colors.textSecondary,textAlign:'center',padding:18},footer:{flexDirection:'row',justifyContent:'flex-end',gap:9,marginTop:15,paddingTop:14,borderTopWidth:1,borderTopColor:colors.border},
 });

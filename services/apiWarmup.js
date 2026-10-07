@@ -24,7 +24,14 @@ function warm(path, stage, requestUrl = () => getApiUrl(path)) {
   const startedAt = Date.now();
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 12_000);
-  const request = fetch(requestUrl(), {
+  let targetUrl;
+  try {
+    targetUrl = typeof requestUrl === 'function' ? requestUrl() : requestUrl;
+  } catch {
+    clearTimeout(timeout);
+    return Promise.resolve({ ready: false });
+  }
+  const request = fetch(targetUrl, {
     method: path === '/health' ? 'GET' : 'POST',
     ...(path === '/health' ? {} : { headers: { 'Content-Type': 'application/json' }, body: '{}' }),
     signal: controller.signal,

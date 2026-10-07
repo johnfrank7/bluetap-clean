@@ -85,12 +85,26 @@ function validateRetentionPolicy(value) {
 }
 
 async function loadMaintenanceDocument(db) {
-  const snapshot = await db.collection(CONFIG_PATH[0]).doc(CONFIG_PATH[1]).get();
-  return snapshot.exists ? snapshot.data() || {} : {};
+  try {
+    const snapshot = await db.collection(CONFIG_PATH[0]).doc(CONFIG_PATH[1]).get();
+    return snapshot.exists ? snapshot.data() || {} : {};
+  } catch (err) {
+    console.warn('[system-maintenance] loadMaintenanceDocument failed safely:', err?.message || err);
+    return {};
+  }
 }
 
 async function loadRetentionPolicy(db) {
   return normalizeRetentionPolicy(await loadMaintenanceDocument(db));
+}
+
+async function safeQuery(fn, fallback = { docs: [] }) {
+  try {
+    return await fn();
+  } catch (err) {
+    console.warn('[system-maintenance] Query failed safely:', err?.message || err);
+    return fallback;
+  }
 }
 
 function queryBefore(db, collectionName, field, cutoff) {
@@ -130,14 +144,14 @@ async function collectMaintenanceTargets(db, policy, now = Date.now()) {
   const reportEvidenceCutoff = now - policy.chatReportEvidenceRetentionDays * DAY_MS;
 
   const [registrations, usernameReservations, emailVerifications, passwordVerifications, authRateLimits, registrationOtpRateLimits, passwordRateLimits, orders] = await Promise.all([
-    queryBefore(db, 'registrationSessions', 'createdAt', registrationCutoff),
-    queryBefore(db, 'usernameReservations', 'createdAt', registrationCutoff),
-    queryBefore(db, 'emailOtpVerifications', 'createdAt', verificationCutoff),
-    queryBefore(db, 'passwordResetSessions', 'createdAt', verificationCutoff),
-    queryBefore(db, 'authRateLimits', 'resetAt', rateLimitCutoff),
-    db.collection('emailOtpVerifications').where('resetAt', '<=', rateLimitCutoff).get(),
-    queryBefore(db, 'passwordResetRateLimits', 'lastSentAt', rateLimitCutoff),
-    db.collection('requests').where('status', 'in', TERMINAL_ORDER_QUERY_STATUSES).get(),
+    safeQuery(() => queryBefore(db, 'registrationSessions', 'createdAt', registrationCutoff)),
+    safeQuery(() => queryBefore(db, 'usernameReservations', 'createdAt', registrationCutoff)),
+    safeQuery(() => queryBefore(db, 'emailOtpVerifications', 'createdAt', verificationCutoff)),
+    safeQuery(() => queryBefore(db, 'passwordResetSessions', 'createdAt', verificationCutoff)),
+    safeQuery(() => queryBefore(db, 'authRateLimits', 'resetAt', rateLimitCutoff)),
+    safeQuery(() => db.collection('emailOtpVerifications').where('resetAt', '<=', rateLimitCutoff).get()),
+    safeQuery(() => queryBefore(db, 'passwordResetRateLimits', 'lastSentAt', rateLimitCutoff)),
+    safeQuery(() => db.collection('requests').where('status', 'in', TERMINAL_ORDER_QUERY_STATUSES).get()),
   ]);
 
   const registrationSessions = documents(registrations).filter((doc) => expiredSession(doc, registrationCutoff, now, { incomplete: true }));
@@ -161,12 +175,12 @@ async function collectMaintenanceTargets(db, policy, now = Date.now()) {
   let orderingRestrictions = [];
   if (typeof db.collectionGroup === 'function') {
     const [messageSnapshot, openReportSnapshot, escalatedReportSnapshot, resolvedReportSnapshot, chatRestrictionSnapshot, orderingRestrictionSnapshot] = await Promise.all([
-      db.collectionGroup('messages').where('createdAt', '<=', new Date(chatCutoff)).orderBy('createdAt', 'asc').limit(BATCH_SIZE).get(),
-      db.collection('chatReports').where('status', '==', 'open').orderBy('createdAt', 'desc').limit(BATCH_SIZE).get(),
-      db.collection('chatReports').where('status', '==', 'escalated').orderBy('createdAt', 'desc').limit(BATCH_SIZE).get(),
-      db.collection('chatReports').where('resolvedAt', '<=', new Date(reportEvidenceCutoff)).orderBy('resolvedAt', 'asc').limit(BATCH_SIZE).get(),
-      db.collection('chatRestrictions').where('nextExpiryAt', '<=', new Date(now)).limit(BATCH_SIZE).get(),
-      db.collection('orderingRestrictions').where('nextExpiryAt', '<=', new Date(now)).limit(BATCH_SIZE).get(),
+      safeQuery(() => db.collectionGroup('messages').where('createdAt', '<=', new Date(chatCutoff)).orderBy('createdAt', 'asc').limit(BATCH_SIZE).get()),
+      safeQuery(() => db.collection('chatReports').where('status', '==', 'open').orderBy('createdAt', 'desc').limit(BATCH_SIZE).get()),
+      safeQuery(() => db.collection('chatReports').where('status', '==', 'escalated').orderBy('createdAt', 'desc').limit(BATCH_SIZE).get()),
+      safeQuery(() => db.collection('chatReports').where('resolvedAt', '<=', new Date(reportEvidenceCutoff)).orderBy('resolvedAt', 'asc').limit(BATCH_SIZE).get()),
+      safeQuery(() => db.collection('chatRestrictions').where('nextExpiryAt', '<=', new Date(now)).limit(BATCH_SIZE).get()),
+      safeQuery(() => db.collection('orderingRestrictions').where('nextExpiryAt', '<=', new Date(now)).limit(BATCH_SIZE).get()),
     ]);
     chatMessages = documents(messageSnapshot);
     openChatReports = documents(openReportSnapshot);
@@ -186,12 +200,16 @@ async function collectMaintenanceTargets(db, policy, now = Date.now()) {
   }
   for (const messageDoc of chatMessages) {
     for (const reportId of (messageDoc.data()?.retentionHoldReportIds || []).slice(0, 10)) {
-      const reportSnapshot = await db.collection('chatReports').doc(String(reportId)).get();
-      if (!reportSnapshot.exists) continue;
-      const report = reportSnapshot.data() || {};
-      const status = String(report.status || '').toLowerCase();
-      const stillHeld = ['open', 'escalated'].includes(status) || (status === 'resolved' && millis(report.resolvedAt) + policy.chatReportEvidenceRetentionDays * DAY_MS > now);
-      if (stillHeld) evidenceHeldMessageKeys.add(messageKeyFromPath(messageDoc));
+      try {
+        const reportSnapshot = await db.collection('chatReports').doc(String(reportId)).get();
+        if (!reportSnapshot.exists) continue;
+        const report = reportSnapshot.data() || {};
+        const status = String(report.status || '').toLowerCase();
+        const stillHeld = ['open', 'escalated'].includes(status) || (status === 'resolved' && millis(report.resolvedAt) + policy.chatReportEvidenceRetentionDays * DAY_MS > now);
+        if (stillHeld) evidenceHeldMessageKeys.add(messageKeyFromPath(messageDoc));
+      } catch {
+        evidenceHeldMessageKeys.add(messageKeyFromPath(messageDoc));
+      }
     }
   }
   function messageKeyFromPath(doc) { const segments = String(doc.ref?.path || '').split('/'); return segments.length >= 4 ? `${segments[1]}/${doc.id}` : ''; }
@@ -382,27 +400,35 @@ async function runCleanup(db, policy, triggeredBy, now = Date.now()) {
 }
 
 async function loadCleanupHistory(db) {
-  const snapshot = await db.collection('adminAuditLogs').orderBy('createdAt', 'desc').limit(50).get();
-  return documents(snapshot)
-    .map((doc) => ({ id: doc.id, ...(doc.data() || {}) }))
-    .filter((entry) => entry.action === 'SYSTEM_MAINTENANCE_CLEANUP')
-    .slice(0, 10)
-    .map((entry) => ({
-      id: entry.id,
-      createdAt: entry.createdAt || null,
-      triggeredBy: entry.triggeredBy || entry.actorUid || 'system',
-      result: entry.result || 'success',
-      temporaryRecordsRemoved: Number(entry.summary?.totalTemporaryRecordsRemoved || 0),
-      ordersArchived: Number(entry.summary?.archivedOrders || 0),
-    }));
+  try {
+    const snapshot = await db.collection('adminAuditLogs').orderBy('createdAt', 'desc').limit(50).get();
+    return documents(snapshot)
+      .map((doc) => ({ id: doc.id, ...(doc.data() || {}) }))
+      .filter((entry) => entry.action === 'SYSTEM_MAINTENANCE_CLEANUP')
+      .slice(0, 10)
+      .map((entry) => ({
+        id: entry.id,
+        createdAt: entry.createdAt || null,
+        triggeredBy: entry.triggeredBy || entry.actorUid || 'system',
+        result: entry.result || 'success',
+        temporaryRecordsRemoved: Number(entry.summary?.totalTemporaryRecordsRemoved || 0),
+        ordersArchived: Number(entry.summary?.archivedOrders || 0),
+      }));
+  } catch (err) {
+    console.warn('[system-maintenance] loadCleanupHistory failed safely:', err?.message || err);
+    return [];
+  }
 }
 
 async function loadMaintenanceOverview(db) {
   const document = await loadMaintenanceDocument(db);
+  const lastCleanupAt = document.lastCleanup?.createdAt || null;
   return {
     policy: normalizeRetentionPolicy(document),
+    lastCleanupAt,
+    cleanupMode: 'Manual',
     status: {
-      lastCleanupAt: document.lastCleanup?.createdAt || null,
+      lastCleanupAt,
       nextScheduledCleanupAt: null,
       cleanupMode: 'Manual',
       automaticCleanupConfigured: false,

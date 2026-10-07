@@ -458,7 +458,6 @@ export default function DistributorProfilePage() {
     } catch (error) {
       console.log('Distributor profile save error:', error.message);
       setToast({ visible: true, message: error.message || 'Profile could not be saved.', type: 'error' });
-      Alert.alert('Profile not saved', error.message);
     } finally {
       setSavingProfile(false);
     }

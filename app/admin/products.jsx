@@ -150,7 +150,6 @@ export default function AdminProductsPage() {
   const [editing, setEditing] = React.useState(null);
   const [form, setForm] = React.useState(empty);
   const [saving, setSaving] = React.useState(false);
-  const [message, setMessage] = React.useState('');
   const [toast, setToast] = React.useState({ visible: false, message: '', type: 'info' });
 
   const showToast = (msg, type = 'info') => setToast({ visible: true, message: msg, type });
@@ -287,7 +286,6 @@ export default function AdminProductsPage() {
         };
     initialDraftRef.current = initialForm;
     setForm(initialForm);
-    setMessage('');
     setModal(true);
   };
 
@@ -303,7 +301,6 @@ export default function AdminProductsPage() {
   const chooseImage = () => {
     if (!globalThis.document) {
       const imageMessage = 'Image upload is currently available in the web Admin portal.';
-      setMessage(imageMessage);
       showToast(imageMessage, 'warning');
       return;
     }
@@ -342,7 +339,6 @@ export default function AdminProductsPage() {
   const save = async () => {
     const price = Number(form.price);
     if (!form.product_name.trim() || !Number.isFinite(price) || price < 0) {
-      setMessage('Enter a product name and valid price.');
       showToast('Enter a product name and valid price.', 'error');
       return;
     }
@@ -351,12 +347,10 @@ export default function AdminProductsPage() {
         ? null
         : Number(form.maxQuantityPerRequester);
     if (limit !== null && (!Number.isInteger(limit) || limit < 1 || limit > 100)) {
-      setMessage('Requester order limit must be a whole number from 1 to 100.');
       showToast('Requester order limit must be a whole number from 1 to 100.', 'error');
       return;
     }
     setSaving(true);
-    setMessage('');
     try {
       const payload = {
         product_name: form.product_name.trim(),
@@ -376,11 +370,9 @@ export default function AdminProductsPage() {
       setEditing(null);
       setForm(empty);
       await productsState.refresh({ force: true });
-      setMessage('Product saved. Requesters will see the updated catalog on refresh.');
       showToast('Product saved successfully.', 'success');
     } catch (error) {
       const err = adminProductErrorMessage(error);
-      setMessage(err);
       showToast(err, 'error');
     } finally {
       setSaving(false);
@@ -389,16 +381,13 @@ export default function AdminProductsPage() {
 
   const toggleActive = async (product) => {
     setSaving(true);
-    setMessage('');
     try {
       await updateAdminProduct(product.id, { active: !product.active }, null);
       await productsState.refresh({ force: true });
       const toggleMsg = product.active ? 'Product deactivated.' : 'Product activated.';
-      setMessage(toggleMsg);
       showToast(toggleMsg, 'success');
     } catch (error) {
       const err = adminProductErrorMessage(error);
-      setMessage(err);
       showToast(err, 'error');
     } finally {
       setSaving(false);
@@ -502,12 +491,6 @@ export default function AdminProductsPage() {
           </Pressable>
         </View>
       </View>
-
-      {!!message && (
-        <View accessibilityRole="alert" style={styles.notice}>
-          <Text style={styles.noticeText}>{message}</Text>
-        </View>
-      )}
 
       {productsState.loading && !productsState.data ? (
         <View style={styles.grid}>

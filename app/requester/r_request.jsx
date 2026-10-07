@@ -450,7 +450,6 @@ export default function RequesterRequests() {
       }
 
       setToast({ visible: true, message: error.message || 'Cancel failed.', type: 'error' });
-      Alert.alert('Cancel failed', error.message);
     } finally {
       setCancellingRequestId('');
     }

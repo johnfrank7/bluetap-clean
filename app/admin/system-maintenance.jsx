@@ -7,6 +7,7 @@ import { SectionCard } from '../../components/DashboardUi';
 import { useAdminTheme } from '../../components/AdminTheme';
 import TopToastFeedback from '../../components/TopToastFeedback';
 import { ADMIN_CACHE_KEYS, useAdminData } from '../../services/adminDataCache';
+import { parseTimestamp } from '../../services/notificationTimestamp';
 import {
   getSystemMaintenance,
   previewSystemCleanup,
@@ -38,10 +39,9 @@ const COUNT_ROWS = Object.freeze([
   ['expiredRestrictionProjections', 'Expired restriction projections'],
 ]);
 
-const dateText = (value) => {
-  if (!value) return 'Never run';
-  const millis = typeof value?.seconds === 'number' ? value.seconds * 1000 : new Date(value).getTime();
-  return Number.isFinite(millis) ? new Date(millis).toLocaleString() : 'Unavailable';
+const dateText = (value, fallback = 'Never run') => {
+  const parsed = parseTimestamp(value);
+  return parsed ? parsed.toLocaleString() : fallback;
 };
 
 function RetentionSelect({ label, detail, value, options, onChange, styles, colors }) {
@@ -190,8 +190,8 @@ export default function SystemMaintenancePage() {
       {status ? <SectionCard>
         <Text style={styles.eyebrow}>CLEANUP STATUS</Text><Text style={styles.sectionTitle}>Manual cleanup</Text>
         <View style={styles.statusGrid}>
-          <View style={styles.statusItem}><Text style={styles.statusLabel}>Last Cleanup</Text><Text style={styles.statusValue}>{dateText(status.lastCleanupAt)}</Text></View>
-          <View style={styles.statusItem}><Text style={styles.statusLabel}>Next Scheduled Cleanup</Text><Text style={styles.statusValue}>{status.nextScheduledCleanupAt ? dateText(status.nextScheduledCleanupAt) : 'Not scheduled'}</Text></View>
+          <View style={styles.statusItem}><Text style={styles.statusLabel}>Last Cleanup</Text><Text style={styles.statusValue}>{dateText(status.lastCleanupAt, 'Never run')}</Text></View>
+          <View style={styles.statusItem}><Text style={styles.statusLabel}>Next Scheduled Cleanup</Text><Text style={styles.statusValue}>{dateText(status.nextScheduledCleanupAt, 'Not scheduled')}</Text></View>
           <View style={styles.statusItem}><Text style={styles.statusLabel}>Cleanup Mode</Text><Text style={styles.statusValue}>{status.cleanupMode || 'Manual'}</Text><Text style={styles.statusNote}>Automatic cleanup: Not configured</Text></View>
         </View>
         <View style={styles.warningCallout}><Text style={styles.warningTitle}>Cleanup changes are permanent for expired temporary records.</Text><Text style={styles.warningText}>Preview is calculated by the server. Orders are archived in place and remain available to history, analytics, Buy Again, and audit workflows.</Text></View>

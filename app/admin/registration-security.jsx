@@ -42,8 +42,6 @@ export default function SecuritySettingsPage() {
   const [savedSettings, setSavedSettings] = React.useState(data || null);
   const [draftSettings, setDraftSettings] = React.useState(data || null);
   const [dirty, setDirty] = React.useState(false);
-  const [message, setMessage] = React.useState('');
-  const [isError, setIsError] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
   const [toast, setToast] = React.useState({ visible: false, message: '', type: 'success' });
   const showToast = (toastMessage, type) => setToast({ visible: true, message: toastMessage, type });
@@ -54,32 +52,30 @@ export default function SecuritySettingsPage() {
     onDiscard: () => {
       setDraftSettings(savedSettings);
       setDirty(false);
-      setMessage('');
-      setIsError(false);
     },
   });
 
   React.useEffect(() => {
     if (!data || dirty) return;
-    setSavedSettings(data); setDraftSettings(data); setIsError(false);
+    setSavedSettings(data); setDraftSettings(data);
   }, [data, dirty]);
 
   const toggleVerification = (key) => {
     const next = { ...draftSettings, [key]: !draftSettings[key] };
-    setMessage(''); setIsError(false); setDirty(true); setDraftSettings(next);
+    setDirty(true); setDraftSettings(next);
   };
   const updateSession = (role, key, value) => { setDirty(true); setDraftSettings((current) => ({ ...current, sessionSecurity: { ...current.sessionSecurity, [role]: { ...current.sessionSecurity[role], [key]: value } } })); };
   const save = async () => {
     const next = { ...draftSettings, maxAccountsPerDevice: Number(draftSettings.maxAccountsPerDevice), maxAccountsPerIp: Number(draftSettings.maxAccountsPerIp) };
     if (![next.maxAccountsPerDevice, next.maxAccountsPerIp].every((value) => Number.isInteger(value) && value >= 1 && value <= 20)) {
-      setMessage('Account limits must be whole numbers from 1 to 20.'); setIsError(true); showToast('Account limits must be whole numbers from 1 to 20.', 'error'); return;
+      showToast('Account limits must be whole numbers from 1 to 20.', 'error'); return;
     }
-    setSaving(true); setMessage('');
+    setSaving(true);
     try {
       const authoritative = await updateRegistrationSecurity(next);
       await refresh();
-      setSavedSettings(authoritative); setDraftSettings(authoritative); setDirty(false); setMessage(''); setIsError(false); showToast('Security settings saved.', 'success');
-    } catch (error) { setDraftSettings(savedSettings); setDirty(false); setMessage(error.message); setIsError(true); showToast(error.message || 'Unable to save security settings.', 'error'); }
+      setSavedSettings(authoritative); setDraftSettings(authoritative); setDirty(false); showToast('Security settings saved.', 'success');
+    } catch (error) { setDraftSettings(savedSettings); setDirty(false); showToast(error.message || 'Unable to save security settings.', 'error'); }
     finally { setSaving(false); }
   };
 
@@ -103,8 +99,7 @@ export default function SecuritySettingsPage() {
       <SectionCard><Text style={styles.sectionEyebrow}>REGISTRATION LIMITS</Text><Text style={styles.title}>Account limits</Text><Text style={styles.help}>Limit finalized registrations from a single device or network. Use whole numbers from 1 to 20.</Text><View style={styles.fields}>{[['maxAccountsPerDevice', 'Maximum accounts per device'], ['maxAccountsPerIp', 'Maximum accounts per network/IP']].map(([key, label]) => <View key={key} style={styles.field}><Text style={styles.inputLabel}>{label}</Text><TextInput accessibilityLabel={label} keyboardType="number-pad" value={String(settings[key])} onChangeText={(value) => { setDirty(true); setDraftSettings({ ...settings, [key]: value }); }} style={styles.input} /></View>)}</View></SectionCard>
       <SectionCard><Text style={styles.sectionEyebrow}>SESSION SECURITY</Text><Text style={styles.title}>Automatic logout policy</Text><Text style={styles.help}>Idle warnings and absolute session limits apply to Requester, Distributor, and Manager sessions. Administrator sessions are unchanged.</Text><View style={styles.roleGrid}>{ROLES.map(([role, label]) => { const policy = settings.sessionSecurity[role]; return <View key={role} style={styles.roleCard}><Text style={styles.roleTitle}>{label}</Text><PolicySelect label="Idle timeout" value={policy.idleTimeoutMinutes} options={IDLE_OPTIONS} onChange={(value) => updateSession(role, 'idleTimeoutMinutes', value)} colors={colors} styles={styles} /><PolicySelect label="Absolute session lifetime" value={policy.absoluteSessionHours} options={ABSOLUTE_OPTIONS} onChange={(value) => updateSession(role, 'absoluteSessionHours', value)} colors={colors} styles={styles} /><View style={styles.forceRow}><View style={styles.forceCopy}><Text style={styles.label}>Force logout after password change</Text><Text style={styles.help}>Revoke other Firebase sessions after a required password change.</Text></View><Switch value={policy.forceLogoutAfterPasswordChange} onValueChange={(value) => updateSession(role, 'forceLogoutAfterPasswordChange', value)} trackColor={{ false: colors.neutral, true: colors.primaryLight }} thumbColor={policy.forceLogoutAfterPasswordChange ? colors.primary : colors.surface} /></View></View>; })}</View></SectionCard>
       <SectionCard><Text style={styles.sectionEyebrow}>SECURITY NOTE</Text><Text style={styles.help}>Individual account session termination remains available in Accounts & Audit. Policy changes are Admin-only and recorded in the audit log.</Text></SectionCard>
-      {!!error && !message && <View accessibilityRole="alert" style={[styles.notice, styles.errorNotice]}><Text style={[styles.noticeText, styles.errorText]}>{error}</Text><TouchableOpacity onPress={() => refresh({ force: true })}><Text style={styles.retry}>Retry refresh</Text></TouchableOpacity></View>}
-      {!!message && isError && <View accessibilityRole="alert" style={[styles.notice, styles.errorNotice]}><Text style={[styles.noticeText, styles.errorText]}>{message}</Text></View>}
+      {!!error && <View accessibilityRole="alert" style={[styles.notice, styles.errorNotice]}><Text style={[styles.noticeText, styles.errorText]}>{error}</Text><TouchableOpacity onPress={() => refresh({ force: true })}><Text style={styles.retry}>Retry refresh</Text></TouchableOpacity></View>}
       <TouchableOpacity disabled={saving} onPress={save} style={[styles.button, saving && styles.disabled]}><Text style={styles.buttonText}>{saving ? 'Saving…' : 'Save changes'}</Text></TouchableOpacity>
       {refreshing && !dirty && <Text style={styles.refreshing}>Refreshing saved policy…</Text>}
     </>}</View>
