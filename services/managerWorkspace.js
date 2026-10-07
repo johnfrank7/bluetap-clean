@@ -1,5 +1,7 @@
 import { auth } from '../firebase';
 import { getApiUrl } from './apiClient';
+import { ADMIN_CACHE_KEYS, invalidateAdminData } from './adminDataCache';
+import { invalidateRequesterCatalog } from './requesterOrdering';
 
 export async function getManagerWorkspace() {
   const token = await auth.currentUser?.getIdToken();
@@ -41,6 +43,25 @@ export async function approveManagerDistributor(distributorUid) {
     error.code = result?.error?.reason || 'service-unavailable';
     throw error;
   }
+  invalidateAdminData(ADMIN_CACHE_KEYS.distributors, ADMIN_CACHE_KEYS.dashboard);
+  return result;
+}
+
+export async function rejectManagerDistributor(distributorUid, rejectionReason = '') {
+  const token = await auth.currentUser?.getIdToken();
+  if (!token) throw new Error('Manager authentication is required.');
+  const response = await fetch(getApiUrl('/api/manager/workspace'), {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'rejectDistributor', distributorUid, reason: rejectionReason }),
+  });
+  const result = await response.json().catch(() => null);
+  if (!response.ok) {
+    const error = new Error(result?.error?.message || 'Unable to reject this Distributor application.');
+    error.code = result?.error?.reason || 'service-unavailable';
+    throw error;
+  }
+  invalidateAdminData(ADMIN_CACHE_KEYS.distributors, ADMIN_CACHE_KEYS.dashboard);
   return result;
 }
 
@@ -58,6 +79,8 @@ export async function updateManagerDeliveryPricing(pricing) {
     error.code = result?.error?.reason || 'service-unavailable';
     throw error;
   }
+  invalidateAdminData(ADMIN_CACHE_KEYS.branches, ADMIN_CACHE_KEYS.dashboard);
+  invalidateRequesterCatalog();
   return result;
 }
 

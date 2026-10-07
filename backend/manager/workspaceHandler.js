@@ -5,8 +5,17 @@ const { OtpError } = require('../utils/otpError');
 const { safeProduct } = require('../admin/productManagementHandler');
 const { productDeliveryDays, productLimit } = require('../../services/productOrderPolicy');
 const { resolveEffectiveProductPolicy } = require('../utils/effectiveProductPolicy');
-const { approveDistributorInTransaction } = require('../utils/distributorApproval');
+const {
+  approveDistributorApplicationInTransaction,
+  normalizeDistributorStatus,
+  rejectDistributorApplicationInTransaction,
+} = require('../distributor/distributorApplicationService');
 const { BRANCH_SUSPENSION_REASONS, getBranchSuspensionLabel } = require('../../constants/branchSuspensionReasons');
+const {
+  normalizeBranchDeliveryPricing,
+  validateDeliveryPricingInput,
+  updateBranchDeliveryPricingInTransaction,
+} = require('../pricing/deliveryPricingService');
 
 function bodyOf(req) {
   if (req.body && typeof req.body === 'object') return req.body;
@@ -19,7 +28,7 @@ function bodyOf(req) {
 
 const clean = (value, max = 240) => String(value || '').trim().slice(0, max);
 const number = (value) => Number.isFinite(Number(value)) ? Number(value) : 0;
-const distributorState = (profile = {}) => clean(profile.distributorStatus || profile.approvalStatus || profile.status, 40).toLowerCase();
+const distributorState = (profile = {}) => normalizeDistributorStatus(profile.distributorStatus || profile.approvalStatus || profile.status || profile.accountStatus);
 const fullName = (profile = {}) => clean(profile.fullName || profile.full_name || `${profile.firstName || ''} ${profile.lastName || ''}`, 160);
 const branchDistributor = (profile = {}, branchId) => profile.role === 'distributor'
   && clean(profile.branchId, 128) === branchId
@@ -101,9 +110,10 @@ function createManagerWorkspaceHandler(getAdmin = getFirebaseAdmin) {
           const targetRef = db.collection('users').doc(distributorUid);
           let approval;
           await db.runTransaction(async (tx) => {
-            approval = await approveDistributorInTransaction({
+            approval = await approveDistributorApplicationInTransaction({
               actorRole: 'manager',
               actorUid: manager.decoded.uid,
+              actorPublicUid: clean(manager.profile?.publicUid || manager.profile?.displayUid, 80),
               branchId,
               db,
               enforceRequestedBranch: true,
@@ -115,6 +125,30 @@ function createManagerWorkspaceHandler(getAdmin = getFirebaseAdmin) {
           return res.status(200).json({
             distributor: safeAccount(distributorUid, { ...approval.data, ...approval.changes }, branchId),
             idempotent: approval.idempotent,
+          });
+        }
+        if (body.action === 'rejectDistributor') {
+          const distributorUid = clean(body.distributorUid, 128);
+          const rejectionReason = clean(body.reason || body.rejectionReason, 240);
+          if (!distributorUid) throw new OtpError(400, 'DISTRIBUTOR_REQUIRED', 'Choose a Distributor application to reject.');
+          const targetRef = db.collection('users').doc(distributorUid);
+          let rejection;
+          await db.runTransaction(async (tx) => {
+            rejection = await rejectDistributorApplicationInTransaction({
+              actorRole: 'manager',
+              actorUid: manager.decoded.uid,
+              actorPublicUid: clean(manager.profile?.publicUid || manager.profile?.displayUid, 80),
+              branchId,
+              db,
+              enforceRequestedBranch: true,
+              rejectionReason,
+              targetRef,
+              tx,
+            });
+          });
+          return res.status(200).json({
+            distributor: safeAccount(distributorUid, { ...rejection.data, ...rejection.changes }, branchId),
+            rejected: true,
           });
         }
         if (body.action === 'updateProductPolicy') {
@@ -139,42 +173,31 @@ function createManagerWorkspaceHandler(getAdmin = getFirebaseAdmin) {
           return res.status(200).json({ productId, policy: { deliveryDays: productDeliveryDays(body.deliveryDays), maxQuantityPerRequester: limit, source: 'branch_override' } });
         }
         if (body.action === 'updateDeliveryPricing') {
-          const baseDeliveryFee = number(body.baseDeliveryFee);
-          const includedRadiusKm = number(body.includedRadiusKm);
-          const outsideRadiusFeePerKm = number(body.outsideRadiusFeePerKm);
-          const serviceRadiusKm = number(body.serviceRadiusKm);
-          if (baseDeliveryFee < 0 || baseDeliveryFee > 10000 ||
-              includedRadiusKm < 0 || includedRadiusKm > 500 ||
-              outsideRadiusFeePerKm < 0 || outsideRadiusFeePerKm > 10000 ||
-              serviceRadiusKm < 0 || serviceRadiusKm > 500) {
-            throw new OtpError(400, 'INVALID_DELIVERY_PRICING', 'Delivery pricing values are invalid.');
+          let validatedPricing;
+          try {
+            validatedPricing = validateDeliveryPricingInput(body);
+          } catch (err) {
+            throw new OtpError(400, 'INVALID_DELIVERY_PRICING', err.message || 'Delivery pricing values are invalid.');
           }
           const branchRef = db.collection('branches').doc(branchId);
           const now = new Date();
-          const pricing = { baseDeliveryFee, includedRadiusKm, outsideRadiusFeePerKm, serviceRadiusKm };
+          let canonicalPricing;
           await db.runTransaction(async (tx) => {
-            const currentSnapshot = await tx.get(branchRef);
-            if (!currentSnapshot.exists) throw new OtpError(404, 'BRANCH_NOT_FOUND', 'Your assigned branch no longer exists.');
-            const current = currentSnapshot.data() || {};
-            const before = {
-              baseDeliveryFee: number(current.baseDeliveryFee),
-              includedRadiusKm: number(current.includedRadiusKm ?? current.serviceRadiusKm),
-              outsideRadiusFeePerKm: number(current.outsideRadiusFeePerKm),
-              serviceRadiusKm: number(current.serviceRadiusKm),
-            };
-            tx.update(branchRef, { ...pricing, updatedAt: now, updatedBy: manager.decoded.uid });
-            tx.set(db.collection('adminAuditLogs').doc(), {
-              action: 'MANAGER_BRANCH_DELIVERY_PRICING_UPDATED',
-              actorUid: manager.decoded.uid,
-              actorPublicUid: clean(manager.profile?.publicUid || manager.profile?.displayUid || manager.profile?.uniqueId, 80),
-              actorRole: 'manager',
+            canonicalPricing = await updateBranchDeliveryPricingInTransaction({
+              db,
+              tx,
+              branchRef,
               branchId,
-              before,
-              after: pricing,
-              createdAt: now,
+              pricingInput: validatedPricing,
+              actor: {
+                uid: manager.decoded.uid,
+                publicUid: clean(manager.profile?.publicUid || manager.profile?.displayUid || manager.profile?.uniqueId, 80),
+                role: 'manager',
+              },
+              now,
             });
           });
-          return res.status(200).json({ branchId, pricing });
+          return res.status(200).json({ branchId, pricing: canonicalPricing });
         }
         if (body.action === 'suspendBranchUser') {
           const targetUid = clean(body.targetUid, 128);
@@ -497,9 +520,21 @@ function createManagerWorkspaceHandler(getAdmin = getFirebaseAdmin) {
         .map((product) => ({ ...product, effectivePolicy: resolveEffectiveProductPolicy(product, manager.branch) }))
         .sort((left, right) => left.product_name.localeCompare(right.product_name));
       const productSales = orders.reduce((total, order) => total + (order.quantity || order.items.reduce((sum, item) => sum + item.quantity, 0)), 0);
+      const branchPricing = normalizeBranchDeliveryPricing(manager.branch);
       return res.status(200).json({
         manager: safeAccount(manager.decoded.uid, manager.profile, branchId),
-        branch: { id: branchId, name: clean(manager.branch.name, 160), status: 'active', barangay: clean(manager.branch.barangay, 120), city: clean(manager.branch.city, 120), baseDeliveryFee: number(manager.branch.baseDeliveryFee), includedRadiusKm: number(manager.branch.includedRadiusKm ?? manager.branch.serviceRadiusKm), outsideRadiusFeePerKm: number(manager.branch.outsideRadiusFeePerKm), serviceRadiusKm: number(manager.branch.serviceRadiusKm) },
+        branch: {
+          id: branchId,
+          name: clean(manager.branch.name, 160),
+          status: 'active',
+          barangay: clean(manager.branch.barangay, 120),
+          city: clean(manager.branch.city, 120),
+          baseDeliveryFee: branchPricing.baseDeliveryFee,
+          includedRadiusKm: branchPricing.includedRadiusKm,
+          outsideRadiusFeePerKm: branchPricing.outsideRadiusFeePerKm,
+          serviceRadiusKm: branchPricing.serviceRadiusKm,
+          deliveryPricing: branchPricing,
+        },
         distributors,
         pendingDistributors,
         requesters,

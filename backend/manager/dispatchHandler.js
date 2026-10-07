@@ -7,6 +7,7 @@ const { OtpError } = require('../utils/otpError');
 const { assignmentVersionForTransition } = require('../utils/relationshipEpochs');
 const { reconcileOrderLifecycleInTransaction } = require('../chat/conversationLifecycleService');
 const { effectiveDeliveryDays, isAllowedDeliveryDate, productLimit, productDeliveryDays, limitViolations } = require('../../services/productOrderPolicy');
+const { calculateOrderTotal } = require('../../services/deliveryPricing');
 
 const AWAITING_ASSIGNMENT = 'awaiting_distributor_assignment';
 const DISTRIBUTOR_ASSIGNED = 'distributor_assigned';
@@ -462,7 +463,7 @@ function createManagerDispatchHandler(getAdmin = getFirebaseAdmin) {
           };
         }));
         const quantity = items.reduce((sum, item) => sum + item.quantity, 0);
-        const totalAtOrder = Math.round(items.reduce((sum, item) => sum + item.totalAtOrder, 0) * 100) / 100;
+        const subtotalAtOrder = Math.round(items.reduce((sum, item) => sum + item.totalAtOrder, 0) * 100) / 100;
         const effectiveDays = effectiveDeliveryDays(items);
         const notes = body.notes !== undefined ? clean(body.notes, 500) : (body.specialInstructions !== undefined ? clean(body.specialInstructions, 500) : undefined);
         const container = body.container !== undefined ? clean(body.container, 80) : undefined;
@@ -474,6 +475,10 @@ function createManagerDispatchHandler(getAdmin = getFirebaseAdmin) {
             throw new OtpError(409, 'ORDER_NOT_EDITABLE', 'Orders can only be edited before delivery begins.');
           }
           if (current.scheduledAt && !isAllowedDeliveryDate(current.scheduledAt, effectiveDays)) throw new OtpError(409, 'PRODUCT_DELIVERY_DAY_UNAVAILABLE', 'The current schedule is not valid for these products. Reschedule before changing the items.');
+          const currentDeliveryFee = typeof current.deliveryFeeAtOrder === 'number'
+            ? current.deliveryFeeAtOrder
+            : (typeof current.deliveryFee === 'number' ? current.deliveryFee : 0);
+          const newTotal = calculateOrderTotal(subtotalAtOrder, currentDeliveryFee);
           const editEntry = {
             event: 'ORDER_EDITED',
             managerUid: manager.decoded.uid,
@@ -481,7 +486,7 @@ function createManagerDispatchHandler(getAdmin = getFirebaseAdmin) {
             previousItems: current.items || [],
             previousTotal: current.totalAtOrder ?? current.total_cost ?? 0,
             newItems: items,
-            newTotal: totalAtOrder,
+            newTotal,
             ...(notes !== undefined ? { notes } : {}),
             ...(container !== undefined ? { container } : {}),
           };
@@ -497,8 +502,9 @@ function createManagerDispatchHandler(getAdmin = getFirebaseAdmin) {
             product_price: items[0]?.unitPriceAtOrder || 0,
             quantity,
             total_quantity: quantity,
-            totalAtOrder,
-            total_cost: totalAtOrder,
+            subtotalAtOrder,
+            totalAtOrder: newTotal,
+            total_cost: newTotal,
             ...(notes !== undefined ? { notes, specialInstructions: notes } : {}),
             ...(container !== undefined ? { container } : {}),
             editHistory: [...history(current.editHistory), editEntry],

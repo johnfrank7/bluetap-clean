@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -20,7 +21,8 @@ import TopToastFeedback from '../../components/TopToastFeedback';
 import ManagerShell, { MANAGER_COLORS, ManagerPill } from '../../components/ManagerShell';
 import { useManagerRealtimeData } from '../../components/ManagerRealtimeData';
 import { parseTimestamp } from '../../services/notificationTimestamp';
-import { approveManagerDistributor } from '../../services/managerWorkspace';
+import { approveManagerDistributor, rejectManagerDistributor } from '../../services/managerWorkspace';
+import { normalizeDistributorApplication, formatDistributorStatusLabel } from '../../services/distributorApplications';
 const { getManagerQueues, toManagerOrder } = require('../../services/managerOperational');
 const { effectiveDeliveryDays, isAllowedDeliveryDate, manilaScheduleDate } = require('../../services/productOrderPolicy');
 
@@ -456,7 +458,7 @@ function DistributorDispatchQueue({ styles, colors, isDark, onShowToast }) {
 export default function ManagerDistributorsPage() {
   const { colors, resolvedTheme } = useAdminTheme();
   const { width } = useWindowDimensions();
-  const styles = createStyles(colors, width);
+  const styles = createStyles(colors, width, resolvedTheme);
   const branchId = getModuleSession('manager')?.branchId || '';
   const { users: realtimeUsers, pendingApplications, loading: realtimeLoading, error: realtimeError } = useManagerRealtimeData();
   const [registeredDistributors, setRegisteredDistributors] = useState([]);
@@ -464,7 +466,9 @@ export default function ManagerDistributorsPage() {
   const [loadError, setLoadError] = useState('');
   const [search, setSearch] = useState('');
   const [applicationsVisible, setApplicationsVisible] = useState(false);
-  const [approvingUid, setApprovingUid] = useState('');
+  const [actionBusyUid, setActionBusyUid] = useState('');
+  const [rejectingUid, setRejectingUid] = useState('');
+  const [rejectReason, setRejectReason] = useState('');
   const [toast, setToast] = useState({ visible: false, message: '', type: 'info' });
 
   const showToast = (message, type = 'info') => {
@@ -473,15 +477,32 @@ export default function ManagerDistributorsPage() {
 
   const approveApplication = async (applicant) => {
     const uid = applicant?.uid || applicant?.id;
-    if (!uid || approvingUid) return;
-    setApprovingUid(uid);
+    if (!uid || actionBusyUid) return;
+    setActionBusyUid(uid);
     try {
       const result = await approveManagerDistributor(uid);
       showToast(result?.idempotent ? 'Distributor was already approved for your branch.' : 'Distributor approved for your branch.', 'success');
+      setRejectingUid('');
     } catch (error) {
       showToast(error.message || 'Unable to approve this Distributor application.', 'error');
     } finally {
-      setApprovingUid('');
+      setActionBusyUid('');
+    }
+  };
+
+  const rejectApplication = async (applicant) => {
+    const uid = applicant?.uid || applicant?.id;
+    if (!uid || actionBusyUid) return;
+    setActionBusyUid(uid);
+    try {
+      await rejectManagerDistributor(uid, rejectReason.trim());
+      showToast('Distributor application declined.', 'info');
+      setRejectingUid('');
+      setRejectReason('');
+    } catch (error) {
+      showToast(error.message || 'Unable to decline this Distributor application.', 'error');
+    } finally {
+      setActionBusyUid('');
     }
   };
 
@@ -565,29 +586,96 @@ export default function ManagerDistributorsPage() {
                 style={styles.inlineVisualEmpty}
               />
             ) : (
-              pendingApplications.map((applicant) => (
-                <View key={applicant.uid || applicant.id} style={styles.applicationRow}>
-                  <View style={styles.applicationDetails}>
-                    <Text style={styles.distributorName}>{getFullName(applicant)}</Text>
-                    <Text style={styles.distributorSub}>{getProfileUniqueId(applicant) || applicant.email || 'ID pending'}</Text>
-                    <Text style={styles.distributorSub}>{applicant.email || applicant.phone || 'Contact not set'} · {getBarangay(applicant)}</Text>
-                    <Text style={styles.distributorSub}>Applied {getJoinedLabel(applicant)} · Pending branch review</Text>
-                  </View>
-                  <TouchableOpacity
-                    accessibilityRole="button"
-                    accessibilityLabel={`Approve ${getFullName(applicant)}`}
-                    disabled={Boolean(approvingUid)}
-                    onPress={() => approveApplication(applicant)}
-                    style={[styles.approveApplicationButton, Boolean(approvingUid) && styles.actionDisabled]}
-                  >
-                    {approvingUid === (applicant.uid || applicant.id) ? (
-                      <ActivityIndicator size="small" color={colors.onPrimary || '#FFFFFF'} />
-                    ) : (
-                      <Text style={styles.approveApplicationText}>Approve</Text>
+              pendingApplications.map((rawApplicant) => {
+                const applicant = normalizeDistributorApplication(rawApplicant);
+                const isBusy = actionBusyUid === applicant.uid;
+                const isRejecting = rejectingUid === applicant.uid;
+
+                return (
+                  <View key={applicant.uid} style={styles.applicationRow}>
+                    <View style={styles.applicationDetails}>
+                      <View style={styles.applicationHeaderRow}>
+                        <Text style={styles.distributorName}>{applicant.fullName}</Text>
+                        <ManagerPill tone="blue">Pending branch review</ManagerPill>
+                      </View>
+                      <Text style={styles.distributorSub}>ID: {applicant.displayUid}</Text>
+                      <Text style={styles.distributorSub}>{applicant.email || 'No email'} · {applicant.phone || 'No phone'} · {applicant.barangay}</Text>
+                      <Text style={styles.distributorSub}>Applied {getJoinedLabel(applicant)}</Text>
+                    </View>
+
+                    <View style={styles.applicationActions}>
+                      <TouchableOpacity
+                        accessibilityRole="button"
+                        accessibilityLabel={`Approve ${applicant.fullName}`}
+                        disabled={isBusy}
+                        onPress={() => approveApplication(applicant)}
+                        style={[
+                          styles.approveApplicationButton,
+                          isBusy && styles.actionDisabled,
+                          Platform.OS === 'web' && { cursor: isBusy ? 'not-allowed' : 'pointer' },
+                        ]}
+                        activeOpacity={0.8}
+                      >
+                        {isBusy && !isRejecting ? (
+                          <View style={styles.approveLoadingRow}>
+                            <ActivityIndicator size="small" color="#FFFFFF" />
+                            <Text style={styles.approveApplicationText}>Approving…</Text>
+                          </View>
+                        ) : (
+                          <Text style={styles.approveApplicationText}>Approve</Text>
+                        )}
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        accessibilityRole="button"
+                        accessibilityLabel={`Reject ${applicant.fullName}`}
+                        disabled={isBusy}
+                        onPress={() => {
+                          setRejectingUid(isRejecting ? '' : applicant.uid);
+                          setRejectReason('');
+                        }}
+                        style={[styles.rejectApplicationButton, isBusy && styles.actionDisabled]}
+                      >
+                        <Text style={styles.rejectApplicationText}>Reject</Text>
+                      </TouchableOpacity>
+                    </View>
+
+                    {isRejecting && (
+                      <View style={styles.applicationDeclineBox}>
+                        <TextInput
+                          value={rejectReason}
+                          onChangeText={setRejectReason}
+                          maxLength={240}
+                          multiline
+                          placeholder="Optional reason for declining this application"
+                          placeholderTextColor={colors.placeholder}
+                          style={styles.applicationDeclineInput}
+                        />
+                        <View style={styles.applicationDeclineActions}>
+                          <TouchableOpacity
+                            onPress={() => {
+                              setRejectingUid('');
+                              setRejectReason('');
+                            }}
+                            style={styles.applicationCancelDeclineBtn}
+                          >
+                            <Text style={styles.applicationCancelDeclineText}>Cancel</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            disabled={isBusy}
+                            onPress={() => rejectApplication(applicant)}
+                            style={[styles.applicationConfirmDeclineBtn, isBusy && styles.actionDisabled]}
+                          >
+                            <Text style={styles.applicationConfirmDeclineText}>
+                              {isBusy ? 'Declining…' : 'Confirm Decline'}
+                            </Text>
+                          </TouchableOpacity>
+                        </View>
+                      </View>
                     )}
-                  </TouchableOpacity>
-                </View>
-              ))
+                  </View>
+                );
+              })
             )}
           </View>
         )}
@@ -596,7 +684,7 @@ export default function ManagerDistributorsPage() {
   );
 }
 
-const createStyles = (colors, width = 1200) =>
+const createStyles = (colors, width = 1200, resolvedTheme = 'light') =>
   StyleSheet.create({
     dispatchCard: {
       backgroundColor: colors.surface,
@@ -613,10 +701,22 @@ const createStyles = (colors, width = 1200) =>
     applicationsButton: { minHeight: 38, paddingHorizontal: 12, borderRadius: 9, borderWidth: 1, borderColor: colors.primary, backgroundColor: colors.primarySoft, justifyContent: 'center' },
     applicationsButtonText: { color: colors.primary, fontSize: 12, fontWeight: '800' },
     applicationsPanel: { borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceAlt, borderRadius: 12, padding: 12, marginBottom: 12, gap: 8 },
-    applicationRow: { paddingVertical: 9, borderTopWidth: 1, borderTopColor: colors.border, flexDirection: width < 550 ? 'column' : 'row', alignItems: width < 550 ? 'stretch' : 'center', gap: 12 },
+    applicationRow: { paddingVertical: 12, borderTopWidth: 1, borderTopColor: colors.border, flexDirection: width < 550 ? 'column' : 'row', alignItems: width < 550 ? 'stretch' : 'center', gap: 12, flexWrap: 'wrap' },
     applicationDetails: { flex: 1, minWidth: 0 },
-    approveApplicationButton: { minHeight: 44, minWidth: 92, width: width < 550 ? '100%' : undefined, paddingHorizontal: 14, borderRadius: 9, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
-    approveApplicationText: { color: colors.onPrimary || '#FFFFFF', fontSize: 12, fontWeight: '900' },
+    applicationHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 4, flexWrap: 'wrap' },
+    applicationActions: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap', width: width < 550 ? '100%' : 'auto' },
+    approveApplicationButton: { minHeight: 44, minWidth: 104, flex: width < 550 ? 1 : 0, paddingHorizontal: 16, borderRadius: 10, backgroundColor: resolvedTheme === 'dark' ? '#15803D' : (colors.successAction || '#167347'), alignItems: 'center', justifyContent: 'center' },
+    approveApplicationText: { color: '#FFFFFF', fontSize: 13, fontWeight: '800', letterSpacing: 0.2 },
+    approveLoadingRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
+    rejectApplicationButton: { minHeight: 44, minWidth: 92, flex: width < 550 ? 1 : 0, paddingHorizontal: 14, borderRadius: 9, backgroundColor: colors.dangerSoft, borderWidth: 1, borderColor: colors.danger, alignItems: 'center', justifyContent: 'center' },
+    rejectApplicationText: { color: colors.danger, fontSize: 12, fontWeight: '900' },
+    applicationDeclineBox: { width: '100%', marginTop: 10, gap: 8 },
+    applicationDeclineInput: { minHeight: 60, borderWidth: 1, borderColor: colors.border, borderRadius: 8, backgroundColor: colors.surface, color: colors.textPrimary, paddingHorizontal: 10, paddingVertical: 8, fontSize: 12, outlineStyle: 'none' },
+    applicationDeclineActions: { flexDirection: 'row', gap: 8, justifyContent: 'flex-end' },
+    applicationConfirmDeclineBtn: { minHeight: 44, paddingHorizontal: 14, borderRadius: 8, backgroundColor: colors.dangerAction || colors.danger, alignItems: 'center', justifyContent: 'center' },
+    applicationConfirmDeclineText: { color: colors.onDanger || '#FFFFFF', fontSize: 12, fontWeight: '800' },
+    applicationCancelDeclineBtn: { minHeight: 44, paddingHorizontal: 14, borderRadius: 8, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, alignItems: 'center', justifyContent: 'center' },
+    applicationCancelDeclineText: { color: colors.textPrimary, fontSize: 12, fontWeight: '700' },
     cardHeaderRow: {
       flexDirection: width < 600 ? 'column' : 'row',
       alignItems: width < 600 ? 'stretch' : 'flex-start',

@@ -2,7 +2,7 @@ const { getFirebaseAdmin } = require('../firebase/firebaseAdmin');
 const { requireAdmin } = require('../auth/authorization');
 const { applyCors } = require('../utils/cors');
 const { OtpError } = require('../utils/otpError');
-const { activeBranchInTransaction, approveDistributorInTransaction, statusOf } = require('../utils/distributorApproval');
+const { activeBranchInTransaction, approveDistributorInTransaction, rejectDistributorInTransaction, statusOf } = require('../utils/distributorApproval');
 const { branchMembershipVersionForTransition } = require('../utils/relationshipEpochs');
 const { reconcileDistributorMembershipInTransaction } = require('../chat/conversationLifecycleService');
 
@@ -52,6 +52,11 @@ function createAdminDistributorsHandler(getAdmin = getFirebaseAdmin) {
         if (action === 'approve') {
           const result = await approveDistributorInTransaction({ actorRole: 'admin', actorUid: admin.uid, branchId, db, targetRef, tx });
           distributor = safeDistributor(targetRef.id, { ...result.data, ...result.changes }, new Map([[result.branch.id, clean(result.branch.name)]]));
+          return;
+        }
+        if (action === 'reject') {
+          const result = await rejectDistributorInTransaction({ actorRole: 'admin', actorUid: admin.uid, branchId, db, targetRef, tx, rejectionReason });
+          distributor = safeDistributor(targetRef.id, { ...result.data, ...result.changes }, new Map());
           return;
         }
         const snapshot = await tx.get(targetRef); if (!snapshot.exists) throw new OtpError(404, 'DISTRIBUTOR_NOT_FOUND', 'Distributor account not found.');

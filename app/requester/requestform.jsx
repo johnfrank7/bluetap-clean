@@ -10,25 +10,55 @@ import TopToastFeedback from '../../components/TopToastFeedback';
 import { ModerationNoticeBanner, useModerationNotices } from '../../components/ModerationNotices';
 import { BLUETAP_COLORS, BLUETAP_LAYOUT } from '../../constants/bluetapTheme';
 import { USER_PORTAL_BOTTOM_CONTENT_INSET, USER_PORTAL_LAYOUT } from '../../constants/userPortalLayout';
-import { haversineDistanceKm, rankBranchesByDistance, requestCurrentLocation } from '../../services/location';
+import { haversineDistanceKm, rankProviderBranches, rankBranchesByDistance, requestCurrentLocation } from '../../services/location';
 import { getRequesterCatalog, getRequesterOrders } from '../../services/requesterOrdering';
 import { buildBuyAgainDraft } from '../../services/buyAgain';
 import { createRequest, subscribeRequesterCurrentRequests } from '../../services/requests';
 import { auth } from '../../firebase';
 import useUnsavedChangesGuard from '../../components/useUnsavedChangesGuard';
+import {
+  normalizeBranchDeliveryPricing,
+  calculateDeliveryFee,
+  calculateOrderTotal,
+  getDeliveryFeeBreakdown,
+} from '../../services/deliveryPricing';
 
 const containers = ['New Container', 'Exchange'];
 const formatPrice = (value) => `₱${Number(value || 0).toFixed(2)}`;
 const firstParam = (value) => Array.isArray(value) ? value[0] : value;
 const productAvailable = (product, branchId) => !product.branchIds?.length || product.branchIds.includes(branchId);
 const serviceRadiusFor = (branch) => {
-  const radius = Number(branch?.serviceRadiusKm);
-  return Number.isFinite(radius) && radius > 0 ? radius : 5;
+  if (!branch) return 5;
+  return normalizeBranchDeliveryPricing(branch).serviceRadiusKm;
 };
 const formatRestrictionUntil = (value) => {
   const date = new Date(value || 0);
   return Number.isNaN(date.getTime()) ? '' : date.toLocaleString([], { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
 };
+
+function formatActiveOrderStatusLabel(status) {
+  const normalized = String(status || '').toLowerCase().trim().replace(/[\s-]+/g, '_');
+  const labels = {
+    pending: 'Pending Review',
+    outside_radius_pending_approval: 'Awaiting Branch Approval',
+    manager_approval_pending: 'Awaiting Branch Approval',
+    awaiting_distributor_assignment: 'Awaiting Dispatch',
+    distributor_assigned: 'Distributor Assigned',
+    accepted: 'Accepted by Distributor',
+    scheduled: 'Scheduled for Delivery',
+    out_for_delivery: 'Out for Delivery',
+    delivery_failed: 'Delivery Issue',
+  };
+  return labels[normalized] || 'In Progress';
+}
+
+function resolvePublicOrderReference(order = {}) {
+  const candidate = order.requestId || order.request_id || order.trackingNumber || order.publicOrderId || '';
+  if (candidate && !/^[a-zA-Z0-9]{20,}$/.test(candidate)) {
+    return candidate;
+  }
+  return '';
+}
 
 function Section({ number, title, helper, children }) {
   useBlueTapTheme();
@@ -78,7 +108,10 @@ export default function RequestFormPage() {
     }
   }, [catalog?.profile?.defaultDeliveryLocation, deliveryLocation]);
 
-const rankedBranches = React.useMemo(()=>deliveryLocation?rankBranchesByDistance(catalog?.branches||[],deliveryLocation).map((branch)=>({ ...branch, serviceRadiusKm:serviceRadiusFor(branch), withinServiceArea:branch.distanceKm<=serviceRadiusFor(branch) })):[],[catalog?.branches,deliveryLocation]);
+  const rankedBranches = React.useMemo(
+    () => (deliveryLocation ? rankProviderBranches(catalog?.branches || [], deliveryLocation) : []),
+    [catalog?.branches, deliveryLocation]
+  );
   React.useEffect(() => {
     if (!buyAgainTemplate || !catalog || !deliveryLocation || !rankedBranches.length || appliedBuyAgainId.current === buyAgainTemplate.id) return;
     const draft = buildBuyAgainDraft(buyAgainTemplate, catalog, rankedBranches, productAvailable);
@@ -103,19 +136,13 @@ const rankedBranches = React.useMemo(()=>deliveryLocation?rankBranchesByDistance
   const selectedOutsideServiceArea = selectedDistance !== null && selectedDistance > selectedRadius;
   const exceedsProductLimit = itemDetails.some((item) => item.product.maxQuantityPerRequester != null && item.quantity > item.product.maxQuantityPerRequester);
   const needsManagerApproval = selectedOutsideServiceArea || exceedsProductLimit;
-  const baseDeliveryFee = Number.isFinite(Number(selectedBranch?.baseDeliveryFee)) ? Number(selectedBranch.baseDeliveryFee) : 20;
-  const includedRadiusKm = Number.isFinite(Number(selectedBranch?.includedRadiusKm)) ? Number(selectedBranch.includedRadiusKm) : (selectedRadius || 5);
-  const outsideRadiusFeePerKm = Number.isFinite(Number(selectedBranch?.outsideRadiusFeePerKm)) ? Number(selectedBranch.outsideRadiusFeePerKm) : 10;
-  const estimatedDeliveryFee = React.useMemo(() => {
-    if (!selectedBranch || selectedDistance == null) return 0;
-    let fee = baseDeliveryFee;
-    if (selectedDistance > includedRadiusKm && outsideRadiusFeePerKm > 0) {
-      const extraKm = Math.max(0, selectedDistance - includedRadiusKm);
-      fee += Math.round(extraKm * outsideRadiusFeePerKm * 100) / 100;
-    }
-    return Math.round(fee * 100) / 100;
-  }, [selectedBranch, selectedDistance, baseDeliveryFee, includedRadiusKm, outsideRadiusFeePerKm]);
-  const estimatedTotal = Math.round((clientEstimate + estimatedDeliveryFee) * 100) / 100;
+  const branchPricing = React.useMemo(() => (selectedBranch ? normalizeBranchDeliveryPricing(selectedBranch) : null), [selectedBranch]);
+  const deliveryBreakdown = React.useMemo(() => {
+    if (!selectedBranch || selectedDistance == null || !branchPricing) return null;
+    return getDeliveryFeeBreakdown(selectedDistance, branchPricing);
+  }, [selectedBranch, selectedDistance, branchPricing]);
+  const estimatedDeliveryFee = deliveryBreakdown ? deliveryBreakdown.totalFee : 0;
+  const estimatedTotal = calculateOrderTotal(clientEstimate, estimatedDeliveryFee);
 
   const profileComplete = catalog?.profile?.complete === true;
   const hasActiveOrder = activeOrders.length > 0;
@@ -182,12 +209,53 @@ const rankedBranches = React.useMemo(()=>deliveryLocation?rankBranchesByDistance
   const submit = async () => { if(!canReview||submitting) return; setSubmitting(true); setSubmitError(''); try { await createRequest({branchId:selectedBranch.id,deliveryLocation,container,saveAsDefaultLocation,items:items.map(({productId,quantity})=>({product_id:productId,quantity}))}); router.replace('/requester/r_request'); } catch(error){setSubmitError(error.message); setToast({ visible: true, message: error.message || 'Unable to submit order.', type: 'error' });} finally{setSubmitting(false);} };
 
   return <LinearGradient colors={isDark?[colors.background,colors.header]:[colors.primary,colors.primaryLight]} style={styles.gradient} start={{x:0,y:0}} end={{x:0,y:1}}><SafeAreaView edges={['left','right','bottom']} style={styles.safe}><TopToastFeedback visible={toast.visible} message={toast.message} type={toast.type} onDismiss={() => setToast((t) => ({ ...t, visible: false }))} /><KeyboardAvoidingView behavior={Platform.OS==='ios'?'padding':undefined} style={styles.flex}><ScrollView ref={scrollViewRef} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
-    <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => confirmLeave(() => router.canGoBack?.() ? router.back() : router.replace('/requester/r_dashboard'))} style={{alignSelf:'flex-start',minHeight:44,justifyContent:'center',marginBottom:4}}><Text style={{color:'#FFFFFF',fontSize:14,fontWeight:'900'}}>‹ Back</Text></TouchableOpacity>
-    <View style={styles.pageHeading}><Text style={styles.eyebrow}>NEW REQUEST</Text><Text style={styles.title}>Place a water order</Text><Text style={styles.subtitle}>Choose a delivery point, nearby provider, and products. Final pricing is verified by BlueTap.</Text></View>
+    <View style={styles.pageHeading}>
+      <View style={styles.headerTopRow}>
+        <Text style={styles.eyebrow}>NEW REQUEST</Text>
+        <TouchableOpacity
+          accessibilityRole="button"
+          accessibilityLabel="Back"
+          onPress={() => confirmLeave(() => router.canGoBack?.() ? router.back() : router.replace('/requester/r_dashboard'))}
+          style={styles.backButton}
+        >
+          <Text style={styles.backButtonText}>← Back</Text>
+        </TouchableOpacity>
+      </View>
+      <Text style={styles.title}>Place a water order</Text>
+      <Text style={styles.subtitle}>Choose a delivery point, nearby provider, and products. Final pricing is verified by BlueTap.</Text>
+    </View>
     <ModerationNoticeBanner scope="ordering" />
     {!!buyAgainMessage && <View style={{ backgroundColor: colors.primarySoft, borderColor: colors.border, borderWidth: 1, borderRadius: 10, padding: 12, marginBottom: 12 }}><Text style={{ color: colors.textPrimary, fontSize: 12 }}>{buyAgainMessage}</Text></View>}
     {loading&&!catalog?<View style={styles.state}><ActivityIndicator color={BLUETAP_COLORS.primary}/><Text style={styles.stateText}>Loading products and providers…</Text></View>:loadError?<View style={styles.state}><Text style={styles.errorTitle}>Unable to load ordering</Text><Text style={styles.stateText}>{loadError}</Text><TouchableOpacity onPress={()=>load(true)} style={styles.primaryButton}><Text style={styles.primaryText}>Retry</Text></TouchableOpacity></View>:<>
-      {hasActiveOrder&&<View style={styles.activeOrderBanner}><Text style={styles.activeOrderTitle}>Active Order In Progress</Text><Text style={styles.activeOrderText}>You currently have an active order ({activeOrders[0].requestId || activeOrders[0].id} · {activeOrders[0].status}). You can only place one order at a time.</Text><TouchableOpacity onPress={()=>router.push('/requester/r_request')} style={styles.activeOrderButton}><Text style={styles.activeOrderButtonText}>View Active Order</Text></TouchableOpacity></View>}
+      {hasActiveOrder && (() => {
+        const activeOrder = activeOrders[0] || {};
+        const statusLabel = formatActiveOrderStatusLabel(activeOrder.status);
+        const publicRef = resolvePublicOrderReference(activeOrder);
+        const refNotice = publicRef ? `Order ${publicRef} is currently ${statusLabel.toLowerCase()}.` : `You have an order currently ${statusLabel.toLowerCase()}.`;
+        return (
+          <View style={styles.activeOrderBanner}>
+            <Text style={styles.activeOrderTitle}>Active Order in Progress</Text>
+            <Text style={styles.activeOrderText}>
+              {refNotice} You can place a new order once your current request is completed or cancelled.
+            </Text>
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel="View Active Order"
+              onPress={() => router.push('/requester/r_request')}
+              style={[
+                styles.activeOrderButton,
+                { backgroundColor: colors.primaryAction || BLUETAP_COLORS.primaryAction || '#0B67AD' },
+                Platform.OS === 'web' && { cursor: 'pointer' },
+              ]}
+              activeOpacity={0.8}
+            >
+              <Text style={[styles.activeOrderButtonText, { color: colors.onPrimary || '#FFFFFF' }]}>
+                View Active Order
+              </Text>
+            </TouchableOpacity>
+          </View>
+        );
+      })()}
       {!profileComplete&&<View style={styles.warning}><Text style={styles.warningTitle}>Complete your profile before placing an order.</Text><Text style={styles.warningText}>Your full name, contact number, and complete address are required for delivery.</Text><TouchableOpacity onPress={()=>router.push('/requester/r_profile')} style={styles.linkButton}><Text style={styles.linkText}>Complete profile</Text></TouchableOpacity></View>}
       <Section number="1" title="Delivery location" helper="BlueTap requests your device GPS location to find nearby stations. Continuous tracking is never enabled.">
         <TouchableOpacity onPress={useCurrentLocation} disabled={locationState==='loading'} style={styles.primaryButton}><Text style={styles.primaryText}>{locationState==='loading'?(deliveryLocation?'Updating location…':'Finding your location…'):deliveryLocation?'Update current location':'Use my current location'}</Text></TouchableOpacity>
@@ -204,7 +272,7 @@ const rankedBranches = React.useMemo(()=>deliveryLocation?rankBranchesByDistance
           const restrictionUntil=restricted?.endsAt?formatRestrictionUntil(restricted.endsAt):'';
           return <View key={branch.id} style={[styles.branchCard,restrictionStyles.branchCardResponsive,selectedBranchId===branch.id&&!restricted&&styles.selected,restricted&&restrictionStyles.restrictedBranchCard,restricted&&{backgroundColor:colors.dangerSoft,borderColor:colors.danger}]}>
             <View style={[styles.branchMain,restrictionStyles.branchMainResponsive]}>
-              <View style={styles.branchTitleRow}><Text style={styles.branchName}>{branch.name}</Text>{index===0&&<Text style={styles.nearest}>Nearest provider</Text>}</View>
+              <View style={styles.branchTitleRow}><Text style={styles.branchName}>{branch.name}</Text>{branch.isRecommended && <Text style={styles.nearest}>Nearest provider</Text>}</View>
               <Text style={styles.branchAddress}>{[branch.address,branch.barangay,branch.city].filter(Boolean).join(', ')}</Text>
               <Text style={styles.distance}>Approx. {branch.distanceKm.toFixed(1)} km away</Text>
               <Text style={[styles.coverageState,branch.withinServiceArea?styles.withinCoverage:styles.outsideCoverage]}>{branch.withinServiceArea?'Within delivery area':`Outside normal delivery area · ${branch.serviceRadiusKm} km radius`}</Text>
@@ -222,7 +290,67 @@ const rankedBranches = React.useMemo(()=>deliveryLocation?rankBranchesByDistance
         {itemDetails.map((item)=><View key={item.productId} style={styles.itemRow}><View style={styles.itemInfo}><Text style={styles.itemName}>{item.product.product_name}</Text><Text style={styles.itemPrice}>{formatPrice(item.product.price)} each · {formatPrice(item.lineTotal)}</Text></View><View style={styles.quantity}><TouchableOpacity onPress={()=>changeQuantity(item.productId,-1)} style={styles.quantityButton}><Text style={styles.quantityText}>−</Text></TouchableOpacity><Text style={styles.quantityValue}>{item.quantity}</Text><TouchableOpacity onPress={()=>changeQuantity(item.productId,1)} style={styles.quantityButton}><Text style={styles.quantityText}>+</Text></TouchableOpacity></View></View>)}
       </Section>
       <Section number="4" title="Order details"><View style={styles.choiceRow}>{containers.map((option)=><TouchableOpacity key={option} onPress={()=>setContainer(option)} style={[styles.choice,container===option&&styles.choiceActive]}><Text style={[styles.choiceText,container===option&&styles.choiceTextActive]}>{option}</Text></TouchableOpacity>)}</View></Section>
-      <Section number="5" title="Review request"><LimitWarning items={itemDetails} colors={colors} /><View style={styles.reviewRow}><Text style={styles.reviewLabel}>Provider</Text><Text style={styles.reviewValue}>{selectedBranch?.name||'Not selected'}</Text></View><View style={styles.reviewRow}><Text style={styles.reviewLabel}>Distance</Text><Text style={styles.reviewValue}>{selectedDistance==null?'—':`Approx. ${selectedDistance.toFixed(1)} km`}</Text></View><View style={styles.reviewRow}><Text style={styles.reviewLabel}>Normal radius</Text><Text style={styles.reviewValue}>{selectedBranch?`${selectedRadius} km`:'—'}</Text></View><View style={styles.reviewRow}><Text style={styles.reviewLabel}>Items</Text><Text style={styles.reviewValue}>{items.reduce((sum,item)=>sum+item.quantity,0)}</Text></View><View style={styles.reviewRow}><Text style={styles.reviewLabel}>Items Subtotal</Text><Text style={styles.reviewValue}>{formatPrice(clientEstimate)}</Text></View><View style={styles.reviewRow}><Text style={styles.reviewLabel}>Delivery Fee</Text><Text style={styles.reviewValue}>{selectedBranch?formatPrice(estimatedDeliveryFee):'—'}</Text></View><View style={styles.reviewRow}><Text style={styles.reviewLabel}>Estimated total</Text><Text style={styles.total}>{formatPrice(estimatedTotal)}</Text></View>{selectedBranch&&<View style={[styles.reviewCoverage,selectedOutsideServiceArea?styles.reviewOutside:styles.reviewWithin]}><Text style={styles.reviewCoverageTitle}>{selectedOutsideServiceArea?'Outside normal delivery area':'Within delivery area'}</Text><Text style={styles.reviewCoverageText}>{needsManagerApproval?'Your request will wait for branch approval before it is confirmed.':'This provider can receive your order normally.'}</Text></View>}<Text style={styles.securityNote}>The backend reloads branch coverage, distance, product prices, delivery fees, and the final total when you submit.</Text>{reviewing&&<View style={styles.confirm}><Text style={styles.confirmTitle}>{needsManagerApproval?'Request branch approval?':'Ready to submit?'}</Text><Text style={styles.confirmText}>{needsManagerApproval?'The branch Manager must approve this request before delivery can proceed.':'Your delivery location and order snapshots will be shared only with authorized fulfillment roles.'}</Text></View>}{!!submitError&&<Text accessibilityRole="alert" style={styles.submitError}>{submitError}</Text>}<TouchableOpacity disabled={!canReview||submitting} onPress={reviewing?submit:()=>setReviewing(true)} style={[styles.submitButton,(!canReview||submitting)&&styles.disabled]}><Text style={styles.submitText}>{submitting?'Submitting…':hasActiveOrder?'Active order in progress':reviewing?(needsManagerApproval?'Confirm approval request':'Confirm order'):(needsManagerApproval?'Request branch approval':'Review request')}</Text></TouchableOpacity>{reviewing&&<TouchableOpacity onPress={()=>setReviewing(false)} style={styles.cancel}><Text style={styles.cancelText}>Back to edit</Text></TouchableOpacity>}</Section>
+      <Section number="5" title="Review request">
+        <LimitWarning items={itemDetails} colors={colors} />
+        <View style={styles.reviewRow}>
+          <Text style={styles.reviewLabel}>Provider</Text>
+          <Text style={styles.reviewValue}>{selectedBranch?.name || 'Not selected'}</Text>
+        </View>
+        <View style={styles.reviewRow}>
+          <Text style={styles.reviewLabel}>Distance</Text>
+          <Text style={styles.reviewValue}>{selectedDistance == null ? '—' : `Approx. ${selectedDistance.toFixed(1)} km`}</Text>
+        </View>
+        <View style={styles.reviewRow}>
+          <Text style={styles.reviewLabel}>Normal radius</Text>
+          <Text style={styles.reviewValue}>{selectedBranch ? `${selectedRadius} km` : '—'}</Text>
+        </View>
+        <View style={styles.reviewRow}>
+          <Text style={styles.reviewLabel}>Items</Text>
+          <Text style={styles.reviewValue}>{items.reduce((sum, item) => sum + item.quantity, 0)}</Text>
+        </View>
+        <View style={styles.reviewRow}>
+          <Text style={styles.reviewLabel}>Items Subtotal</Text>
+          <Text style={styles.reviewValue}>{formatPrice(clientEstimate)}</Text>
+        </View>
+        <View style={styles.reviewRow}>
+          <View style={styles.reviewLabelWrap}>
+            <Text style={styles.reviewLabel}>Delivery Fee</Text>
+            {!!deliveryBreakdown && (
+              <Text style={styles.feeBreakdownText}>
+                {deliveryBreakdown.isWithinIncludedRadius
+                  ? `Within base ${deliveryBreakdown.includedRadiusKm} km coverage`
+                  : `Base ₱${deliveryBreakdown.baseDeliveryFee} + ₱${deliveryBreakdown.outsideRadiusFeePerKm}/km beyond ${deliveryBreakdown.includedRadiusKm} km (${deliveryBreakdown.excessDistanceKm} km outside)`}
+              </Text>
+            )}
+          </View>
+          <Text style={styles.reviewValue}>{selectedBranch ? formatPrice(estimatedDeliveryFee) : '—'}</Text>
+        </View>
+        <View style={styles.reviewRow}>
+          <Text style={styles.reviewLabel}>Estimated total</Text>
+          <Text style={styles.total}>{formatPrice(estimatedTotal)}</Text>
+        </View>
+        {selectedBranch && (
+          <View style={[styles.reviewCoverage, selectedOutsideServiceArea ? styles.reviewOutside : styles.reviewWithin]}>
+            <Text style={styles.reviewCoverageTitle}>{selectedOutsideServiceArea ? 'Outside normal delivery area' : 'Within delivery area'}</Text>
+            <Text style={styles.reviewCoverageText}>{needsManagerApproval ? 'Your request will wait for branch approval before it is confirmed.' : 'This provider can receive your order normally.'}</Text>
+          </View>
+        )}
+        {reviewing && (
+          <View style={styles.confirm}>
+            <Text style={styles.confirmTitle}>{needsManagerApproval ? 'Request branch approval?' : 'Ready to submit?'}</Text>
+            <Text style={styles.confirmText}>{needsManagerApproval ? 'The branch Manager must approve this request before delivery can proceed.' : 'Your delivery location and order snapshots will be shared only with authorized fulfillment roles.'}</Text>
+          </View>
+        )}
+        {!!submitError && <Text accessibilityRole="alert" style={styles.submitError}>{submitError}</Text>}
+        <TouchableOpacity disabled={!canReview || submitting} onPress={reviewing ? submit : () => setReviewing(true)} style={[styles.submitButton, (!canReview || submitting) && styles.disabled]}>
+          <Text style={styles.submitText}>{submitting ? 'Submitting…' : hasActiveOrder ? 'Active order in progress' : reviewing ? (needsManagerApproval ? 'Confirm approval request' : 'Confirm order') : (needsManagerApproval ? 'Request branch approval' : 'Review request')}</Text>
+        </TouchableOpacity>
+        {reviewing && (
+          <TouchableOpacity onPress={() => setReviewing(false)} style={styles.cancel}>
+            <Text style={styles.cancelText}>Back to edit</Text>
+          </TouchableOpacity>
+        )}
+      </Section>
     </>}
   </ScrollView></KeyboardAvoidingView><UnsavedModal /></SafeAreaView></LinearGradient>;
 }
@@ -242,4 +370,4 @@ const restrictionStyles = createPortalStyleSheet({
   selectTextReset:{marginLeft:0},
 });
 
-const styles = createPortalStyleSheet({gradient:{flex:1,minWidth:0},safe:{flex:1,minWidth:0,backgroundColor:'transparent'},flex:{flex:1,minWidth:0},content:{width:'100%',maxWidth:USER_PORTAL_LAYOUT.maxWidth,minWidth:0,alignSelf:'center',paddingHorizontal:USER_PORTAL_LAYOUT.gutter,paddingTop:24,paddingBottom:USER_PORTAL_BOTTOM_CONTENT_INSET},pageHeading:{width:'100%',maxWidth:'100%',minWidth:0,marginBottom:18},eyebrow:{color:'#E3F2FD',fontSize:11,fontWeight:'900',letterSpacing:1},title:{color:'#FFFFFF',fontSize:28,fontWeight:'900',marginTop:5},subtitle:{color:'#E3F2FD',fontSize:14,lineHeight:21,marginTop:7,maxWidth:'100%'},section:{width:'100%',maxWidth:'100%',minWidth:0,backgroundColor:BLUETAP_COLORS.surface,borderWidth:1,borderColor:BLUETAP_COLORS.border,borderRadius:BLUETAP_LAYOUT.radius.lg,padding:18,marginBottom:16,...BLUETAP_LAYOUT.shadow},sectionHeading:{flexDirection:'row',alignItems:'flex-start',gap:12,marginBottom:16},number:{width:30,height:30,borderRadius:15,backgroundColor:BLUETAP_COLORS.primary,alignItems:'center',justifyContent:'center'},numberText:{color:'#FFF',fontWeight:'900'},sectionTitleWrap:{flex:1,minWidth:0},sectionTitle:{color:BLUETAP_COLORS.textPrimary,fontSize:17,fontWeight:'900'},sectionHelper:{color:BLUETAP_COLORS.textSecondary,fontSize:12,lineHeight:18,marginTop:3},deliveryAvailability:{backgroundColor:BLUETAP_COLORS.primarySoft,borderWidth:1,borderColor:BLUETAP_COLORS.border,borderRadius:10,padding:12,marginBottom:12},deliveryAvailabilityTitle:{color:BLUETAP_COLORS.textPrimary,fontSize:12,fontWeight:'900'},deliveryAvailabilityText:{color:BLUETAP_COLORS.textSecondary,fontSize:11,lineHeight:16,marginTop:3},primaryButton:{minHeight:46,alignItems:'center',justifyContent:'center',backgroundColor:BLUETAP_COLORS.primary,borderRadius:10,paddingHorizontal:16,alignSelf:'flex-start'},primaryText:{color:'#FFF',fontWeight:'900'},manualHint:{color:BLUETAP_COLORS.textSecondary,fontSize:12,marginVertical:12},locationStatus:{marginTop:10,backgroundColor:BLUETAP_COLORS.primarySoft,borderRadius:10,padding:11,borderWidth:1,borderColor:BLUETAP_COLORS.border},locationStatusTitle:{color:BLUETAP_COLORS.textPrimary,fontWeight:'900',fontSize:12},locationStatusText:{color:BLUETAP_COLORS.textSecondary,fontSize:11,lineHeight:16,marginTop:3},saveDefaultRow:{flexDirection:'row',alignItems:'center',gap:8,marginTop:12},checkbox:{width:20,height:20,borderRadius:4,borderWidth:1.5,borderColor:BLUETAP_COLORS.border,alignItems:'center',justifyContent:'center'},checkboxChecked:{backgroundColor:BLUETAP_COLORS.primary,borderColor:BLUETAP_COLORS.primary},checkmark:{color:'#FFF',fontSize:12,fontWeight:'900'},saveDefaultText:{color:BLUETAP_COLORS.textPrimary,fontSize:12,fontWeight:'700'},activeOrderBanner:{backgroundColor:'#FFF8E8',borderWidth:1,borderColor:BLUETAP_COLORS.warning,borderRadius:16,padding:16,marginBottom:16},activeOrderTitle:{color:BLUETAP_COLORS.textPrimary,fontWeight:'900',fontSize:15},activeOrderText:{color:BLUETAP_COLORS.textSecondary,fontSize:12,lineHeight:18,marginTop:4},activeOrderButton:{alignSelf:'flex-start',backgroundColor:BLUETAP_COLORS.primary,paddingHorizontal:14,paddingVertical:8,borderRadius:8,marginTop:10},activeOrderButtonText:{color:'#FFF',fontWeight:'800',fontSize:12},inlineError:{backgroundColor:BLUETAP_COLORS.dangerSoft,borderRadius:10,padding:12,marginTop:10},inlineErrorText:{color:BLUETAP_COLORS.danger,fontSize:12,lineHeight:18},retryText:{color:BLUETAP_COLORS.primary,fontWeight:'900',marginTop:7},warning:{backgroundColor:'#FFF8E8',borderWidth:1.5,borderColor:BLUETAP_COLORS.warning,borderRadius:16,padding:16,marginBottom:16},warningTitle:{color:BLUETAP_COLORS.textPrimary,fontWeight:'900',fontSize:14},warningText:{color:BLUETAP_COLORS.textSecondary,fontSize:12,lineHeight:18,marginTop:5},linkButton:{backgroundColor:BLUETAP_COLORS.primary,borderRadius:8,paddingHorizontal:16,paddingVertical:10,alignSelf:'flex-start',marginTop:12},linkText:{color:'#FFFFFF',fontWeight:'900',fontSize:13},branchCard:{width:'100%',maxWidth:'100%',minWidth:0,flexDirection:'row',alignItems:'center',borderWidth:1,borderColor:BLUETAP_COLORS.border,borderRadius:12,padding:14,marginBottom:10,backgroundColor:BLUETAP_COLORS.surfaceAlt},nearestBranchCard:{},selected:{borderColor:BLUETAP_COLORS.primary,borderWidth:2,backgroundColor:BLUETAP_COLORS.primarySoft},branchMain:{flex:1,minWidth:0},branchTitleRow:{flexDirection:'row',alignItems:'center',gap:8,flexWrap:'wrap'},branchName:{color:BLUETAP_COLORS.textPrimary,fontSize:15,fontWeight:'900'},nearest:{color:BLUETAP_COLORS.success,fontSize:10,fontWeight:'900',backgroundColor:'#E8F7EF',borderRadius:999,paddingHorizontal:8,paddingVertical:4},branchAddress:{color:BLUETAP_COLORS.textSecondary,fontSize:12,lineHeight:17,marginTop:4},distance:{color:BLUETAP_COLORS.primary,fontSize:12,fontWeight:'800',marginTop:5},coverageState:{fontSize:11,fontWeight:'900',marginTop:5},withinCoverage:{color:BLUETAP_COLORS.success},outsideCoverage:{color:BLUETAP_COLORS.warning},selectText:{color:BLUETAP_COLORS.primary,fontWeight:'900',marginLeft:12},outsideNotice:{backgroundColor:'#FFF8E8',borderWidth:1,borderColor:BLUETAP_COLORS.warning,borderRadius:12,padding:14,marginTop:2},outsideNoticeTitle:{color:BLUETAP_COLORS.textPrimary,fontWeight:'900'},outsideNoticeText:{color:BLUETAP_COLORS.textSecondary,fontSize:12,lineHeight:18,marginTop:5},outsideActions:{flexDirection:'row',flexWrap:'wrap',gap:8,marginTop:12},outsidePrimary:{minHeight:40,borderRadius:9,paddingHorizontal:12,backgroundColor:BLUETAP_COLORS.primary,alignItems:'center',justifyContent:'center'},outsidePrimaryText:{color:'#FFF',fontWeight:'900',fontSize:12},outsideSecondary:{minHeight:40,borderRadius:9,paddingHorizontal:12,borderWidth:1,borderColor:BLUETAP_COLORS.primary,alignItems:'center',justifyContent:'center'},outsideSecondaryText:{color:BLUETAP_COLORS.primary,fontWeight:'900',fontSize:12},products:{gap:12,paddingBottom:8,maxWidth:'100%'},productWrap:{width:260,maxWidth:'100%',minWidth:0},itemRow:{flexDirection:'row',alignItems:'center',gap:12,borderTopWidth:1,borderTopColor:BLUETAP_COLORS.border,paddingTop:12,marginTop:12,minWidth:0},itemInfo:{flex:1,minWidth:0},itemName:{color:BLUETAP_COLORS.textPrimary,fontWeight:'900'},itemPrice:{color:BLUETAP_COLORS.textSecondary,fontSize:12,marginTop:4},quantity:{flexDirection:'row',alignItems:'center',gap:10},quantityButton:{width:34,height:34,borderRadius:10,backgroundColor:BLUETAP_COLORS.primarySoft,alignItems:'center',justifyContent:'center'},quantityText:{color:BLUETAP_COLORS.primary,fontSize:19,fontWeight:'900'},quantityValue:{minWidth:20,textAlign:'center',color:BLUETAP_COLORS.textPrimary,fontWeight:'900'},choiceRow:{flexDirection:'row',flexWrap:'wrap',gap:10,minWidth:0},choice:{minHeight:44,paddingHorizontal:16,borderWidth:1,borderColor:BLUETAP_COLORS.border,borderRadius:10,alignItems:'center',justifyContent:'center'},choiceActive:{backgroundColor:BLUETAP_COLORS.primary,borderColor:BLUETAP_COLORS.primary},choiceText:{color:BLUETAP_COLORS.textPrimary,fontWeight:'800'},choiceTextActive:{color:'#FFF'},reviewRow:{flexDirection:'row',justifyContent:'space-between',gap:18,borderBottomWidth:1,borderBottomColor:BLUETAP_COLORS.border,paddingVertical:10,minWidth:0},reviewLabel:{color:BLUETAP_COLORS.textSecondary,fontSize:13},reviewValue:{color:BLUETAP_COLORS.textPrimary,fontWeight:'800',textAlign:'right',flex:1,minWidth:0},total:{color:BLUETAP_COLORS.primary,fontSize:18,fontWeight:'900'},reviewCoverage:{borderRadius:10,padding:12,marginTop:12,borderWidth:1},reviewWithin:{backgroundColor:'#E8F7EF',borderColor:BLUETAP_COLORS.success},reviewOutside:{backgroundColor:'#FFF8E8',borderColor:BLUETAP_COLORS.warning},reviewCoverageTitle:{color:BLUETAP_COLORS.textPrimary,fontWeight:'900',fontSize:12},reviewCoverageText:{color:BLUETAP_COLORS.textSecondary,fontSize:11,lineHeight:16,marginTop:3},securityNote:{color:BLUETAP_COLORS.muted,fontSize:11,lineHeight:17,marginTop:12},confirm:{backgroundColor:BLUETAP_COLORS.primarySoft,borderRadius:10,padding:12,marginTop:14},confirmTitle:{color:BLUETAP_COLORS.textPrimary,fontWeight:'900'},confirmText:{color:BLUETAP_COLORS.textSecondary,fontSize:12,lineHeight:18,marginTop:4},submitButton:{minHeight:50,backgroundColor:BLUETAP_COLORS.primary,borderRadius:11,alignItems:'center',justifyContent:'center',marginTop:16},submitText:{color:'#FFF',fontWeight:'900'},disabled:{opacity:.45},cancel:{alignItems:'center',padding:12},cancelText:{color:BLUETAP_COLORS.primary,fontWeight:'800'},submitError:{color:BLUETAP_COLORS.danger,fontSize:12,marginTop:12},empty:{borderWidth:1,borderStyle:'dashed',borderColor:BLUETAP_COLORS.border,borderRadius:12,padding:20,alignItems:'center'},emptyTitle:{color:BLUETAP_COLORS.textPrimary,fontWeight:'900',textAlign:'center'},emptyText:{color:BLUETAP_COLORS.textSecondary,fontSize:12,marginTop:5,textAlign:'center'},state:{alignItems:'center',padding:30,backgroundColor:BLUETAP_COLORS.surface,borderRadius:16,borderWidth:1,borderColor:BLUETAP_COLORS.border},stateText:{color:BLUETAP_COLORS.textSecondary,fontSize:13,lineHeight:19,textAlign:'center',marginVertical:10},errorTitle:{color:BLUETAP_COLORS.danger,fontWeight:'900'}});
+const styles = createPortalStyleSheet({gradient:{flex:1,minWidth:0},safe:{flex:1,minWidth:0,backgroundColor:'transparent'},flex:{flex:1,minWidth:0},content:{width:'100%',maxWidth:USER_PORTAL_LAYOUT.maxWidth,minWidth:0,alignSelf:'center',paddingHorizontal:USER_PORTAL_LAYOUT.gutter,paddingTop:24,paddingBottom:USER_PORTAL_BOTTOM_CONTENT_INSET},pageHeading:{width:'100%',maxWidth:'100%',minWidth:0,marginBottom:18},headerTopRow:{flexDirection:'row',alignItems:'center',justifyContent:'space-between',gap:12,marginBottom:6},backButton:{minHeight:44,minWidth:84,paddingHorizontal:14,paddingVertical:10,borderRadius:10,borderWidth:1,borderColor:'rgba(255,255,255,0.35)',backgroundColor:'rgba(255,255,255,0.12)',alignItems:'center',justifyContent:'center'},backButtonText:{color:'#FFFFFF',fontSize:13,fontWeight:'800'},eyebrow:{color:'#E3F2FD',fontSize:11,fontWeight:'900',letterSpacing:1},title:{color:'#FFFFFF',fontSize:28,fontWeight:'900',marginTop:5},subtitle:{color:'#E3F2FD',fontSize:14,lineHeight:21,marginTop:7,maxWidth:'100%'},section:{width:'100%',maxWidth:'100%',minWidth:0,backgroundColor:BLUETAP_COLORS.surface,borderWidth:1,borderColor:BLUETAP_COLORS.border,borderRadius:BLUETAP_LAYOUT.radius.lg,padding:18,marginBottom:16,...BLUETAP_LAYOUT.shadow},sectionHeading:{flexDirection:'row',alignItems:'flex-start',gap:12,marginBottom:16},number:{width:30,height:30,borderRadius:15,backgroundColor:BLUETAP_COLORS.primary,alignItems:'center',justifyContent:'center'},numberText:{color:'#FFF',fontWeight:'900'},sectionTitleWrap:{flex:1,minWidth:0},sectionTitle:{color:BLUETAP_COLORS.textPrimary,fontSize:17,fontWeight:'900'},sectionHelper:{color:BLUETAP_COLORS.textSecondary,fontSize:12,lineHeight:18,marginTop:3},deliveryAvailability:{backgroundColor:BLUETAP_COLORS.primarySoft,borderWidth:1,borderColor:BLUETAP_COLORS.border,borderRadius:10,padding:12,marginBottom:12},deliveryAvailabilityTitle:{color:BLUETAP_COLORS.textPrimary,fontSize:12,fontWeight:'900'},deliveryAvailabilityText:{color:BLUETAP_COLORS.textSecondary,fontSize:11,lineHeight:16,marginTop:3},primaryButton:{minHeight:46,alignItems:'center',justifyContent:'center',backgroundColor:BLUETAP_COLORS.primary,borderRadius:10,paddingHorizontal:16,alignSelf:'flex-start'},primaryText:{color:'#FFF',fontWeight:'900'},manualHint:{color:BLUETAP_COLORS.textSecondary,fontSize:12,marginVertical:12},locationStatus:{marginTop:10,backgroundColor:BLUETAP_COLORS.primarySoft,borderRadius:10,padding:11,borderWidth:1,borderColor:BLUETAP_COLORS.border},locationStatusTitle:{color:BLUETAP_COLORS.textPrimary,fontWeight:'900',fontSize:12},locationStatusText:{color:BLUETAP_COLORS.textSecondary,fontSize:11,lineHeight:16,marginTop:3},saveDefaultRow:{flexDirection:'row',alignItems:'center',gap:8,marginTop:12},checkbox:{width:20,height:20,borderRadius:4,borderWidth:1.5,borderColor:BLUETAP_COLORS.border,alignItems:'center',justifyContent:'center'},checkboxChecked:{backgroundColor:BLUETAP_COLORS.primary,borderColor:BLUETAP_COLORS.primary},checkmark:{color:'#FFF',fontSize:12,fontWeight:'900'},saveDefaultText:{color:BLUETAP_COLORS.textPrimary,fontSize:12,fontWeight:'700'},activeOrderBanner:{backgroundColor:'#FFF8E8',borderWidth:1,borderColor:BLUETAP_COLORS.warning,borderRadius:16,padding:16,marginBottom:16},activeOrderTitle:{color:BLUETAP_COLORS.textPrimary,fontWeight:'900',fontSize:15},activeOrderText:{color:BLUETAP_COLORS.textSecondary,fontSize:12,lineHeight:18,marginTop:4},activeOrderButton:{minHeight:44,alignItems:'center',justifyContent:'center',alignSelf:'flex-start',backgroundColor:BLUETAP_COLORS.primaryAction,paddingHorizontal:16,paddingVertical:10,borderRadius:10,marginTop:12},activeOrderButtonText:{color:'#FFFFFF',fontWeight:'900',fontSize:13,letterSpacing:0.2},inlineError:{backgroundColor:BLUETAP_COLORS.dangerSoft,borderRadius:10,padding:12,marginTop:10},inlineErrorText:{color:BLUETAP_COLORS.danger,fontSize:12,lineHeight:18},retryText:{color:BLUETAP_COLORS.primary,fontWeight:'900',marginTop:7},warning:{backgroundColor:'#FFF8E8',borderWidth:1.5,borderColor:BLUETAP_COLORS.warning,borderRadius:16,padding:16,marginBottom:16},warningTitle:{color:BLUETAP_COLORS.textPrimary,fontWeight:'900',fontSize:14},warningText:{color:BLUETAP_COLORS.textSecondary,fontSize:12,lineHeight:18,marginTop:5},linkButton:{backgroundColor:BLUETAP_COLORS.primary,borderRadius:8,paddingHorizontal:16,paddingVertical:10,alignSelf:'flex-start',marginTop:12},linkText:{color:'#FFFFFF',fontWeight:'900',fontSize:13},branchCard:{width:'100%',maxWidth:'100%',minWidth:0,flexDirection:'row',alignItems:'center',borderWidth:1,borderColor:BLUETAP_COLORS.border,borderRadius:12,padding:14,marginBottom:10,backgroundColor:BLUETAP_COLORS.surfaceAlt},nearestBranchCard:{},selected:{borderColor:BLUETAP_COLORS.primary,borderWidth:2,backgroundColor:BLUETAP_COLORS.primarySoft},branchMain:{flex:1,minWidth:0},branchTitleRow:{flexDirection:'row',alignItems:'center',gap:8,flexWrap:'wrap'},branchName:{color:BLUETAP_COLORS.textPrimary,fontSize:15,fontWeight:'900'},nearest:{color:BLUETAP_COLORS.success,fontSize:10,fontWeight:'900',backgroundColor:'#E8F7EF',borderRadius:999,paddingHorizontal:8,paddingVertical:4},branchAddress:{color:BLUETAP_COLORS.textSecondary,fontSize:12,lineHeight:17,marginTop:4},distance:{color:BLUETAP_COLORS.primary,fontSize:12,fontWeight:'800',marginTop:5},coverageState:{fontSize:11,fontWeight:'900',marginTop:5},withinCoverage:{color:BLUETAP_COLORS.success},outsideCoverage:{color:BLUETAP_COLORS.warning},selectText:{color:BLUETAP_COLORS.primary,fontWeight:'900',marginLeft:12},outsideNotice:{backgroundColor:'#FFF8E8',borderWidth:1,borderColor:BLUETAP_COLORS.warning,borderRadius:12,padding:14,marginTop:2},outsideNoticeTitle:{color:BLUETAP_COLORS.textPrimary,fontWeight:'900'},outsideNoticeText:{color:BLUETAP_COLORS.textSecondary,fontSize:12,lineHeight:18,marginTop:5},outsideActions:{flexDirection:'row',flexWrap:'wrap',gap:8,marginTop:12},outsidePrimary:{minHeight:40,borderRadius:9,paddingHorizontal:12,backgroundColor:BLUETAP_COLORS.primary,alignItems:'center',justifyContent:'center'},outsidePrimaryText:{color:'#FFF',fontWeight:'900',fontSize:12},outsideSecondary:{minHeight:40,borderRadius:9,paddingHorizontal:12,borderWidth:1,borderColor:BLUETAP_COLORS.primary,alignItems:'center',justifyContent:'center'},outsideSecondaryText:{color:BLUETAP_COLORS.primary,fontWeight:'900',fontSize:12},products:{gap:12,paddingBottom:8,maxWidth:'100%'},productWrap:{width:260,maxWidth:'100%',minWidth:0},itemRow:{flexDirection:'row',alignItems:'center',gap:12,borderTopWidth:1,borderTopColor:BLUETAP_COLORS.border,paddingTop:12,marginTop:12,minWidth:0},itemInfo:{flex:1,minWidth:0},itemName:{color:BLUETAP_COLORS.textPrimary,fontWeight:'900'},itemPrice:{color:BLUETAP_COLORS.textSecondary,fontSize:12,marginTop:4},quantity:{flexDirection:'row',alignItems:'center',gap:10},quantityButton:{width:34,height:34,borderRadius:10,backgroundColor:BLUETAP_COLORS.primarySoft,alignItems:'center',justifyContent:'center'},quantityText:{color:BLUETAP_COLORS.primary,fontSize:19,fontWeight:'900'},quantityValue:{minWidth:20,textAlign:'center',color:BLUETAP_COLORS.textPrimary,fontWeight:'900'},choiceRow:{flexDirection:'row',flexWrap:'wrap',gap:10,minWidth:0},choice:{minHeight:44,paddingHorizontal:16,borderWidth:1,borderColor:BLUETAP_COLORS.border,borderRadius:10,alignItems:'center',justifyContent:'center'},choiceActive:{backgroundColor:BLUETAP_COLORS.primary,borderColor:BLUETAP_COLORS.primary},choiceText:{color:BLUETAP_COLORS.textPrimary,fontWeight:'800'},choiceTextActive:{color:'#FFF'},reviewRow:{flexDirection:'row',justifyContent:'space-between',gap:18,borderBottomWidth:1,borderBottomColor:BLUETAP_COLORS.border,paddingVertical:10,minWidth:0},reviewLabelWrap:{flex:1,minWidth:0},feeBreakdownText:{color:BLUETAP_COLORS.textSecondary,fontSize:11,lineHeight:16,marginTop:2},reviewLabel:{color:BLUETAP_COLORS.textSecondary,fontSize:13},reviewValue:{color:BLUETAP_COLORS.textPrimary,fontWeight:'800',textAlign:'right',flex:1,minWidth:0},total:{color:BLUETAP_COLORS.primary,fontSize:18,fontWeight:'900'},reviewCoverage:{borderRadius:10,padding:12,marginTop:12,borderWidth:1},reviewWithin:{backgroundColor:'#E8F7EF',borderColor:BLUETAP_COLORS.success},reviewOutside:{backgroundColor:'#FFF8E8',borderColor:BLUETAP_COLORS.warning},reviewCoverageTitle:{color:BLUETAP_COLORS.textPrimary,fontWeight:'900',fontSize:12},reviewCoverageText:{color:BLUETAP_COLORS.textSecondary,fontSize:11,lineHeight:16,marginTop:3},securityNote:{color:BLUETAP_COLORS.muted,fontSize:11,lineHeight:17,marginTop:12},confirm:{backgroundColor:BLUETAP_COLORS.primarySoft,borderRadius:10,padding:12,marginTop:14},confirmTitle:{color:BLUETAP_COLORS.textPrimary,fontWeight:'900'},confirmText:{color:BLUETAP_COLORS.textSecondary,fontSize:12,lineHeight:18,marginTop:4},submitButton:{minHeight:50,backgroundColor:BLUETAP_COLORS.primary,borderRadius:11,alignItems:'center',justifyContent:'center',marginTop:16},submitText:{color:'#FFF',fontWeight:'900'},disabled:{opacity:.45},cancel:{alignItems:'center',padding:12},cancelText:{color:BLUETAP_COLORS.primary,fontWeight:'800'},submitError:{color:BLUETAP_COLORS.danger,fontSize:12,marginTop:12},empty:{borderWidth:1,borderStyle:'dashed',borderColor:BLUETAP_COLORS.border,borderRadius:12,padding:20,alignItems:'center'},emptyTitle:{color:BLUETAP_COLORS.textPrimary,fontWeight:'900',textAlign:'center'},emptyText:{color:BLUETAP_COLORS.textSecondary,fontSize:12,marginTop:5,textAlign:'center'},state:{alignItems:'center',padding:30,backgroundColor:BLUETAP_COLORS.surface,borderRadius:16,borderWidth:1,borderColor:BLUETAP_COLORS.border},stateText:{color:BLUETAP_COLORS.textSecondary,fontSize:13,lineHeight:19,textAlign:'center',marginVertical:10},errorTitle:{color:BLUETAP_COLORS.danger,fontWeight:'900'}});

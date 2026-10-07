@@ -7,6 +7,7 @@ import ManagerShell from '../../components/ManagerShell';
 import TopToastFeedback from '../../components/TopToastFeedback';
 import useUnsavedChangesGuard from '../../components/useUnsavedChangesGuard';
 import { getManagerWorkspace, updateManagerDeliveryPricing, updateManagerProductPolicy } from '../../services/managerWorkspace';
+import { normalizeBranchDeliveryPricing } from '../../services/deliveryPricing';
 const { WEEKDAYS } = require('../../services/productOrderPolicy');
 
 const money = (value) => `₱${Number(value || 0).toFixed(2)}`;
@@ -36,16 +37,17 @@ export default function ManagerProductsPage() {
   const [pricingError, setPricingError] = React.useState('');
 
   const branch = workspace?.branch;
+  const branchPricing = React.useMemo(() => normalizeBranchDeliveryPricing(branch), [branch]);
 
   const isPricingDirty = React.useMemo(() => {
     if (!pricingModalOpen || !branch) return false;
     return (
-      baseFee !== String(branch.baseDeliveryFee ?? 0) ||
-      incRadius !== String(branch.includedRadiusKm ?? branch.serviceRadiusKm ?? 0) ||
-      outsideFee !== String(branch.outsideRadiusFeePerKm ?? 0) ||
-      servRadius !== String(branch.serviceRadiusKm ?? 0)
+      baseFee !== String(branchPricing.baseDeliveryFee) ||
+      incRadius !== String(branchPricing.includedRadiusKm) ||
+      outsideFee !== String(branchPricing.outsideRadiusFeePerKm) ||
+      servRadius !== String(branchPricing.serviceRadiusKm)
     );
-  }, [pricingModalOpen, branch, baseFee, incRadius, outsideFee, servRadius]);
+  }, [pricingModalOpen, branch, branchPricing, baseFee, incRadius, outsideFee, servRadius]);
 
   const { confirmLeave, UnsavedModal } = useUnsavedChangesGuard({
     isDirty: isPricingDirty,
@@ -64,10 +66,11 @@ export default function ManagerProductsPage() {
 
   const openPricingModal = () => {
     if (!branch) return;
-    setBaseFee(String(branch.baseDeliveryFee ?? 0));
-    setIncRadius(String(branch.includedRadiusKm ?? branch.serviceRadiusKm ?? 0));
-    setOutsideFee(String(branch.outsideRadiusFeePerKm ?? 0));
-    setServRadius(String(branch.serviceRadiusKm ?? 0));
+    const pricing = normalizeBranchDeliveryPricing(branch);
+    setBaseFee(String(pricing.baseDeliveryFee));
+    setIncRadius(String(pricing.includedRadiusKm));
+    setOutsideFee(String(pricing.outsideRadiusFeePerKm));
+    setServRadius(String(pricing.serviceRadiusKm));
     setPricingError('');
     setPricingModalOpen(true);
   };
@@ -163,10 +166,10 @@ export default function ManagerProductsPage() {
         </TouchableOpacity>
       </View>
       <View style={styles.metricGrid}>
-        <Metric label="Base delivery fee" value={money(branch?.baseDeliveryFee)} styles={styles}/>
-        <Metric label="Included radius" value={`${branch?.includedRadiusKm || 0} km`} styles={styles}/>
-        <Metric label="Outside-radius fee" value={`${money(branch?.outsideRadiusFeePerKm)} / km`} styles={styles}/>
-        <Metric label="Service radius" value={`${branch?.serviceRadiusKm || 0} km`} styles={styles}/>
+        <Metric label="Base delivery fee" value={money(branchPricing.baseDeliveryFee)} styles={styles}/>
+        <Metric label="Included radius" value={`${branchPricing.includedRadiusKm} km`} styles={styles}/>
+        <Metric label="Outside-radius fee" value={`${money(branchPricing.outsideRadiusFeePerKm)} / km`} styles={styles}/>
+        <Metric label="Service radius" value={`${branchPricing.serviceRadiusKm} km`} styles={styles}/>
       </View>
     </View>
 

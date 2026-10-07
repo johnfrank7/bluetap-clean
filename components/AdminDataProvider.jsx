@@ -1,6 +1,6 @@
 import React from 'react';
 import { onAuthStateChanged } from 'firebase/auth';
-import { collection, limit, onSnapshot, orderBy, query } from 'firebase/firestore';
+import { collection, limit, onSnapshot, orderBy, query, where } from 'firebase/firestore';
 
 import { auth, db } from '../firebase';
 import { prefetchLikelyAdminDestinations } from '../services/adminPrefetch';
@@ -34,10 +34,13 @@ export function AdminDataProvider({ children }) {
 
   React.useEffect(() => {
     let unsubscribeRequests = () => {};
+    let unsubscribeDistributors = () => {};
     let cancelPrefetch = () => {};
     const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
       unsubscribeRequests();
       unsubscribeRequests = () => {};
+      unsubscribeDistributors();
+      unsubscribeDistributors = () => {};
       cancelPrefetch();
       cancelPrefetch = () => {};
       const uid = user?.uid || '';
@@ -66,11 +69,28 @@ export function AdminDataProvider({ children }) {
             : current);
         },
       );
+
+      const distributorQuery = query(
+        collection(db, 'users'),
+        where('role', '==', 'distributor')
+      );
+      unsubscribeDistributors = onSnapshot(
+        distributorQuery,
+        () => {
+          distributorState.refresh({ force: true });
+        },
+        (error) => {
+          if (typeof __DEV__ !== 'undefined' && __DEV__) {
+            console.warn('[AdminDataProvider] distributor listener failed', error?.message);
+          }
+        }
+      );
     });
 
     return () => {
       unsubscribeAuth();
       unsubscribeRequests();
+      unsubscribeDistributors();
       cancelPrefetch();
     };
   }, []);

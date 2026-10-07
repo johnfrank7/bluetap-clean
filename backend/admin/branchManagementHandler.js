@@ -3,6 +3,7 @@ const { requireAdmin } = require('../auth/authorization');
 const { applyCors } = require('../utils/cors');
 const { OtpError } = require('../utils/otpError');
 const { DEFAULT_SERVICE_RADIUS_KM, TOLEDO_BARANGAYS, TOLEDO_CITY } = require('../../constants/toledoBarangays.json');
+const { normalizeBranchDeliveryPricing } = require('../pricing/deliveryPricingService');
 
 const BRANCH_STATUS = new Set(['active', 'inactive']);
 const MANAGER_STATUS = new Set(['active', 'inactive']);
@@ -15,18 +16,22 @@ const finiteCoordinate = (value, minimum, maximum) => {
   return Number.isFinite(number) && number >= minimum && number <= maximum ? number : null;
 };
 const branchIdForCode = (code) => clean(code, 24).toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '');
-const safeBranch = (id, data = {}) => ({
-  id,
-  name: clean(data.name), code: clean(data.code, 24), barangay: clean(data.barangay),
-  city: clean(data.city) || TOLEDO_CITY, address: clean(data.address, 240), status: data.status === 'inactive' ? 'inactive' : 'active',
-  active: data.status === 'inactive' ? false : data.active !== false,
-  latitude: finiteCoordinate(data.latitude, -90, 90), longitude: finiteCoordinate(data.longitude, -180, 180),
-  serviceRadiusKm: data.serviceRadiusKm !== null && data.serviceRadiusKm !== undefined && data.serviceRadiusKm !== '' && Number.isFinite(Number(data.serviceRadiusKm)) ? Number(data.serviceRadiusKm) : DEFAULT_SERVICE_RADIUS_KM,
-  baseDeliveryFee: data.baseDeliveryFee !== null && data.baseDeliveryFee !== undefined && data.baseDeliveryFee !== '' && Number.isFinite(Number(data.baseDeliveryFee)) ? Number(data.baseDeliveryFee) : 0,
-  includedRadiusKm: data.includedRadiusKm !== null && data.includedRadiusKm !== undefined && data.includedRadiusKm !== '' && Number.isFinite(Number(data.includedRadiusKm)) ? Number(data.includedRadiusKm) : (Number(data.serviceRadiusKm) || DEFAULT_SERVICE_RADIUS_KM),
-  outsideRadiusFeePerKm: data.outsideRadiusFeePerKm !== null && data.outsideRadiusFeePerKm !== undefined && data.outsideRadiusFeePerKm !== '' && Number.isFinite(Number(data.outsideRadiusFeePerKm)) ? Number(data.outsideRadiusFeePerKm) : 10,
-  createdAt: data.createdAt || null, createdBy: data.createdBy || '', updatedAt: data.updatedAt || null, updatedBy: data.updatedBy || '',
-});
+const safeBranch = (id, data = {}) => {
+  const pricing = normalizeBranchDeliveryPricing(data);
+  return {
+    id,
+    name: clean(data.name), code: clean(data.code, 24), barangay: clean(data.barangay),
+    city: clean(data.city) || TOLEDO_CITY, address: clean(data.address, 240), status: data.status === 'inactive' ? 'inactive' : 'active',
+    active: data.status === 'inactive' ? false : data.active !== false,
+    latitude: finiteCoordinate(data.latitude, -90, 90), longitude: finiteCoordinate(data.longitude, -180, 180),
+    serviceRadiusKm: pricing.serviceRadiusKm,
+    baseDeliveryFee: pricing.baseDeliveryFee,
+    includedRadiusKm: pricing.includedRadiusKm,
+    outsideRadiusFeePerKm: pricing.outsideRadiusFeePerKm,
+    deliveryPricing: pricing,
+    createdAt: data.createdAt || null, createdBy: data.createdBy || '', updatedAt: data.updatedAt || null, updatedBy: data.updatedBy || '',
+  };
+};
 const safeManager = (id, data = {}) => ({
   uid: id, email: clean(data.email).toLowerCase(), username: clean(data.username || data.usernameNormalized, 40),
   firstName: clean(data.firstName, 80), lastName: clean(data.lastName, 80), role: data.role,
@@ -167,6 +172,10 @@ function createAdminBranchesHandler(getAdmin = getFirebaseAdmin) {
         if (existing.exists) throw new OtpError(409, 'BRANCH_CODE_EXISTS', 'That branch code is already in use.');
         const now = new Date();
         const saved = { ...branchInput(body), code, createdAt: now, createdBy: admin.uid, updatedAt: now, updatedBy: admin.uid };
+        const canonicalPricing = normalizeBranchDeliveryPricing(saved);
+        canonicalPricing.updatedAt = now;
+        canonicalPricing.updatedBy = admin.uid;
+        saved.deliveryPricing = canonicalPricing;
         await db.runTransaction(async (tx) => {
           tx.create(ref, saved);
           tx.set(db.collection('adminAuditLogs').doc(), { action: 'BRANCH_CREATED', adminUid: admin.uid, branchId, before: null, after: safeBranch(branchId, saved), createdAt: now });
@@ -181,6 +190,16 @@ function createAdminBranchesHandler(getAdmin = getFirebaseAdmin) {
       const changes = branchInput(body, { partial: true });
       if (!Object.keys(changes).length) throw new OtpError(400, 'NO_BRANCH_CHANGES', 'No branch changes were provided.');
       const now = new Date();
+      const pricingKeys = ['baseDeliveryFee', 'includedRadiusKm', 'outsideRadiusFeePerKm', 'serviceRadiusKm'];
+      if (pricingKeys.some((k) => Object.prototype.hasOwnProperty.call(changes, k))) {
+        const canonicalPricing = normalizeBranchDeliveryPricing({
+          ...current.data(),
+          ...changes,
+        });
+        canonicalPricing.updatedAt = now;
+        canonicalPricing.updatedBy = admin.uid;
+        changes.deliveryPricing = canonicalPricing;
+      }
       const saved = { ...current.data(), ...changes, updatedAt: now, updatedBy: admin.uid };
       const action = current.data()?.status === 'active' && saved.status === 'inactive' ? 'BRANCH_DEACTIVATED' : 'BRANCH_UPDATED';
       await db.runTransaction(async (tx) => {

@@ -12,6 +12,11 @@ const { requestedDateNeedsApproval, resolveEffectiveProductPolicy } = require('.
 const { RELATIONSHIP_VERSION_BASELINE } = require('../utils/relationshipEpochs');
 const { reconcileOrderLifecycleInTransaction } = require('../chat/conversationLifecycleService');
 const { assertOrderingAllowed, recordOrderAbuseIncidentInTransaction } = require('../moderation/moderationService');
+const {
+  normalizeBranchDeliveryPricing,
+  calculateDeliveryFee,
+  calculateOrderTotal,
+} = require('../pricing/deliveryPricingService');
 
 const clean = (value, max = 240) => String(value || '').trim().slice(0, max);
 const coordinate = (value, minimum, maximum) => {
@@ -34,21 +39,6 @@ const distanceKm = (from, to) => {
     + Math.cos(radians(from.latitude)) * Math.cos(radians(to.latitude)) * Math.sin(longitudeDelta / 2) ** 2;
   const bounded = Math.min(1, Math.max(0, a));
   return Math.round(earthRadiusKm * 2 * Math.atan2(Math.sqrt(bounded), Math.sqrt(1 - bounded)) * 10) / 10;
-};
-const calculateDeliveryFee = (distKm, branch = {}) => {
-  const baseFee = typeof branch.baseDeliveryFee === 'number' ? branch.baseDeliveryFee : 0;
-  const includedRadius = typeof branch.includedRadiusKm === 'number'
-    ? branch.includedRadiusKm
-    : (typeof branch.serviceRadiusKm === 'number' ? branch.serviceRadiusKm : DEFAULT_SERVICE_RADIUS_KM);
-  const outsideRate = typeof branch.outsideRadiusFeePerKm === 'number' ? branch.outsideRadiusFeePerKm : 10;
-
-  if (!Number.isFinite(distKm) || distKm <= includedRadius) {
-    return Math.round(baseFee * 100) / 100;
-  }
-
-  const excessKm = distKm - includedRadius;
-  const extraFee = excessKm * outsideRate;
-  return Math.round((baseFee + extraFee) * 100) / 100;
 };
 const fullNameFor = (profile = {}) => clean(profile.fullName || `${profile.firstName || ''} ${profile.lastName || ''}`, 160);
 const profileAddressFor = (profile = {}) => clean(
@@ -203,12 +193,14 @@ async function buildTrustedOrder(db, requester, body) {
     ...(productLimitViolations.length ? ['PRODUCT_LIMIT_EXCEEDED'] : []),
     ...(deliveryDayApprovalRequired ? ['NON_STANDARD_DELIVERY_DAY'] : []),
   ];
-  const deliveryFeeAtOrder = calculateDeliveryFee(distanceKmSnapshot, branch);
-  const totalAtOrder = Math.round((subtotalAtOrder + deliveryFeeAtOrder) * 100) / 100;
+  const branchPricing = normalizeBranchDeliveryPricing(branch);
+  const deliveryFeeAtOrder = calculateDeliveryFee(distanceKmSnapshot, branchPricing);
+  const totalAtOrder = calculateOrderTotal(subtotalAtOrder, deliveryFeeAtOrder);
   const deliveryFeePolicy = {
-    baseDeliveryFee: typeof branch.baseDeliveryFee === 'number' ? branch.baseDeliveryFee : 0,
-    includedRadiusKm: typeof branch.includedRadiusKm === 'number' ? branch.includedRadiusKm : serviceRadiusKmSnapshot,
-    outsideRadiusFeePerKm: typeof branch.outsideRadiusFeePerKm === 'number' ? branch.outsideRadiusFeePerKm : 10,
+    baseDeliveryFee: branchPricing.baseDeliveryFee,
+    includedRadiusKm: branchPricing.includedRadiusKm,
+    outsideRadiusFeePerKm: branchPricing.outsideRadiusFeePerKm,
+    serviceRadiusKm: branchPricing.serviceRadiusKm,
   };
   return {
     requesterUid: requester.decoded.uid,
@@ -317,8 +309,8 @@ function createRequesterOrdersHandler(getAdmin = getFirebaseAdmin) {
           }));
 
           const subtotalAtOrder = Math.round(items.reduce((sum, item) => sum + item.totalAtOrder, 0) * 100) / 100;
-          const deliveryFeeAtOrder = typeof current.deliveryFeeAtOrder === 'number' ? current.deliveryFeeAtOrder : 0;
-          const totalAtOrder = Math.round((subtotalAtOrder + deliveryFeeAtOrder) * 100) / 100;
+          const deliveryFeeAtOrder = typeof current.deliveryFeeAtOrder === 'number' ? current.deliveryFeeAtOrder : (typeof current.deliveryFee === 'number' ? current.deliveryFee : 0);
+          const totalAtOrder = calculateOrderTotal(subtotalAtOrder, deliveryFeeAtOrder);
           const quantity = items.reduce((sum, item) => sum + item.quantity, 0);
           const now = new Date();
           const productLimitViolations = limitViolations(items);

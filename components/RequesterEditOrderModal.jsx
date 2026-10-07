@@ -2,11 +2,13 @@ import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Modal,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { createPortalStyleSheet, useBlueTapTheme } from './BlueTapTheme';
@@ -26,6 +28,7 @@ export default function RequesterEditOrderModal({
 }) {
   const request = requestProp || orderProp;
   const { colors, isDark } = useBlueTapTheme();
+  const { width, height } = useWindowDimensions();
   const [items, setItems] = useState([]);
   const [container, setContainer] = useState('');
   const [notes, setNotes] = useState('');
@@ -143,194 +146,359 @@ export default function RequesterEditOrderModal({
     }
   };
 
-  return (
-    <Modal
-      visible={visible}
-      transparent
-      animationType="fade"
-      onRequestClose={saving ? undefined : () => confirmLeave(onClose)}
-    >
-      <View style={styles.backdrop}>
-        <View style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          {/* Header */}
-          <View style={styles.header}>
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.title, { color: colors.primary }]}>Edit Pending Order</Text>
-              <Text style={[styles.subTitle, { color: colors.textSecondary }]}>
-                Order #{request.request_id || request.requestId || request.id}
-              </Text>
-            </View>
-            <TouchableOpacity
-              onPress={() => confirmLeave(onClose)}
-              disabled={saving}
-              style={styles.closeBtn}
-            >
-              <Text style={[styles.closeText, { color: colors.textSecondary }]}>✕</Text>
-            </TouchableOpacity>
-          </View>
+  const isNarrowScreen = width < 360;
+  const modalMaxHeight = Math.min(Math.max(320, height - (width < 440 ? 24 : 48)), 720);
 
-          <ScrollView style={styles.scrollArea} showsVerticalScrollIndicator={false}>
-            {/* Items Section */}
-            <View style={styles.section}>
-              <Text style={[styles.sectionTitle, { color: colors.primary }]}>Ordered Products</Text>
-              {items.map((item, idx) => (
-                <View
-                  key={item.id}
+  return (
+    <>
+      <Modal
+        visible={visible}
+        transparent
+        animationType="fade"
+        onRequestClose={saving ? undefined : () => confirmLeave(onClose)}
+        statusBarTranslucent
+      >
+        <View style={styles.rootOverlay}>
+          {/* Backdrop: dim only, separate from modal surface */}
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Close modal backdrop"
+            style={[
+              styles.backdrop,
+              { backgroundColor: isDark ? 'rgba(2, 10, 18, 0.72)' : 'rgba(8, 31, 51, 0.55)' },
+            ]}
+            onPress={saving ? undefined : () => confirmLeave(onClose)}
+          />
+
+          {/* Modal Surface: solid, fully opaque, theme-aware */}
+          <View
+            accessibilityViewIsModal
+            style={[
+              styles.modalCard,
+              {
+                backgroundColor: isDark ? colors.surface : '#FFFFFF',
+                borderColor: colors.border,
+                maxHeight: modalMaxHeight,
+              },
+            ]}
+          >
+            {/* Header: fixed/stable solid surface */}
+            <View
+              style={[
+                styles.header,
+                {
+                  backgroundColor: isDark ? colors.surface : '#FFFFFF',
+                  borderBottomColor: colors.border,
+                },
+              ]}
+            >
+              <View style={styles.headerTitleWrap}>
+                <Text style={[styles.title, { color: colors.primary }]}>
+                  Edit Pending Order
+                </Text>
+                <Text style={[styles.subTitle, { color: colors.textSecondary }]}>
+                  Order #{request.request_id || request.requestId || request.id}
+                </Text>
+              </View>
+              <TouchableOpacity
+                accessibilityRole="button"
+                accessibilityLabel="Close"
+                onPress={() => confirmLeave(onClose)}
+                disabled={saving}
+                style={styles.closeBtn}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Text style={[styles.closeText, { color: colors.textSecondary }]}>✕</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Scrollable Body: solid surface */}
+            <ScrollView
+              style={[styles.scrollArea, { backgroundColor: isDark ? colors.surface : '#FFFFFF' }]}
+              contentContainerStyle={styles.scrollContent}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              nestedScrollEnabled
+            >
+              {/* Ordered Products Section */}
+              <View style={styles.section}>
+                <Text style={[styles.sectionTitle, { color: colors.primary }]}>
+                  Ordered Products
+                </Text>
+                {items.map((item, idx) => (
+                  <View
+                    key={item.id}
+                    style={[
+                      styles.itemCard,
+                      {
+                        backgroundColor: isDark ? colors.surfaceAlt : '#F8FAFC',
+                        borderColor: colors.border,
+                      },
+                    ]}
+                  >
+                    <View style={styles.itemInfo}>
+                      <Text
+                        style={[styles.itemName, { color: colors.textPrimary }]}
+                        numberOfLines={2}
+                      >
+                        {item.name}
+                      </Text>
+                      <Text style={[styles.itemPrice, { color: colors.textSecondary }]}>
+                        {formatPrice(item.unitPrice)} each
+                      </Text>
+                    </View>
+
+                    <View style={styles.qtyControlRow}>
+                      <TouchableOpacity
+                        accessibilityRole="button"
+                        accessibilityLabel={`Decrease quantity of ${item.name}`}
+                        onPress={() => updateQuantity(idx, -1)}
+                        style={[
+                          styles.qtyBtn,
+                          {
+                            borderColor: colors.border,
+                            backgroundColor: isDark ? colors.surface : '#FFFFFF',
+                          },
+                        ]}
+                        disabled={saving || item.quantity <= 1}
+                      >
+                        <Text
+                          style={[
+                            styles.qtyBtnText,
+                            {
+                              color:
+                                item.quantity <= 1
+                                  ? (isDark ? colors.disabled : '#94A3B8')
+                                  : colors.primary,
+                            },
+                          ]}
+                        >
+                          −
+                        </Text>
+                      </TouchableOpacity>
+                      <Text style={[styles.qtyText, { color: colors.textPrimary }]}>
+                        {item.quantity}
+                      </Text>
+                      <TouchableOpacity
+                        accessibilityRole="button"
+                        accessibilityLabel={`Increase quantity of ${item.name}`}
+                        onPress={() => updateQuantity(idx, 1)}
+                        style={[
+                          styles.qtyBtn,
+                          {
+                            borderColor: colors.border,
+                            backgroundColor: isDark ? colors.surface : '#FFFFFF',
+                          },
+                        ]}
+                        disabled={saving || item.quantity >= 100}
+                      >
+                        <Text
+                          style={[
+                            styles.qtyBtnText,
+                            {
+                              color:
+                                item.quantity >= 100
+                                  ? (isDark ? colors.disabled : '#94A3B8')
+                                  : colors.primary,
+                            },
+                          ]}
+                        >
+                          +
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                ))}
+              </View>
+
+              {/* Container Type */}
+              <View style={styles.section}>
+                <Text style={[styles.sectionTitle, { color: colors.primary }]}>
+                  Container Type
+                </Text>
+                <TextInput
+                  value={container}
+                  onChangeText={setContainer}
+                  placeholder="e.g. Slim 5-gal, Round Dispenser"
+                  placeholderTextColor={isDark ? colors.muted : '#94A3B8'}
                   style={[
-                    styles.itemRow,
-                    { borderColor: colors.border },
-                    idx > 0 && styles.itemRowBorder,
+                    styles.input,
+                    {
+                      backgroundColor: isDark ? colors.input : '#F8FAFC',
+                      borderColor: colors.border,
+                      color: colors.textPrimary,
+                    },
+                  ]}
+                  editable={!saving}
+                />
+              </View>
+
+              {/* Delivery Notes / Instructions */}
+              <View style={styles.section}>
+                <Text style={[styles.sectionTitle, { color: colors.primary }]}>
+                  Delivery Notes / Instructions
+                </Text>
+                <TextInput
+                  value={notes}
+                  onChangeText={setNotes}
+                  placeholder="Gate code, landmarks, special requests..."
+                  placeholderTextColor={isDark ? colors.muted : '#94A3B8'}
+                  multiline
+                  numberOfLines={3}
+                  style={[
+                    styles.input,
+                    styles.multilineInput,
+                    {
+                      backgroundColor: isDark ? colors.input : '#F8FAFC',
+                      borderColor: colors.border,
+                      color: colors.textPrimary,
+                    },
+                  ]}
+                  editable={!saving}
+                />
+              </View>
+
+              {/* Price Summary */}
+              <View
+                style={[
+                  styles.priceSummaryBox,
+                  {
+                    backgroundColor: isDark ? colors.surfaceAlt : '#F0F8FF',
+                    borderColor: colors.border,
+                  },
+                ]}
+              >
+                <View style={styles.summaryRow}>
+                  <Text style={[styles.summaryLabel, { color: colors.textSecondary }]}>
+                    Subtotal
+                  </Text>
+                  <Text style={[styles.summaryValue, { color: colors.textPrimary }]}>
+                    {formatPrice(calculatedSubtotal)}
+                  </Text>
+                </View>
+                <View style={styles.summaryRow}>
+                  <Text style={[styles.summaryLabel, { color: colors.textSecondary }]}>
+                    Delivery Fee
+                  </Text>
+                  <Text style={[styles.summaryValue, { color: colors.textPrimary }]}>
+                    {formatPrice(deliveryFee)}
+                  </Text>
+                </View>
+                <View style={[styles.summaryDivider, { backgroundColor: colors.border }]} />
+                <View style={styles.summaryRow}>
+                  <Text style={[styles.totalLabel, { color: colors.textPrimary }]}>
+                    Estimated Total
+                  </Text>
+                  <Text style={[styles.totalValue, { color: colors.primary }]}>
+                    {formatPrice(calculatedTotal)}
+                  </Text>
+                </View>
+              </View>
+
+              {/* Error Message */}
+              {!!error && (
+                <View
+                  style={[
+                    styles.errorBox,
+                    {
+                      backgroundColor: isDark ? colors.dangerSoft : '#FEE2E2',
+                      borderColor: colors.danger,
+                    },
                   ]}
                 >
-                  <View style={{ flex: 1, marginRight: 12 }}>
-                    <Text style={[styles.itemName, { color: colors.textPrimary }]} numberOfLines={1}>
-                      {item.name}
-                    </Text>
-                    <Text style={[styles.itemPrice, { color: colors.textSecondary }]}>
-                      {formatPrice(item.unitPrice)} each
-                    </Text>
-                  </View>
-
-                  <View style={styles.qtyControlRow}>
-                    <TouchableOpacity
-                      onPress={() => updateQuantity(idx, -1)}
-                      style={[styles.qtyBtn, { borderColor: colors.border }]}
-                      disabled={saving || item.quantity <= 1}
-                    >
-                      <Text style={[styles.qtyBtnText, { color: colors.primary }]}>-</Text>
-                    </TouchableOpacity>
-                    <Text style={[styles.qtyText, { color: colors.textPrimary }]}>
-                      {item.quantity}
-                    </Text>
-                    <TouchableOpacity
-                      onPress={() => updateQuantity(idx, 1)}
-                      style={[styles.qtyBtn, { borderColor: colors.border }]}
-                      disabled={saving || item.quantity >= 100}
-                    >
-                      <Text style={[styles.qtyBtnText, { color: colors.primary }]}>+</Text>
-                    </TouchableOpacity>
-                  </View>
+                  <Text style={[styles.errorText, { color: isDark ? '#FCA5A5' : '#DC2626' }]}>
+                    {error}
+                  </Text>
                 </View>
-              ))}
-            </View>
-
-            {/* Container */}
-            <View style={styles.section}>
-              <Text style={[styles.sectionTitle, { color: colors.primary }]}>Container Type</Text>
-              <TextInput
-                value={container}
-                onChangeText={setContainer}
-                placeholder="e.g. Slim 5-gal, Round Dispenser"
-                placeholderTextColor={colors.placeholder}
-                style={[
-                  styles.input,
-                  {
-                    backgroundColor: isDark ? colors.backgroundSecondary : '#F8FAFC',
-                    borderColor: colors.border,
-                    color: colors.textPrimary,
-                  },
-                ]}
-                editable={!saving}
-              />
-            </View>
-
-            {/* Special Instructions */}
-            <View style={styles.section}>
-              <Text style={[styles.sectionTitle, { color: colors.primary }]}>Delivery Notes / Instructions</Text>
-              <TextInput
-                value={notes}
-                onChangeText={setNotes}
-                placeholder="Gate code, landmarks, special requests..."
-                placeholderTextColor={colors.placeholder}
-                multiline
-                numberOfLines={3}
-                style={[
-                  styles.input,
-                  styles.multilineInput,
-                  {
-                    backgroundColor: isDark ? colors.backgroundSecondary : '#F8FAFC',
-                    borderColor: colors.border,
-                    color: colors.textPrimary,
-                  },
-                ]}
-                editable={!saving}
-              />
-            </View>
-
-            {/* Price Summary */}
-            <View style={[styles.priceSummaryBox, { backgroundColor: isDark ? colors.backgroundSecondary : '#F0F8FF', borderColor: colors.border }]}>
-              <View style={styles.summaryRow}>
-                <Text style={[styles.summaryLabel, { color: colors.textSecondary }]}>Subtotal</Text>
-                <Text style={[styles.summaryValue, { color: colors.textPrimary }]}>{formatPrice(calculatedSubtotal)}</Text>
-              </View>
-              <View style={styles.summaryRow}>
-                <Text style={[styles.summaryLabel, { color: colors.textSecondary }]}>Delivery Fee</Text>
-                <Text style={[styles.summaryValue, { color: colors.textPrimary }]}>{formatPrice(deliveryFee)}</Text>
-              </View>
-              <View style={[styles.summaryDivider, { backgroundColor: colors.border }]} />
-              <View style={styles.summaryRow}>
-                <Text style={[styles.totalLabel, { color: colors.textPrimary }]}>Estimated Total</Text>
-                <Text style={[styles.totalValue, { color: colors.primary }]}>{formatPrice(calculatedTotal)}</Text>
-              </View>
-            </View>
-
-            {/* Error Message */}
-            {!!error && (
-              <View style={styles.errorBox}>
-                <Text style={styles.errorText}>{error}</Text>
-              </View>
-            )}
-          </ScrollView>
-
-          {/* Footer Actions */}
-          <View style={[styles.footer, { borderTopColor: colors.border }]}>
-            <TouchableOpacity
-              onPress={() => confirmLeave(onClose)}
-              disabled={saving}
-              style={[styles.cancelBtn, { borderColor: colors.border }]}
-            >
-              <Text style={[styles.cancelBtnText, { color: colors.textSecondary }]}>Cancel</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              onPress={handleSave}
-              disabled={saving}
-              style={[styles.saveBtn, { backgroundColor: colors.primaryAction }, saving && styles.btnDisabled]}
-            >
-              {saving ? (
-                <ActivityIndicator color={colors.onPrimary} size="small" />
-              ) : (
-                <Text style={[styles.saveBtnText, { color: colors.onPrimary }]}>Save Changes</Text>
               )}
-            </TouchableOpacity>
+            </ScrollView>
+
+            {/* Footer Actions: fixed/stable solid surface */}
+            <View
+              style={[
+                styles.footer,
+                isNarrowScreen && styles.footerStacked,
+                {
+                  backgroundColor: isDark ? colors.surface : '#FFFFFF',
+                  borderTopColor: colors.border,
+                },
+              ]}
+            >
+              <TouchableOpacity
+                accessibilityRole="button"
+                accessibilityLabel="Cancel editing order"
+                onPress={() => confirmLeave(onClose)}
+                disabled={saving}
+                style={[
+                  styles.cancelBtn,
+                  isNarrowScreen && styles.btnFullWidth,
+                  {
+                    borderColor: colors.border,
+                    backgroundColor: isDark ? colors.surfaceAlt : '#F8FAFC',
+                  },
+                ]}
+              >
+                <Text style={[styles.cancelBtnText, { color: colors.textSecondary }]}>
+                  Cancel
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                accessibilityRole="button"
+                accessibilityLabel="Save order changes"
+                onPress={handleSave}
+                disabled={saving}
+                style={[
+                  styles.saveBtn,
+                  isNarrowScreen && styles.btnFullWidth,
+                  { backgroundColor: colors.primaryAction },
+                  saving && styles.btnDisabled,
+                ]}
+              >
+                {saving ? (
+                  <ActivityIndicator color={colors.onPrimary} size="small" />
+                ) : (
+                  <Text style={[styles.saveBtnText, { color: colors.onPrimary }]}>
+                    Save Changes
+                  </Text>
+                )}
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
-      </View>
+      </Modal>
       <UnsavedModal />
-    </Modal>
+    </>
   );
 }
 
 const styles = createPortalStyleSheet({
-  backdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(8, 31, 51, 0.55)',
+  rootOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 9999,
+    elevation: 24,
     justifyContent: 'center',
     alignItems: 'center',
     padding: 16,
   },
+  backdrop: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 1,
+  },
   modalCard: {
+    position: 'relative',
+    zIndex: 2,
     width: '100%',
-    maxWidth: 420,
-    maxHeight: '90%',
+    maxWidth: 440,
     borderRadius: 20,
     borderWidth: 1,
     overflow: 'hidden',
+    backgroundColor: '#FFFFFF',
     ...createShadow({
-      color: '#0D47A1',
-      elevation: 12,
-      opacity: 0.2,
-      radius: 16,
+      color: '#07131F',
+      elevation: 20,
+      opacity: 0.22,
+      radius: 20,
       offset: { width: 0, height: 8 },
     }),
   },
@@ -341,6 +509,13 @@ const styles = createPortalStyleSheet({
     paddingHorizontal: 20,
     paddingTop: 18,
     paddingBottom: 14,
+    borderBottomWidth: 1,
+    backgroundColor: '#FFFFFF',
+  },
+  headerTitleWrap: {
+    flex: 1,
+    minWidth: 0,
+    paddingRight: 12,
   },
   title: {
     fontSize: 18,
@@ -352,14 +527,24 @@ const styles = createPortalStyleSheet({
   },
   closeBtn: {
     padding: 6,
+    minHeight: 36,
+    minWidth: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   closeText: {
     fontSize: 18,
     fontWeight: '600',
   },
   scrollArea: {
+    flexGrow: 0,
+    flexShrink: 1,
+    backgroundColor: '#FFFFFF',
+  },
+  scrollContent: {
     paddingHorizontal: 20,
-    paddingBottom: 10,
+    paddingTop: 16,
+    paddingBottom: 12,
   },
   section: {
     marginBottom: 16,
@@ -369,57 +554,70 @@ const styles = createPortalStyleSheet({
     fontWeight: '700',
     marginBottom: 8,
   },
-  itemRow: {
+  itemCard: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    marginBottom: 8,
+    gap: 12,
   },
-  itemRowBorder: {
-    borderTopWidth: 1,
+  itemInfo: {
+    flex: 1,
+    minWidth: 0,
+    flexShrink: 1,
   },
   itemName: {
     fontSize: 14,
-    fontWeight: '600',
+    fontWeight: '700',
+    lineHeight: 18,
   },
   itemPrice: {
     fontSize: 12,
-    marginTop: 2,
+    fontWeight: '500',
+    marginTop: 3,
   },
   qtyControlRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    flexShrink: 0,
     gap: 8,
   },
   qtyBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 8,
+    width: 36,
+    height: 36,
+    borderRadius: 10,
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#FFFFFF',
   },
   qtyBtnText: {
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: 'bold',
+    lineHeight: 20,
   },
   qtyText: {
     fontSize: 15,
     fontWeight: 'bold',
-    minWidth: 24,
+    minWidth: 26,
     textAlign: 'center',
   },
   input: {
     borderWidth: 1,
     borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 11,
     fontSize: 13,
   },
   multilineInput: {
     minHeight: 64,
+    maxHeight: 96,
     textAlignVertical: 'top',
+    paddingTop: 10,
   },
   priceSummaryBox: {
     borderRadius: 14,
@@ -453,15 +651,12 @@ const styles = createPortalStyleSheet({
     fontWeight: 'bold',
   },
   errorBox: {
-    backgroundColor: '#FEE2E2',
     borderRadius: 10,
     padding: 10,
     marginBottom: 14,
     borderWidth: 1,
-    borderColor: '#FCA5A5',
   },
   errorText: {
-    color: '#DC2626',
     fontSize: 12,
     fontWeight: '500',
   },
@@ -473,24 +668,37 @@ const styles = createPortalStyleSheet({
     paddingHorizontal: 20,
     paddingVertical: 14,
     borderTopWidth: 1,
+    backgroundColor: '#FFFFFF',
+  },
+  footerStacked: {
+    flexDirection: 'column-reverse',
+    gap: 10,
   },
   cancelBtn: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+    minHeight: 44,
+    paddingHorizontal: 18,
+    paddingVertical: 11,
     borderRadius: 10,
     borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   cancelBtnText: {
     fontSize: 13,
     fontWeight: '600',
   },
   saveBtn: {
+    minHeight: 44,
     paddingHorizontal: 20,
-    paddingVertical: 10,
+    paddingVertical: 11,
     borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
-    minWidth: 110,
+    minWidth: 120,
+  },
+  btnFullWidth: {
+    width: '100%',
+    minWidth: '100%',
   },
   btnDisabled: {
     opacity: 0.6,

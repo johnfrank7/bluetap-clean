@@ -132,6 +132,7 @@ const DARK_COLOR_MAP = Object.freeze({
   '#91abc0': 'border',
   '#a8bccb': 'border',
   '#187bcd': 'primary',
+  '#0b67ad': 'primaryAction',
   '#1565c0': 'primary',
   '#0b5fa8': 'primaryLight',
   '#2563eb': 'primaryLight',
@@ -189,7 +190,7 @@ function mapDarkColor(value, property, colors) {
   }
 
   const token = DARK_COLOR_MAP[normalized];
-  if (token === 'primary') {
+  if (token === 'primary' || token === 'primaryAction') {
     if (property === 'color') return colors.primaryLight;
     if (property === 'backgroundColor' || property.toLowerCase().includes('border')) return colors.primaryAction;
   }

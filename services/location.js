@@ -1,4 +1,5 @@
 import { Platform } from 'react-native';
+import { normalizeBranchDeliveryPricing } from './deliveryPricing.js';
 
 const asCoordinate = (value, minimum, maximum) => {
   if (value === null || value === undefined || value === '') return null;
@@ -61,7 +62,52 @@ export async function requestCurrentLocation() {
   };
 }
 
-export const rankBranchesByDistance = (branches, location) => (branches || [])
-  .map((branch) => ({ ...branch, distanceKm: haversineDistanceKm(location, branch) }))
-  .filter((branch) => branch.distanceKm !== null)
-  .sort((left, right) => left.distanceKm - right.distanceKm);
+export const rankProviderBranches = (branches, location) => {
+  const normLoc = normalizeLocation(location);
+  if (!normLoc || !Array.isArray(branches)) return [];
+
+  const candidates = branches
+    .map((branch) => {
+      const distanceKm = haversineDistanceKm(normLoc, branch);
+      if (distanceKm === null) return null;
+      const pricing = normalizeBranchDeliveryPricing(branch);
+      const serviceRadiusKm = pricing.serviceRadiusKm;
+      const isWithinNormalArea = distanceKm <= serviceRadiusKm;
+      return {
+        ...branch,
+        distanceKm,
+        serviceRadiusKm,
+        withinServiceArea: isWithinNormalArea,
+        isWithinNormalArea,
+        requiresApproval: !isWithinNormalArea,
+      };
+    })
+    .filter(Boolean);
+
+  const eligible = candidates
+    .filter((branch) => branch.isWithinNormalArea)
+    .sort((left, right) => left.distanceKm - right.distanceKm);
+
+  const outside = candidates
+    .filter((branch) => !branch.isWithinNormalArea)
+    .sort((left, right) => left.distanceKm - right.distanceKm);
+
+  const hasEligible = eligible.length > 0;
+
+  const markedEligible = eligible.map((branch, index) => ({
+    ...branch,
+    isRecommended: index === 0,
+    isNearestInCoverage: index === 0,
+  }));
+
+  const markedOutside = outside.map((branch, index) => ({
+    ...branch,
+    isRecommended: false,
+    isNearestInCoverage: false,
+    isClosestOutside: !hasEligible && index === 0,
+  }));
+
+  return [...markedEligible, ...markedOutside];
+};
+
+export const rankBranchesByDistance = (branches, location) => rankProviderBranches(branches, location);

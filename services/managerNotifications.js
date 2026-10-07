@@ -1,4 +1,4 @@
-﻿const { belongsToBranch, statusOf } = require('./managerOperational');
+const { belongsToBranch, statusOf } = require('./managerOperational');
 
 const { formatDeliveryFailureReason } = require('../constants/deliveryFailureReasons');
 
@@ -14,7 +14,7 @@ const deliveryMessages = {
 
 const NOTIFICATION_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 
-function getManagerNotifications(orders = [], incomingTransfers = [], decisions = [], branchId = '', parseTimestamp, now = Date.now()) {
+function getManagerNotifications(orders = [], incomingTransfers = [], decisions = [], branchId = '', parseTimestamp, now = Date.now(), pendingApplications = [], branchName = '') {
   if (!branchId || typeof parseTimestamp !== 'function') return [];
   const events = [];
   const add = (id, order, message, status, at, path, navigable = true) => {
@@ -72,6 +72,26 @@ function getManagerNotifications(orders = [], incomingTransfers = [], decisions 
         transferToBranchName: decision.targetBranchNameSnapshot || '',
         transferDeclineReason: decision.declineReason || '',
       } });
+  }
+  for (const applicant of (Array.isArray(pendingApplications) ? pendingApplications : [])) {
+    const applicantBranchId = applicant.requestedBranchId || applicant.branchId;
+    if (applicantBranchId && applicantBranchId !== branchId) continue;
+    const at = applicant.createdAt || applicant.created_at;
+    const date = parseTimestamp(at);
+    if (!date || date.getTime() < now - NOTIFICATION_RETENTION_MS) continue;
+    const targetBranchName = branchName || applicant.requestedBranchName || applicant.branchName || 'your branch';
+    events.push({
+      id: `applicant:${applicant.id || applicant.uid}`,
+      orderId: '',
+      requestId: applicant.displayUid || applicant.publicUid || applicant.id || applicant.uid || '',
+      requesterName: applicant.fullName || applicant.full_name || 'Distributor applicant',
+      message: `A new Distributor application is awaiting review for ${targetBranchName}.`,
+      status: 'pending',
+      at: date,
+      path: '/manager/distributors',
+      navigable: true,
+      applicant,
+    });
   }
   return events.sort((a, b) => b.at.getTime() - a.at.getTime()).slice(0, 150);
 }

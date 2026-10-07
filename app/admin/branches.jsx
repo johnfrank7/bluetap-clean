@@ -11,6 +11,7 @@ import { requestCurrentLocation } from '../../services/location';
 import { ADMIN_CACHE_KEYS, useAdminData } from '../../services/adminDataCache';
 import TopToastFeedback from '../../components/TopToastFeedback';
 import useUnsavedChangesGuard from '../../components/useUnsavedChangesGuard';
+import { normalizeBranchDeliveryPricing } from '../../services/deliveryPricing';
 
 const { DEFAULT_SERVICE_RADIUS_KM, TOLEDO_BARANGAYS, TOLEDO_CITY } = require('../../constants/toledoBarangays.json');
 const RADIUS_CHOICES = [3, 5, 10, 15];
@@ -35,24 +36,43 @@ export default function AdminBranchesPage() {
   const customRadius = !RADIUS_CHOICES.includes(Number(form.serviceRadiusKm));
   const filteredBarangays = React.useMemo(() => TOLEDO_BARANGAYS.filter((barangay) => barangay.toLowerCase().includes(barangayQuery.trim().toLowerCase())), [barangayQuery]);
   const edit = (branch) => {
-    setEditingId(branch.id); setForm({ name: branch.name || '', code: branch.code || '', barangay: branch.barangay || '', city: TOLEDO_CITY, address: branch.address || '', latitude: String(branch.latitude ?? ''), longitude: String(branch.longitude ?? ''), serviceRadiusKm: String(branch.serviceRadiusKm ?? DEFAULT_SERVICE_RADIUS_KM), baseDeliveryFee: String(branch.baseDeliveryFee ?? 20), includedRadiusKm: String(branch.includedRadiusKm ?? branch.serviceRadiusKm ?? DEFAULT_SERVICE_RADIUS_KM), outsideRadiusFeePerKm: String(branch.outsideRadiusFeePerKm ?? 10) });
-    setBarangayQuery(branch.barangay || ''); setCoordinateText(branch.latitude == null ? '' : `${Number(branch.latitude).toFixed(6)}, ${Number(branch.longitude).toFixed(6)}`); setBarangayOpen(false); setLocationError(''); setMessage('');
+    const pricing = normalizeBranchDeliveryPricing(branch);
+    setEditingId(branch.id);
+    setForm({
+      name: branch.name || '',
+      code: branch.code || '',
+      barangay: branch.barangay || '',
+      city: TOLEDO_CITY,
+      address: branch.address || '',
+      latitude: String(branch.latitude ?? ''),
+      longitude: String(branch.longitude ?? ''),
+      serviceRadiusKm: String(pricing.serviceRadiusKm),
+      baseDeliveryFee: String(pricing.baseDeliveryFee),
+      includedRadiusKm: String(pricing.includedRadiusKm),
+      outsideRadiusFeePerKm: String(pricing.outsideRadiusFeePerKm),
+    });
+    setBarangayQuery(branch.barangay || '');
+    setCoordinateText(branch.latitude == null ? '' : `${Number(branch.latitude).toFixed(6)}, ${Number(branch.longitude).toFixed(6)}`);
+    setBarangayOpen(false);
+    setLocationError('');
+    setMessage('');
   };
   const cancel = () => { setEditingId(''); setForm(empty); setBarangayQuery(''); setCoordinateText(''); setBarangayOpen(false); setLocationError(''); setMessage(''); };
 
   const editingBranch = React.useMemo(() => branches.find((b) => b.id === editingId) || null, [branches, editingId]);
   const isBranchDirty = React.useMemo(() => {
     if (editingId && editingBranch) {
+      const editingPricing = normalizeBranchDeliveryPricing(editingBranch);
       return (
         form.name !== (editingBranch.name || '') ||
         form.barangay !== (editingBranch.barangay || '') ||
         form.address !== (editingBranch.address || '') ||
         form.latitude !== String(editingBranch.latitude ?? '') ||
         form.longitude !== String(editingBranch.longitude ?? '') ||
-        form.serviceRadiusKm !== String(editingBranch.serviceRadiusKm ?? DEFAULT_SERVICE_RADIUS_KM) ||
-        form.baseDeliveryFee !== String(editingBranch.baseDeliveryFee ?? 20) ||
-        form.includedRadiusKm !== String(editingBranch.includedRadiusKm ?? editingBranch.serviceRadiusKm ?? DEFAULT_SERVICE_RADIUS_KM) ||
-        form.outsideRadiusFeePerKm !== String(editingBranch.outsideRadiusFeePerKm ?? 10)
+        form.serviceRadiusKm !== String(editingPricing.serviceRadiusKm) ||
+        form.baseDeliveryFee !== String(editingPricing.baseDeliveryFee) ||
+        form.includedRadiusKm !== String(editingPricing.includedRadiusKm) ||
+        form.outsideRadiusFeePerKm !== String(editingPricing.outsideRadiusFeePerKm)
       );
     }
     return (
@@ -124,7 +144,10 @@ export default function AdminBranchesPage() {
     </View>
     {!!message && <View accessibilityRole="alert" style={styles.notice}><Text style={styles.noticeText}>{message}</Text></View>}
     <View style={styles.listHeader}><View><Text style={styles.listTitle}>Existing branches</Text><Text style={styles.listHelp}>Only active branches with coordinates are shown to Requesters.</Text></View><Text style={styles.total}>{refreshing ? 'Refreshing…' : `${branches.length} total`}</Text></View>
-    {error ? <View style={styles.empty}><Text style={styles.noticeText}>{error}</Text><TouchableOpacity onPress={() => refresh({ force: true })}><Text style={styles.retry}>Try again</Text></TouchableOpacity></View> : loading && !data ? <View style={styles.grid}>{[1, 2, 3].map((key) => <CardSkeleton key={key} style={styles.skeleton} />)}</View> : branches.length === 0 ? <View style={styles.empty}><Text style={styles.emptyTitle}>No branches yet</Text></View> : <View style={styles.grid}>{branches.map((branch) => <View key={branch.id} style={styles.branchCard}><View style={styles.row}><View style={styles.branchHeading}><Text style={styles.branchName}>{branch.name}</Text><Text style={styles.code}>{branch.code}</Text></View><StatusBadge status={branch.status} /></View><Text style={styles.location}>{[branch.address, branch.barangay, branch.city].filter(Boolean).join(', ')}</Text><Text style={styles.coordinatesValue}>{branch.latitude == null ? 'Location pin required' : `${branch.latitude.toFixed(5)}, ${branch.longitude.toFixed(5)}`}</Text><Text style={styles.coverageCard}>Normal delivery area: {branch.serviceRadiusKm} km</Text><Text style={styles.coverageCard}>Delivery Fee: ₱{branch.baseDeliveryFee ?? 20} (first {branch.includedRadiusKm ?? branch.serviceRadiusKm ?? 5} km) + ₱{branch.outsideRadiusFeePerKm ?? 10}/km outside</Text><Text style={styles.manager}>Managers: {branch.managers?.length ? branch.managers.map((manager) => `${manager.firstName} ${manager.lastName}`.trim() || manager.email).join(', ') : 'Unassigned'}</Text><View style={styles.actions}><TouchableOpacity style={styles.secondary} onPress={() => confirmLeave(() => edit(branch))}><Text style={styles.secondaryText}>Edit</Text></TouchableOpacity><TouchableOpacity disabled={saving} style={[styles.secondary, branch.status === 'active' && styles.danger]} onPress={() => toggle(branch)}><Text style={[styles.secondaryText, branch.status === 'active' && styles.dangerText]}>{branch.status === 'active' ? 'Deactivate' : 'Activate'}</Text></TouchableOpacity></View></View>)}</View>}
+    {error ? <View style={styles.empty}><Text style={styles.noticeText}>{error}</Text><TouchableOpacity onPress={() => refresh({ force: true })}><Text style={styles.retry}>Try again</Text></TouchableOpacity></View> : loading && !data ? <View style={styles.grid}>{[1, 2, 3].map((key) => <CardSkeleton key={key} style={styles.skeleton} />)}</View> : branches.length === 0 ? <View style={styles.empty}><Text style={styles.emptyTitle}>No branches yet</Text></View> : <View style={styles.grid}>{branches.map((branch) => {
+      const pricing = normalizeBranchDeliveryPricing(branch);
+      return <View key={branch.id} style={styles.branchCard}><View style={styles.row}><View style={styles.branchHeading}><Text style={styles.branchName}>{branch.name}</Text><Text style={styles.code}>{branch.code}</Text></View><StatusBadge status={branch.status} /></View><Text style={styles.location}>{[branch.address, branch.barangay, branch.city].filter(Boolean).join(', ')}</Text><Text style={styles.coordinatesValue}>{branch.latitude == null ? 'Location pin required' : `${branch.latitude.toFixed(5)}, ${branch.longitude.toFixed(5)}`}</Text><Text style={styles.coverageCard}>Normal delivery area: {pricing.serviceRadiusKm} km</Text><Text style={styles.coverageCard}>Delivery Fee: ₱{pricing.baseDeliveryFee} (first {pricing.includedRadiusKm} km) + ₱{pricing.outsideRadiusFeePerKm}/km outside</Text><Text style={styles.manager}>Managers: {branch.managers?.length ? branch.managers.map((manager) => `${manager.firstName} ${manager.lastName}`.trim() || manager.email).join(', ') : 'Unassigned'}</Text><View style={styles.actions}><TouchableOpacity style={styles.secondary} onPress={() => confirmLeave(() => edit(branch))}><Text style={styles.secondaryText}>Edit</Text></TouchableOpacity><TouchableOpacity disabled={saving} style={[styles.secondary, branch.status === 'active' && styles.danger]} onPress={() => toggle(branch)}><Text style={[styles.secondaryText, branch.status === 'active' && styles.dangerText]}>{branch.status === 'active' ? 'Deactivate' : 'Activate'}</Text></TouchableOpacity></View></View>;
+    })}</View>}
     <UnsavedModal />
   </AdminShell>;
 }

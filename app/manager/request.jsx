@@ -692,13 +692,16 @@ function ReceivedRequestsQueue({ orders, loading, styles, colors, isDark, onShow
             <Text style={styles.detailLine}>Distance: {orderDistance(order)}</Text>
             <Text style={styles.amountText}>{formatAmount(order.totalAtOrder)}</Text>
             <View style={styles.actionRow}>
-              <TouchableOpacity disabled={entry.actionsDisabled} onPress={() => onOpenOrder(entry.item)} style={[styles.actionButton, styles.viewDetailsBtn, entry.actionsDisabled && styles.actionDisabled]}>
+              <View style={styles.chatActionWrap}>
+                <ManagerOrderChatAction order={order} disabled={entry.actionsDisabled} style={styles.managerChatButton} />
+              </View>
+              <TouchableOpacity disabled={entry.actionsDisabled} onPress={() => onOpenOrder(order)} style={[styles.actionButton, styles.viewDetailsBtn, entry.actionsDisabled && styles.actionDisabled]}>
                 <Text style={styles.viewDetailsBtnText}>View Details</Text>
               </TouchableOpacity>
-              <TouchableOpacity disabled={!!updatingId || entry.actionsDisabled} onPress={() => decide(entry.item, 'accept-order')} style={[styles.actionButton, styles.approveButton, (!!updatingId || entry.actionsDisabled) && styles.actionDisabled]}>
-                <Text style={styles.approveButtonText}>{updatingId === entry.id ? 'Saving?' : 'Accept'}</Text>
+              <TouchableOpacity disabled={!!updatingId || entry.actionsDisabled} onPress={() => decide(order, 'accept-order')} style={[styles.actionButton, styles.approveButton, (!!updatingId || entry.actionsDisabled) && styles.actionDisabled]}>
+                <Text style={styles.approveButtonText}>{updatingId === order.id ? 'Saving…' : 'Accept'}</Text>
               </TouchableOpacity>
-              <TouchableOpacity disabled={!!updatingId || entry.actionsDisabled} onPress={() => { setRejectingId(rejectingId === entry.id ? '' : entry.id); setReason(''); setError(''); }} style={[styles.actionButton, styles.declineButton, entry.actionsDisabled && styles.actionDisabled]}>
+              <TouchableOpacity disabled={!!updatingId || entry.actionsDisabled} onPress={() => { setRejectingId(rejectingId === order.id ? '' : order.id); setReason(''); setError(''); }} style={[styles.actionButton, styles.declineButton, entry.actionsDisabled && styles.actionDisabled]}>
                 <Text style={styles.declineButtonText}>Reject</Text>
               </TouchableOpacity>
             </View>
@@ -1108,18 +1111,24 @@ const createStyles = (colors, width = 1200) =>
       flexDirection: 'row',
       flexWrap: 'wrap',
       justifyContent: width >= 800 ? 'flex-end' : 'flex-start',
-      alignItems: 'stretch',
+      alignItems: 'center',
       gap: 8,
       marginTop: 10,
     },
     chatActionWrap: {
       flexGrow: 1,
-      flexBasis: width < 430 ? '48%' : 150,
+      flexBasis: width < 430 ? '48%' : 118,
       minWidth: 0,
+      minHeight: 44,
+      maxHeight: 48,
+      height: 44,
+      justifyContent: 'center',
     },
     managerChatButton: {
       width: '100%',
       minHeight: 44,
+      maxHeight: 48,
+      height: 44,
       borderRadius: 10,
     },
     actionButton: {
@@ -1127,6 +1136,8 @@ const createStyles = (colors, width = 1200) =>
       flexBasis: width < 430 ? '48%' : 118,
       minWidth: 0,
       minHeight: 44,
+      maxHeight: 48,
+      height: 44,
       paddingHorizontal: 12,
       borderRadius: 10,
       alignItems: 'center',

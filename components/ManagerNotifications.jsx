@@ -1,4 +1,4 @@
-﻿import React from 'react';
+import React from 'react';
 import { getModuleSession } from '../services/authSession';
 import { parseTimestamp } from '../services/notificationTimestamp';
 import { useManagerRealtimeData } from './ManagerRealtimeData';
@@ -46,11 +46,19 @@ function useManagerNotificationsState() {
     return () => { listeners.delete(sync); globalThis.removeEventListener?.('storage', sync); };
   }, [key]);
   const events = React.useMemo(() => [
-    ...getManagerNotifications(realtime.requests, realtime.incomingTransfers,
-      realtime.sourceDecisionEvents, realtime.branchId, parseTimestamp),
+    ...getManagerNotifications(
+      realtime.requests,
+      realtime.incomingTransfers,
+      realtime.sourceDecisionEvents,
+      realtime.branchId,
+      parseTimestamp,
+      Date.now(),
+      realtime.pendingApplications,
+      realtime.branch?.name
+    ),
     ...getChatFollowupNotifications(chat.conversations, 'manager'),
   ].sort((left, right) => right.at.getTime() - left.at.getTime()).slice(0, 150),
-  [chat.conversations, realtime.requests, realtime.incomingTransfers, realtime.sourceDecisionEvents, realtime.branchId]);
+  [chat.conversations, realtime.requests, realtime.incomingTransfers, realtime.sourceDecisionEvents, realtime.branchId, realtime.pendingApplications, realtime.branch?.name]);
   const unread = React.useMemo(() => unreadManagerNotifications(events, seen), [events, seen]);
   const markRead = React.useCallback((ids) => {
     const next = new Set([...readSeen(key), ...ids]);
