@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { createHash, createHmac } = require('node:crypto');
 const { createRegistrationService } = require('../registration');
+const { createRegistrationSessionService } = require('../registrationSession');
 
 const form = { firstName: 'Test', lastName: 'Person', phone: '+639123456789',
   barangay: 'Awihao', address: 'Test Street', username: 'Test_User',
@@ -15,13 +16,19 @@ function fixture() {
   const sessionId = '123e4567-e89b-42d3-a456-426614174000';
   let failEmail = false;
   let failProfile = false;
+  let failDelete = false;
   let failEnrollment = false;
   const otpStages = [];
   let creates = 0;
   let queue = Promise.resolve();
   const snapshot = (key) => ({ exists: records.has(key), data: () => records.get(key) });
   const db = {
-    collection: (collection) => ({ doc: (id) => ({ key: collection + '/' + id, get: async () => snapshot(collection + '/' + id) }) }),
+    collection: (collection) => ({
+      doc: (id) => ({ key: collection + '/' + id, get: async () => snapshot(collection + '/' + id) }),
+      where: (field, operator, value) => ({ limit: (count) => ({ get: async () => ({ docs: [...records.entries()]
+        .filter(([key, data]) => key.startsWith(collection + '/') && operator === '==' && field.split('.').reduce((entry, part) => entry?.[part], data) === value)
+        .slice(0, count).map(([key, data]) => ({ id: key.slice(collection.length + 1), data: () => data })) }) }) }),
+    }),
     runTransaction: (callback) => {
       const task = queue.then(async () => {
         const writes = [];
@@ -53,23 +60,30 @@ function fixture() {
     },
   };
   const auth = {
+    verifyIdToken: async () => ({ uid: 'new-user' }),
+    getUser: async (uid) => {
+      const user = users.get(uid);
+      if (!user) throw Object.assign(new Error('Not found'), { code: 'auth/user-not-found' });
+      return { ...user };
+    },
     getUserByEmail: async (email) => {
       const user = [...users.values()].find((u) => u.email === email);
       if (!user) throw Object.assign(new Error('Not found'), { code: 'auth/user-not-found' });
       return { ...user };
     },
     createUser: async (data) => {
+      if ([...users.values()].some((user) => user.email === data.email)) throw Object.assign(new Error('Email exists'), { code: 'auth/email-already-exists' });
       creates++;
       const user = { ...data, uid: 'new-user' };
       users.set(user.uid, user);
       return user;
     },
-    deleteUser: async (uid) => users.delete(uid),
+    deleteUser: async (uid) => { if (failDelete) throw new Error('Auth rollback unavailable'); users.delete(uid); },
     updateUser: async (uid, data) => users.set(uid, { ...users.get(uid), ...data }),
     createCustomToken: async (uid) => 'test-custom-token-for-' + uid,
   };
   const renderCalls = [];
-  const service = createRegistrationService({ auth, db, hashSecret: 'test-signing-key', now: () => time,
+  const service = createRegistrationService({ auth, db, hashSecret: 'test-signing-key', now: () => time, newUid: () => 'new-user',
     otpStage: (stage) => otpStages.push(stage),
     render: async (path, body) => {
       renderCalls.push({ path, body });
@@ -96,10 +110,15 @@ function fixture() {
     });
   };
   setSessionProfile();
-  const registrationService = { ...service, request: (email, ip, username = form.username) => service.request(email, username, sessionId, ip),
+  const registrationService = { ...service, request: (email, ip, username = form.username, id = sessionId) => service.request(email, username, id, ip),
     complete: (challenge, code, input) => service.complete(challenge, code, input, finalFaceImage) };
-  return { service: registrationService, users, records, sent, get creates() { return creates; },
-    sessionId, setSessionProfile, renderCalls, otpStages, advance: (ms) => { time += ms; }, failEmail: () => { failEmail = true; }, failProfile: () => { failProfile = true; }, failEnrollment: () => { failEnrollment = true; }, restoreEnrollment: () => { failEnrollment = false; } };
+  return { service: registrationService, db, auth, users, records, sent, get creates() { return creates; }, get time() { return time; },
+    sessionId, setSessionProfile, addSession: (id, { sameDevice = false } = {}) => {
+      const original = records.get('registrationSessions/' + sessionId);
+      records.set('registrationSessions/' + id, { ...original,
+        registrationLimitKeys: { ...original.registrationLimitKeys, deviceHash: sameDevice ? original.registrationLimitKeys.deviceHash : 'another-device-hash' } });
+    },
+    renderCalls, otpStages, advance: (ms) => { time += ms; }, failEmail: () => { failEmail = true; }, failProfile: () => { failProfile = true; }, restoreProfile: () => { failProfile = false; }, failDelete: () => { failDelete = true; }, failEnrollment: () => { failEnrollment = true; }, restoreEnrollment: () => { failEnrollment = false; } };
 }
 const reason = (expected) => (error) => error.reason === expected;
 
@@ -124,6 +143,31 @@ test('provider failure and wrong OTP never create an account', async () => {
   await assert.rejects(f.service.complete(result.challenge, '000000', form), reason('incorrect-code'));
   assert.equal(f.creates, 0);
   assert.equal([...f.records.keys()].some((key) => key.startsWith('registrationLimits/')), false);
+});
+
+test('changing the registration email invalidates the previous OTP while retaining send limits', async () => {
+  const f = fixture();
+  const first = await f.service.request('old@example.test', 'test-ip');
+  const oldOtpId = [...f.records.entries()].find(([key, value]) =>
+    key.startsWith('emailOtpVerifications/registration-') && value?.status === 'active'
+  )?.[0];
+  const before = { ...f.records.get(oldOtpId) };
+
+  const second = await f.service.request('new@example.test', 'test-ip');
+  const invalidated = f.records.get(oldOtpId);
+  assert.equal(invalidated.status, 'invalidated');
+  assert.equal(invalidated.otpHash, null);
+  assert.equal(invalidated.sendCount, before.sendCount);
+  assert.equal(invalidated.lastSentAt, before.lastSentAt);
+  await assert.rejects(f.service.complete(first.challenge, f.sent[0].code, form), reason('no-active-code'));
+  assert.equal(f.creates, 0);
+  f.records.set(oldOtpId, { ...before, status: 'active' });
+  await assert.rejects(f.service.complete(first.challenge, f.sent[0].code, form), reason('registration-session-invalid'));
+  assert.equal(f.creates, 0);
+
+  const completed = await f.service.complete(second.challenge, f.sent[1].code, form);
+  assert.equal(completed.verified, true);
+  assert.equal(f.users.get('new-user').email, 'new@example.test');
 });
 
 test('correct OTP creates verified Auth account and server-owned profile exactly once', async () => {
@@ -202,6 +246,14 @@ test('face-only policy sends no OTP and preserves unverified email state', async
   assert.equal(completed.finalized, true);
   assert.equal(f.users.get('new-user').emailVerified, false);
   assert.equal(f.records.get('users/new-user').emailOtpVerification.status, 'not_required');
+});
+
+test('face-only signup cannot take over an existing unverified Auth identity', async () => {
+  const f = fixture();
+  f.setSessionProfile(form, { otpRequired: false });
+  f.users.set('unrelated', { uid: 'unrelated', email: 'old@example.test', emailVerified: false });
+  await assert.rejects(f.service.request('old@example.test', 'test-ip'), reason('account-exists'));
+  assert.equal(f.users.get('unrelated').password, undefined);
 });
 
 test('OTP-only policy never calls face service and stores face as not required', async () => {
@@ -308,6 +360,114 @@ test('profile write failure rolls back only the newly created Auth account', asy
   assert.equal(f.records.get('registrationLimits/device_device-hash').reservedCount, 0);
 });
 
+test('an Auth-only partial finalization remains locked to its session and recovers after rollback failure', async () => {
+  const f = fixture();
+  const request = await f.service.request('new@example.test', 'test-ip');
+  f.failProfile();
+  f.failDelete();
+  await assert.rejects(f.service.complete(request.challenge, f.sent[0].code, form));
+  assert.equal(f.users.has('new-user'), true);
+  assert.equal(f.records.has('users/new-user'), false);
+  assert.equal(f.records.get('registrationSessions/' + f.sessionId).finalization.status, 'recovery_required');
+  assert.equal(f.records.get('registrationSessions/' + f.sessionId).finalization.uid, 'new-user');
+  f.restoreProfile();
+  const recovered = await f.service.retryFinalization(request.challenge, form, finalFaceImage);
+  assert.equal(recovered.finalized, true);
+  assert.equal(f.records.get('users/new-user').registrationCompleted, true);
+  assert.equal(f.records.get('counters/unique_ids').requester, 1);
+});
+
+test('a refreshed OTP signup can reclaim its verified Auth-only orphan after the old reservation expires', async () => {
+  const f = fixture();
+  const freshSession = '123e4567-e89b-42d3-b456-426614174000';
+  f.addSession(freshSession);
+  const original = await f.service.request('new@example.test', 'test-ip');
+  f.failProfile();
+  f.failDelete();
+  await assert.rejects(f.service.complete(original.challenge, f.sent[0].code, form));
+  f.restoreProfile();
+  f.advance(15 * 60 * 1000);
+  const available = await f.service.availability(form.username, 'new@example.test', freshSession);
+  assert.equal(available.usernameAvailable, true);
+  assert.equal(available.emailAvailable, true);
+  const requested = await f.service.request('new@example.test', 'second-ip', form.username, freshSession);
+  const completed = await f.service.complete(requested.challenge, f.sent[1].code, form);
+  assert.equal(completed.finalized, true);
+  assert.equal(f.users.size, 1);
+  assert.equal(f.records.get('users/new-user').registrationCompleted, true);
+  assert.equal(f.records.get('counters/unique_ids').requester, 1);
+});
+
+test('a refreshed Distributor signup recovers its incomplete profile without a second public UID or approval', async () => {
+  const f = fixture();
+  const distributor = { ...form, role: 'distributor', requestedBranchId: 'branch-a' };
+  f.setSessionProfile(distributor);
+  const freshSession = '123e4567-e89b-42d3-b456-426614174000';
+  f.addSession(freshSession);
+  const original = await f.service.request('driver@example.test', 'first-ip');
+  f.failEnrollment();
+  f.failDelete();
+  await assert.rejects(f.service.complete(original.challenge, f.sent[0].code, distributor));
+  const pending = f.records.get('users/new-user');
+  assert.equal(pending.registrationCompleted, false);
+  assert.equal(pending.publicUid, 'Dis001');
+  f.restoreEnrollment();
+  f.advance(15 * 60 * 1000);
+  const available = await f.service.availability(distributor.username, 'driver@example.test', freshSession);
+  assert.equal(available.emailAvailable, true);
+  const requested = await f.service.request('driver@example.test', 'second-ip', distributor.username, freshSession);
+  const result = await f.service.complete(requested.challenge, f.sent[1].code, distributor);
+  assert.equal(result.finalized, true);
+  const profile = f.records.get('users/new-user');
+  assert.equal(profile.registrationCompleted, true);
+  assert.equal(profile.publicUid, 'Dis001');
+  assert.equal(profile.distributorStatus, 'pending');
+  assert.equal(profile.approvalStatus, 'pending');
+  assert.equal(f.records.get('counters/unique_ids').distributor, 1);
+  assert.equal([...f.records.entries()].filter(([key]) => key.startsWith('users/')).length, 1);
+});
+
+test('face-only policy recovers its own Auth-only partial account without claiming another identity', async () => {
+  const f = fixture();
+  f.setSessionProfile(form, { otpRequired: false });
+  const request = await f.service.request('new@example.test', 'test-ip');
+  f.failProfile();
+  f.failDelete();
+  await assert.rejects(f.service.completeWithoutOtp(request.challenge, form, finalFaceImage));
+  assert.equal(f.records.get('registrationSessions/' + f.sessionId).finalization.uid, 'new-user');
+  f.restoreProfile();
+  const recovered = await f.service.retryFinalization(request.challenge, form, finalFaceImage);
+  assert.equal(recovered.finalized, true);
+  assert.equal(f.records.get('users/new-user').emailVerified, false);
+});
+
+test('a refreshed face-only signup reclaims its own orphan only after the original Auth password is verified', async (t) => {
+  const f = fixture();
+  f.setSessionProfile(form, { otpRequired: false });
+  const freshSession = '123e4567-e89b-42d3-b456-426614174000';
+  f.addSession(freshSession);
+  const original = await f.service.request('new@example.test', 'test-ip');
+  f.failProfile();
+  f.failDelete();
+  await assert.rejects(f.service.completeWithoutOtp(original.challenge, form, finalFaceImage));
+  f.restoreProfile();
+  f.advance(15 * 60 * 1000);
+  const requested = await f.service.request('new@example.test', 'second-ip', form.username, freshSession);
+  let passwordCorrect = false;
+  t.mock.method(global, 'fetch', async (_url, options) => {
+    const body = JSON.parse(options.body);
+    passwordCorrect = body.password === form.password;
+    return { ok: passwordCorrect, json: async () => passwordCorrect ? { localId: 'new-user', idToken: 'verified-test-token' } : { error: { message: 'INVALID_PASSWORD' } } };
+  });
+  await assert.rejects(f.service.completeWithoutOtp(requested.challenge, { ...form, password: 'wrong-password' }, finalFaceImage), reason('registration-recovery-unavailable'));
+  assert.equal(passwordCorrect, false);
+  assert.equal(f.records.has('users/new-user'), false);
+  const recovered = await f.service.completeWithoutOtp(requested.challenge, form, finalFaceImage);
+  assert.equal(passwordCorrect, true);
+  assert.equal(recovered.finalized, true);
+  assert.equal(f.records.get('users/new-user').registrationCompleted, true);
+});
+
 test('final face enrollment failure leaves no Auth account or operational profile', async () => {
   const f = fixture();
   const result = await f.service.request('new@example.test', 'test-ip');
@@ -381,11 +541,162 @@ test('public request endpoint rate limits sends across different emails by IP', 
 test('usernames are normalized and reserved without permanent abandoned claims', async () => {
   const f = fixture();
   await f.service.request('first@example.test', 'first-ip', 'JohnBlueTap');
-  await assert.rejects(f.service.request('second@example.test', 'second-ip', 'johnbluetap'), reason('username-taken'));
+  const secondSession = '123e4567-e89b-42d3-b456-426614174000';
+  f.addSession(secondSession);
+  await assert.rejects(f.service.request('second@example.test', 'second-ip', 'johnbluetap', secondSession), reason('username-taken'));
   assert.equal(f.records.has('usernames/johnbluetap'), false);
   f.advance(15 * 60 * 1000);
-  await f.service.request('second@example.test', 'second-ip', 'JOHNBLUETAP');
+  await f.service.request('second@example.test', 'second-ip', 'JOHNBLUETAP', secondSession);
   assert.equal(f.sent.length, 2);
+});
+
+test('availability treats a session own temporary username and email as reusable', async () => {
+  const f = fixture();
+  assert.deepEqual(await f.service.availability(' TEST_USER ', ' NEW@example.test ', f.sessionId),
+    { usernameAvailable: true, emailAvailable: true, normalizedUsername: 'test_user', finalizationPending: false });
+  await f.service.request('new@example.test', 'test-ip');
+  assert.deepEqual(await f.service.availability('test_user', 'new@example.test', f.sessionId),
+    { usernameAvailable: true, emailAvailable: true, normalizedUsername: 'test_user', finalizationPending: false });
+  const other = '123e4567-e89b-42d3-b456-426614174000';
+  f.addSession(other);
+  const blocked = await f.service.availability('TEST_USER', 'NEW@example.test', other);
+  assert.equal(blocked.usernameAvailable, false);
+  assert.equal(blocked.emailAvailable, false);
+  f.advance(15 * 60 * 1000);
+  const expired = await f.service.availability('TEST_USER', 'NEW@example.test', other);
+  assert.equal(expired.usernameAvailable, true);
+  assert.equal(expired.emailAvailable, true);
+});
+
+test('a refreshed matching installation supersedes its own unverified draft without an active-claim leak', async () => {
+  const f = fixture();
+  const freshSession = '123e4567-e89b-42d3-b456-426614174000';
+  f.addSession(freshSession, { sameDevice: true });
+  const original = await f.service.request('new@example.test', 'first-ip');
+  const available = await f.service.availability(form.username, 'new@example.test', freshSession);
+  assert.equal(available.usernameAvailable, true);
+  assert.equal(available.emailAvailable, true);
+  f.advance(60000); // Keep the per-email resend cooldown authoritative.
+  const refreshed = await f.service.request('new@example.test', 'second-ip', form.username, freshSession);
+  assert.equal(f.records.get('registrationSessions/' + f.sessionId).supersededBy, freshSession);
+  assert.equal(f.records.get('usernameReservations/test_user').registrationSessionId, freshSession);
+  assert.equal(f.records.has('usernames/test_user'), false);
+  await assert.rejects(f.service.complete(original.challenge, f.sent[0].code, form));
+  assert.equal(f.users.size, 0);
+  const completed = await f.service.complete(refreshed.challenge, f.sent[1].code, form);
+  assert.equal(completed.finalized, true);
+  assert.equal(f.users.size, 1);
+});
+
+test('matching email and device do not supersede a different personal identity', async () => {
+  const f = fixture();
+  const other = '123e4567-e89b-42d3-b456-426614174000';
+  f.addSession(other, { sameDevice: true });
+  const draft = f.records.get('registrationSessions/' + other);
+  f.records.set('registrationSessions/' + other, { ...draft, personalInfoDigest: 'different-person' });
+  await f.service.request('new@example.test', 'first-ip');
+  const available = await f.service.availability(form.username, 'new@example.test', other);
+  assert.equal(available.usernameAvailable, false);
+  assert.equal(available.emailAvailable, false);
+  await assert.rejects(f.service.request('new@example.test', 'second-ip', form.username, other), reason('username-taken'));
+});
+
+test('completed username and primary recovery email remain unavailable', async () => {
+  const f = fixture();
+  const other = '123e4567-e89b-42d3-b456-426614174000';
+  f.addSession(other);
+  const requested = await f.service.request('new@example.test', 'test-ip');
+  await f.service.complete(requested.challenge, f.sent[0].code, form);
+  const unavailable = await f.service.availability('Test_User', 'NEW@example.test', other);
+  assert.equal(unavailable.usernameAvailable, false);
+  assert.equal(unavailable.emailAvailable, false);
+});
+
+test('cancelled provisional signup releases only its own reservations and invalidates OTP', async () => {
+  const f = fixture();
+  const other = '123e4567-e89b-42d3-b456-426614174000';
+  f.addSession(other);
+  await f.service.request('new@example.test', 'test-ip');
+  const username = f.records.get('usernameReservations/test_user');
+  const emailRef = [...f.records.keys()].find((key) => key.startsWith('registrationEmailReservations/'));
+  const otpRef = [...f.records.keys()].find((key) => /^emailOtpVerifications\/registration-[a-f0-9]{64}$/.test(key));
+  const sessionService = createRegistrationSessionService({ db: f.db, hashSecret: 'test-signing-key', now: () => f.time });
+  await sessionService.cancel(f.sessionId);
+  assert.equal(f.records.has('usernameReservations/test_user'), false);
+  assert.equal(f.records.has(emailRef), false);
+  assert.equal(f.records.get(otpRef).status, 'invalidated');
+  assert.equal(f.records.has('usernames/test_user'), false);
+  f.advance(60000); // The OTP resend cooldown remains intact after cancellation.
+  await f.service.request('new@example.test', 'test-ip-2', 'Test_User', other);
+  assert.notEqual(username.registrationSessionId, f.records.get('usernameReservations/test_user').registrationSessionId);
+});
+
+test('an expired session cannot cancel another session newer reservation or OTP', async () => {
+  const f = fixture();
+  const other = '123e4567-e89b-42d3-b456-426614174000';
+  f.addSession(other);
+  await f.service.request('new@example.test', 'first-ip');
+  f.advance(15 * 60 * 1000);
+  await f.service.request('new@example.test', 'second-ip', form.username, other);
+  const sessionService = createRegistrationSessionService({ db: f.db, hashSecret: 'test-signing-key', now: () => f.time });
+  await sessionService.cancel(f.sessionId);
+  assert.equal(f.records.get('usernameReservations/test_user').registrationSessionId, other);
+  const emailReservation = [...f.records.values()].find((value) => value?.registrationSessionId === other && value?.ownerHash === undefined && value?.expiresAt);
+  assert.ok(emailReservation);
+  const otp = [...f.records.entries()].find(([key]) => /^emailOtpVerifications\/registration-[a-f0-9]{64}$/.test(key))?.[1];
+  assert.equal(otp.status, 'active');
+});
+
+test('a stale finalization lease with no Auth or profile can be cancelled safely', async () => {
+  const f = fixture();
+  await f.service.request('new@example.test', 'test-ip');
+  const ref = 'registrationSessions/' + f.sessionId;
+  f.records.set(ref, { ...f.records.get(ref), finalization: { status: 'processing', uid: 'never-created', owner: 'stale-owner', leaseUntil: new Date(f.time - 1) } });
+  const sessionService = createRegistrationSessionService({ db: f.db, auth: f.auth, hashSecret: 'test-signing-key', now: () => f.time });
+  await sessionService.cancel(f.sessionId);
+  assert.equal(f.records.has('usernameReservations/test_user'), false);
+  assert.equal(f.records.get(ref).cancelled, true);
+});
+
+test('concurrent sessions cannot reserve the same username or email', async () => {
+  const first = fixture();
+  const other = '123e4567-e89b-42d3-b456-426614174000';
+  first.addSession(other);
+  const usernames = await Promise.allSettled([
+    first.service.request('one@example.test', 'ip-one', 'Shared_Name', first.sessionId),
+    first.service.request('two@example.test', 'ip-two', 'shared_name', other),
+  ]);
+  assert.deepEqual(usernames.map((item) => item.status).sort(), ['fulfilled', 'rejected']);
+  assert.equal(usernames.find((item) => item.status === 'rejected').reason.reason, 'username-taken');
+  assert.equal(first.records.has('usernames/shared_name'), false);
+
+  const second = fixture();
+  second.addSession(other);
+  const emails = await Promise.allSettled([
+    second.service.request('same@example.test', 'ip-one', 'First_Name', second.sessionId),
+    second.service.request('SAME@example.test', 'ip-two', 'Second_Name', other),
+  ]);
+  assert.deepEqual(emails.map((item) => item.status).sort(), ['fulfilled', 'rejected']);
+  assert.equal(emails.find((item) => item.status === 'rejected').reason.reason, 'email-in-use');
+  assert.equal(second.sent.length, 1);
+});
+
+test('duplicate Distributor confirmation or lost success response returns the same account and public UID', async () => {
+  const f = fixture();
+  const distributor = { ...form, role: 'distributor', requestedBranchId: 'branch-a' };
+  f.setSessionProfile(distributor);
+  const request = await f.service.request('driver@example.test', 'test-ip');
+  const attempts = await Promise.allSettled([
+    f.service.complete(request.challenge, f.sent[0].code, distributor),
+    f.service.complete(request.challenge, f.sent[0].code, distributor),
+  ]);
+  assert.equal(attempts.filter((item) => item.status === 'fulfilled').length, 1);
+  assert.equal(attempts.find((item) => item.status === 'rejected').reason.reason, 'registration-finalization-pending');
+  const recovered = await f.service.complete(request.challenge, f.sent[0].code, distributor);
+  assert.equal(recovered.finalized, true);
+  assert.equal(f.records.get('counters/unique_ids').distributor, 1);
+  assert.equal([...f.records.entries()].filter(([key, data]) => key.startsWith('users/') && data?.role === 'distributor').length, 1);
+  assert.equal(f.records.get('users/new-user').publicUid, 'Dis001');
 });
 
 test('account completed after requesting OTP cannot be overwritten', async () => {

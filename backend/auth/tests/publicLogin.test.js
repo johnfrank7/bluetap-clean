@@ -59,6 +59,7 @@ test('public form establishes the client session before profile lookup and role 
     { name: 'rejected distributor', role: 'distributor', profile: { approvalStatus: 'rejected' }, path: '/registration-status' },
     { name: 'unfinished requester', role: 'requester', profile: { registrationCompleted: false }, path: '/registration-status' },
     { name: 'wrong password', error: 'INVALID_CREDENTIALS', message: 'Invalid username or password.' },
+    { name: 'disabled account', error: 'ACCOUNT_DISABLED', message: 'This account is currently disabled. Please contact BlueTap support if you need assistance.' },
     { name: 'active manager username', role: 'manager', profile: { managerStatus: 'active', branchId: 'branch-a' }, path: '/manager/dashboard' },
     { name: 'manager temporary password', role: 'manager', profile: { managerStatus: 'active', branchId: 'branch-a', mustChangePassword: true }, path: '/required-password-change' },
     { name: 'admin rejected by backend', error: 'PRIVILEGED_LOGIN_REQUIRED', message: 'This account must use the Administrator sign-in portal.', actionLabel: 'Go to Admin Login', actionPath: '/admin/login' },
@@ -80,6 +81,8 @@ test('public form establishes the client session before profile lookup and role 
     }, 'loginWithUsernameResult');
     const context = {
       auth, db: {}, loading: false, email: scenario.email || 'test_user', password: 'test-password',
+      getAuthSessionEpoch: () => 0,
+      isCurrentAuthSession: (user) => auth.currentUser?.uid === user?.uid,
       loginInFlight: { current: false }, console: { info: () => {} },
       getPublicLoginErrorMessage, loginWithUsernameResult: usernameLogin,
       signInWithCustomToken: async (_auth, token) => {
@@ -119,4 +122,53 @@ test('public form establishes the client session before profile lookup and role 
       assert.equal(auth.currentUser.uid, 'public-user');
     }
   });
+});
+
+test('login route redirects only a current authorized Firebase session', async () => {
+  const page = readFileSync(resolve(root, 'app/login.jsx'), 'utf8');
+  const start = page.indexOf('    let cancelled = false;\n    const unsubscribe = onAuthStateChanged');
+  const end = page.indexOf('  }, [router]);', start);
+  assert.ok(start > 0 && end > start);
+  const effect = page.slice(start, end);
+  const routes = [];
+  let callback;
+  const auth = { currentUser: { uid: 'requester-1' } };
+  let epoch = 1;
+  let status = 'active';
+  let profileGate = null;
+  const context = {
+    auth, router: { replace: (path) => routes.push(path) },
+    loginInFlight: { current: false }, loginSucceeded: { current: false },
+    onAuthStateChanged: (_auth, listener) => { callback = listener; return () => {}; },
+    getAuthSessionEpoch: () => epoch,
+    isCurrentAuthSession: (user, capturedEpoch) => capturedEpoch === epoch && auth.currentUser?.uid === user?.uid,
+    fetchFirestoreUserProfile: async () => profileGate
+      ? profileGate
+      : ({ uid: 'requester-1', role: 'requester' }),
+    getCanonicalAccountStatus: () => status,
+    validateRoleAccess: async () => ({ status: 'authorized', profile: { role: 'requester' } }),
+    getPostAuthenticationDestination: () => '/requester/r_dashboard',
+  };
+  vm.runInNewContext(`(() => {${effect}})()`, context);
+  await callback(auth.currentUser);
+  assert.deepEqual(routes, ['/requester/r_dashboard']);
+  routes.length = 0;
+  auth.currentUser = null;
+  epoch++;
+  await callback(null);
+  assert.deepEqual(routes, []);
+  auth.currentUser = { uid: 'requester-1' };
+  status = 'suspended';
+  await callback(auth.currentUser);
+  assert.deepEqual(routes, []);
+  status = 'active';
+  profileGate = new Promise((resolveProfile) => {
+    context.resolveProfile = resolveProfile;
+  });
+  const pending = callback(auth.currentUser);
+  auth.currentUser = null;
+  epoch++;
+  context.resolveProfile({ uid: 'requester-1', role: 'requester' });
+  await pending;
+  assert.deepEqual(routes, []);
 });

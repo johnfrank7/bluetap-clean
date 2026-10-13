@@ -1,5 +1,5 @@
 import { cancelRequesterOrder, createRequesterOrder, getRequesterOrders, updateRequesterOrder } from './requesterOrdering';
-import { collection, onSnapshot, query, where } from 'firebase/firestore';
+import { collection, doc, getDoc, onSnapshot, query, where } from 'firebase/firestore';
 import { db } from '../firebase';
 import {
   isActiveRequesterOrderStatus,
@@ -18,19 +18,28 @@ const normalizeAmount = (amount) => {
   return Number.isFinite(parsedAmount) ? parsedAmount : 0;
 };
 
-const normalizeItems = (data = {}) => {
+export const normalizeItems = (data = {}) => {
   if (Array.isArray(data.items) && data.items.length > 0) {
     return data.items
       .map((item) => ({
         product_id: item.product_id || item.productId || '',
+        productId: item.productId || item.product_id || '',
         product_name: item.product_name || item.productName || item.productNameSnapshot || '',
+        productName: item.productName || item.product_name || item.productNameSnapshot || '',
+        productNameSnapshot: item.productNameSnapshot || item.product_name || item.productName || '',
         product_price: normalizeAmount(item.product_price ?? item.price ?? item.unitPriceAtOrder),
+        unitPrice: normalizeAmount(item.unitPriceAtOrder ?? item.product_price ?? item.price),
+        unitPriceAtOrder: normalizeAmount(item.unitPriceAtOrder ?? item.product_price ?? item.price),
         quantity: normalizeAmount(item.quantity),
         line_total: normalizeAmount(
           item.line_total ?? item.totalAtOrder ?? normalizeAmount(item.product_price ?? item.price ?? item.unitPriceAtOrder) * normalizeAmount(item.quantity)
         ),
+        totalAtOrder: normalizeAmount(
+          item.totalAtOrder ?? item.line_total ?? normalizeAmount(item.product_price ?? item.price ?? item.unitPriceAtOrder) * normalizeAmount(item.quantity)
+        ),
+        containerType: item.containerType || item.containerTypeSnapshot || item.container || '',
       }))
-      .filter((item) => item.product_id && item.quantity > 0);
+      .filter((item) => (item.product_id || item.productId) && item.quantity > 0);
   }
 
   if (!data.product_id && !data.product_name) {
@@ -56,7 +65,9 @@ const timestampToMillis = (timestamp) => {
   return d ? d.getTime() : 0;
 };
 
-const normalizeRequest = (id, data = {}) => {
+export const normalizeRequest = (idOrData, maybeData) => {
+  const id = typeof idOrData === 'string' ? idOrData : (idOrData?.id || '');
+  const data = typeof idOrData === 'object' && idOrData !== null && maybeData === undefined ? idOrData : (maybeData || {});
   const items = normalizeItems(data);
   const totalQuantity =
     normalizeAmount(data.quantity) ||
@@ -101,9 +112,27 @@ const normalizeRequest = (id, data = {}) => {
       data.currentBranchNameSnapshot || data.branchNameSnapshot || data.water_station || '',
     currentBranchName: data.currentBranchNameSnapshot || data.branchNameSnapshot || data.water_station || '',
     transferState: data.transferState || '',
-    transferToBranchName: data.transferToBranchNameSnapshot || '',
+    transferFromBranchId: (data.transferFromBranchId || '').toString().trim(),
+    transferToBranchId: (data.transferToBranchId || '').toString().trim(),
+    transferFromBranchName: data.transferFromBranchNameSnapshot || data.transferFromBranchName || '',
+    transferFromBranchNameSnapshot: data.transferFromBranchNameSnapshot || data.transferFromBranchName || '',
+    transferToBranchName: data.transferToBranchNameSnapshot || data.transferToBranchName || '',
+    transferToBranchNameSnapshot: data.transferToBranchNameSnapshot || data.transferToBranchName || '',
+    transferReason: data.transferReason || '',
+    transferRequestId: (data.transferRequestId || '').toString().trim(),
+    transferAcceptedAt: data.transferAcceptedAt || null,
+    transferRequestedAt: data.transferRequestedAt || null,
+    transferHistory: Array.isArray(data.transferHistory) ? data.transferHistory : [],
     delivery_date: data.delivery_date || '',
     total_cost: totalCost,
+    totalAtOrder: data.totalAtOrder !== undefined ? data.totalAtOrder : totalCost,
+    subtotalAtOrder: data.subtotalAtOrder !== undefined ? data.subtotalAtOrder : data.subtotal,
+    subtotal: data.subtotalAtOrder !== undefined ? data.subtotalAtOrder : data.subtotal,
+    deliveryFeeAtOrder: data.deliveryFeeAtOrder !== undefined ? data.deliveryFeeAtOrder : (data.deliveryFee ?? data.delivery_fee),
+    deliveryFee: data.deliveryFeeAtOrder !== undefined ? data.deliveryFeeAtOrder : (data.deliveryFee ?? data.delivery_fee),
+    deliveryFeePolicy: data.deliveryFeePolicy || null,
+    distanceKmAtOrder: data.distanceKmAtOrder ?? data.distanceKmSnapshot ?? null,
+    distanceKmSnapshot: data.distanceKmSnapshot ?? data.distanceKmAtOrder ?? null,
     status: data.status || 'Pending',
     created_at: data.created_at || data.createdAt || null,
     createdAt: data.createdAt || data.created_at || null,
@@ -423,7 +452,40 @@ export const createRequest = async (requestData) => {
   return primeRequesterRequest(order);
 };
 
-export const cancelRequest = async (request) => {
+export const reconcileAuthoritativeOrderStatus = async (requestId) => {
+  if (!requestId) return null;
+
+  // 1. Try reading directly from Firestore
+  try {
+    if (db) {
+      const snap = await getDoc(doc(db, REQUESTS_COLLECTION, requestId));
+      if (snap.exists()) {
+        return normalizeRequest(snap.id, snap.data());
+      }
+    }
+  } catch {
+    // Direct Firestore fetch may fail if offline or permissions block
+  }
+
+  // 2. Try fetching via getRequesterOrders API
+  try {
+    const orders = await getRequesterOrders();
+    if (Array.isArray(orders)) {
+      const match = orders.find(
+        (o) => (o.id || o.requestId || o.request_id) === requestId
+      );
+      if (match) {
+        return normalizeRequest(match.id || match.requestId || match.request_id, match);
+      }
+    }
+  } catch {
+    // API fetch may fail if network unreachable
+  }
+
+  return null;
+};
+
+export const cancelRequest = async (request, options = {}) => {
   const requestId = typeof request === 'string' ? request : request?.id;
 
   if (!requestId) {
@@ -432,12 +494,51 @@ export const cancelRequest = async (request) => {
 
   const normalizedRequest = normalizeRequest(requestId, typeof request === 'string' ? {} : request);
 
-  if (!['pending', 'outside radius pending approval'].includes(normalizeRequesterOrderStatus(normalizedRequest.status))) {
+  if (!['pending', 'outside radius pending approval', 'manager approval pending'].includes(normalizeRequesterOrderStatus(normalizedRequest.status))) {
     throw new Error('Only pending requests can be canceled.');
   }
 
-  const cancelled = await cancelRequesterOrder(requestId);
-  return primeRequesterRequest({ ...cancelled, id: requestId });
+  const cancelFn = options.cancelRequesterOrder || cancelRequesterOrder;
+  const reconciler = options.reconcileOrderStatus || reconcileAuthoritativeOrderStatus;
+
+  try {
+    const cancelled = await cancelFn(requestId);
+    return primeRequesterRequest({ ...cancelled, id: requestId, status: 'Cancelled' });
+  } catch (originalError) {
+    // If the server explicitly rejected the cancellation with a 4xx client error
+    // (e.g. 404 ORDER_NOT_FOUND, 409 ORDER_NOT_CANCELLABLE), fail immediately with server message.
+    if (originalError.status && originalError.status >= 400 && originalError.status < 500) {
+      throw originalError;
+    }
+
+    // Network loss, timeout, or dropped response: attempt authoritative reconciliation.
+    // NOTE: NEVER trigger an automatic cancellation retry (PATCH) here to avoid duplicate mutations.
+    let authoritativeOrder = null;
+    try {
+      authoritativeOrder = await reconciler(requestId);
+    } catch {
+      // Re-fetch failed due to network unavailability
+    }
+
+    if (authoritativeOrder) {
+      const authoritativeStatus = normalizeRequesterOrderStatus(authoritativeOrder.status);
+      if (authoritativeStatus === 'cancelled') {
+        // Authoritative reconciliation confirms the server did process the cancellation.
+        return primeRequesterRequest({ ...authoritativeOrder, id: requestId, status: 'Cancelled' });
+      }
+
+      // Authoritative reconciliation confirms the order is still active on the server.
+      const error = new Error('Cancellation could not be completed. Your order remains active.');
+      error.orderActive = true;
+      error.reconciledOrder = authoritativeOrder;
+      throw error;
+    }
+
+    // Status could not be authoritatively verified.
+    const error = new Error('Unable to confirm cancellation. Please check your order status.');
+    error.statusUnknown = true;
+    throw error;
+  }
 };
 
 export const updateRequest = async (request, payload) => {

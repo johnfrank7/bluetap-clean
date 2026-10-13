@@ -11,3 +11,10 @@ export const updateRegistrationSecurity = async (settings) => {
   invalidateAdminData(ADMIN_CACHE_KEYS.dashboard);
   return updated;
 };
+export const revokeAdminSessions = async (options = {}) => {
+  return request('POST', {
+    action: 'signOutAllSessions',
+    clientRequestId: options.clientRequestId || null,
+    reason: options.reason || null,
+  });
+};

@@ -133,6 +133,7 @@ export default function RequesterNotification() {
                 status={entry.item.status}
                 time={formatNotificationTime(entry.item.at)}
                 message={entry.item.message}
+                metadata={entry.item.metadata}
                 onPress={() => {
                   markSeen([entry.item.id]);
                   if (entry.item.noticeId) { openNotice(entry.item.noticeId); return; }

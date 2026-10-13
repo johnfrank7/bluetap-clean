@@ -418,8 +418,15 @@ function DistributorDashboardContent() {
         deliveryLocation: activeRequest.deliveryLocation,
         branchLocation: activeRequest.branchLocation,
         branchId: activeRequest.branchId,
+        subtotal: activeRequest.subtotalAtOrder ?? activeRequest.subtotal,
+        subtotalAtOrder: activeRequest.subtotalAtOrder ?? activeRequest.subtotal,
+        deliveryFee: activeRequest.deliveryFeeAtOrder ?? activeRequest.deliveryFee,
+        deliveryFeeAtOrder: activeRequest.deliveryFeeAtOrder ?? activeRequest.deliveryFee,
+        deliveryFeePolicy: activeRequest.deliveryFeePolicy || null,
+        distanceKmAtOrder: activeRequest.distanceKmAtOrder,
+        totalAtOrder: activeRequest.totalAtOrder ?? getDistributorTotalAmount(activeRequest),
         items: getDistributorRequestItems(activeRequest),
-        grandTotalAmount: getDistributorTotalAmount(activeRequest),
+        grandTotalAmount: activeRequest.totalAtOrder ?? getDistributorTotalAmount(activeRequest),
       }
     : null;
 
@@ -446,11 +453,21 @@ function DistributorDashboardContent() {
     if (!deliveryAction || processing) return;
     setProcessing(true);
     try {
-      if (deliveryAction.type === 'failed') await failAssignedDelivery(deliveryAction.id, failure);
-      else await completeAssignedDelivery(deliveryAction.id);
+      if (deliveryAction.type === 'failed') await failAssignedDelivery(deliveryAction.id, failure, {
+        expectedAssignmentVersion: activeRequest?.assignmentVersion,
+      });
+      else await completeAssignedDelivery(deliveryAction.id, {
+        expectedAssignmentVersion: activeRequest?.assignmentVersion,
+      });
       setDeliveryAction(null);
       setToast({ visible: true, type: 'success', message: 'Delivery status updated.' });
-    } catch (error) { setToast({ visible: true, type: 'error', message: error.message || 'Delivery could not be updated.' }); }
+    } catch (error) {
+      if (error.statusUnknown) {
+        setToast({ visible: true, type: 'info', message: error.message || 'Unable to confirm the action. Please refresh or check the order status.' });
+      } else {
+        setToast({ visible: true, type: 'error', message: error.message || 'Delivery could not be updated.' });
+      }
+    }
     finally { setProcessing(false); }
   };
 

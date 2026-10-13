@@ -118,6 +118,9 @@ function documents(snapshot) {
 function expiredSession(doc, cutoff, now, { incomplete = false } = {}) {
   const data = doc.data() || {};
   if (incomplete && data.completed === true) return false;
+  // Auth and Firestore are not atomic. Keep the session evidence needed to
+  // reconcile an Auth-only or pending-profile registration before cleanup.
+  if (incomplete && (data.userUid || data.finalization?.uid || data.profileRecovery?.uid)) return false;
   return millis(data.createdAt) > 0 && millis(data.createdAt) <= cutoff &&
     millis(data.expiresAt) > 0 && millis(data.expiresAt) <= now;
 }
@@ -143,9 +146,10 @@ async function collectMaintenanceTargets(db, policy, now = Date.now()) {
   const chatCutoff = now - policy.chatMessageRetentionDays * DAY_MS;
   const reportEvidenceCutoff = now - policy.chatReportEvidenceRetentionDays * DAY_MS;
 
-  const [registrations, usernameReservations, emailVerifications, passwordVerifications, authRateLimits, registrationOtpRateLimits, passwordRateLimits, orders] = await Promise.all([
+  const [registrations, usernameReservations, emailReservations, emailVerifications, passwordVerifications, authRateLimits, registrationOtpRateLimits, passwordRateLimits, orders] = await Promise.all([
     safeQuery(() => queryBefore(db, 'registrationSessions', 'createdAt', registrationCutoff)),
     safeQuery(() => queryBefore(db, 'usernameReservations', 'createdAt', registrationCutoff)),
+    safeQuery(() => queryBefore(db, 'registrationEmailReservations', 'createdAt', registrationCutoff)),
     safeQuery(() => queryBefore(db, 'emailOtpVerifications', 'createdAt', verificationCutoff)),
     safeQuery(() => queryBefore(db, 'passwordResetSessions', 'createdAt', verificationCutoff)),
     safeQuery(() => queryBefore(db, 'authRateLimits', 'resetAt', rateLimitCutoff)),
@@ -156,6 +160,10 @@ async function collectMaintenanceTargets(db, policy, now = Date.now()) {
 
   const registrationSessions = documents(registrations).filter((doc) => expiredSession(doc, registrationCutoff, now, { incomplete: true }));
   const expiredUsernameReservations = documents(usernameReservations).filter((doc) => {
+    const data = doc.data() || {};
+    return millis(data.createdAt) > 0 && millis(data.createdAt) <= registrationCutoff && millis(data.expiresAt) > 0 && millis(data.expiresAt) <= now;
+  });
+  const expiredEmailReservations = documents(emailReservations).filter((doc) => {
     const data = doc.data() || {};
     return millis(data.createdAt) > 0 && millis(data.createdAt) <= registrationCutoff && millis(data.expiresAt) > 0 && millis(data.expiresAt) <= now;
   });
@@ -224,6 +232,7 @@ async function collectMaintenanceTargets(db, policy, now = Date.now()) {
   return {
     registrationSessions,
     usernameReservations: expiredUsernameReservations,
+    emailReservations: expiredEmailReservations,
     emailOtpVerifications,
     passwordResetSessions,
     authRateLimits: expiredAuthRateLimits,
@@ -241,6 +250,7 @@ async function collectMaintenanceTargets(db, policy, now = Date.now()) {
 function summarizeTargets(targets) {
   const expiredRegistrationSessions = targets.registrationSessions.length;
   const expiredUsernameReservations = targets.usernameReservations.length;
+  const expiredEmailReservations = targets.emailReservations.length;
   const expiredVerificationSessions = targets.emailOtpVerifications.length + targets.passwordResetSessions.length;
   const expiredRateLimitRecords = targets.authRateLimits.length + targets.registrationOtpRateLimits.length + targets.passwordResetRateLimits.length;
   const ordersEligibleForArchive = targets.ordersToArchive.length;
@@ -253,6 +263,7 @@ function summarizeTargets(targets) {
     expiredNotifications: 0,
     expiredRegistrationSessions,
     expiredUsernameReservations,
+    expiredEmailReservations,
     expiredVerificationSessions,
     expiredRateLimitRecords,
     ordersEligibleForArchive,
@@ -263,7 +274,7 @@ function summarizeTargets(targets) {
     reportEvidenceEligibleForPurge,
     expiredRestrictionProjections,
     closedConversationsEligible: 0,
-    temporaryRecordsEligible: expiredRegistrationSessions + expiredUsernameReservations + expiredVerificationSessions + expiredRateLimitRecords + expiredChatMessages,
+    temporaryRecordsEligible: expiredRegistrationSessions + expiredUsernameReservations + expiredEmailReservations + expiredVerificationSessions + expiredRateLimitRecords + expiredChatMessages,
   };
 }
 
@@ -323,7 +334,7 @@ async function runCleanup(db, policy, triggeredBy, now = Date.now()) {
     }
   }
   const actualTargets = { ...targets, registrationSessions: deletableRegistrationSessions };
-  for (const key of ['registrationSessions', 'usernameReservations', 'emailOtpVerifications', 'passwordResetSessions', 'authRateLimits', 'registrationOtpRateLimits', 'passwordResetRateLimits']) {
+  for (const key of ['registrationSessions', 'usernameReservations', 'emailReservations', 'emailOtpVerifications', 'passwordResetSessions', 'authRateLimits', 'registrationOtpRateLimits', 'passwordResetRateLimits']) {
     for (const doc of actualTargets[key]) operations.push({ type: 'delete', ref: doc.ref });
   }
   for (const doc of targets.ordersToArchive) {
@@ -360,7 +371,7 @@ async function runCleanup(db, policy, triggeredBy, now = Date.now()) {
       triggeredBy: triggeredBy || 'system',
       result: 'failed',
       policySnapshot: { ...policy },
-      summary: { deleted: { incompleteRegistrationSessions: 0, usernameReservations: 0, verificationSessions: 0, rateLimitRecords: 0 }, archivedOrders: 0, totalTemporaryRecordsRemoved: 0 },
+      summary: { deleted: { incompleteRegistrationSessions: 0, usernameReservations: 0, emailReservations: 0, verificationSessions: 0, rateLimitRecords: 0 }, archivedOrders: 0, totalTemporaryRecordsRemoved: 0 },
       safeFailures: [{ category: 'cleanup-batch', count: operations.length, reason: 'write-failed' }],
       durationMs: Math.max(0, Date.now() - startedAt),
       createdAt: archivedAt,
@@ -373,6 +384,7 @@ async function runCleanup(db, policy, triggeredBy, now = Date.now()) {
     deleted: {
       incompleteRegistrationSessions: actualTargets.registrationSessions.length,
       usernameReservations: targets.usernameReservations.length,
+      emailReservations: targets.emailReservations.length,
       verificationSessions: targets.emailOtpVerifications.length + targets.passwordResetSessions.length,
       rateLimitRecords: targets.authRateLimits.length + targets.registrationOtpRateLimits.length + targets.passwordResetRateLimits.length,
       chatMessages: targets.chatMessagesToDelete.length,
@@ -381,7 +393,7 @@ async function runCleanup(db, policy, triggeredBy, now = Date.now()) {
     restrictionProjectionsCleaned: targets.expiredRestrictionProjections.length,
     chatMessagesProtectedByEvidence: targets.chatMessagesProtectedByEvidence.length,
     archivedOrders: targets.ordersToArchive.length,
-    totalTemporaryRecordsRemoved: actualTargets.registrationSessions.length + targets.usernameReservations.length + targets.emailOtpVerifications.length +
+    totalTemporaryRecordsRemoved: actualTargets.registrationSessions.length + targets.usernameReservations.length + targets.emailReservations.length + targets.emailOtpVerifications.length +
       targets.passwordResetSessions.length + targets.authRateLimits.length + targets.registrationOtpRateLimits.length + targets.passwordResetRateLimits.length + targets.chatMessagesToDelete.length,
   };
   const audit = {

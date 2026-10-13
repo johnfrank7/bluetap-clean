@@ -16,21 +16,33 @@ const formatNoticeTime = (value) => {
 function NoticeDetailModal({ notice, onClose, onAcknowledge }) {
   const { colors } = useBlueTapTheme();
   if (!notice) return null;
+  const isApproval = notice.type === 'distributor_application_approved' || notice.category === 'DISTRIBUTOR_APPLICATION';
+  const isRestoration = notice.type === 'reactivate_account' || notice.category === 'ACCOUNT_RESTORATION' || notice.type === 'restore_branch_access';
   const restriction = notice.type?.startsWith('suspend_');
+  const accentColor = (isApproval || isRestoration) ? (colors.success || '#059669') : colors.warning;
+  const eyebrowText = isApproval ? 'APPLICATION APPROVED' : isRestoration ? 'ACCESS RESTORED' : 'REPORTS & SAFETY';
+  const titleText = isApproval ? 'Application Approved' : (notice.title || (isRestoration ? 'Account Access Restored' : 'BlueTap safety notice'));
+  const bodyText = isApproval
+    ? `Your Distributor application has been approved for ${notice.branchName || 'your branch'}. You can now access your assigned Distributor services.`
+    : restriction
+      ? `This ${categoryLabel(notice.scope)} restriction${notice.branchName ? ` applies to ${notice.branchName}` : ' applies across BlueTap'}${notice.endsAt ? ` until ${new Date(notice.endsAt).toLocaleString()}` : ' until restored by branch management'}. ${notice.reasonLabel ? `Reason: ${notice.reasonLabel}.` : ''}`
+      : notice.type === 'restore_branch_access'
+        ? `Your access to ${notice.branchName || 'the branch'} has been restored. You may now resume orders and communications.`
+        : isRestoration
+          ? (notice.message || 'Your account access has been restored. You may now sign in and use BlueTap services.')
+          : `A moderator issued a warning related to ${categoryLabel(notice.category)}. Please follow BlueTap's safety and conduct requirements.`;
+  const primaryActionLabel = isApproval ? 'Get Started' : 'Acknowledge';
+
   return <Modal visible transparent animationType="fade" onRequestClose={onClose}>
     <View style={[styles.modalBackdrop, { backgroundColor: colors.overlay || 'rgba(2, 16, 31, .62)' }]}>
       <View accessibilityViewIsModal style={[styles.modal, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-        <Text style={[styles.modalEyebrow, { color: colors.warning }]}>REPORTS &amp; SAFETY</Text>
-        <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>{notice.title || 'BlueTap safety notice'}</Text>
-        <Text style={[styles.modalBody, { color: colors.textSecondary }]}>{restriction
-          ? `This ${categoryLabel(notice.scope)} restriction${notice.branchName ? ` applies to ${notice.branchName}` : ' applies across BlueTap'}${notice.endsAt ? ` until ${new Date(notice.endsAt).toLocaleString()}` : ' until restored by branch management'}. ${notice.reasonLabel ? `Reason: ${notice.reasonLabel}.` : ''}`
-          : notice.type === 'restore_branch_access'
-            ? `Your access to ${notice.branchName || 'the branch'} has been restored. You may now resume orders and communications.`
-            : `A moderator issued a warning related to ${categoryLabel(notice.category)}. Please follow BlueTap's safety and conduct requirements.`}</Text>
-        <Text style={[styles.modalMeta, { color: colors.textSecondary }]}>Reporter identity and private moderator notes are never disclosed.</Text>
+        <Text style={[styles.modalEyebrow, { color: accentColor }]}>{eyebrowText}</Text>
+        <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>{titleText}</Text>
+        <Text style={[styles.modalBody, { color: colors.textSecondary }]}>{bodyText}</Text>
+        {!isApproval && !isRestoration && <Text style={[styles.modalMeta, { color: colors.textSecondary }]}>Reporter identity and private moderator notes are never disclosed.</Text>}
         <View style={styles.modalActions}>
           <Pressable accessibilityRole="button" onPress={onClose} style={[styles.secondaryButton, { borderColor: colors.border }]}><Text style={{ color: colors.textPrimary, fontWeight: '800' }}>Close</Text></Pressable>
-          {!notice.acknowledgedAt && <Pressable accessibilityRole="button" onPress={() => onAcknowledge(notice.id)} style={[styles.primaryButton, { backgroundColor: colors.warning }]}><Text style={styles.buttonText}>Acknowledge</Text></Pressable>}
+          {!notice.acknowledgedAt && <Pressable accessibilityRole="button" onPress={() => onAcknowledge(notice.id)} style={[styles.primaryButton, { backgroundColor: accentColor }]}><Text style={styles.buttonText}>{primaryActionLabel}</Text></Pressable>}
         </View>
       </View>
     </View>

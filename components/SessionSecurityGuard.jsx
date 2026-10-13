@@ -20,6 +20,7 @@ export default function SessionSecurityGuard({ children, role }) {
   const policyRef = React.useRef(null);
   const expiredRef = React.useRef(false);
   const [warning, setWarning] = React.useState(false);
+  const [signOutError, setSignOutError] = React.useState(false);
 
   const clearTimers = React.useCallback(() => {
     clearTimeout(idleTimer.current);
@@ -31,8 +32,14 @@ export default function SessionSecurityGuard({ children, role }) {
     if (expiredRef.current) return;
     expiredRef.current = true;
     clearTimers();
-    await signOutAndClearSessions();
-    router.replace(getRoleLoginPath(role));
+    try {
+      await signOutAndClearSessions();
+      router.replace(getRoleLoginPath(role));
+    } catch {
+      expiredRef.current = false;
+      setSignOutError(true);
+      setWarning(true);
+    }
   }, [clearTimers, role, router]);
 
   const scheduleIdle = React.useCallback(() => {
@@ -104,6 +111,7 @@ export default function SessionSecurityGuard({ children, role }) {
           <View style={styles.card}>
             <Text style={styles.title}>Your session is about to expire</Text>
             <Text style={styles.body}>For your security, BlueTap will sign you out after one minute of inactivity.</Text>
+            {signOutError && <Text style={styles.body}>Sign out could not complete. Please try again.</Text>}
             <View style={styles.actions}>
               <TouchableOpacity onPress={expire} style={styles.secondary}>
                 <Text style={styles.secondaryText}>Sign out now</Text>

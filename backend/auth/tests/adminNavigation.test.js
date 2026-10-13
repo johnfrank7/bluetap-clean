@@ -13,6 +13,8 @@ const harness = () => {
   const context = {
     pendingDestination: '/admin/dashboard', rootNavigationState: undefined,
     navigationCompletedRef: { current: false },
+    pendingAuthEpochRef: { current: 1 }, getAuthSessionEpoch: () => 1,
+    auth: { currentUser: { uid: 'admin-1' } },
     currentPathname: '/admin/login',
     routerRef: { current: { replace: (path) => calls.push(path) } },
     logPrivilegedStage: (stage) => calls.push(stage),

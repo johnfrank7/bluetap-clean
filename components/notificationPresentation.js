@@ -4,7 +4,16 @@ const normalizeNotificationStatus = (status) =>
     .toLowerCase()
     .replace(/[\s-]+/g, '_');
 
-const SUCCESS_STATUSES = new Set(['delivered', 'completed', 'success', 'restored']);
+const SUCCESS_STATUSES = new Set([
+  'delivered',
+  'completed',
+  'success',
+  'restored',
+  'approved',
+  'application_approved',
+  'reactivated',
+  'account_reactivated',
+]);
 const ERROR_STATUSES = new Set([
   'cancelled',
   'canceled',
@@ -90,7 +99,8 @@ const notificationSeverity = (status, dark = false) => {
 
 const compactNotificationStatus = (status) => {
   const normalized = normalizeNotificationStatus(status);
-  if (normalized === 'restored') return 'Restored';
+  if (normalized === 'restored' || normalized === 'reactivated' || normalized === 'account_reactivated') return 'Restored';
+  if (normalized === 'approved' || normalized === 'application_approved' || normalized === 'accepted') return 'Approved';
   if (SUCCESS_STATUSES.has(normalized)) return 'Delivered';
   if (DELIVERY_STATUSES.has(normalized)) return 'In transit';
   if (RESTRICTED_STATUSES.has(normalized)) return 'Restricted';
@@ -100,7 +110,7 @@ const compactNotificationStatus = (status) => {
   if (WARNING_STATUSES.has(normalized)) return 'Warning';
   if (normalized.includes('pending') || normalized.includes('review')) return 'Pending';
   if (normalized === 'scheduled') return 'Scheduled';
-  if (normalized === 'accepted' || normalized === 'approved') return 'Approved';
+  if (normalized === 'transferred' || (normalized.includes('transfer') && !normalized.includes('pending'))) return 'Transferred';
   if (normalized.includes('assigned')) return 'Assigned';
   return 'Update';
 };

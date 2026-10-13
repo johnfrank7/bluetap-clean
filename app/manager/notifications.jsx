@@ -1,4 +1,4 @@
-﻿import React from 'react';
+import React from 'react';
 import { useRouter } from 'expo-router';
 import { ActivityIndicator, Animated, StyleSheet, Text, View } from 'react-native';
 import { useAdminTheme } from '../../components/AdminTheme';
@@ -65,23 +65,55 @@ export default function ManagerNotificationsPage() {
     <View style={styles.list}>
       {notificationEntries.map((entry, index) => {
         const event = entry.item;
-        return <AnimatedPresenceItem key={entry.id} phase={entry.phase} delay={Math.min(index * 30, 120)}><NotificationCard
-        accessibilityLabel={`${event.message} Order ${event.requestId}`}
-        colors={colors}
-        dark={resolvedTheme === 'dark'}
-        status={event.status}
-        time={formatNotificationTime(event.at)}
-        message={event.message}
-        metadata={`Order #${event.requestId}${event.requesterName ? ` · ${event.requesterName}` : ''}`}
-        onPress={() => {
-          markRead([event.id]);
-          if (event.navigable !== false && event.orderId) {
-            clearManagerNotificationOrigin();
-            navigateOnce({ pathname: '/manager/request', params: { orderId: event.orderId } });
-          }
-          else setSelectedEventId(event.id);
-        }}
-      /></AnimatedPresenceItem>;
+        const isApplicant = event.kind === 'applicant' || !!event.applicant;
+        if (isApplicant) {
+          return (
+            <AnimatedPresenceItem key={entry.id} phase={entry.phase} delay={Math.min(index * 30, 120)}>
+              <NotificationCard
+                accessibilityLabel={`${event.title || 'New Distributor Application'}: ${event.message}${event.requestId ? ` Applicant ${event.requestId}` : ''}`}
+                colors={colors}
+                dark={resolvedTheme === 'dark'}
+                status={event.status}
+                time={formatNotificationTime(event.at)}
+                message={event.message}
+                metadata={event.metadata || `Applicant${event.requestId ? ` #${event.requestId}` : ''}${event.requesterName ? ` · ${event.requesterName}` : ''}`}
+                onPress={() => {
+                  markRead([event.id]);
+                  clearManagerNotificationOrigin();
+                  navigateOnce({
+                    pathname: '/manager/distributors',
+                    params: {
+                      tab: 'applications',
+                      applicantId: event.applicantId || event.applicant?.id || event.applicant?.uid || '',
+                    },
+                  });
+                }}
+              />
+            </AnimatedPresenceItem>
+          );
+        }
+        return (
+          <AnimatedPresenceItem key={entry.id} phase={entry.phase} delay={Math.min(index * 30, 120)}>
+            <NotificationCard
+              accessibilityLabel={`${event.message} Order ${event.requestId}`}
+              colors={colors}
+              dark={resolvedTheme === 'dark'}
+              status={event.status}
+              time={formatNotificationTime(event.at)}
+              message={event.message}
+              metadata={`Order #${event.requestId}${event.requesterName ? ` · ${event.requesterName}` : ''}`}
+              onPress={() => {
+                markRead([event.id]);
+                if (event.navigable !== false && event.orderId) {
+                  clearManagerNotificationOrigin();
+                  navigateOnce({ pathname: '/manager/request', params: { orderId: event.orderId } });
+                } else {
+                  setSelectedEventId(event.id);
+                }
+              }}
+            />
+          </AnimatedPresenceItem>
+        );
       })}
     </View>
     <ManagerNotificationDetailsModal

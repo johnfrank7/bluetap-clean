@@ -6,6 +6,7 @@ const { applyCors } = require('../utils/cors');
 const { getClientIp } = require('../utils/request');
 const firebaseWebConfig = require('../../firebase-web-config.json');
 const { ACCOUNT_STATUS, canonicalAccountStatus } = require('../auth/accountStatus');
+const { getAppEnv, isKnownProductionFirebaseProject, APP_ENVIRONMENTS } = require('../config/appEnv');
 
 const genericLogin = () => new OtpError(401, 'invalid-credential', 'Invalid username or password.');
 const mappingError = () => new OtpError(409, 'account-mapping-invalid', 'Your account sign-in setup needs attention. Please contact support.');
@@ -50,24 +51,48 @@ const publicProfile = (profile, uid, email) => ({
 });
 let verifiedWebKey = null;
 async function getPasswordApiKey() {
-  const apiKey = process.env.FIREBASE_WEB_API_KEY || firebaseWebConfig.apiKey;
-  if (!apiKey || (process.env.FIREBASE_PROJECT_ID && process.env.FIREBASE_PROJECT_ID !== firebaseWebConfig.projectId)) {
+  const appEnv = getAppEnv();
+  const serverProjectId = process.env.FIREBASE_PROJECT_ID;
+
+  if (appEnv === APP_ENVIRONMENTS.STAGING && serverProjectId && isKnownProductionFirebaseProject(serverProjectId)) {
+    throw new Error('Firebase project configuration mismatch: Staging cannot target production project');
+  }
+
+  const expectedProjectId = serverProjectId || firebaseWebConfig.projectId;
+  const apiKey = process.env.FIREBASE_WEB_API_KEY || (expectedProjectId === firebaseWebConfig.projectId ? firebaseWebConfig.apiKey : null);
+
+  if (!apiKey) {
+    throw new Error('Firebase Web API key is not configured');
+  }
+
+  const webProjectId = process.env.FIREBASE_WEB_PROJECT_ID || process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID;
+  if (webProjectId && serverProjectId && webProjectId !== serverProjectId) {
     throw new Error('Firebase project configuration mismatch');
   }
-  // An override may be a rotated key, but must still identify this project.
-  // Otherwise Firebase can report valid BlueTap credentials as invalid in a
-  // different project. Cache only successful configuration verification.
-  if (apiKey !== firebaseWebConfig.apiKey &&
-      (!verifiedWebKey || verifiedWebKey.key !== apiKey || verifiedWebKey.expiresAt <= Date.now())) {
+
+  if (appEnv === APP_ENVIRONMENTS.PRODUCTION && serverProjectId && serverProjectId !== firebaseWebConfig.projectId) {
+    throw new Error('Firebase project configuration mismatch');
+  }
+
+  // An override may be a rotated key or staging key, but must still identify this project.
+  // Cache only successful configuration verification.
+  const isDefaultProductionKey = expectedProjectId === firebaseWebConfig.projectId && apiKey === firebaseWebConfig.apiKey;
+  if (!isDefaultProductionKey &&
+      (!verifiedWebKey || verifiedWebKey.key !== apiKey || verifiedWebKey.projectId !== expectedProjectId || verifiedWebKey.expiresAt <= Date.now())) {
     const response = await fetch(`https://identitytoolkit.googleapis.com/v1/projects?key=${encodeURIComponent(apiKey)}`, {
       signal: AbortSignal.timeout(15000),
     });
     const config = await response.json().catch(() => null);
-    if (!response.ok || ![firebaseWebConfig.projectId, firebaseWebConfig.messagingSenderId].includes(String(config?.projectId || ''))) {
+    const returnedProject = String(config?.projectId || '');
+    const allowedProjects = [expectedProjectId];
+    if (expectedProjectId === firebaseWebConfig.projectId) {
+      allowedProjects.push(firebaseWebConfig.messagingSenderId);
+    }
+    if (!response.ok || !allowedProjects.includes(returnedProject)) {
       stage('FIREBASE_CONFIGURATION_FAILED');
       throw new Error('Firebase Web API key project mismatch');
     }
-    verifiedWebKey = { key: apiKey, expiresAt: Date.now() + 5 * 60 * 1000 };
+    verifiedWebKey = { key: apiKey, projectId: expectedProjectId, expiresAt: Date.now() + 5 * 60 * 1000 };
   }
   return apiKey;
 }
@@ -425,6 +450,7 @@ function createUsernameHandler(action, getAdmin = getFirebaseAdmin, { now = Date
 
 module.exports = {
   createUsernameHandler,
+  getPasswordApiKey,
   checkUsername,
   checkIpRateLimit,
   checkAccountRateLimit,

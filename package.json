@@ -12,6 +12,9 @@
     "build:android:device": "expo run:android --device",
     "build:ios:device": "expo run:ios --device",
     "test": "node --test backend/*/tests/*.test.js",
+    "test:emulator": "firebase emulators:exec --only firestore --project demo-bluetap \"node --test backend/chat/tests/protectedReads.emulator.test.js backend/registration/tests/firestoreSecurityRules.emulator.test.js\"",
+    "verify:deploy:staging": "node scripts/verify-deploy-target.js --env=staging --platform=firebase --project=bluetap-staging",
+    "verify:deploy:production": "node scripts/verify-deploy-target.js --env=production --platform=firebase --project=bluetap-8c98d",
     "start:backend": "node backend/app.js"
   },
   "dependencies": {

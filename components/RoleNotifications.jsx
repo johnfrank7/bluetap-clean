@@ -46,16 +46,32 @@ export function RoleNotificationProvider({ role, children }) {
   const events = React.useMemo(() => [
     ...getRoleOrderNotifications(roleData.orders || [], role),
     ...getChatFollowupNotifications(chat.conversations || [], role),
-    ...moderation.notices.map((notice) => ({
-      id: `moderation:${notice.id}`, kind: 'moderation', noticeId: notice.id,
-      status: notice.type === 'warn' ? 'warning' : notice.type === 'restore_branch_access' ? 'restored' : 'restricted',
-      at: notice.createdAt?.toDate?.() || new Date(notice.createdAt || Date.now()),
-      message: notice.type === 'warn'
-        ? `${notice.title}: review your BlueTap conduct notice.`
-        : notice.type === 'restore_branch_access'
-          ? `Branch access restored${notice.branchName ? ` for ${notice.branchName}` : ''}.`
-          : `${notice.title}${notice.branchName ? ` for ${notice.branchName}` : ''}${notice.reasonLabel ? ` (${notice.reasonLabel})` : ''}.`,
-    })),
+    ...moderation.notices.map((notice) => {
+      const isApproval = notice.type === 'distributor_application_approved' || notice.category === 'DISTRIBUTOR_APPLICATION';
+      const isRestoration = notice.type === 'reactivate_account' || notice.category === 'ACCOUNT_RESTORATION' || notice.type === 'restore_branch_access';
+      return {
+        id: `moderation:${notice.id}`,
+        kind: isApproval ? 'application_approval' : isRestoration ? 'account_restoration' : 'moderation',
+        noticeId: notice.id,
+        status: isApproval
+          ? 'approved'
+          : isRestoration
+            ? 'restored'
+            : notice.type === 'warn'
+              ? 'warning'
+              : 'restricted',
+        at: notice.createdAt?.toDate?.() || new Date(notice.createdAt || Date.now()),
+        message: isApproval
+          ? `Your Distributor application has been approved for ${notice.branchName || 'your branch'}. You can now access your assigned Distributor services.`
+          : isRestoration
+            ? (notice.type === 'restore_branch_access'
+                ? `Branch access restored${notice.branchName ? ` for ${notice.branchName}` : ''}.`
+                : (notice.message || 'Your account access has been restored.'))
+            : notice.type === 'warn'
+              ? `${notice.title}: review your BlueTap conduct notice.`
+              : `${notice.title}${notice.branchName ? ` for ${notice.branchName}` : ''}${notice.reasonLabel ? ` (${notice.reasonLabel})` : ''}.`,
+      };
+    }),
   ].sort((left, right) => right.at.getTime() - left.at.getTime()).slice(0, 150), [chat.conversations, moderation.notices, role, roleData.orders]);
 
   React.useEffect(() => {

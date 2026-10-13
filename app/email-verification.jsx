@@ -57,7 +57,7 @@ const getOtpError = (error) => {
     return 'Unable to send verification email. Please try again.';
   }
   if (reason === 'no-active-code') return 'Please request a new verification code.';
-  if (['registration-expired', 'invalid-registration', 'account-exists', 'username-taken', 'face-capture-required'].includes(reason)) return error.message;
+  if (['registration-expired', 'invalid-registration', 'account-exists', 'username-taken', 'face-capture-required', 'registration-finalization-pending'].includes(reason)) return error.message;
   if (['face-service-preparing', 'FACE_SERVICE_PREPARING'].includes(reason)) {
     return 'Face verification service is preparing. Please try again in a moment.';
   }
@@ -112,6 +112,7 @@ export default function EmailVerificationPage() {
   );
   const [messageType, setMessageType] = React.useState(sent === 'false' ? 'error' : 'info');
   const [registrationFinalizationFailed, setRegistrationFinalizationFailed] = React.useState(false);
+  const [otpFocused, setOtpFocused] = React.useState(false);
 
   const secondsRemaining = expiresAt ? Math.max(0, Math.ceil((expiresAt - now) / 1000)) : 0;
   const resendSeconds = cooldownEndsAt
@@ -334,7 +335,7 @@ export default function EmailVerificationPage() {
         router.replace({ pathname: '/signup', params: { role: draft?.profile?.role || 'requester', usernameTaken: 'true' } });
         return;
       }
-      if (registration && ['face-service-preparing', 'FACE_SERVICE_PREPARING', 'invalid-face-response', 'INVALID_FACE_RESPONSE', 'face-review-required', 'registration-finalization-failed'].includes(reason)) {
+      if (registration && ['registration-finalization-pending', 'face-service-preparing', 'FACE_SERVICE_PREPARING', 'invalid-face-response', 'INVALID_FACE_RESPONSE', 'face-review-required', 'registration-finalization-failed'].includes(reason)) {
         setRegistrationFinalizationFailed(true);
         setOtp('');
         setCodeSent(false);
@@ -397,6 +398,7 @@ export default function EmailVerificationPage() {
 
   const verifyDisabled = otp.length !== OTP_LENGTH || !codeSent || sending || verifying || codeExpired || verified;
   const resendDisabled = resendSeconds > 0 || sending || verifying || verified;
+  const otpInputDisabled = sending || verifying || verified || codeExpired || !codeSent;
 
   return (
     <LinearGradient
@@ -449,15 +451,18 @@ export default function EmailVerificationPage() {
                       const digit = otp[index] || '';
                       const active = !verified && index === otp.length;
                       return (
-                        <View
+                          <View
                           key={index}
                           style={[
                             styles.otpBox,
-                            active && styles.otpBoxActive,
-                            digit && styles.otpBoxFilled,
+                            { borderColor: colors.border, backgroundColor: colors.surface },
+                            active && !otpInputDisabled && { borderColor: colors.primary, borderWidth: 2, backgroundColor: colors.surfaceAlt },
+                            otpFocused && active && !otpInputDisabled && { borderColor: colors.primaryLight },
+                            digit && !otpInputDisabled && { borderColor: colors.primary, backgroundColor: colors.surfaceAlt },
+                            otpInputDisabled && { borderColor: colors.border, backgroundColor: colors.surfaceAlt },
                           ]}
                         >
-                          <Text style={styles.otpDigit}>{digit}</Text>
+                          <Text style={[styles.otpDigit, { color: otpInputDisabled ? colors.textSecondary : colors.textPrimary }]}>{digit}</Text>
                         </View>
                       );
                     })}
@@ -468,9 +473,12 @@ export default function EmailVerificationPage() {
                     importantForAutofill="yes"
                     keyboardType="number-pad"
                     maxLength={OTP_LENGTH}
-                    editable={!sending && !verifying && !verified}
+                    editable={!otpInputDisabled}
                     onChangeText={changeOtp}
+                    onFocus={() => setOtpFocused(true)}
+                    onBlur={() => setOtpFocused(false)}
                     onSubmitEditing={verify}
+                    selectionColor={colors.primary}
                     returnKeyType="done"
                     style={styles.hiddenOtpInput}
                     textContentType="oneTimeCode"
@@ -496,11 +504,13 @@ export default function EmailVerificationPage() {
 
                 <RegistrationActions
                   stacked={width < 520}
-                  backLabel={registration ? 'Cancel registration' : 'Back to Login'}
+                  backLabel={registration ? 'Edit Email Address' : 'Back to Login'}
                   primaryLabel={verifying
                     ? registrationFinalizationFailed ? 'Finishing...' : 'Verifying...'
                     : registrationFinalizationFailed ? 'Try Again' : verified ? 'Email Verified' : 'Confirm Code'}
-                  onBack={returnToLogin}
+                  onBack={registration
+                    ? () => router.replace({ pathname: '/signup', params: { role: draft?.profile?.role || 'requester', resumeRegistration: 'true' } })
+                    : returnToLogin}
                   onPrimary={registrationFinalizationFailed ? retryFinalization : verify}
                   backDisabled={sending || verifying || verified}
                   primaryDisabled={registrationFinalizationFailed ? sending || verifying : verifyDisabled}
@@ -539,6 +549,37 @@ export default function EmailVerificationPage() {
   );
 }
 
+export function ErrorBoundary({ retry }) {
+  const { colors, isDark } = useBlueTapTheme();
+  const router = useRouter();
+  const params = useLocalSearchParams();
+  const registration = firstParam(params.registration) === 'true';
+  const role = firstParam(params.role) === 'distributor' ? 'distributor' : 'requester';
+  return (
+    <LinearGradient colors={isDark ? [colors.background, colors.header] : [colors.primary, colors.primaryLight]} style={styles.gradient}>
+      <SafeAreaView style={styles.safeArea}>
+        <ScrollView contentContainerStyle={styles.scrollContent}>
+          <RegistrationBrand />
+          <View style={[styles.errorFallbackCard, { backgroundColor: colors.surface }]}>
+            <RegistrationNotice
+              tone="error"
+              title="Verification could not be displayed"
+              message="Your registration details are still available in this session. Return to account details or try loading verification again."
+            />
+            <RegistrationActions
+              stacked={false}
+              backLabel={registration ? 'Back to Account Details' : 'Back to Login'}
+              primaryLabel="Try Again"
+              onBack={() => router.replace(registration ? { pathname: '/signup', params: { role, resumeRegistration: 'true' } } : '/login')}
+              onPrimary={retry}
+            />
+          </View>
+        </ScrollView>
+      </SafeAreaView>
+    </LinearGradient>
+  );
+}
+
 const styles = createPortalStyleSheet({
   gradient: { flex: 1 },
   safeArea: { flex: 1 },
@@ -561,6 +602,7 @@ const styles = createPortalStyleSheet({
     shadowOffset: { width: 0, height: 10 },
     elevation: 8,
   },
+  errorFallbackCard: { width: '100%', maxWidth: 520, backgroundColor: '#FFFFFF', borderRadius: 24, padding: 26 },
   loadingState: { minHeight: 300, justifyContent: 'center', alignItems: 'center' },
   loadingText: { color: '#40617A', fontSize: 15, marginTop: 14 },
   emailIcon: {
@@ -610,13 +652,11 @@ const styles = createPortalStyleSheet({
     justifyContent: 'center',
     backgroundColor: '#F8FCFF',
   },
-  otpBoxActive: { borderColor: '#187BCD', borderWidth: 2, backgroundColor: '#F3FAFF' },
-  otpBoxFilled: { borderColor: '#63B6EC', backgroundColor: '#EDF8FF' },
   otpDigit: { color: '#17324D', fontSize: 23, fontWeight: '700' },
   hiddenOtpInput: {
     ...StyleSheet.absoluteFillObject,
     color: 'transparent',
-    opacity: 0.02,
+    opacity: 0,
     fontSize: 1,
   },
   expiryText: {

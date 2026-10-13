@@ -24,7 +24,11 @@ function stationColorFor(branchIdentity) {
 }
 
 function connectorCoordinates(delivery, station) {
-  if (![delivery?.latitude, delivery?.longitude, station?.latitude, station?.longitude].every(Number.isFinite)) return [];
+  const dLat = Number(delivery?.latitude ?? delivery?.location?.latitude);
+  const dLng = Number(delivery?.longitude ?? delivery?.location?.longitude);
+  const sLat = Number(station?.latitude ?? station?.branch?.latitude ?? station?.branch?.location?.latitude ?? station?.location?.latitude);
+  const sLng = Number(station?.longitude ?? station?.branch?.longitude ?? station?.branch?.location?.longitude ?? station?.location?.longitude);
+  if (![dLat, dLng, sLat, sLng].every(Number.isFinite)) return [];
   return [delivery, station];
 }
 

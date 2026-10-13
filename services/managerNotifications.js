@@ -79,17 +79,31 @@ function getManagerNotifications(orders = [], incomingTransfers = [], decisions 
     const at = applicant.createdAt || applicant.created_at;
     const date = parseTimestamp(at);
     if (!date || date.getTime() < now - NOTIFICATION_RETENTION_MS) continue;
-    const targetBranchName = branchName || applicant.requestedBranchName || applicant.branchName || 'your branch';
+    const targetBranchName = branchName || applicant.requestedBranchName || applicant.requestedBranchNameSnapshot || applicant.branchName || 'your branch';
+    const applicantName = applicant.fullName || applicant.full_name ||
+      (applicant.firstName ? `${applicant.firstName} ${applicant.lastName || ''}`.trim() : '') ||
+      'Distributor applicant';
+    const rawCandidate = String(applicant.publicUid || applicant.displayUid || applicant.unique_id || applicant.uniqueId || '').trim();
+    const isPublicUid = /^(?:Dis|DIS)[-\d]/i.test(rawCandidate) || /^(?:Dis|Req|Man|Mgr|Adm|Acc)-?\d+$/i.test(rawCandidate);
+    const displayUid = isPublicUid ? rawCandidate : '';
+    const applicantUid = applicant.id || applicant.uid || '';
+    const metadataText = displayUid
+      ? `Applicant #${displayUid} · ${targetBranchName}`
+      : `Applicant · ${targetBranchName}`;
     events.push({
-      id: `applicant:${applicant.id || applicant.uid}`,
+      id: `applicant:${applicantUid}`,
       orderId: '',
-      requestId: applicant.displayUid || applicant.publicUid || applicant.id || applicant.uid || '',
-      requesterName: applicant.fullName || applicant.full_name || 'Distributor applicant',
-      message: `A new Distributor application is awaiting review for ${targetBranchName}.`,
+      applicantId: applicantUid,
+      requestId: displayUid,
+      requesterName: applicantName,
+      title: 'New Distributor Application',
+      message: `${applicantName} submitted a Distributor application for ${targetBranchName} and is awaiting review.`,
+      metadata: metadataText,
       status: 'pending',
       at: date,
       path: '/manager/distributors',
       navigable: true,
+      kind: 'applicant',
       applicant,
     });
   }
@@ -101,6 +115,30 @@ const unreadManagerNotifications = (events, seenIds) => events.filter((event) =>
 function getManagerNotificationDetail(event) {
   const source = event || {};
   const order = source.order || {};
+  const applicant = source.applicant || {};
+  const isApplicant = source.kind === 'applicant' || !!source.applicant;
+  if (isApplicant) {
+    const rawCandidate = String(applicant.publicUid || applicant.displayUid || applicant.unique_id || applicant.uniqueId || source.requestId || '').trim();
+    const isPublicUid = /^(?:Dis|DIS)[-\d]/i.test(rawCandidate) || /^(?:Dis|Req|Man|Mgr|Adm|Acc)-?\d+$/i.test(rawCandidate);
+    const displayUid = isPublicUid ? rawCandidate : '';
+    return {
+      status: source.status || 'pending',
+      requestId: displayUid,
+      requesterName: source.requesterName || applicant.fullName || applicant.full_name || 'Distributor applicant',
+      requesterUniqueId: displayUid,
+      branchName: applicant.requestedBranchName || applicant.requestedBranchNameSnapshot || applicant.branchName || '',
+      items: [],
+      deliveryAddress: applicant.barangay || applicant.address || '',
+      distributorName: source.requesterName || applicant.fullName || applicant.full_name || '',
+      distributorUniqueId: displayUid,
+      scheduledAt: null,
+      deliveryFee: 0,
+      total: 0,
+      message: source.message || '',
+      at: source.at || null,
+      kind: 'applicant',
+    };
+  }
   return {
     status: source.status || statusOf(order.status),
     requestId: source.requestId || order.requestId || order.request_id || order.id || '',

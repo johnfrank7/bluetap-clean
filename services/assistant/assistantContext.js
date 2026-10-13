@@ -76,6 +76,8 @@ export function sanitizeOrder(order = {}) {
   const normalized = normalizeRequestDetails(order);
   const totalAmount = normalized?.grandTotal ?? Number(order.totalAmount ?? order.total ?? order.price ?? 0);
   const total = Number.isFinite(totalAmount) && totalAmount > 0 ? `₱${totalAmount.toFixed(2)}` : '';
+  const subtotal = normalized?.formattedSubtotal || (Number.isFinite(normalized?.subtotal) ? `₱${normalized.subtotal.toFixed(2)}` : '');
+  const deliveryFee = normalized?.formattedDeliveryFee || (normalized?.deliveryFee !== undefined && Number.isFinite(normalized?.deliveryFee) ? `₱${normalized.deliveryFee.toFixed(2)}` : '');
 
   const scheduleRaw = order.scheduledAt || order.scheduled_at || order.delivery_date || order.deliverySchedule;
   const schedule = formatTime(scheduleRaw);
@@ -99,6 +101,8 @@ export function sanitizeOrder(order = {}) {
     productSummary,
     quantity: Number(order.quantity) || 1,
     total,
+    subtotal,
+    deliveryFee,
     schedule,
     safeFailureReason,
     isOutsideRadius,

@@ -8,6 +8,7 @@ import { createAdminAccount, getAccountsWorkspace, getBranches, manageAdminAccou
 import { checkUsername, validateUsername } from '../../services/usernameAuth';
 import { ADMIN_CACHE_KEYS, setCachedAdminData, useAdminData } from '../../services/adminDataCache';
 import TopToastFeedback from '../../components/TopToastFeedback';
+import AccountActionModal from '../../components/AccountActionModal';
 import PasswordVisibilityButton from '../../components/PasswordVisibilityButton';
 import RoleBadge from '../../components/RoleBadge';
 import useUnsavedChangesGuard from '../../components/useUnsavedChangesGuard';
@@ -15,14 +16,14 @@ const { accountPageMeta, accountPageNumbers, accountPageSlice } = require('../..
 const { roleFromTone, roleToneFor } = require('../../constants/rolePresentation');
 
 const roles = ['all', 'requester', 'distributor', 'manager'];
-const statuses = ['all', 'active', 'inactive', 'pending', 'rejected'];
+const statuses = ['all', 'active', 'inactive', 'suspended', 'pending', 'rejected'];
 const idleOptions = [null, 5, 10, 15, 30, 60, 120];
 const emptyCreate = { fullName: '', email: '', username: '', temporaryPassword: '', role: 'requester', branchId: '', requirePasswordChange: true };
 const titleCase = (value) => String(value || '').replace(/_/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
 const dateText = (value) => { if (!value) return '—'; const raw = value?._seconds ? value._seconds * 1000 : value?.seconds ? value.seconds * 1000 : value; const date = new Date(raw); return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString(); };
 const accountSearch = (a) => `${a.fullName} ${a.username} ${a.email} ${a.branchName}`.toLowerCase();
 const roleTone = roleToneFor;
-const statusTone = (status) => ['active', 'approved'].includes(status) ? 'green' : status === 'pending' ? 'amber' : status === 'inactive' ? 'gray' : status === 'rejected' ? 'red' : 'blue';
+const statusTone = (status) => ['active', 'approved'].includes(status) ? 'green' : status === 'pending' ? 'amber' : ['inactive', 'suspended'].includes(status) ? 'red' : status === 'rejected' ? 'red' : 'blue';
 const sourceText = (source) => source === 'admin_created' ? 'Admin created' : 'Public registration';
 
 function Field({ label, hint, children, half = false, create = false }) { const { colors } = useAdminTheme(); const { width } = useWindowDimensions(); const compact = width < 760; const styles = createStyles(colors, compact); return <View style={[styles.field, !half && !create && { flexBasis: 'auto' }, half && styles.halfField, create && styles.createField]}><Text style={styles.label}>{label}</Text>{children}{hint ? <Text style={styles.hint}>{hint}</Text> : null}</View>; }
@@ -136,14 +137,99 @@ export default function AccountsAuditPage() {
   const save = async (account, draft) => { setSaving(true); try { const result = await manageAdminAccount(account.uid, 'updateAccount', { fullName: draft.fullName, email: draft.email, username: draft.username, role: draft.role, branchId: draft.branchId, sessionIdleTimeoutOverrideMinutes: draft.sessionIdleTimeoutOverrideMinutes, temporaryPassword: draft.temporaryPassword, requirePasswordChange: draft.requirePasswordChange, active: draft.active }); patchCachedAccount(result); setAccountModal(null); showToast('Account changes saved and audited.', 'success'); } catch (error) { showToast(error.message, 'error'); } finally { setSaving(false); } };
   const sessionAction = async (account) => { setSaving(true); try { patchCachedAccount(await manageAdminAccount(account.uid, 'signOutAllSessions')); showToast('All active sessions were revoked.', 'success'); } catch (error) { showToast(error.message, 'error'); } finally { setSaving(false); } };
   const distributorAction = async (account, action, options = {}) => { const confirmed = action !== 'reject' || typeof globalThis.confirm !== 'function' || globalThis.confirm('Reject this distributor application?'); if (!confirmed) return; setSaving(true); try { const updated = await updateDistributor(account.uid, action, options); patchCachedAccount({ ...account, ...updated, status: updated.approvalStatus || (action === 'approve' ? 'active' : 'rejected') }); const distMsg = `Distributor ${action === 'approve' ? 'approved' : 'rejected'} through the protected workflow.`; showToast(distMsg, 'success'); } catch (error) { showToast(error.message, 'error'); } finally { setSaving(false); } };
-  const doAction = async (type, account) => { setMoreFor(null); if (type === 'view' || type === 'edit') return setAccountModal({ mode: type, account }); if (type === 'sessions') return sessionAction(account); const confirmed = typeof globalThis.confirm !== 'function' || globalThis.confirm(`${type === 'deactivate' ? 'Deactivate' : 'Reactivate'} this account?`); if (!confirmed) return; setSaving(true); try { patchCachedAccount(await manageAdminAccount(account.uid, type)); const doMsg = `${titleCase(type)} completed.`; showToast(doMsg, 'success'); } catch (error) { showToast(error.message, 'error'); } finally { setSaving(false); } };
+  const [actionModal, setActionModal] = React.useState(null);
+  const confirmAction = async ({ reason } = {}) => {
+    if (!actionModal?.account || !actionModal?.action) return;
+    const { action, account } = actionModal;
+    setSaving(true);
+    try {
+      const updated = await manageAdminAccount(account.uid, action, { reason });
+      patchCachedAccount(updated);
+      setActionModal(null);
+      showToast(
+        action === 'suspend'
+          ? 'Account suspended successfully.'
+          : 'Account reactivated successfully.',
+        'success'
+      );
+    } catch (error) {
+      showToast(error.message || 'Account action failed.', 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+  const doAction = async (type, account) => {
+    setMoreFor(null);
+    if (type === 'view' || type === 'edit') return setAccountModal({ mode: type, account });
+    if (type === 'sessions') return sessionAction(account);
+    if (type === 'suspend' || type === 'reactivate') {
+      return setActionModal({ visible: true, action: type, account });
+    }
+    const confirmed = typeof globalThis.confirm !== 'function' || globalThis.confirm(`${type === 'deactivate' ? 'Deactivate' : 'Reactivate'} this account?`);
+    if (!confirmed) return;
+    setSaving(true);
+    try {
+      patchCachedAccount(await manageAdminAccount(account.uid, type));
+      const doMsg = `${titleCase(type)} completed.`;
+      showToast(doMsg, 'success');
+    } catch (error) {
+      showToast(error.message, 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
   const accountByUid = React.useMemo(() => { const map = new Map(); accounts.forEach((a) => map.set(a.uid, a)); return map; }, [accounts]);
   const resolveActorLabel = (event) => { if (event.actorPublicUid) return event.actorPublicUid; const m = accountByUid.get(event.actorUid); if (m?.publicUid) return m.publicUid; if (m?.username) return `@${m.username}`; if (m?.fullName) return m.fullName; return event.actorUid ? 'Administrator' : '—'; };
   const resolveTargetLabel = (event) => { if (event.targetPublicUid) return event.targetPublicUid; const m = accountByUid.get(event.targetUid); if (m?.publicUid) return m.publicUid; if (m?.username) return `@${m.username}`; if (m?.fullName) return m.fullName; return event.targetUid ? 'Target Account' : '—'; };
   const filteredAccounts = accounts.filter((a) => (role === 'all' || a.role === role) && (status === 'all' || a.status === status) && (branch === 'all' || a.branchId === branch) && accountSearch(a).includes(debounced)); const accountPage = accountPageSlice(filteredAccounts, currentPage); const filtered = accountPage.accounts; React.useEffect(() => { setCurrentPage((page) => Math.min(page, accountPage.totalPages)); }, [accountPage.totalPages]); const filteredActivity = activity.filter((event) => `${event.action} ${event.actorUid} ${event.targetUid} ${event.role}`.toLowerCase().includes(debounced)); const reset = () => { setQuery(''); setRole('all'); setStatus('all'); setBranch('all'); };
   return <AdminShell title="Accounts & Audit" subtitle="Provision accounts, manage access, and review administrative activity."><TopToastFeedback visible={toast.visible} message={toast.message} type={toast.type} onDismiss={() => setToast((t) => ({ ...t, visible: false }))} /><View style={styles.tabs}><Tab active={tab === 'accounts'} onPress={() => setTab('accounts')}>All accounts</Tab><Tab active={tab === 'activity'} onPress={() => setTab('activity')}>Activity log</Tab></View>{workspaceState.error ? <View style={styles.notice}><Text style={styles.noticeText}>{workspaceState.error}</Text><TouchableOpacity onPress={() => workspaceState.refresh({ force: true })}><Text style={styles.retry}>Retry</Text></TouchableOpacity></View> : null}
     {tab === 'accounts' ? <><CreateAccountCard branches={branches} saving={saving} onCreate={create} compact={compact} /><View style={styles.card}><Text style={styles.cardTitle}>All accounts</Text><Text style={styles.help}>A compact, authoritative list of Requesters, Distributors, and Managers.</Text><View style={styles.filterBar}><View style={styles.search}><Input value={query} onChangeText={setQuery} placeholder="Search name, username, or email" autoCapitalize="none" /></View><View style={styles.filter}><Text style={styles.filterLabel}>Role</Text><SelectControl accessibilityLabel="Filter by role" value={role} options={roles} labelFor={(value) => value === 'all' ? 'All roles' : titleCase(value)} onSelect={setRole} /></View><View style={styles.filter}><Text style={styles.filterLabel}>Status</Text><SelectControl accessibilityLabel="Filter by status" value={status} options={statuses} labelFor={(value) => value === 'all' ? 'All statuses' : titleCase(value)} onSelect={setStatus} /></View><View style={styles.filter}><Text style={styles.filterLabel}>Branch</Text><SelectControl accessibilityLabel="Filter by branch" value={branch} options={['all', ...activeBranches.map((item) => item.id)]} labelFor={(value) => value === 'all' ? 'All branches' : activeBranches.find((item) => item.id === value)?.name || value} onSelect={setBranch} /></View><TouchableOpacity onPress={reset} style={styles.reset}><Text style={styles.resetText}>Reset</Text></TouchableOpacity></View>{workspaceState.loading && !workspaceState.data ? <TableSkeleton rows={6} /> : filtered.length === 0 ? <Text style={styles.empty}>{accounts.length ? 'No accounts match these filters.' : 'No accounts found.'}</Text> : compact ? <View style={styles.mobileList}>{filtered.map((a) => <View key={a.uid} style={[styles.mobileCard, { borderColor: colors.border }]}><View style={styles.mobileTop}><View><Text style={styles.strong}>{a.fullName || '—'}</Text><Text style={styles.muted}>{a.username ? `@${a.username}` : a.email}</Text></View><Badge tone={statusTone(a.status)}>{titleCase(a.status)}</Badge></View><Text style={styles.mobileEmail}>{a.email}</Text><View style={styles.mobileMeta}><Badge>{titleCase(a.role)}</Badge><Text style={styles.muted}>{a.branchName || 'No branch'}</Text></View><View style={styles.tableActions}><TouchableOpacity accessibilityLabel={`Edit ${a.fullName}`} onPress={() => setAccountModal({ mode: 'edit', account: a })} style={styles.edit}><Text style={styles.editText}>Edit</Text></TouchableOpacity><TouchableOpacity accessibilityLabel={`More actions for ${a.fullName}`} onPress={() => setMoreFor(a)} style={styles.more}><Text style={styles.moreText}>•••</Text></TouchableOpacity></View></View>)}</View> : <ScrollView horizontal showsHorizontalScrollIndicator contentContainerStyle={styles.tableScroll}><View style={styles.table}><View style={[styles.tableRow, styles.tableHeader]}>{['Username', 'Name', 'Email', 'Role', 'Branch', 'Status', 'Last sign-in', 'Actions'].map((heading) => <Text key={heading} style={[styles.cell, styles[`col${heading.replace(/[^A-Za-z]/g, '')}`], styles.headerText]}>{heading}</Text>)}</View>{filtered.map((a) => <View key={a.uid} style={styles.tableRow}><Text numberOfLines={1} style={[styles.cell, styles.colUsername]}>{a.username ? `@${a.username}` : '—'}</Text><Text numberOfLines={2} style={[styles.cell, styles.colName, styles.strong]}>{a.fullName || '—'}</Text><Text numberOfLines={1} style={[styles.cell, styles.colEmail]}>{a.email || '—'}</Text><View style={[styles.cell, styles.colRole]}><Badge>{titleCase(a.role)}</Badge></View><Text numberOfLines={1} style={[styles.cell, styles.colBranch]}>{a.branchName || '—'}</Text><View style={[styles.cell, styles.colStatus]}><Badge tone={statusTone(a.status)}>{titleCase(a.status)}</Badge></View><Text numberOfLines={2} style={[styles.cell, styles.colLastsignin]}>{dateText(a.lastSignInAt)}</Text><View style={[styles.cell, styles.colActions, styles.tableActions]}><TouchableOpacity accessibilityLabel={`Edit ${a.fullName}`} onPress={() => setAccountModal({ mode: 'edit', account: a })} style={styles.edit}><Text style={styles.editText}>Edit</Text></TouchableOpacity><TouchableOpacity accessibilityLabel={`More actions for ${a.fullName}`} onPress={() => setMoreFor(a)} style={styles.more}><Text style={styles.moreText}>•••</Text></TouchableOpacity></View></View>)}</View></ScrollView>}</View>{!workspaceState.loading ? <AccountPagination currentPage={accountPage.currentPage} onPageChange={setCurrentPage} totalAccounts={filteredAccounts.length} /> : null}</> : <View style={styles.card}><Text style={styles.cardTitle}>Activity log</Text><Text style={styles.help}>Server-recorded account and access changes. Sensitive credentials are never stored here.</Text><View style={styles.activitySearch}><Input value={query} onChangeText={setQuery} placeholder="Search action, actor, target, or role" autoCapitalize="none" /></View>{workspaceState.loading && !workspaceState.data ? <TableSkeleton rows={6} /> : filteredActivity.length === 0 ? <Text style={styles.empty}>No activity recorded yet.</Text> : compact ? <View style={styles.auditMobileList}>{filteredActivity.map((event) => <View key={event.id} style={[styles.auditMobileCard, { borderColor: colors.border }]}><View style={styles.auditMobileTop}><Text style={styles.strong}>{titleCase(event.action)}</Text><Text style={styles.muted}>{dateText(event.createdAt)}</Text></View><View style={styles.auditMobileRow}><Text style={styles.auditMetaLabel}>Admin / actor</Text><Text style={styles.auditMetaValue}>{resolveActorLabel(event)}</Text></View><View style={styles.auditMobileRow}><Text style={styles.auditMetaLabel}>Target account</Text><Text style={styles.auditMetaValue}>{resolveTargetLabel(event)}</Text></View><View style={styles.auditMobileRow}><Text style={styles.auditMetaLabel}>Role</Text><Text style={styles.auditMetaValue}>{titleCase(event.role) || '—'}</Text></View><View style={styles.auditMobileRow}><Text style={styles.auditMetaLabel}>Details</Text><Text style={styles.auditMetaValue}>{[event.previousStatus && `${event.previousStatus} → ${event.newStatus}`, event.branchId && `Branch: ${event.branchId}`].filter(Boolean).join(' · ') || '—'}</Text></View></View>)}</View> : <ScrollView horizontal><View style={[styles.table, styles.auditTable]}><View style={[styles.tableRow, styles.tableHeader]}>{['Time', 'Admin / actor', 'Action', 'Target account', 'Role', 'Details'].map((heading) => <Text key={heading} style={[styles.cell, styles.auditCell, styles.headerText]}>{heading}</Text>)}</View>{filteredActivity.map((event) => <View key={event.id} style={styles.tableRow}><Text style={[styles.cell, styles.auditCell]}>{dateText(event.createdAt)}</Text><Text style={[styles.cell, styles.auditCell]}>{resolveActorLabel(event)}</Text><Text style={[styles.cell, styles.auditCell, styles.strong]}>{titleCase(event.action)}</Text><Text style={[styles.cell, styles.auditCell]}>{resolveTargetLabel(event)}</Text><Text style={[styles.cell, styles.auditCell]}>{titleCase(event.role) || '—'}</Text><Text style={[styles.cell, styles.auditCell]}>{[event.previousStatus && `${event.previousStatus} → ${event.newStatus}`, event.branchId && `Branch: ${event.branchId}`].filter(Boolean).join(' · ') || '—'}</Text></View>)}</View></ScrollView>}</View>}
-    <AccountModal state={accountModal} branches={branches} saving={saving} onClose={() => setAccountModal(null)} onSave={save} onSessionAction={sessionAction} onDistributorAction={distributorAction} /><Modal visible={!!moreFor} transparent animationType="fade" onRequestClose={() => setMoreFor(null)}><Pressable onPress={() => setMoreFor(null)} style={styles.menuBackdrop}><Pressable onPress={() => {}} style={[styles.moreMenu, { backgroundColor: colors.surface, borderColor: colors.border }]}><TouchableOpacity onPress={() => doAction('view', moreFor)} style={styles.menuItem}><Text style={styles.menuText}>View details</Text></TouchableOpacity><TouchableOpacity onPress={() => doAction('edit', moreFor)} style={styles.menuItem}><Text style={styles.menuText}>Edit account</Text></TouchableOpacity><TouchableOpacity onPress={() => doAction('sessions', moreFor)} style={styles.menuItem}><Text style={styles.menuText}>Sign out all sessions</Text></TouchableOpacity>{['active', 'inactive'].includes(moreFor?.status) ? <TouchableOpacity onPress={() => doAction(moreFor.status === 'active' ? 'deactivate' : 'reactivate', moreFor)} style={styles.menuItem}><Text style={[styles.menuText, moreFor.status === 'active' && styles.dangerText]}>{moreFor.status === 'active' ? 'Deactivate account' : 'Reactivate account'}</Text></TouchableOpacity> : null}</Pressable></Pressable></Modal>
+    <AccountModal state={accountModal} branches={branches} saving={saving} onClose={() => setAccountModal(null)} onSave={save} onSessionAction={sessionAction} onDistributorAction={distributorAction} />
+    <Modal visible={!!moreFor} transparent animationType="fade" onRequestClose={() => setMoreFor(null)}>
+      <Pressable onPress={() => setMoreFor(null)} style={styles.menuBackdrop}>
+        <Pressable onPress={() => {}} style={[styles.moreMenu, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+          <TouchableOpacity onPress={() => doAction('view', moreFor)} style={styles.menuItem}><Text style={styles.menuText}>View details</Text></TouchableOpacity>
+          <TouchableOpacity onPress={() => doAction('edit', moreFor)} style={styles.menuItem}><Text style={styles.menuText}>Edit account</Text></TouchableOpacity>
+          <TouchableOpacity onPress={() => doAction('sessions', moreFor)} style={styles.menuItem}><Text style={styles.menuText}>Sign out all sessions</Text></TouchableOpacity>
+          {moreFor?.status === 'active' ? (
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel={`Suspend account ${moreFor.fullName || moreFor.username || ''}`}
+              onPress={() => {
+                const target = moreFor;
+                setMoreFor(null);
+                setActionModal({ visible: true, action: 'suspend', account: target });
+              }}
+              style={styles.menuItem}
+            >
+              <Text style={[styles.menuText, styles.dangerText]}>Suspend account</Text>
+            </TouchableOpacity>
+          ) : ['inactive', 'suspended'].includes(moreFor?.status) ? (
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel={`Reactivate account ${moreFor.fullName || moreFor.username || ''}`}
+              onPress={() => {
+                const target = moreFor;
+                setMoreFor(null);
+                setActionModal({ visible: true, action: 'reactivate', account: target });
+              }}
+              style={styles.menuItem}
+            >
+              <Text style={styles.menuText}>Reactivate account</Text>
+            </TouchableOpacity>
+          ) : null}
+        </Pressable>
+      </Pressable>
+    </Modal>
+    <AccountActionModal
+      visible={Boolean(actionModal?.visible)}
+      action={actionModal?.action || 'suspend'}
+      account={actionModal?.account}
+      scope="global"
+      busy={saving}
+      onClose={() => !saving && setActionModal(null)}
+      onConfirm={confirmAction}
+    />
   </AdminShell>;
 }
 

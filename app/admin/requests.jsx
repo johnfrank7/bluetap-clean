@@ -940,6 +940,23 @@ export default function AdminRequestsPage() {
                   </View>
                 )}
 
+                {(() => {
+                  const fee = selectedOrder?.deliveryFeeAtOrder ?? selectedOrder?.deliveryFee ?? selectedOrder?.delivery_fee;
+                  if (fee !== undefined && fee !== null && fee !== '' && Number.isFinite(Number(fee))) {
+                    return (
+                      <View style={styles.itemRow}>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.itemName}>Delivery Fee</Text>
+                        </View>
+                        <Text style={styles.itemTotal}>
+                          {formatAmount(Number(fee))}
+                        </Text>
+                      </View>
+                    );
+                  }
+                  return null;
+                })()}
+
                 <View style={styles.totalRow}>
                   <Text style={styles.totalLabel}>Total Authoritative Amount</Text>
                   <Text style={styles.totalValue}>

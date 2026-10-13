@@ -27,6 +27,9 @@ async function updateOrder(db, orderId, prepare) {
       if (!snapshot.exists) throw new OtpError(404, 'ORDER_NOT_FOUND', 'The assigned delivery was not found.');
       const current = snapshot.data() || {};
       const update = await prepare(current, tx);
+      if (update && update.idempotent) {
+        return current;
+      }
       let activeOrderGuard = null;
       if (statusOf(update) === 'delivered') {
         const requesterUid = clean(current.requesterUid || current.requester_id, 128);
@@ -103,6 +106,13 @@ function createDistributorAssignedOrdersHandler(getAdmin = getFirebaseAdmin) {
       const body = bodyOf(req);
       const orderId = clean(body.orderId);
       const action = clean(body.action, 48).toLowerCase();
+      const clientMutationId = clean(body.clientMutationId, 128);
+      const expectedAssignmentVersion = body.expectedAssignmentVersion !== undefined && body.expectedAssignmentVersion !== null && body.expectedAssignmentVersion !== ''
+        ? Number(body.expectedAssignmentVersion)
+        : body.assignmentVersion !== undefined && body.assignmentVersion !== null && body.assignmentVersion !== ''
+          ? Number(body.assignmentVersion)
+          : null;
+
       if (!orderId || !['accept-assignment', 'decline-assignment', 'schedule-delivery', 'start-delivery', 'fail-delivery', 'reschedule-delivery', 'mark-delivered'].includes(action)) {
         throw new OtpError(400, 'INVALID_DELIVERY_ACTION', 'Choose a valid delivery action.');
       }
@@ -115,6 +125,40 @@ function createDistributorAssignedOrdersHandler(getAdmin = getFirebaseAdmin) {
           || owningBranchId(current) !== distributor.branch.id) {
           throw new OtpError(404, 'ORDER_NOT_FOUND', 'The assigned delivery was not found.');
         }
+
+        if (expectedAssignmentVersion !== null && Number(current.assignmentVersion || 0) !== expectedAssignmentVersion) {
+          throw new OtpError(409, 'STALE_ASSIGNMENT', 'The delivery assignment version is out of date.');
+        }
+
+        const deliveryHistory = history(current.distributorDeliveryHistory);
+        if (clientMutationId) {
+          const matchingReceipt = deliveryHistory.find((h) => h.clientMutationId === clientMutationId);
+          if (matchingReceipt) {
+            if (matchingReceipt.distributorUid && matchingReceipt.distributorUid !== distributor.decoded.uid) {
+              throw new OtpError(409, 'MUTATION_ID_CONFLICT', 'The client mutation identifier was already used by another actor.');
+            }
+            const expectedEventForAction = {
+              'accept-assignment': 'ASSIGNMENT_ACCEPTED',
+              'decline-assignment': 'ASSIGNMENT_DECLINED',
+              'start-delivery': 'DELIVERY_STARTED',
+              'fail-delivery': 'DELIVERY_FAILED',
+              'reschedule-delivery': 'DELIVERY_RESCHEDULED',
+              'mark-delivered': 'DELIVERY_COMPLETED',
+            }[action];
+            if (matchingReceipt.event && matchingReceipt.event !== expectedEventForAction) {
+              throw new OtpError(409, 'MUTATION_ID_CONFLICT', 'The client mutation identifier was already used for a different action.');
+            }
+            if (action === 'fail-delivery') {
+              const reqReasonCode = clean(body.failureReasonCode, 48).toUpperCase();
+              const reqReasonNote = clean(body.failureReasonNote, 240);
+              if (matchingReceipt.failureReasonCode !== reqReasonCode || clean(matchingReceipt.failureReasonNote, 240) !== reqReasonNote) {
+                throw new OtpError(409, 'MUTATION_ID_CONFLICT', 'The client mutation identifier was already used for a different failure reason.');
+              }
+            }
+            return { ...current, idempotent: true };
+          }
+        }
+
         const currentStatus = statusOf(current);
         let update;
         let event;
@@ -126,6 +170,12 @@ function createDistributorAssignedOrdersHandler(getAdmin = getFirebaseAdmin) {
         let scheduledAt = null;
 
         if (action === 'accept-assignment') {
+          if (['accepted', 'scheduled'].includes(currentStatus)) {
+            const hasAccepted = Boolean(current.acceptedAt || deliveryHistory.some((h) => h.event === 'ASSIGNMENT_ACCEPTED' && h.distributorUid === distributor.decoded.uid));
+            if (hasAccepted && clean(current.assignedDistributorUid || current.distributor_id) === distributor.decoded.uid) {
+              return { ...current, idempotent: true };
+            }
+          }
           if (currentStatus !== 'distributor_assigned') {
             throw new OtpError(409, 'ORDER_NOT_ACCEPTABLE', 'Only newly assigned deliveries can be accepted.');
           }
@@ -166,15 +216,18 @@ function createDistributorAssignedOrdersHandler(getAdmin = getFirebaseAdmin) {
         } else if (action === 'schedule-delivery') {
           throw new OtpError(409, 'MANAGER_SCHEDULE_REQUIRED', 'Initial scheduling belongs to your Manager. Accept the assignment, then start delivery when ready.');
         } else if (action === 'start-delivery') {
+          if (currentStatus === 'out_for_delivery') {
+            const hasStarted = Boolean(current.deliveryStartedAt || deliveryHistory.some((h) => h.event === 'DELIVERY_STARTED' && h.distributorUid === distributor.decoded.uid));
+            if (hasStarted && clean(current.assignedDistributorUid || current.distributor_id) === distributor.decoded.uid) {
+              return { ...current, idempotent: true };
+            }
+          }
           if (!['accepted', 'scheduled'].includes(currentStatus)) {
             throw new OtpError(409, 'ORDER_NOT_STARTABLE', 'This delivery is not ready to start.');
           }
           event = 'DELIVERY_STARTED';
           update = { status: 'out_for_delivery', deliveryStartedAt: now };
         } else if (action === 'fail-delivery') {
-          if (currentStatus !== 'out_for_delivery') {
-            throw new OtpError(409, 'ORDER_NOT_FAILABLE', 'Only deliveries that are out for delivery can be reported as failed.');
-          }
           failureReasonCode = clean(body.failureReasonCode, 48).toUpperCase();
           const allowedReason = deliveryFailureReasonForCode(failureReasonCode);
           if (!allowedReason) throw new OtpError(400, 'FAILURE_REASON_INVALID', 'Choose a supported delivery failure reason.');
@@ -184,6 +237,18 @@ function createDistributorAssignedOrdersHandler(getAdmin = getFirebaseAdmin) {
             throw new OtpError(400, 'FAILURE_REASON_NOTE_REQUIRED', 'Add a short explanation when choosing Other.');
           }
           failureReason = failureReasonNote ? `${failureReasonLabel}: ${failureReasonNote}` : failureReasonLabel;
+
+          if (currentStatus === 'delivery_failed') {
+            const hasFailed = clean(current.failureReasonCode) === failureReasonCode
+              && clean(current.failureReasonNote) === failureReasonNote
+              && clean(current.assignedDistributorUid || current.distributor_id) === distributor.decoded.uid;
+            if (hasFailed) {
+              return { ...current, idempotent: true };
+            }
+          }
+          if (currentStatus !== 'out_for_delivery') {
+            throw new OtpError(409, 'ORDER_NOT_FAILABLE', 'Only deliveries that are out for delivery can be reported as failed.');
+          }
           event = 'DELIVERY_FAILED';
           update = {
             status: 'delivery_failed',
@@ -202,6 +267,12 @@ function createDistributorAssignedOrdersHandler(getAdmin = getFirebaseAdmin) {
           if (!scheduledAt || Number.isNaN(scheduledAt.getTime()) || scheduledAt.getTime() < now.getTime() - (5 * 60 * 1000)) {
             throw new OtpError(400, 'INVALID_DELIVERY_SCHEDULE', 'Choose a current or future delivery time.');
           }
+          if (currentStatus === 'scheduled' && clean(current.assignedDistributorUid || current.distributor_id) === distributor.decoded.uid) {
+            const currentScheduledTime = current.scheduledAt?.toDate?.() || new Date(current.scheduledAt || 0);
+            if (Math.abs(currentScheduledTime.getTime() - scheduledAt.getTime()) < 1000) {
+              return { ...current, idempotent: true };
+            }
+          }
           event = 'DELIVERY_RESCHEDULED';
           update = {
             status: 'scheduled',
@@ -213,6 +284,9 @@ function createDistributorAssignedOrdersHandler(getAdmin = getFirebaseAdmin) {
             distributorChatGraceUntil: null,
           };
         } else {
+          if (currentStatus === 'delivered' && clean(current.assignedDistributorUid || current.distributor_id) === distributor.decoded.uid) {
+            return { ...current, idempotent: true };
+          }
           if (currentStatus !== 'out_for_delivery') {
             throw new OtpError(409, 'ORDER_NOT_COMPLETABLE', 'Only an active delivery can be marked delivered.');
           }
@@ -222,10 +296,12 @@ function createDistributorAssignedOrdersHandler(getAdmin = getFirebaseAdmin) {
         }
         const result = {
           ...update,
-          distributorDeliveryHistory: [...history(current.distributorDeliveryHistory), {
+          distributorDeliveryHistory: [...deliveryHistory, {
             event,
             distributorUid: distributor.decoded.uid,
             branchId: distributor.branch.id,
+            assignmentVersion: current.assignmentVersion,
+            ...(clientMutationId ? { clientMutationId } : {}),
             ...(failureReason ? { failureReason } : {}),
             ...(failureReasonCode ? { failureReasonCode, failureReasonLabel, failureReasonNote } : {}),
             ...(declineReason ? { declineReason } : {}),

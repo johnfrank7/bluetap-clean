@@ -46,6 +46,12 @@ const PROFILE_CACHE_TTL_MS = 60000;
 let cachedRequesterProfile = null;
 let cachedRequesterProfileUid = '';
 let cachedRequesterProfileFetchedAt = 0;
+globalThis.__bluetapClearRequesterProfileCache = (uid) => {
+  if (uid && cachedRequesterProfileUid !== uid) return;
+  cachedRequesterProfile = null;
+  cachedRequesterProfileUid = '';
+  cachedRequesterProfileFetchedAt = 0;
+};
 
 const getLocalRequesterProfile = (user) => {
   return findLocalUserForAuthRole(user, 'requester');
@@ -131,6 +137,7 @@ export default function ProfilePage() {
   const [editingProfile, setEditingProfile] = useState(false);
   const [savingProfile, setSavingProfile] = useState(false);
   const [toast, setToast] = useState({ visible: false, message: '', type: 'success' });
+  const logoutPending = useRef(false);
   const [profileDraft, setProfileDraft] = useState(() =>
     buildProfileDraft(initialProfile || {})
   );
@@ -239,8 +246,16 @@ export default function ProfilePage() {
   );
 
   const handleLogout = async () => {
-    await signOutAndClearSessions();
-    router.replace('/login');
+    if (logoutPending.current) return;
+    logoutPending.current = true;
+    try {
+      await signOutAndClearSessions();
+      router.replace('/login');
+    } catch {
+      setToast({ visible: true, message: 'Sign out could not complete. Please try again.', type: 'error' });
+    } finally {
+      logoutPending.current = false;
+    }
   };
 
   const openProfileEditor = () => {

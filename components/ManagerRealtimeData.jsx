@@ -31,11 +31,12 @@ const emptyState = {
 
 const ManagerRealtimeContext = React.createContext(emptyState);
 
-const revisionFor = (requests, incomingTransfers, users) => ['ready',
+const revisionFor = (requests, incomingTransfers, users, applicants = []) => ['ready',
   ...requests,
   ...incomingTransfers,
   ...users,
-].map((item) => `${item.id}|${item.status || item.role || ''}|${item.updatedAt?.seconds || item.updated_at?.seconds || ''}`).join('::');
+  ...applicants,
+].map((item) => `${item.id}|${item.status || item.role || item.distributorStatus || ''}|${item.updatedAt?.seconds || item.updated_at?.seconds || ''}`).join('::');
 
 export function ManagerRealtimeDataProvider({ children }) {
   const session = useProtectedReadSession('manager');
@@ -103,7 +104,7 @@ export function ManagerRealtimeDataProvider({ children }) {
         profileLoading: !ready.profile && !current.profile,
         error: Object.values(listenerErrors).find(Boolean) || '',
         errors: { ...listenerErrors },
-        revision: revisionFor(current.requests, current.incomingTransfers, current.users),
+        revision: revisionFor(current.requests, current.incomingTransfers, current.users, current.applicants),
         retry,
         primeProfile,
       };

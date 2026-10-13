@@ -168,6 +168,8 @@ export default function ManagerShell({
   const [collapsed, setCollapsed] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [confirmLogout, setConfirmLogout] = useState(false);
+  const [logoutError, setLogoutError] = useState('');
+  const logoutPending = useRef(false);
 
   const sidebarWidth = useRef(new Animated.Value(DESKTOP_WIDTH)).current;
   const drawerProgress = useRef(new Animated.Value(0)).current;
@@ -222,10 +224,19 @@ export default function ManagerShell({
   };
 
   const completeLogout = async () => {
-    setConfirmLogout(false);
-    clearManagerNotificationOrigin();
-    await signOutAndClearSessions();
-    replaceOnce('/login');
+    if (logoutPending.current) return;
+    logoutPending.current = true;
+    setLogoutError('');
+    try {
+      await signOutAndClearSessions();
+      clearManagerNotificationOrigin();
+      setConfirmLogout(false);
+      replaceOnce('/login');
+    } catch {
+      setLogoutError('Sign out could not complete. Please try again.');
+    } finally {
+      logoutPending.current = false;
+    }
   };
 
   const renderSidebar = (isCollapsed, mobile = false) => (
@@ -322,7 +333,7 @@ export default function ManagerShell({
         <SidebarLogoutControl
           collapsed={isCollapsed}
           colors={colors}
-          onPress={() => setConfirmLogout(true)}
+          onPress={() => { setLogoutError(''); setConfirmLogout(true); }}
         />
       </View>
     </Animated.View>
@@ -409,6 +420,7 @@ export default function ManagerShell({
             </View>
             <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>Log out of BlueTap?</Text>
             <Text style={[styles.modalBody, { color: colors.textSecondary }]}>You will need to sign in again to access Manager tools.</Text>
+            {!!logoutError && <Text accessibilityRole="alert" style={[styles.modalBody, { color: colors.danger }]}>{logoutError}</Text>}
             <View style={styles.modalActions}>
               <TouchableOpacity accessibilityRole="button" accessibilityLabel="Cancel logout" onPress={() => setConfirmLogout(false)} style={[styles.modalSecondary, { borderColor: colors.border, backgroundColor: colors.surfaceAlt }]}>
                 <Text style={[styles.modalSecondaryText, { color: colors.textPrimary }]}>Cancel</Text>

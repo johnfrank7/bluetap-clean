@@ -28,6 +28,7 @@ const COUNT_ROWS = Object.freeze([
   ['expiredNotifications', 'Expired notifications'],
   ['expiredRegistrationSessions', 'Expired registration sessions'],
   ['expiredUsernameReservations', 'Expired username reservations'],
+  ['expiredEmailReservations', 'Expired registration email reservations'],
   ['expiredVerificationSessions', 'Expired verification sessions'],
   ['expiredRateLimitRecords', 'Expired rate-limit records'],
   ['ordersEligibleForArchive', 'Orders eligible for archive'],

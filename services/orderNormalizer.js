@@ -1,4 +1,5 @@
 import deliveryFailureReasonsModule from '../constants/deliveryFailureReasons.js';
+import { getApiUrl } from './apiClientConfig.js';
 const { formatDeliveryFailureReason } = deliveryFailureReasonsModule;
 
 const clean = (value) => String(value || '').trim();
@@ -99,6 +100,9 @@ export function formatCurrency(amount) {
 
   return `₱${numeric.toFixed(2)}`;
 }
+
+export const formatOrderAmount = formatCurrency;
+export const formatOrderPrice = formatCurrency;
 
 export function normalizeProductItem(item = {}, index = 0) {
   const id = clean(item.id || item.productId || item.product_id || `${item.productName || item.product_name || 'product'}-${index}`);
@@ -274,17 +278,33 @@ export function normalizeRequestDetails(order) {
 
   // Authoritative Subtotal
   const rawSubtotal = order.subtotalAtOrder ?? order.subtotal;
-  let subtotal = rawSubtotal !== undefined && rawSubtotal !== null && rawSubtotal !== ''
-    ? Number(rawSubtotal)
-    : items.reduce((sum, item) => sum + (Number.isFinite(item.subtotal) ? item.subtotal : 0), 0);
-  if (!Number.isFinite(subtotal)) subtotal = 0;
+  let subtotal = undefined;
+  if (rawSubtotal !== undefined && rawSubtotal !== null && rawSubtotal !== '') {
+    const num = Number(typeof rawSubtotal === 'string' ? rawSubtotal.replace(/^[₱\u20B1\s]+/, '').replace(/,/g, '') : rawSubtotal);
+    if (Number.isFinite(num) && num >= 0) subtotal = Math.round(num * 100) / 100;
+  }
+  if (subtotal === undefined && items.length > 0) {
+    const lineItemSum = items.reduce((sum, item) => sum + (Number.isFinite(item.subtotal) ? item.subtotal : 0), 0);
+    if (Number.isFinite(lineItemSum) && (lineItemSum > 0 || items.some((i) => i.subtotal !== undefined))) {
+      subtotal = Math.round(lineItemSum * 100) / 100;
+    }
+  }
 
   // Authoritative Delivery Fee
   const rawDeliveryFee = order.deliveryFeeAtOrder ?? order.deliveryFee ?? order.delivery_fee;
-  let deliveryFee = rawDeliveryFee !== undefined && rawDeliveryFee !== null && rawDeliveryFee !== ''
-    ? Number(rawDeliveryFee)
-    : 0;
-  if (!Number.isFinite(deliveryFee)) deliveryFee = 0;
+  let deliveryFee = undefined;
+  if (rawDeliveryFee !== undefined && rawDeliveryFee !== null && rawDeliveryFee !== '') {
+    let num = rawDeliveryFee;
+    if (typeof rawDeliveryFee === 'string') {
+      const stripped = rawDeliveryFee.replace(/^[₱\u20B1\s]+/, '').replace(/,/g, '').trim();
+      num = (stripped && stripped !== '—' && stripped !== 'Not set') ? Number(stripped) : NaN;
+    } else {
+      num = Number(rawDeliveryFee);
+    }
+    if (Number.isFinite(num) && num >= 0) {
+      deliveryFee = Math.round(num * 100) / 100;
+    }
+  }
 
   // Authoritative Grand Total
   // Priority: totalAtOrder -> total_cost -> grandTotalAmount -> grandTotal -> totalAmount -> total
@@ -302,13 +322,13 @@ export function normalizeRequestDetails(order) {
     if (candidate !== undefined && candidate !== null && candidate !== '') {
       let num = candidate;
       if (typeof candidate === 'string') {
-        const stripped = candidate.replace(/^[₱\u20B1\s]+/, '').replace(/,/g, '');
-        num = Number(stripped);
+        const stripped = candidate.replace(/^[₱\u20B1\s]+/, '').replace(/,/g, '').trim();
+        num = (stripped && stripped !== '—' && stripped !== 'Not set') ? Number(stripped) : NaN;
       } else {
         num = Number(candidate);
       }
-      if (Number.isFinite(num) && num > 0) {
-        grandTotal = num;
+      if (Number.isFinite(num) && num >= 0) {
+        grandTotal = Math.round(num * 100) / 100;
         break;
       }
     }
@@ -316,15 +336,15 @@ export function normalizeRequestDetails(order) {
 
   // Fallback line-item computation if no explicit authoritative total is found
   if (grandTotal === undefined) {
-    const discount = Number.isFinite(Number(order.discount)) ? Number(order.discount) : 0;
-    const computed = Math.round((subtotal + deliveryFee - discount) * 100) / 100;
-    if (computed > 0 || (items.length > 0 && computed >= 0)) {
-      grandTotal = computed;
+    if (subtotal !== undefined && deliveryFee !== undefined) {
+      const discount = Number.isFinite(Number(order.discount)) ? Number(order.discount) : 0;
+      const computed = Math.round((subtotal + deliveryFee - discount) * 100) / 100;
+      if (computed >= 0) {
+        grandTotal = computed;
+      }
     } else if (order.price !== undefined && Number.isFinite(Number(order.price))) {
       const qty = Number(order.quantity) || 1;
       grandTotal = Math.round(Number(order.price) * qty * 100) / 100;
-    } else {
-      grandTotal = undefined;
     }
   }
 
@@ -360,6 +380,9 @@ export function normalizeRequestDetails(order) {
     subtotalAtOrder: subtotal,
     deliveryFee,
     deliveryFeeAtOrder: deliveryFee,
+    deliveryFeePolicy: order.deliveryFeePolicy || null,
+    distanceKmAtOrder: order.distanceKmAtOrder ?? order.distanceKmSnapshot ?? null,
+    distanceKmSnapshot: order.distanceKmSnapshot ?? order.distanceKmAtOrder ?? null,
     grandTotal,
     grandTotalAmount: grandTotal,
     totalAmount: grandTotal,
@@ -369,6 +392,7 @@ export function normalizeRequestDetails(order) {
     formattedSubtotal: formatCurrency(subtotal),
     formattedDeliveryFee: formatCurrency(deliveryFee),
     formattedGrandTotal: formatCurrency(grandTotal),
+    hasDeliveryFee: deliveryFee !== undefined,
     failureReason,
   };
 }
@@ -438,8 +462,8 @@ export async function resolveAuthorizedOrderDetails({ orderId, order, localOrder
       const auth = getAuth();
       const token = await auth.currentUser?.getIdToken();
       if (token) {
-        const baseUrl = process.env.EXPO_PUBLIC_API_BASE_URL || 'http://localhost:3000';
-        const response = await fetch(`${baseUrl}/api/orders/details?orderId=${encodeURIComponent(candidateId)}`, {
+        const orderUrl = getApiUrl(`/api/orders/details?orderId=${encodeURIComponent(candidateId)}`);
+        const response = await fetch(orderUrl, {
           headers: {
             Authorization: `Bearer ${token}`,
             'Content-Type': 'application/json',
@@ -469,6 +493,8 @@ export async function resolveAuthorizedOrderDetails({ orderId, order, localOrder
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     formatCurrency,
+    formatOrderAmount,
+    formatOrderPrice,
     formatOrderDate,
     formatDeliveryDate,
     formatDisplayUniqueId,

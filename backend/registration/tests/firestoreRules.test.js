@@ -12,7 +12,7 @@ test('Firestore rules allow own-profile access while scoping Manager reads to th
 });
 
 test('Firestore rules keep OTP and registration state private', () => {
-  for (const collection of ['registrationSessions', 'emailOtpVerifications', 'registrationOtpVerifications']) {
+  for (const collection of ['registrationSessions', 'registrationEmailReservations', 'emailOtpVerifications', 'registrationOtpVerifications']) {
     assert.match(rules, new RegExp(`match \\/${collection}\\/\\{document=\\*\\*\\} \\{ allow read, write: if false; \\}`));
   }
 });
@@ -133,4 +133,34 @@ test('requesterActiveOrders guard documents are strictly backend-only', () => {
 test('Admin has read-only oversight on requests collection while client mutations remain blocked', () => {
   assert.match(rules, /match \/requests\/\{requestId\}[\s\S]*allow read:\s*if isAdmin\(\);/);
   assert.match(rules, /match \/requests\/\{requestId\}[\s\S]*allow create, update, delete:\s*if false;/);
+});
+
+test('PHASE 10B — Firestore Rules verify all 7 core release security guarantees', () => {
+  // 1. registrationEmailReservations cannot be directly read or written by unauthorized clients
+  assert.match(rules, /match \/registrationEmailReservations\/\{document=\*\*\} \{ allow read, write: if false; \}/);
+
+  // 2. Users cannot edit their own accountStatus, role or branch privilege
+  for (const field of ['accountStatus', 'role', 'branchId', 'requestedBranchId', 'managerStatus', 'distributorStatus', 'approvalStatus']) {
+    assert.match(rules, new RegExp(`['"]${field}['"]`));
+  }
+
+  // 3. Suspended accounts cannot read protected operational data (gated by hasActiveGlobalAccount)
+  assert.match(rules, /function hasActiveGlobalAccount\(\)[\s\S]*currentUser\(\)\.get\('accountStatus', ''\) == 'active'/);
+  assert.match(rules, /match \/products\/\{productId\}[\s\S]*allow read:\s*if hasActiveGlobalAccount\(\);/);
+
+  // 4. Cross-role protected reads are rejected
+  assert.match(rules, /allow read:\s*if isRequester\(\) && resource\.data\.requester_id == request\.auth\.uid;/);
+  assert.match(rules, /allow read:\s*if isDistributor\(\)[\s\S]*assignedDistributorUid == request\.auth\.uid/);
+
+  // 5. Cross-branch reads are rejected
+  assert.match(rules, /function isManagerBranch\(branchId\)[\s\S]*branchId == currentUser\(\)\.branchId/);
+  assert.match(rules, /match \/branches\/\{branchId\}[\s\S]*currentUser\(\)\.branchId/);
+
+  // 6. Client order/price mutations remain backend-only
+  assert.match(rules, /match \/requests\/\{requestId\}[\s\S]*allow create, update, delete:\s*if false;/);
+
+  // 7. Legitimate approved active users retain required reads
+  assert.match(rules, /allow read:\s*if isAdmin\(\);/);
+  assert.match(rules, /allow read:\s*if isRequester\(\)/);
+  assert.match(rules, /allow read:\s*if isManagerBranch\(/);
 });

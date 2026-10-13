@@ -225,8 +225,12 @@ export default function LocationMap({
   // Selected station connection line calculations
   const selectedBranchPoint = React.useMemo(() => {
     if (!selectedBranchId) return null;
-    return positionedBranchPoints.find((bp) => bp.branch.id === selectedBranchId) || null;
-  }, [selectedBranchId, pointSignature, viewport.center, viewport.zoom, left, top]);
+    const targetId = String(selectedBranchId).trim();
+    return positionedBranchPoints.find((bp) => {
+      const bId = bp.branch?.id || bp.branch?.branchId || bp.id;
+      return String(bId || '').trim() === targetId;
+    }) || null;
+  }, [selectedBranchId, positionedBranchPoints]);
 
   const distanceKmValue = React.useMemo(() => {
     if (!requester || !selectedBranchPoint?.branch) return null;
@@ -234,11 +238,11 @@ export default function LocationMap({
   }, [requester, selectedBranchPoint]);
 
   const lineDetails = React.useMemo(() => {
-    if (!requester || !requesterPosition || !selectedBranchPoint) return null;
+    if (!requester || !requesterPosition || !selectedBranchPoint?.screenPosition) return null;
     const endpoints = connectorCoordinates(requester, selectedBranchPoint);
     if (endpoints.length !== 2) return null;
     return projectedOverlayGeometry(requesterPosition, selectedBranchPoint.screenPosition);
-  }, [requester, selectedBranchPoint, viewport.center, viewport.zoom, left, top]);
+  }, [requester, requesterPosition, selectedBranchPoint]);
 
   return (
     <View
@@ -329,7 +333,8 @@ export default function LocationMap({
 
         {/* Station Landmark Pins (Red Landmark Pin) */}
         {positionedBranchPoints.map(({ branch, screenPosition, ...point }) => {
-          const selected = branch.id === selectedBranchId;
+          const bId = branch?.id || branch?.branchId || point.id;
+          const selected = String(bId || '').trim() === String(selectedBranchId || '').trim();
           const pos = screenPosition;
           const pinGeometry = selected ? PIN_GEOMETRY.stationSelected : PIN_GEOMETRY.station;
           const pinColor = stationColorFor(branch.id || branch.name);
@@ -606,11 +611,13 @@ const styles = StyleSheet.create({
   distanceLine: {
     position: 'absolute',
     height: 3,
-    zIndex: 2,
-    opacity: 0.85,
-    overflow: 'hidden',
+    zIndex: 3,
+    opacity: 0.9,
     flexDirection: 'row',
     alignItems: 'center',
+    borderStyle: 'dashed',
+    borderTopWidth: 2,
+    borderTopColor: '#EF4444',
   },
   distanceDash: {
     width: 7,
@@ -618,6 +625,7 @@ const styles = StyleSheet.create({
     marginRight: 5,
     borderRadius: 1.5,
     backgroundColor: '#EF4444',
+    flexShrink: 0,
   },
   distanceBadge: {
     position: 'absolute',

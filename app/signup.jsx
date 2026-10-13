@@ -11,9 +11,9 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { BLUETAP_COLORS } from '../constants/bluetapTheme';
 import { createPortalStyleSheet, useBlueTapTheme } from '../components/BlueTapTheme';
 import { clearAllAuthSessions } from '../services/authSession';
-import { clearPendingRegistration, completeRegistrationWithoutOtp, getPendingRegistration, requestRegistrationOtp, setPendingRegistration } from '../services/emailVerification';
-import { checkUsername, normalizeUsername, validateUsername } from '../services/usernameAuth';
-import { acceptRegistrationTerms, createRegistrationSession, getCachedRegistrationPolicy, getRegistrationBranches, getRegistrationSessionStatus, primeRegistrationPolicy, revalidateRegistrationPolicy } from '../services/registrationSession';
+import { clearPendingRegistration, completeRegistrationWithoutOtp, getPendingRegistration, requestRegistrationOtp, retryRegistrationFinalization, setPendingRegistration } from '../services/emailVerification';
+import { normalizeUsername, validateUsername } from '../services/usernameAuth';
+import { acceptRegistrationTerms, cancelRegistrationSession, createRegistrationSession, getCachedRegistrationPolicy, getRegistrationAvailability, getRegistrationBranches, getRegistrationSessionStatus, primeRegistrationPolicy, revalidateRegistrationPolicy } from '../services/registrationSession';
 import { clearPendingFaceEnrollment } from '../services/pendingFaceEnrollment';
 import { useFaceServiceWarmup } from '../services/useFaceServiceWarmup';
 
@@ -27,6 +27,7 @@ import useUnsavedChangesGuard from '../components/useUnsavedChangesGuard';
 
 const { isTrustedRegistrationFaceVerification } = require('../services/webFaceCaptureCore');
 const { REGISTRATION_STEP: STEP, REGISTRATION_STEP_LABELS, buildRegistrationDisplaySteps, buildRegistrationSteps, adjacentRegistrationStep, registrationEntryStep } = require('../services/registrationStepStatus');
+const { getRegistrationCredentialState } = require('../services/registrationCredentialState');
 
 const BARANGAYS = ['Awihao', 'Bagakay', 'Bato', 'Biga', 'Bulongan', 'Bunga', 'Cabitoonan', 'Calongcalong', 'Cambang-ug', 'Camp 8', 'Canlumampao', 'Cantabaco', 'Capitan Claudio', 'Carmen', 'Daanglungsod', 'Don Andres Soriano', 'Dumlog', 'Gen. Climaco', 'Ibo', 'Ilihan', 'Juan Climaco, Sr.', 'Landahan', 'Loay', 'Luray II', 'Matab-ang', 'Media Once', 'Pangamihan', 'Poblacion', 'Poog', 'Putingbato', 'Sagay', 'Sam-ang', 'Sangi', 'Santo Niño', 'Subayon', 'Talavera', 'Tubod', 'Tungkay'];
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -44,7 +45,7 @@ const Field = ({ label, error, hint, children }) => (
   <View style={styles.field}>
     <Text style={styles.label}>{label}</Text>
     {children}
-    {!!error && <Text style={styles.error}>{error}</Text>}
+    {!!error && <Text accessibilityRole="alert" accessibilityLiveRegion="polite" style={styles.error}>{error}</Text>}
     {!error && !!hint && <Text style={styles.hint}>{hint}</Text>}
   </View>
 );
@@ -78,6 +79,8 @@ export default function SignupPage() {
   const [usernameState, setUsernameState] = React.useState(() => usernameTaken && usernameRetryDraft
     ? { status: 'taken', checked: normalizeUsername(usernameRetryDraft.profile.username) }
     : { status: 'idle', checked: '' });
+  const [emailState, setEmailState] = React.useState({ status: 'idle', checked: '' });
+  const [availabilityRetry, setAvailabilityRetry] = React.useState(0);
   const [loading, setLoading] = React.useState(false);
   const [notice, setNotice] = React.useState(null);
   const [retryAt, setRetryAt] = React.useState(0);
@@ -122,11 +125,19 @@ export default function SignupPage() {
 
   const { confirmLeave, UnsavedModal } = useUnsavedChangesGuard({
     isDirty,
-    onDiscard: () => {
+    onDiscard: async () => {
+      if (registrationSessionId) {
+        try { await cancelRegistrationSession(registrationSessionId); }
+        catch (error) {
+          setNotice({ title: 'Registration still pending', message: error.message || 'Could not cancel registration. Please retry.' });
+          return false;
+        }
+      }
       clearPendingRegistration();
       if (registrationSessionId) {
         clearPendingFaceEnrollment(registrationSessionId);
       }
+      return true;
     },
   });
 
@@ -230,7 +241,8 @@ export default function SignupPage() {
   const accountComplete = !!form.role;
   const personalComplete = !!form.firstName.trim() && !!form.lastName.trim() && PHONE.test(form.phone) && !!form.barangay && !!form.address.trim() && (form.role !== 'distributor' || !!form.requestedBranchId);
   const identityComplete = !!registrationSessionId && (securityPolicy?.faceVerificationRequired === false || isTrustedRegistrationFaceVerification(faceVerification));
-  const credentialsComplete = !validateUsername(form.username) && EMAIL.test(form.email.trim()) && form.password.length >= 8 && form.password === form.confirmPassword && usernameState.status === 'available' && termsAccepted;
+  const passwordState = getRegistrationCredentialState(form.password, form.confirmPassword);
+  const credentialsComplete = !validateUsername(form.username) && EMAIL.test(form.email.trim()) && passwordState.passwordPolicyPassed && passwordState.passwordsMatch && usernameState.status === 'available' && usernameState.checked === normalizeUsername(form.username) && emailState.status === 'available' && emailState.checked === form.email.trim().toLowerCase() && termsAccepted;
   const visibleRegistrationSteps = React.useMemo(
     () => buildRegistrationSteps(securityPolicy),
     [securityPolicy?.emailOtpRequired, securityPolicy?.faceVerificationRequired],
@@ -288,25 +300,33 @@ export default function SignupPage() {
 
   React.useEffect(() => {
     if (step !== STEP.credentials) return undefined;
-    const validation = validateUsername(form.username);
-    if (validation) {
-      setUsernameState({ status: form.username.trim() ? 'invalid' : 'idle', checked: '' });
+    if (validateUsername(form.username) || !EMAIL.test(form.email.trim()) || !registrationSessionId) {
+      setUsernameState({ status: form.username.trim() && validateUsername(form.username) ? 'invalid' : 'idle', checked: '' });
+      setEmailState({ status: form.email.trim() && !EMAIL.test(form.email.trim()) ? 'invalid' : 'idle', checked: '' });
       return undefined;
     }
     const normalized = normalizeUsername(form.username);
+    const normalizedEmail = form.email.trim().toLowerCase();
     const version = usernameCheckVersion.current + 1;
     usernameCheckVersion.current = version;
     const timer = setTimeout(async () => {
       setUsernameState({ status: 'checking', checked: normalized });
+      setEmailState({ status: 'checking', checked: normalizedEmail });
       try {
-        const result = await checkUsername(form.username);
-        if (usernameCheckVersion.current === version) setUsernameState({ status: result.available === true ? 'available' : 'taken', checked: normalized });
+        const result = await getRegistrationAvailability(form.username, form.email, registrationSessionId);
+        if (usernameCheckVersion.current === version) {
+          setUsernameState({ status: result.finalizationPending === true ? 'pending' : result.usernameAvailable === true ? 'available' : 'taken', checked: normalized });
+          setEmailState({ status: result.finalizationPending === true ? 'pending' : result.emailAvailable === true ? 'available' : 'taken', checked: normalizedEmail });
+        }
       } catch {
-        if (usernameCheckVersion.current === version) setUsernameState({ status: 'unavailable', checked: normalized });
+        if (usernameCheckVersion.current === version) {
+          setUsernameState({ status: 'unavailable', checked: normalized });
+          setEmailState({ status: 'unavailable', checked: normalizedEmail });
+        }
       }
     }, 500);
     return () => { clearTimeout(timer); usernameCheckVersion.current += 1; };
-  }, [form.username, step]);
+  }, [form.username, form.email, registrationSessionId, step, availabilityRetry]);
 
   const validateStep = (target = step) => {
     const next = {};
@@ -323,10 +343,11 @@ export default function SignupPage() {
       const usernameError = validateUsername(form.username);
       if (usernameError) next.username = usernameError;
       else if (usernameState.status === 'taken' && usernameState.checked === normalizeUsername(form.username)) next.username = 'This username is already taken.';
-      else if (usernameState.status === 'checking') next.username = 'Checking username availability. Please wait.';
-      else if (usernameState.status === 'unavailable') next.username = 'Unable to check username. Please try again.';
+      else if (usernameState.status !== 'available' || usernameState.checked !== normalizeUsername(form.username)) next.username = usernameState.status === 'pending' ? 'Your registration is still being finalized. Return to email verification and retry.' : usernameState.status === 'unavailable' ? 'Unable to check username. Please try again.' : 'Checking username availability. Please wait.';
       if (!EMAIL.test(form.email.trim())) next.email = 'Enter a valid email address.';
-      if (form.password.length < 8) next.password = 'Password must be at least 8 characters.';
+      else if (emailState.status === 'taken' && emailState.checked === form.email.trim().toLowerCase()) next.email = 'This email is already in use.';
+      else if (emailState.status !== 'available' || emailState.checked !== form.email.trim().toLowerCase()) next.email = emailState.status === 'pending' ? 'Your registration is still being finalized.' : emailState.status === 'unavailable' ? 'Unable to check email. Please try again.' : 'Checking email availability. Please wait.';
+      if (!passwordState.passwordPolicyPassed) next.password = 'Password must be between 8 and 128 characters.';
       if (form.password !== form.confirmPassword) next.confirmPassword = 'Passwords do not match.';
     }
     setErrors(next);
@@ -398,7 +419,7 @@ export default function SignupPage() {
         ...(form.role === 'distributor' ? { requestedBranchId: form.requestedBranchId } : {}),
         securityPolicy,
       };
-      clearPendingRegistration();
+      clearPendingRegistration({ preserveFaceEnrollment: true });
       const result = await requestRegistrationOtp(profile.email, profile.username, registrationSessionId);
       setPendingRegistration(profile, result);
       clearAllAuthSessions();
@@ -422,10 +443,32 @@ export default function SignupPage() {
         setErrors((current) => ({ ...current, username: 'This username is already taken.' }));
         setUsernameState({ status: 'taken', checked: normalizeUsername(form.username) });
       }
+      if (reason === 'account-exists' || reason === 'email-in-use') {
+        setErrors((current) => ({ ...current, email: reason === 'account-exists' ? 'This email is already registered. Log in or recover your account.' : 'This email is currently in use. Please try again later.' }));
+        setEmailState({ status: 'taken', checked: form.email.trim().toLowerCase() });
+      }
       setNotice({
         title: reason === 'account-exists' ? 'Email already registered' : reason === 'username-taken' ? 'Username unavailable' : 'Signup failed',
         message: retry > 0 ? `Too many code requests. Try again in ${Math.ceil(retry / 60)} minute(s).` : error.message,
       });
+    } finally {
+      submitting.current = false;
+      setLoading(false);
+    }
+  };
+
+  const retryPendingFinalization = async () => {
+    if (loading || submitting.current) return;
+    submitting.current = true;
+    setLoading(true);
+    try {
+      const completed = await retryRegistrationFinalization();
+      await signInWithCustomToken(auth, completed.customToken);
+      saveRoleSession({ uid: auth.currentUser.uid, email: form.email.trim().toLowerCase(), role: completed.role });
+      clearPendingRegistration();
+      router.replace(completed.role === 'distributor' ? '/registration-status' : getRoleHomePath(completed.role));
+    } catch (error) {
+      setNotice({ title: 'Account setup still pending', message: error.message || 'Please retry in a moment.' });
     } finally {
       submitting.current = false;
       setLoading(false);
@@ -511,12 +554,15 @@ export default function SignupPage() {
               />}
 
               {step === STEP.credentials && <View>
-                <Field label="Username" error={errors.username} hint={usernameState.status === 'checking' ? 'Checking username availability...' : usernameState.status === 'available' ? 'Username is available.' : usernameState.status === 'taken' ? 'Username is already taken.' : usernameState.status === 'invalid' ? 'Invalid username format' : usernameState.status === 'unavailable' ? 'Unable to check username' : '4-20 characters; letters, numbers, and underscores.'}>
+                <Field label="Username" error={errors.username} hint={usernameState.status === 'pending' ? 'Registration is being finalized. Return to email verification and retry.' : usernameState.status === 'checking' ? 'Checking username availability...' : usernameState.status === 'available' ? 'Username is available.' : usernameState.status === 'taken' ? 'Username is already taken.' : usernameState.status === 'invalid' ? 'Invalid username format' : usernameState.status === 'unavailable' ? 'Unable to check username' : '4-20 characters; letters, numbers, and underscores.'}>
                   <TextInput style={[styles.input, errors.username && styles.inputError, usernameState.status === 'available' && styles.inputSuccess]} value={form.username} onChangeText={(v) => update('username', v.replace(/\s/g, ''))} autoCapitalize="none" autoCorrect={false} maxLength={20} />
                 </Field>
-                <Field label="Recovery email" error={errors.email}><TextInput style={[styles.input, errors.email && styles.inputError]} value={form.email} onChangeText={(v) => update('email', v)} keyboardType="email-address" autoCapitalize="none" autoComplete="email" /></Field>
-                <Field label="Password" error={errors.password} hint="Use at least 8 characters."><View style={[styles.password, errors.password && styles.inputError]}><TextInput style={styles.passwordInput} value={form.password} onChangeText={(v) => update('password', v)} secureTextEntry={!showPassword} autoCapitalize="none" /><PasswordVisibilityButton visible={showPassword} onPress={() => setShowPassword((v) => !v)} /></View></Field>
-                <Field label="Confirm password" error={errors.confirmPassword}><View style={[styles.password, errors.confirmPassword && styles.inputError]}><TextInput style={styles.passwordInput} value={form.confirmPassword} onChangeText={(v) => update('confirmPassword', v)} secureTextEntry={!showPasswordConfirmation} autoCapitalize="none" /><PasswordVisibilityButton visible={showPasswordConfirmation} onPress={() => setShowPasswordConfirmation((v) => !v)} label="password confirmation" /></View></Field>
+                <Field label="Recovery email" error={errors.email} hint={emailState.status === 'pending' ? 'Account finalization is in progress.' : emailState.status === 'checking' ? 'Checking email availability...' : emailState.status === 'available' ? 'Email is available.' : emailState.status === 'taken' ? 'Email is already in use.' : emailState.status === 'unavailable' ? 'Unable to verify availability. Please retry.' : 'This email is also your account email.'}><TextInput style={[styles.input, errors.email && styles.inputError, emailState.status === 'available' && styles.inputSuccess]} value={form.email} onChangeText={(v) => update('email', v)} keyboardType="email-address" autoCapitalize="none" autoComplete="email" /></Field>
+                {(usernameState.status === 'unavailable' || emailState.status === 'unavailable') && <TouchableOpacity onPress={() => setAvailabilityRetry((value) => value + 1)} accessibilityRole="button" accessibilityLabel="Retry availability check"><Text style={styles.loginLink}>Retry availability check</Text></TouchableOpacity>}
+                {(usernameState.status === 'pending' || emailState.status === 'pending') && getPendingRegistration()?.otpRequired === true && <TouchableOpacity onPress={() => router.replace({ pathname: '/email-verification', params: { registration: 'true', role: form.role, sent: 'true', expiresAt: String(getPendingRegistration().expiresAt || 0) } })} accessibilityRole="button" accessibilityLabel="Return to email verification"><Text style={styles.loginLink}>Return to email verification</Text></TouchableOpacity>}
+                {(usernameState.status === 'pending' || emailState.status === 'pending') && getPendingRegistration()?.otpRequired === false && <TouchableOpacity onPress={retryPendingFinalization} accessibilityRole="button" accessibilityLabel="Retry account setup"><Text style={styles.loginLink}>Retry account setup</Text></TouchableOpacity>}
+                <Field label="Password" error={errors.password} hint="Use 8 to 128 characters."><View style={[styles.password, passwordState.success && styles.inputSuccess, errors.password && styles.inputError]}><TextInput style={styles.passwordInput} value={form.password} onChangeText={(v) => update('password', v)} secureTextEntry={!showPassword} autoCapitalize="none" />{passwordState.success && <Text accessibilityLabel="Password meets requirements" accessibilityRole="image" style={styles.passwordSuccess}>✓</Text>}<PasswordVisibilityButton visible={showPassword} onPress={() => setShowPassword((v) => !v)} /></View></Field>
+                <Field label="Confirm password" error={errors.confirmPassword || (passwordState.mismatch ? 'Passwords do not match.' : '')} hint={passwordState.success ? 'Passwords match.' : ''}><View style={[styles.password, passwordState.success && styles.inputSuccess, (errors.confirmPassword || passwordState.mismatch) && styles.inputError]}><TextInput style={styles.passwordInput} value={form.confirmPassword} onChangeText={(v) => update('confirmPassword', v)} secureTextEntry={!showPasswordConfirmation} autoCapitalize="none" />{passwordState.success && <Text accessibilityLabel="Passwords match" accessibilityRole="image" style={styles.passwordSuccess}>✓</Text>}<PasswordVisibilityButton visible={showPasswordConfirmation} onPress={() => setShowPasswordConfirmation((v) => !v)} label="password confirmation" /></View></Field>
                 <View style={styles.termsRow}>
                   <TouchableOpacity style={styles.checkboxTouch} onPress={() => { setTermsAccepted((value) => !value); setErrors((current) => ({ ...current, terms: '' })); }} accessibilityRole="checkbox" accessibilityState={{ checked: termsAccepted }}>
                     <View style={[styles.checkboxBox, termsAccepted && styles.checkboxTouchChecked]}><Text style={styles.checkboxMark}>{termsAccepted ? '✓' : ''}</Text></View>
@@ -564,7 +610,7 @@ const styles = createPortalStyleSheet({
   phone: { flexDirection: 'row', alignItems: 'center', minHeight: 50, borderWidth: 1, borderColor: '#C8D9E6', borderRadius: 11, backgroundColor: '#FAFCFE' }, prefix: { paddingHorizontal: 14, color: '#17324D', fontWeight: '700', borderRightWidth: 1, borderRightColor: '#D8E5EF' }, phoneInput: { flex: 1, minHeight: 48, paddingHorizontal: 12, color: '#17324D', fontSize: 15 }, select: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }, inputText: { color: '#17324D', fontSize: 15 }, placeholder: { color: BLUETAP_COLORS.textSecondary, fontSize: 15 }, inputDisabled: { opacity: .58 }, dropdown: { maxHeight: 170, borderWidth: 1, borderColor: '#C8D9E6', borderRadius: 11, marginTop: -10, marginBottom: 15 }, option: { padding: 13, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#D8E5EF' }, emptyDropdown: { color: '#607A90', padding: 13, fontSize: 13 },
   identityBox: { alignItems: 'center' }, faceIcon: { width: 82, height: 82, borderRadius: 41, backgroundColor: '#E8F5FF', alignItems: 'center', justifyContent: 'center', marginBottom: 15 }, faceIconText: { color: BLUETAP_COLORS.primary, fontSize: 48 }, identityTitle: { color: '#17324D', fontSize: 17, fontWeight: '800', textAlign: 'center' }, identityText: { color: '#607A90', fontSize: 14, lineHeight: 21, textAlign: 'center', marginTop: 9 }, privacy: { backgroundColor: '#F1F7FB', padding: 13, borderRadius: 10, marginTop: 16 }, privacyText: { color: '#47667E', fontSize: 12, lineHeight: 18 }, status: { flexDirection: 'row', alignItems: 'center', marginTop: 14 }, successMark: { color: '#238A57', fontSize: 18, fontWeight: '900', marginRight: 7 }, reviewDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#C47A13', marginRight: 7 }, faceMessage: { color: '#A34B23', fontSize: 13, lineHeight: 18, textAlign: 'center', marginTop: 14 }, faceSuccess: { color: '#238A57', fontSize: 13, fontWeight: '700' }, faceReview: { color: '#A5650B', fontSize: 13, fontWeight: '700' },
   faceButton: { width: '100%', minHeight: 48, marginTop: 16, borderRadius: 11, borderWidth: 1, borderColor: '#9AC7E8', alignItems: 'center', justifyContent: 'center' }, faceButtonText: { color: BLUETAP_COLORS.primary, fontSize: 14, fontWeight: '700' },
-  password: { flexDirection: 'row', alignItems: 'center', minHeight: 50, borderWidth: 1, borderColor: '#C8D9E6', borderRadius: 11, backgroundColor: '#FAFCFE' }, passwordInput: { flex: 1, minHeight: 48, paddingHorizontal: 14, color: '#17324D', fontSize: 15 },
+  password: { flexDirection: 'row', alignItems: 'center', minHeight: 50, borderWidth: 1, borderColor: '#C8D9E6', borderRadius: 11, backgroundColor: '#FAFCFE' }, passwordInput: { flex: 1, minHeight: 48, paddingHorizontal: 14, color: '#17324D', fontSize: 15 }, passwordSuccess: { color: '#238A57', fontSize: 18, fontWeight: '900', paddingHorizontal: 4 },
   termsRow: { flexDirection: 'row', alignItems: 'flex-start', minHeight: 44, marginTop: 2 }, checkboxTouch: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', marginRight: 2, marginTop: -8 }, checkboxBox: { width: 26, height: 26, borderRadius: 7, borderWidth: 1.5, borderColor: '#91ABC0', alignItems: 'center', justifyContent: 'center' }, checkboxTouchChecked: { backgroundColor: BLUETAP_COLORS.primary, borderColor: BLUETAP_COLORS.primary }, checkboxMark: { color: '#FFF', fontWeight: '900' }, termsText: { flex: 1, color: '#526E84', fontSize: 13, lineHeight: 20 }, termsLink: { color: BLUETAP_COLORS.primary, fontWeight: '800' },
   primary: { flex: 1, minHeight: 50, borderRadius: 11, paddingHorizontal: 18, backgroundColor: BLUETAP_COLORS.primary, alignItems: 'center', justifyContent: 'center' }, primaryText: { color: '#FFF', fontSize: 15, fontWeight: '800', textAlign: 'center' }, loginPrompt: { textAlign: 'center', color: '#6B8498', fontSize: 13, marginTop: 20 }, loginLink: { color: BLUETAP_COLORS.primary, fontWeight: '800' },
   modalBg: { flex: 1, backgroundColor: 'rgba(0,0,0,.5)', alignItems: 'center', justifyContent: 'center', padding: 20 }, modal: { width: '100%', maxWidth: 420, backgroundColor: '#FFF', borderRadius: 20, padding: 24 },

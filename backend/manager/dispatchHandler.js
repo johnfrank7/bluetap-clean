@@ -86,9 +86,12 @@ function safeOrder(id, data = {}, branchNames = new Map()) {
       totalAtOrder: safeNumber(item.totalAtOrder ?? item.line_total) || 0,
       deliveryDaysSnapshot: Array.isArray(item.deliveryDaysSnapshot) ? item.deliveryDaysSnapshot : [],
     })) : [],
-    totalAtOrder: safeNumber(data.totalAtOrder ?? data.total_cost) || 0,
-    subtotalAtOrder: safeNumber(data.subtotalAtOrder ?? data.subtotal) || 0,
-    deliveryFeeAtOrder: safeNumber(data.deliveryFeeAtOrder ?? data.deliveryFee) || 0,
+    totalAtOrder: (data.totalAtOrder ?? data.total_cost ?? data.totalAmount) !== undefined && Number.isFinite(Number(data.totalAtOrder ?? data.total_cost ?? data.totalAmount)) ? Number(data.totalAtOrder ?? data.total_cost ?? data.totalAmount) : 0,
+    subtotalAtOrder: (data.subtotalAtOrder ?? data.subtotal) !== undefined && data.subtotalAtOrder !== null && data.subtotal !== null && Number.isFinite(Number(data.subtotalAtOrder ?? data.subtotal)) ? Number(data.subtotalAtOrder ?? data.subtotal) : undefined,
+    subtotal: (data.subtotalAtOrder ?? data.subtotal) !== undefined && data.subtotalAtOrder !== null && data.subtotal !== null && Number.isFinite(Number(data.subtotalAtOrder ?? data.subtotal)) ? Number(data.subtotalAtOrder ?? data.subtotal) : undefined,
+    deliveryFeeAtOrder: (data.deliveryFeeAtOrder ?? data.deliveryFee ?? data.delivery_fee) !== undefined && (data.deliveryFeeAtOrder ?? data.deliveryFee ?? data.delivery_fee) !== null && Number.isFinite(Number(data.deliveryFeeAtOrder ?? data.deliveryFee ?? data.delivery_fee)) ? Number(data.deliveryFeeAtOrder ?? data.deliveryFee ?? data.delivery_fee) : undefined,
+    deliveryFee: (data.deliveryFeeAtOrder ?? data.deliveryFee ?? data.delivery_fee) !== undefined && (data.deliveryFeeAtOrder ?? data.deliveryFee ?? data.delivery_fee) !== null && Number.isFinite(Number(data.deliveryFeeAtOrder ?? data.deliveryFee ?? data.delivery_fee)) ? Number(data.deliveryFeeAtOrder ?? data.deliveryFee ?? data.delivery_fee) : undefined,
+    deliveryFeePolicy: data.deliveryFeePolicy || null,
     expectedDeliveryDate: clean(data.expectedDeliveryDate || data.delivery_date, 80),
     scheduledAt: data.scheduledAt || data.scheduled_at || null,
     deliveredAt: data.deliveredAt || data.delivered_at || null,
@@ -110,10 +113,14 @@ function safeOrder(id, data = {}, branchNames = new Map()) {
     assignedAt: data.assignedAt || null,
     transferFromBranchId: clean(data.transferFromBranchId, 128),
     transferToBranchId: clean(data.transferToBranchId, 128),
-    transferFromBranchName: branchNames.get(clean(data.transferFromBranchId, 128)) || '',
-    transferToBranchName: branchNames.get(clean(data.transferToBranchId, 128)) || '',
+    transferFromBranchName: branchNames.get(clean(data.transferFromBranchId, 128)) || clean(data.transferFromBranchNameSnapshot, 160) || '',
+    transferToBranchName: branchNames.get(clean(data.transferToBranchId, 128)) || clean(data.transferToBranchNameSnapshot, 160) || '',
+    transferFromBranchNameSnapshot: clean(data.transferFromBranchNameSnapshot, 160) || branchNames.get(clean(data.transferFromBranchId, 128)) || '',
+    transferToBranchNameSnapshot: clean(data.transferToBranchNameSnapshot, 160) || branchNames.get(clean(data.transferToBranchId, 128)) || '',
     transferReason: clean(data.transferReason, 240),
     transferRequestedAt: data.transferRequestedAt || null,
+    transferAcceptedAt: data.transferAcceptedAt || null,
+    transferState: clean(data.transferState, 32),
     assignmentHistory: history(data.assignmentHistory),
     transferHistory: history(data.transferHistory),
     editHistory: history(data.editHistory),
@@ -503,8 +510,13 @@ function createManagerDispatchHandler(getAdmin = getFirebaseAdmin) {
             quantity,
             total_quantity: quantity,
             subtotalAtOrder,
+            subtotal: subtotalAtOrder,
+            deliveryFeeAtOrder: currentDeliveryFee,
+            deliveryFee: currentDeliveryFee,
+            delivery_fee: currentDeliveryFee,
             totalAtOrder: newTotal,
             total_cost: newTotal,
+            totalAmount: newTotal,
             ...(notes !== undefined ? { notes, specialInstructions: notes } : {}),
             ...(container !== undefined ? { container } : {}),
             editHistory: [...history(current.editHistory), editEntry],
@@ -525,12 +537,16 @@ function createManagerDispatchHandler(getAdmin = getFirebaseAdmin) {
           const priorDistributorUid = clean(current.assignedDistributorUid || current.distributor_id, 128);
           const assignmentEpoch = priorDistributorUid ? assignmentVersionForTransition(current, '') : null;
           const assignmentHistory = priorDistributorUid ? [...history(current.assignmentHistory), { event: 'DISTRIBUTOR_UNASSIGNED_FOR_TRANSFER', distributorUid: priorDistributorUid, distributorNameSnapshot: clean(current.assignedDistributorNameSnapshot || current.distributor_name, 160), assignedByManagerUid: manager.decoded.uid, assignedAt: now }] : history(current.assignmentHistory);
-          const transferEntry = { event: 'BRANCH_TRANSFER_REQUESTED', transferRequestId, fromBranchId: managerBranchId, toBranchId: targetBranchId, sourceManagerUid: manager.decoded.uid, targetManagerUids: targetManagers.map((item) => item.uid), transferReason, requestedAt: now };
+          const fromBranchName = branchNames.get(managerBranchId) || clean(manager.branch.name, 160) || clean(current.branchNameSnapshot, 160);
+          const toBranchName = branchNames.get(targetBranchId) || clean(targetBranch.name, 160);
+          const transferEntry = { event: 'BRANCH_TRANSFER_REQUESTED', transferRequestId, fromBranchId: managerBranchId, toBranchId: targetBranchId, fromBranchName, toBranchName, sourceManagerUid: manager.decoded.uid, targetManagerUids: targetManagers.map((item) => item.uid), transferReason, requestedAt: now };
           return updateWithEvent(current, 'BRANCH_TRANSFER_REQUESTED', manager.decoded.uid, managerBranchId, now, {
             status: TRANSFER_PENDING,
             transferState: 'pending',
             transferFromBranchId: managerBranchId,
             transferToBranchId: targetBranchId,
+            transferFromBranchNameSnapshot: fromBranchName,
+            transferToBranchNameSnapshot: toBranchName,
             transferRequestedBy: manager.decoded.uid,
             transferRequestedAt: now,
             transferRequestId,
@@ -557,20 +573,28 @@ function createManagerDispatchHandler(getAdmin = getFirebaseAdmin) {
           if (clean(current.status, 80).toLowerCase() !== TRANSFER_PENDING || clean(current.transferToBranchId, 128) !== managerBranchId) throw new OtpError(409, 'TRANSFER_NOT_PENDING', 'This transfer is not awaiting your branch review.');
           requireManagerBranch(manager, current.transferToBranchId);
           const fromBranchId = clean(current.transferFromBranchId, 128);
-          const sourceEvent = sourceDecisionEvent(orderId, current, 'accepted', managerBranchId, branchNames.get(managerBranchId) || manager.branch.name, now);
+          const fromBranchName = branchNames.get(fromBranchId) || clean(current.transferFromBranchNameSnapshot || current.branchNameSnapshot, 160);
+          const toBranchName = branchNames.get(managerBranchId) || clean(manager.branch.name, 160);
+          const safeReason = clean(current.transferReason, 240);
+          const sourceEvent = sourceDecisionEvent(orderId, current, 'accepted', managerBranchId, toBranchName, now);
           return { orderUpdate: updateWithEvent(current, 'BRANCH_TRANSFER_ACCEPTED', manager.decoded.uid, managerBranchId, now, {
             status: AWAITING_ASSIGNMENT,
             branchId: managerBranchId,
             currentBranchId: managerBranchId,
-            branchNameSnapshot: branchNames.get(managerBranchId) || clean(manager.branch.name, 160),
-            currentBranchNameSnapshot: branchNames.get(managerBranchId) || clean(manager.branch.name, 160),
+            branchNameSnapshot: toBranchName,
+            currentBranchNameSnapshot: toBranchName,
             branchLocation: { latitude: safeNumber(manager.branch.latitude), longitude: safeNumber(manager.branch.longitude) },
             initialBranchId: clean(current.initialBranchId || fromBranchId, 128),
             transferState: 'accepted',
             transferAcceptedAt: now,
             transferAcceptedBy: manager.decoded.uid,
+            transferFromBranchId: fromBranchId,
+            transferToBranchId: managerBranchId,
+            transferFromBranchNameSnapshot: fromBranchName,
+            transferToBranchNameSnapshot: toBranchName,
+            transferReason: safeReason,
             transferRequestId: sourceEvent.transferRequestId,
-            transferHistory: [...history(current.transferHistory), { event: 'BRANCH_TRANSFER_ACCEPTED', fromBranchId, toBranchId: managerBranchId, acceptedByManagerUid: manager.decoded.uid, acceptedAt: now }],
+            transferHistory: [...history(current.transferHistory), { event: 'BRANCH_TRANSFER_ACCEPTED', fromBranchId, toBranchId: managerBranchId, fromBranchName, toBranchName, acceptedByManagerUid: manager.decoded.uid, acceptedAt: now, transferReason: safeReason }],
           }), sideEffects: [{ ref: db.collection(MANAGER_OPERATIONAL_EVENTS).doc(sourceEvent.id), data: sourceEvent.data }] };
         });
       } else {

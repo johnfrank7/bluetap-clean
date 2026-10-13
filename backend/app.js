@@ -4,6 +4,7 @@ const { routes } = require('./routes');
 const { faceUpstreamConfigStatus } = require('./verification/renderFaceClient');
 const { emailProviderConfigStatus } = require('./email/emailProvider');
 const { applyCors } = require('./utils/cors');
+const { validateServerEnvironment } = require('./config/serverEnvironment');
 
 const MAX_REQUEST_BYTES = 5 * 1024 * 1024;
 const MAX_PRODUCT_IMAGE_REQUEST_BYTES = Math.ceil(MAX_REQUEST_BYTES * 4 / 3) + 64 * 1024;
@@ -89,6 +90,7 @@ function createAppServer(routeMap = routes) {
 }
 
 if (require.main === module) {
+  validateServerEnvironment();
   const port = Number(process.env.PORT || 3000);
   const server = createAppServer();
   server.listen(port, '0.0.0.0', () => {

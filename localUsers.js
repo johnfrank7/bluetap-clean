@@ -60,6 +60,23 @@ export const saveLocalUser = (userData) => {
   return nextUsers;
 };
 
+export const removeLocalUser = (uid) => {
+  if (!uid) return;
+  const nextUsers = getLocalUsers().filter((user) => user.uid !== uid);
+  try {
+    if (globalThis.localStorage) {
+      globalThis.localStorage.setItem(STORAGE_KEY, JSON.stringify(nextUsers));
+    } else {
+      globalThis.__bluetapLocalUsers = nextUsers;
+    }
+  } catch {
+    globalThis.__bluetapLocalUsers = nextUsers;
+  }
+  try {
+    globalThis.dispatchEvent?.(new Event(LOCAL_USERS_CHANGED_EVENT));
+  } catch {}
+};
+
 export const findLocalUserByEmail = (email) =>
   getLocalUsers().find((user) => normalizeEmail(user.email) === normalizeEmail(email));
 

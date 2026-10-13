@@ -39,6 +39,70 @@ function createAdminRegistrationSecurityHandler(getAdmin = getFirebaseAdmin) {
         try { body = JSON.parse(body || '{}'); }
         catch { throw new OtpError(400, 'INVALID_REGISTRATION_SECURITY_CONFIG', 'Registration security settings are invalid.'); }
       }
+      if (body && typeof body === 'object' && body.action) {
+        const action = String(body.action).trim();
+        if (action === 'revokeOtherSessions' || action === 'signOutOtherDevices') {
+          throw new OtpError(
+            400,
+            'SELECTIVE_REVOCATION_UNSUPPORTED',
+            'Selective other-session revocation is not supported. Use signOutAllSessions to revoke all active sessions.'
+          );
+        }
+        if (['signOutAllSessions', 'revokeAllSessions', 'revokeAdminSessions'].includes(action)) {
+          const targetUid = String(body.targetUid || body.uid || '').trim();
+          if (targetUid && targetUid !== admin.uid) {
+            throw new OtpError(
+              403,
+              'UNAUTHORIZED_TARGET',
+              'You can only revoke sessions for your own administrator account.'
+            );
+          }
+
+          const clientRequestId = body.clientRequestId ? String(body.clientRequestId).trim() : null;
+          if (clientRequestId) {
+            const auditDocs = await db.collection('adminAuditLogs')
+              .where('actorUid', '==', admin.uid)
+              .where('clientRequestId', '==', clientRequestId)
+              .limit(1)
+              .get();
+            if (auditDocs && !auditDocs.empty) {
+              const prev = auditDocs.docs[0].data();
+              return res.status(200).json({
+                ok: true,
+                action: 'signOutAllSessions',
+                revoked: true,
+                uid: admin.uid,
+                revokedAt: prev.createdAt?.toISOString?.() || new Date().toISOString(),
+                deduplicated: true,
+              });
+            }
+          }
+
+          await auth.revokeRefreshTokens(admin.uid);
+
+          const now = new Date();
+          const auditRef = db.collection('adminAuditLogs').doc();
+          await auditRef.set({
+            action: 'ADMIN_SESSIONS_REVOKED',
+            actorUid: admin.uid,
+            actorRole: 'admin',
+            targetUid: admin.uid,
+            targetRole: 'admin',
+            clientRequestId,
+            reason: body.reason ? String(body.reason).trim().slice(0, 240) : 'Administrator requested all sessions revocation from Security Settings',
+            createdAt: now,
+          });
+
+          return res.status(200).json({
+            ok: true,
+            action: 'signOutAllSessions',
+            revoked: true,
+            uid: admin.uid,
+            revokedAt: now.toISOString(),
+          });
+        }
+        throw new OtpError(400, 'INVALID_SECURITY_ACTION', 'Unsupported security action.');
+      }
       const next = validateRegistrationSecurity(body);
       const configRef = db.collection(CONFIG_PATH[0]).doc(CONFIG_PATH[1]);
       const publicConfigRef = db.collection(PUBLIC_CONFIG_PATH[0]).doc(PUBLIC_CONFIG_PATH[1]);

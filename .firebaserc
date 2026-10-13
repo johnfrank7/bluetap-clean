@@ -1,5 +1,6 @@
 {
   "projects": {
-    "default": "bluetap-8c98d"
+    "default": "bluetap-8c98d",
+    "staging": "bluetap-staging"
   }
 }

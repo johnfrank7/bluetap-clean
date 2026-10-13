@@ -21,7 +21,9 @@ function createRegistrationHandler(action) {
       }
       const service = createRegistrationService({ ...getFirebaseAdmin(), sendEmailOtp, hashSecret: process.env.EMAIL_OTP_HASH_SECRET, otpStage });
       const ip = getClientIp(req);
-      const result = action === 'request'
+      const result = action === 'availability'
+        ? await service.availability(body?.username, body?.email, body?.registrationSessionId, ip)
+        : action === 'request'
         ? await service.request(body?.email, body?.username, body?.registrationSessionId, ip)
         : body?.action === 'complete-without-otp'
           ? await service.completeWithoutOtp(body?.challenge, body?.profile, body?.finalFaceImage)

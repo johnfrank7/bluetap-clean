@@ -2,6 +2,7 @@ const { randomUUID } = require('node:crypto');
 const { createClient } = require('@supabase/supabase-js');
 
 const { OtpError } = require('../utils/otpError');
+const { getAppEnv, isKnownProductionSupabaseHost, APP_ENVIRONMENTS } = require('../config/appEnv');
 
 const MAX_AVATAR_BYTES = 3 * 1024 * 1024;
 const IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
@@ -39,7 +40,39 @@ function avatarStorageConfigStatus(env = process.env) {
   };
 }
 
+function createMockAvatarStorage({ env = process.env } = {}) {
+  return {
+    async uploadAvatar(uid, image) {
+      const safeUid = String(uid || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 128);
+      if (!safeUid) throw storageError('AUTHENTICATION_REQUIRED', 'Authentication is required.', 401);
+      const decoded = decodeAvatarImage(image);
+      const extension = decoded.contentType === 'image/jpeg' ? 'jpg' : decoded.contentType.split('/')[1];
+      const profilePhotoPath = `avatars/${safeUid}/${randomUUID()}.${extension}`;
+      const bucket = String(env.SUPABASE_AVATAR_BUCKET || 'staging-user-avatars').trim();
+      const profilePhotoUrl = `https://staging-mock-storage.local/storage/v1/object/public/${encodeURIComponent(bucket)}/${profilePhotoPath}`;
+      return { profilePhotoUrl, profilePhotoPath };
+    },
+    async deleteAvatar(path, uid) {
+      const safeUid = String(uid || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 128);
+      const safePath = String(path || '');
+      if (!safeUid || !new RegExp(`^avatars/${safeUid}/[a-zA-Z0-9-]+\\.(jpg|png|webp)$`).test(safePath)) return;
+    },
+  };
+}
+
 function createSupabaseAvatarStorage({ env = process.env, createClientImpl = createClient } = {}) {
+  let currentEnv;
+  try { currentEnv = getAppEnv(env); } catch { currentEnv = null; }
+  const driver = String(env.SUPABASE_STORAGE_DRIVER || '').trim().toLowerCase();
+
+  if (currentEnv === APP_ENVIRONMENTS.PRODUCTION && driver === 'mock') {
+    throw new Error('Security violation: Staging storage mock is strictly prohibited in production.');
+  }
+
+  if (currentEnv === APP_ENVIRONMENTS.STAGING && driver === 'mock') {
+    return createMockAvatarStorage({ env });
+  }
+
   let client;
   let config;
   let bucketReady;
@@ -48,6 +81,11 @@ function createSupabaseAvatarStorage({ env = process.env, createClientImpl = cre
       const url = String(env.SUPABASE_URL || '').trim().replace(/\/+$/, '');
       const serviceRoleKey = String(env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
       const bucket = String(env.SUPABASE_AVATAR_BUCKET || '').trim();
+
+      if (currentEnv === APP_ENVIRONMENTS.STAGING && isKnownProductionSupabaseHost(url, env)) {
+        throw storageError('SUPABASE_PRODUCTION_REUSE_BLOCKED', 'Staging cannot target production Supabase project.', 503);
+      }
+
       if (!url.startsWith('https://') || !serviceRoleKey || !/^[a-z0-9][a-z0-9_-]{0,62}$/i.test(bucket)) {
         throw storageError('PROFILE_IMAGE_STORAGE_UNAVAILABLE', 'Profile picture storage is not configured.', 503);
       }

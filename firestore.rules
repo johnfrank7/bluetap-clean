@@ -190,6 +190,7 @@ service cloud.firestore {
     // The registration backend is the sole writer for these protected records.
     match /registrationSessions/{document=**} { allow read, write: if false; }
     match /usernameReservations/{document=**} { allow read, write: if false; }
+    match /registrationEmailReservations/{document=**} { allow read, write: if false; }
     match /emailOtpVerifications/{document=**} { allow read, write: if false; }
     match /registrationOtpVerifications/{document=**} { allow read, write: if false; }
     match /authRateLimits/{document=**} { allow read, write: if false; }

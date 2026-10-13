@@ -2,14 +2,18 @@ import { signOut } from 'firebase/auth';
 import { doc, getDocFromServer } from 'firebase/firestore';
 
 import { auth, db } from '../firebase';
-import { saveLocalUser } from '../localUsers';
+import { removeLocalUser, saveLocalUser } from '../localUsers';
 import { isFaceVerified, normalizeFaceVerification } from './faceVerification';
 import { getManagerContext } from './managerAccess';
 import { clearAdminDataCache } from './adminDataCache';
 import { logDevelopmentTiming } from './performanceLog';
+import { clearRequesterRequestCache } from './requests';
+import { clearAssignedDistributorOrdersCache } from './distributorOrders';
+import { clearDistributorProfileCache } from './distributorProfile';
 
 const ACTIVE_SESSION_KEY = 'bluetapActiveAuthSession';
 const MODULE_SESSIONS_KEY = 'bluetapModuleAuthSessions';
+const AUTH_LOGOUT_CHANNEL = 'bluetapAuthLogout';
 export const AUTH_SESSION_CHANGED_EVENT = 'bluetapAuthSessionChanged';
 
 const ROLE_HOME_PATHS = {
@@ -23,6 +27,25 @@ const validRoles = new Set(Object.keys(ROLE_HOME_PATHS));
 const PRIVILEGED_VALIDATION_TTL_MS = 2 * 60 * 1000;
 let privilegedValidationCache = null;
 const privilegedValidationInFlight = new Map();
+let sessionEpoch = 0;
+let logoutPromise = null;
+const logoutChannel = typeof globalThis.BroadcastChannel === 'function'
+  ? new globalThis.BroadcastChannel(AUTH_LOGOUT_CHANNEL)
+  : null;
+if (logoutChannel) {
+  logoutChannel.onmessage = async ({ data }) => {
+    if (data?.type !== 'logout' || !data.uid) return;
+    await ensureAuthStateReady();
+    if (auth.currentUser?.uid === data.uid) {
+      signOutAndClearSessions({ broadcast: false }).catch(() => {});
+    }
+  };
+}
+
+export const getAuthSessionEpoch = () => sessionEpoch;
+export const isCurrentAuthSession = (user, epoch) =>
+  !logoutPromise && sessionEpoch === epoch && Boolean(user?.uid) && auth.currentUser?.uid === user.uid;
+export const isLogoutInProgress = () => Boolean(logoutPromise);
 
 const clearPrivilegedValidationCache = () => {
   privilegedValidationCache = null;
@@ -346,11 +369,13 @@ const buildFirestoreProfile = (user, data = {}) => ({
 
 export const fetchFirestoreUserProfile = async (user) => {
   if (!user?.uid) return null;
+  const epoch = sessionEpoch;
 
   // Authentication and authorization routing must use the authoritative
   // server profile. A cached pre-finalization document can otherwise send a
   // newly completed registration back through the legacy verification route.
   const snapshot = await getDocFromServer(doc(db, 'users', user.uid));
+  if (!isCurrentAuthSession(user, epoch)) return null;
 
   if (!snapshot.exists()) {
     return null;
@@ -370,6 +395,7 @@ export const fetchFirestoreUserProfile = async (user) => {
 
 const validateRoleAccessOnce = async (expectedRole) => {
   const expected = normalizeRole(expectedRole);
+  const epoch = sessionEpoch;
 
   if (!isValidRole(expected)) {
     return {
@@ -385,6 +411,10 @@ const validateRoleAccessOnce = async (expectedRole) => {
   if (!currentUser) {
     await ensureAuthStateReady();
     currentUser = auth.currentUser;
+  }
+
+  if (!isCurrentAuthSession(currentUser, epoch)) {
+    return { status: 'unauthenticated', redirectTo: getRoleLoginPath(expected), clearRole: expected };
   }
 
   if (!currentUser) {
@@ -477,6 +507,10 @@ const validateRoleAccessOnce = async (expectedRole) => {
       redirectTo: getRoleLoginPath(expected),
       clearRole: expected,
     };
+  }
+
+  if (!isCurrentAuthSession(currentUser, epoch)) {
+    return { status: 'unauthenticated', redirectTo: getRoleLoginPath(expected), clearRole: expected };
   }
 
   if (profile?.role && isValidRole(profile.role) && profile.role !== expected) {
@@ -573,6 +607,10 @@ const validateRoleAccessOnce = async (expectedRole) => {
     }
   }
 
+  if (!isCurrentAuthSession(currentUser, epoch)) {
+    return { status: 'unauthenticated', redirectTo: getRoleLoginPath(expected), clearRole: expected };
+  }
+
   if (
     profile.role === 'distributor' &&
     (!['approved', 'active'].includes(getDistributorApplicationStatus(profile)) || !String(profile.branchId || '').trim())
@@ -596,6 +634,7 @@ const validateRoleAccessOnce = async (expectedRole) => {
 
 export const validateRoleAccess = async (expectedRole) => {
   const expected = normalizeRole(expectedRole);
+  const epoch = sessionEpoch;
   const key = `${auth.currentUser?.uid || 'signed-out'}:${expected}`;
   if (privilegedValidationInFlight.has(key)) {
     logDevelopmentTiming('[admin-performance]', { stage: 'ADMIN_AUTH_VALIDATION_DEDUPED', role: expected });
@@ -604,19 +643,39 @@ export const validateRoleAccess = async (expectedRole) => {
   const startedAt = Date.now();
   if (expected === 'admin') logDevelopmentTiming('[admin-performance]', { stage: 'ADMIN_AUTH_VALIDATION_STARTED' });
   const request = validateRoleAccessOnce(expected).then((result) => {
+    if (sessionEpoch !== epoch || logoutPromise) {
+      return { status: 'unauthenticated', redirectTo: getRoleLoginPath(expected), clearRole: expected };
+    }
     if (expected === 'admin') logDevelopmentTiming('[admin-performance]', { stage: 'ADMIN_AUTH_VALIDATION_FINISHED', durationMs: Date.now() - startedAt, status: result.status, cached: result.cached === true });
     return result;
-  }).finally(() => privilegedValidationInFlight.delete(key));
+  }).finally(() => {
+    if (privilegedValidationInFlight.get(key) === request) privilegedValidationInFlight.delete(key);
+  });
   privilegedValidationInFlight.set(key, request);
   return request;
 };
 
-export const signOutAndClearSessions = async () => {
+export const signOutAndClearSessions = ({ broadcast = true } = {}) => {
+  if (logoutPromise) return logoutPromise;
+  const uid = auth.currentUser?.uid || '';
+  sessionEpoch += 1;
   clearAllAuthSessions();
-
-  try {
-    await signOut(auth);
-  } catch (error) {
-    console.log('Sign out error:', error.message);
-  }
+  logoutPromise = (async () => {
+    try {
+      await signOut(auth);
+      if (auth.currentUser) throw new Error('Firebase sign-out did not complete.');
+      clearRequesterRequestCache(uid);
+      globalThis.__bluetapClearRequesterProfileCache?.(uid);
+      clearAssignedDistributorOrdersCache(uid);
+      clearDistributorProfileCache(uid);
+      if (uid) removeLocalUser(uid);
+      clearAllAuthSessions();
+      if (broadcast && uid) {
+        try { logoutChannel?.postMessage({ type: 'logout', uid }); } catch {}
+      }
+    } finally {
+      logoutPromise = null;
+    }
+  })();
+  return logoutPromise;
 };

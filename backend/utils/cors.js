@@ -1,3 +1,5 @@
+const { getAppEnv, APP_ENVIRONMENTS } = require('../config/appEnv');
+
 const DEFAULT_DEVELOPMENT_ORIGINS = new Set([
   'http://localhost:19006',
   'http://localhost:8081',
@@ -33,9 +35,10 @@ function isAllowedOrigin(req, origin, env = process.env) {
   if (!origin) return true;
   const normalized = String(origin).replace(/\/+$/, '');
   if (isSameOrigin(req, normalized)) return true;
-  if (TRUSTED_PRODUCTION_ORIGINS.has(normalized)) return true;
+  const currentEnv = getAppEnv(env);
+  if (currentEnv !== APP_ENVIRONMENTS.STAGING && TRUSTED_PRODUCTION_ORIGINS.has(normalized)) return true;
   if (configuredOrigins(env).has(normalized)) return true;
-  return env.NODE_ENV !== 'production' && DEFAULT_DEVELOPMENT_ORIGINS.has(normalized);
+  return env.NODE_ENV !== 'production' && currentEnv === APP_ENVIRONMENTS.DEVELOPMENT && DEFAULT_DEVELOPMENT_ORIGINS.has(normalized);
 }
 
 function applyCors(req, res, env = process.env) {

@@ -1,5 +1,6 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
+const { createHmac } = require('node:crypto');
 const { backfillLegacyUids, createAdminAccountsHandler, emailFor, passwordFor, safeAccount, safeAudit, statusOf } = require('../accountManagementHandler');
 const { authorityKeyHash, buildConversationFoundation } = require('../../chat/conversationService');
 
@@ -210,6 +211,41 @@ test('Admin-created active Distributor requires and receives an authoritative ac
   assert.equal(created.statusCode, 201); assert.equal(created.body.account.status, 'active'); assert.equal(created.body.account.branchId, 'north');
   const profile = fixture.records.get(`users/${created.body.account.uid}`); assert.equal(profile.distributorStatus, 'active'); assert.equal(profile.branchId, 'north');
   assert.equal(profile.branchMembershipVersion, 1);
+});
+
+test('Admin provisioning respects active public username reservations without weakening temporary-password policy', async () => {
+  const fixture = managementFixture();
+  const handler = createAdminAccountsHandler(fixture.getAdmin);
+  fixture.records.set('usernameReservations/new_driver', { registrationSessionId: 'pending-public', expiresAt: new Date(Date.now() + 60000) });
+  const input = { role: 'distributor', fullName: 'New Driver', email: 'new@example.test', username: 'New_Driver', temporaryPassword: 'SafePassword2026', branchId: 'north' };
+  const blocked = await call(handler, 'POST', 'admin-token', input);
+  assert.equal(blocked.statusCode, 409);
+  assert.equal(blocked.body.error.reason, 'USERNAME_ALREADY_IN_USE');
+  assert.equal([...fixture.authUsers.values()].some((user) => user.email === input.email), false);
+  fixture.records.set('usernameReservations/new_driver', { registrationSessionId: 'expired-public', expiresAt: new Date(Date.now() - 1000) });
+  const created = await call(handler, 'POST', 'admin-token', input);
+  assert.equal(created.statusCode, 201);
+  assert.equal(fixture.records.get(`users/${created.body.account.uid}`).mustChangePassword, true);
+  assert.equal(fixture.records.get('usernames/new_driver').uid, created.body.account.uid);
+});
+
+test('Admin provisioning respects a current public email reservation', async () => {
+  const previous = process.env.EMAIL_OTP_HASH_SECRET;
+  process.env.EMAIL_OTP_HASH_SECRET = 'test-admin-reservation-secret';
+  try {
+    const fixture = managementFixture();
+    const email = 'new@example.test';
+    const hash = createHmac('sha256', process.env.EMAIL_OTP_HASH_SECRET).update('email:' + email).digest('hex');
+    fixture.records.set(`registrationEmailReservations/${hash}`, { registrationSessionId: 'pending-public', expiresAt: new Date(Date.now() + 60000) });
+    const result = await call(createAdminAccountsHandler(fixture.getAdmin), 'POST', 'admin-token',
+      { role: 'requester', fullName: 'New Person', email, username: 'new_person', temporaryPassword: 'SafePassword2026' });
+    assert.equal(result.statusCode, 409);
+    assert.equal(result.body.error.reason, 'EMAIL_ALREADY_IN_USE');
+    assert.equal([...fixture.authUsers.values()].some((user) => user.email === email), false);
+  } finally {
+    if (previous === undefined) delete process.env.EMAIL_OTP_HASH_SECRET;
+    else process.env.EMAIL_OTP_HASH_SECRET = previous;
+  }
 });
 
 test('backfillLegacyUids is idempotent, converts legacy hyphenated UIDs, and does not overwrite existing public UIDs', async () => {

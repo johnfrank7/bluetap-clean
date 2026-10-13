@@ -1,4 +1,5 @@
 const { OtpError } = require('../utils/otpError');
+const { getAppEnv, isKnownProductionDeepFaceHost, APP_ENVIRONMENTS } = require('../config/appEnv');
 
 const READY_ATTEMPTS = 2;
 const READY_ATTEMPT_TIMEOUT_MS = 10_000;
@@ -9,7 +10,12 @@ const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 function faceUpstreamConfigStatus(env = process.env) {
   const configuredUrl = String(env.DEEPFACE_API_URL || '').replace(/\/+$/, '');
   let validHttpsUrl = false;
-  try { validHttpsUrl = new URL(configuredUrl).protocol === 'https:'; } catch { /* invalid configuration */ }
+  try {
+    validHttpsUrl = new URL(configuredUrl).protocol === 'https:';
+    if (getAppEnv(env) === APP_ENVIRONMENTS.STAGING && isKnownProductionDeepFaceHost(configuredUrl)) {
+      validHttpsUrl = false;
+    }
+  } catch { /* invalid configuration */ }
   return {
     urlConfigured: validHttpsUrl,
     configuredUrl: validHttpsUrl ? configuredUrl : null,
@@ -110,6 +116,10 @@ function createRenderFaceClient({
 
   return async function request(path, form, signal) {
     const base = (env.DEEPFACE_API_URL || '').replace(/\/+$/, '');
+    if (getAppEnv(env) === APP_ENVIRONMENTS.STAGING && isKnownProductionDeepFaceHost(base)) {
+      failLog('FACE_UPSTREAM_FAILED', { path, category: 'security-violation' });
+      throw new OtpError(503, 'FACE_SERVICE_UNAVAILABLE', 'Face verification is temporarily unavailable.');
+    }
     if (!base.startsWith('https://') || !env.DEEPFACE_API_KEY) {
       failLog('FACE_UPSTREAM_FAILED', { path, category: 'configuration' });
       throw new OtpError(503, 'FACE_SERVICE_UNAVAILABLE', 'Face verification is temporarily unavailable.');

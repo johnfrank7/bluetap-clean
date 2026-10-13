@@ -2,6 +2,7 @@
 const { randomUUID } = require('node:crypto');
 const { createClient } = require('@supabase/supabase-js');
 const { OtpError } = require('../utils/otpError');
+const { getAppEnv, isKnownProductionSupabaseHost, APP_ENVIRONMENTS } = require('../config/appEnv');
 
 const MAX_PRODUCT_IMAGE_BYTES = 5 * 1024 * 1024;
 const IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
@@ -40,9 +41,16 @@ function decodeProductImage(value) {
 }
 
 function storageConfig(env = process.env) {
+  let currentEnv;
+  try { currentEnv = getAppEnv(env); } catch { currentEnv = null; }
   const url = String(env.SUPABASE_URL || '').trim().replace(/\/+$/, '');
   const serviceRoleKey = String(env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
   const bucket = String(env.SUPABASE_STORAGE_BUCKET || '').trim();
+
+  if (currentEnv === APP_ENVIRONMENTS.STAGING && isKnownProductionSupabaseHost(url, env)) {
+    throw new OtpError(503, 'SUPABASE_PRODUCTION_REUSE_BLOCKED', 'Staging cannot target production Supabase project.', { stage: 'PRODUCT_IMAGE_STORAGE_CONFIGURATION' });
+  }
+
   if (!url.startsWith('https://') || !serviceRoleKey || !/^[a-z0-9][a-z0-9_-]{0,62}$/i.test(bucket)) throw storageUnavailable();
   return { url, serviceRoleKey, bucket };
 }
@@ -67,7 +75,41 @@ function storageProviderError(error, fallback, stage = 'PRODUCT_IMAGE_BUCKET_CHE
   return fallback();
 }
 
+function createMockProductImageStorage({ env = process.env, logger = console } = {}) {
+  const report = (level, stage, details = {}) => logger[level]?.('[product-image]', { stage, ...details });
+  return {
+    async uploadProductImage(productId, image) {
+      const safeProductId = String(productId || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 128);
+      if (!safeProductId) throw new OtpError(400, 'PRODUCT_ID_REQUIRED', 'Product ID is required.');
+      const decoded = decodeProductImage(image);
+      const extension = decoded.contentType === 'image/jpeg' ? 'jpg' : decoded.contentType.split('/')[1];
+      const imagePath = `products/${safeProductId}/${randomUUID()}.${extension}`;
+      const bucket = String(env.SUPABASE_STORAGE_BUCKET || 'staging-products-images').trim();
+      const mockUrl = `https://staging-mock-storage.local/storage/v1/object/public/${encodeURIComponent(bucket)}/${imagePath}`;
+      report('info', 'PRODUCT_IMAGE_UPLOAD_MOCK_SUCCESS', { productId: safeProductId });
+      return { imageUrl: mockUrl, imagePath, imageStorageProvider: 'supabase' };
+    },
+    async deleteProductImage(imagePath, productId = '') {
+      const path = String(imagePath || '');
+      if (!/^products\/[a-zA-Z0-9_-]+\/[a-zA-Z0-9_-]+\.(jpg|png|webp)$/.test(path)) throw deleteFailed();
+      report('info', 'PRODUCT_IMAGE_DELETE_MOCK_SUCCESS', { productId: String(productId || '').slice(0, 128) });
+    },
+  };
+}
+
 function createSupabaseProductImageStorage({ env = process.env, createClientImpl = createClient, logger = console } = {}) {
+  let currentEnv;
+  try { currentEnv = getAppEnv(env); } catch { currentEnv = null; }
+  const driver = String(env.SUPABASE_STORAGE_DRIVER || '').trim().toLowerCase();
+
+  if (currentEnv === APP_ENVIRONMENTS.PRODUCTION && driver === 'mock') {
+    throw new Error('Security violation: Staging storage mock is strictly prohibited in production.');
+  }
+
+  if (currentEnv === APP_ENVIRONMENTS.STAGING && driver === 'mock') {
+    return createMockProductImageStorage({ env, logger });
+  }
+
   let client;
   let config;
   let bucketReady;

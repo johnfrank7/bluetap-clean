@@ -225,6 +225,7 @@ export default function DistributorProfilePage() {
   const [savingProfile, setSavingProfile] = useState(false);
   const [profileDraft, setProfileDraft] = useState(() => buildProfileDraft());
   const [toast, setToast] = useState({ visible: false, message: '', type: 'success' });
+  const logoutPending = useRef(false);
 
 
   useEffect(() => {
@@ -464,10 +465,16 @@ export default function DistributorProfilePage() {
   };
 
   const handleLogout = async () => {
-    if (savingProfile) return;
-
-    await signOutAndClearSessions();
-    router.replace('/login');
+    if (savingProfile || logoutPending.current) return;
+    logoutPending.current = true;
+    try {
+      await signOutAndClearSessions();
+      router.replace('/login');
+    } catch {
+      setToast({ visible: true, message: 'Sign out could not complete. Please try again.', type: 'error' });
+    } finally {
+      logoutPending.current = false;
+    }
   };
 
   return (

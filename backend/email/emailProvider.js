@@ -1,5 +1,6 @@
 // Server-only provider boundary. Imported by backend HTTP handlers only.
 const { OtpError } = require('../utils/otpError');
+const { getAppEnv, isKnownProductionMailRelay, APP_ENVIRONMENTS } = require('../config/appEnv');
 
 const RESEND_EMAILS_ENDPOINT = 'https://api.resend.com/emails';
 const USER_AGENT = 'BlueTap-Backend/1.0';
@@ -60,12 +61,16 @@ const mapResendFailure = async (response) => {
   );
 };
 
-const relayUrl = (value) => {
+const relayUrl = (value, env = process.env) => {
   try {
     const url = new URL(String(value || '').trim());
     if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash ||
         url.pathname !== '/api/internal/send-otp-email') return '';
-    return url.toString();
+    const asString = url.toString();
+    if (getAppEnv(env) === APP_ENVIRONMENTS.STAGING && isKnownProductionMailRelay(asString)) {
+      return '';
+    }
+    return asString;
   } catch {
     return '';
   }
@@ -79,7 +84,7 @@ const emailProviderConfigStatus = (env = process.env) => {
     provider: providerRecognized ? configuredProvider : configuredProvider ? 'unrecognized' : 'missing',
     providerRecognized,
     relayUrlPresent: Boolean(configuredRelayUrl),
-    relayUrlConfigured: Boolean(relayUrl(configuredRelayUrl)),
+    relayUrlConfigured: Boolean(relayUrl(configuredRelayUrl, env)),
     relaySecretConfigured: Boolean(String(env.INTERNAL_MAIL_RELAY_SECRET || '')),
   };
 };
@@ -109,7 +114,7 @@ function createEmailProvider({ env = process.env, fetchImpl = globalThis.fetch, 
     let headers;
     let body;
     if (provider === 'vercel-relay') {
-      url = relayUrl(env.VERCEL_MAIL_RELAY_URL);
+      url = relayUrl(env.VERCEL_MAIL_RELAY_URL, env);
       const secret = String(env.INTERNAL_MAIL_RELAY_SECRET || '');
       if (!url || !secret || !requestId) {
         const error = notConfigured();

@@ -8,9 +8,10 @@ const asCoordinate = (value, minimum, maximum) => {
 };
 
 export const normalizeLocation = (location) => {
-  const latitude = asCoordinate(location?.latitude, -90, 90);
-  const longitude = asCoordinate(location?.longitude, -180, 180);
-  const accuracy = Number.isFinite(Number(location?.accuracy)) && Number(location?.accuracy) >= 0 ? Number(location.accuracy) : null;
+  const source = location?.location || location?.coords || location;
+  const latitude = asCoordinate(source?.latitude, -90, 90);
+  const longitude = asCoordinate(source?.longitude, -180, 180);
+  const accuracy = Number.isFinite(Number(source?.accuracy)) && Number(source?.accuracy) >= 0 ? Number(source.accuracy) : null;
   return latitude === null || longitude === null ? null : { latitude, longitude, ...(accuracy !== null ? { accuracy } : {}) };
 };
 

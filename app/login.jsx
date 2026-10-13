@@ -20,13 +20,17 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { BLUETAP_COLORS } from '../constants/bluetapTheme';
 import { createPortalStyleSheet, useBlueTapTheme } from '../components/BlueTapTheme';
 import { auth, db } from '../firebase';
-import { signInWithCustomToken, signOut } from 'firebase/auth';
+import { onAuthStateChanged, signInWithCustomToken, signOut } from 'firebase/auth';
 import { saveLocalUser } from '../localUsers';
 import {
   clearAllAuthSessions,
   fetchFirestoreUserProfile,
+  getAuthSessionEpoch,
+  getCanonicalAccountStatus,
   getPostAuthenticationDestination,
+  isCurrentAuthSession,
   saveRoleSession,
+  validateRoleAccess,
 } from '../services/authSession';
 import { loginWithUsernameResult } from '../services/usernameAuth';
 import { restartIncompleteRegistration } from '../services/profileRecovery';
@@ -158,22 +162,26 @@ export default function LoginPage() {
 
   React.useEffect(() => {
     let cancelled = false;
-    const checkActiveSession = async () => {
-      const user = auth.currentUser;
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (!user?.uid || loginInFlight.current || loginSucceeded.current) return;
+      const epoch = getAuthSessionEpoch();
       try {
         const profile = await fetchFirestoreUserProfile(user);
-        if (cancelled || !profile?.role) return;
-        const destination = getPostAuthenticationDestination(profile);
+        if (cancelled || loginInFlight.current || !isCurrentAuthSession(user, epoch) || !profile?.role) return;
+        if (getCanonicalAccountStatus(profile) !== 'active') return;
+        const access = await validateRoleAccess(profile.role);
+        if (cancelled || loginInFlight.current || !isCurrentAuthSession(user, epoch)) return;
+        const destination = access.status === 'authorized'
+          ? getPostAuthenticationDestination(access.profile)
+          : access.shouldSignOut ? '' : access.redirectTo;
         if (destination && destination !== '/login') {
           router.replace(destination);
         }
       } catch {
         // Leave user on login form if profile check fails
       }
-    };
-    checkActiveSession();
-    return () => { cancelled = true; };
+    });
+    return () => { cancelled = true; unsubscribe(); };
   }, [router]);
 
   const clearFocusScrollTimeout = React.useCallback(() => {
@@ -347,6 +355,7 @@ export default function LoginPage() {
     const requestSequence = typeof loginRequestId === 'undefined' ? { current: 0 } : loginRequestId;
     const successState = typeof loginSucceeded === 'undefined' ? { current: false } : loginSucceeded;
     const requestId = requestSequence.current + 1;
+    const sessionEpoch = getAuthSessionEpoch();
     requestSequence.current = requestId;
     successState.current = false;
     let authenticatedUser = null;
@@ -367,10 +376,15 @@ export default function LoginPage() {
       // Both identifiers use password verification and public-role checks on
       // the backend before establishing the matching Firebase client session.
       const loginResult = await loginWithUsernameResult(loginIdentifier, enteredPassword, { portal: 'public' });
+      if (sessionEpoch !== getAuthSessionEpoch()) return;
       const userCredential = await signInWithCustomToken(auth, loginResult.customToken);
 
       const user = userCredential.user;
       authenticatedUser = user;
+      if (!isCurrentAuthSession(user, sessionEpoch)) {
+        if (auth.currentUser?.uid === user.uid) await signOut(auth);
+        return;
+      }
       console.info('[public-login]', { stage: 'LOGIN_AUTH_COMPLETED', durationMs: Date.now() - startedAt });
 
       const responseProfile = loginResult.profile;
@@ -421,12 +435,14 @@ export default function LoginPage() {
         throw Object.assign(new Error('Account setup incomplete'), { code: 'ACCOUNT_SETUP_INCOMPLETE' });
       }
 
+      if (!isCurrentAuthSession(user, sessionEpoch)) return;
       saveLocalUser(profileData);
       successState.current = true;
       finishSuccessfulLogin(profileData);
       console.info('[public-login]', { stage: 'LOGIN_ROUTED', durationMs: Date.now() - startedAt });
 
     } catch (error) {
+      if (sessionEpoch !== getAuthSessionEpoch()) return;
       if (requestId !== requestSequence.current || successState.current) return;
       if (auth.currentUser && (!authenticatedUser || auth.currentUser.uid === authenticatedUser.uid)) {
         clearAllAuthSessions();
@@ -435,7 +451,10 @@ export default function LoginPage() {
       const accountState = error?.code === 'ACCOUNT_SUSPENDED' || error?.code === 'username/account-suspended' ? 'suspended' : error?.code === 'ACCOUNT_TERMINATED' || error?.code === 'username/account-terminated' ? 'terminated' : '';
       if (accountState) { router.replace({ pathname: '/account-access-status', params: { state: accountState } }); return; }
       const privileged = error?.code === 'PRIVILEGED_LOGIN_REQUIRED' || error?.code === 'username/privileged-login-required';
-      showNotification('Login failed', getPublicLoginErrorMessage(error), privileged ? () => router.replace('/admin/login') : undefined, privileged ? 'Go to Admin Login' : '');
+      const disabled = ['ACCOUNT_DISABLED', 'username/account-disabled', 'auth/user-disabled'].includes(error?.code);
+      showNotification(disabled ? 'Account unavailable' : 'Login failed', disabled
+        ? 'This account is currently disabled. Please contact BlueTap support if you need assistance.'
+        : getPublicLoginErrorMessage(error), privileged ? () => router.replace('/admin/login') : undefined, privileged ? 'Go to Admin Login' : '');
     } finally {
       if (requestId === requestSequence.current) {
         loginInFlight.current = false;
@@ -722,10 +741,10 @@ export default function LoginPage() {
         </Modal>
 
         <Modal visible={!!notification} transparent animationType="fade">
-          <View style={styles.modalBackground}>
-            <View style={styles.modalContainer}>
-              <Text style={styles.modalTitle}>{notification?.title}</Text>
-              <Text style={styles.notificationMessage}>{notification?.message}</Text>
+          <View style={[styles.modalBackground, { backgroundColor: colors.overlay || 'rgba(0,0,0,0.5)' }]}>
+            <View style={[styles.modalContainer, { backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1 }]}>
+              <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>{notification?.title}</Text>
+              <Text style={[styles.notificationMessage, { color: colors.textSecondary }]}>{notification?.message}</Text>
 
               <TouchableOpacity style={styles.modalButton} onPress={closeNotification}>
                 <Text style={styles.modalButtonText}>{notification?.actionLabel || 'OK'}</Text>

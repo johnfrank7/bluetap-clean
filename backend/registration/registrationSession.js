@@ -42,7 +42,7 @@ function validatePersonalInfo(input) {
   }
 }
 
-function createRegistrationSessionService({ db, hashSecret, deviceHashSecret, ipHashSecret, now = Date.now }) {
+function createRegistrationSessionService({ db, auth, hashSecret, deviceHashSecret, ipHashSecret, now = Date.now }) {
   const digest = (value) => {
     if (!hashSecret) throw new Error('Missing registration session configuration');
     return createHmac('sha256', hashSecret).update(value).digest('hex');
@@ -133,7 +133,45 @@ function createRegistrationSessionService({ db, hashSecret, deviceHashSecret, ip
     });
     return { accepted: true, termsVersion: TERMS_VERSION, privacyVersion: PRIVACY_VERSION };
   }
-  return { create, status, start, acceptTerms, activeBranches };
+  async function cancel(id) {
+    const ref = sessionRef(db, id);
+    const before = (await ref.get()).data();
+    const pendingUid = before?.finalization?.uid;
+    if (pendingUid && !before?.userUid &&
+      !(['processing', 'compensating'].includes(before.finalization?.status) && millis(before.finalization.leaseUntil) > now())) {
+      if (!auth) throw new OtpError(409, 'registration-finalization-pending', 'Account finalization may still be in progress.');
+      const account = await auth.getUser(pendingUid).catch((error) => {
+        if (error.code === 'auth/user-not-found') return null;
+        throw error;
+      });
+      if (account || (await db.collection('users').doc(pendingUid).get()).exists) {
+        throw new OtpError(409, 'registration-finalization-pending', 'Account finalization may still be in progress.');
+      }
+    }
+    await db.runTransaction(async (tx) => {
+      const session = (await tx.get(ref)).data();
+      if (!session || session.completed || millis(session.expiresAt) <= now()) return;
+      if (session.userUid || (session.finalization?.uid && (session.finalization.uid !== pendingUid || session.finalization?.owner !== before?.finalization?.owner || !auth)) ||
+        (['processing', 'compensating'].includes(session.finalization?.status) && millis(session.finalization.leaseUntil) > now())) {
+        throw new OtpError(409, 'registration-finalization-pending', 'Account finalization is in progress. Please retry finalization.');
+      }
+      const usernameRef = session.registrationUsernameNormalized ? db.collection('usernameReservations').doc(session.registrationUsernameNormalized) : null;
+      const emailRef = session.registrationOtpEmailHash ? db.collection('registrationEmailReservations').doc(session.registrationOtpEmailHash) : null;
+      const otpRef = session.registrationOtpEmailHash ? db.collection('emailOtpVerifications').doc('registration-' + session.registrationOtpEmailHash) : null;
+      const username = usernameRef ? (await tx.get(usernameRef)).data() : null;
+      const email = emailRef ? (await tx.get(emailRef)).data() : null;
+      const otp = otpRef ? (await tx.get(otpRef)).data() : null;
+      if (username?.registrationSessionId === id) tx.delete(usernameRef);
+      if (email?.registrationSessionId === id) {
+        tx.delete(emailRef);
+        if (otp) tx.update(otpRef, { otpHash: null, status: 'invalidated' });
+      }
+      tx.update(ref, { cancelled: true, expiresAt: new Date(now()),
+        ...(pendingUid ? {} : { registrationOtpEmailHash: null, registrationUsernameNormalized: null }) });
+    });
+    return { cancelled: true };
+  }
+  return { create, status, start, acceptTerms, cancel, activeBranches };
 }
 
 // Trusted provider/backend integration only. Never expose this directly as a

@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { useLocalSearchParams } from 'expo-router';
 import {
   ActivityIndicator,
   Platform,
@@ -195,10 +196,17 @@ function DistributorDispatchQueue({ styles, colors, isDark, onShowToast }) {
 
   const actTransfer = async (orderId, targetBranchId) => {
     if (updatingId) return;
+    const cleanReason = String(transferReason || '').trim();
+    if (!cleanReason) {
+      const msg = 'Add a short transfer coordination note.';
+      setError(msg);
+      onShowToast?.(msg, 'error');
+      return;
+    }
     setUpdatingId(orderId);
     setError('');
     try {
-      await dispatchManagerOrder(orderId, 'request-transfer', { targetBranchId, transferReason });
+      await dispatchManagerOrder(orderId, 'request-transfer', { targetBranchId, transferReason: cleanReason });
       setTransferringOrderId('');
       setTransferReason('');
       onShowToast?.('Branch transfer requested successfully.', 'success');
@@ -465,11 +473,19 @@ export default function ManagerDistributorsPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [search, setSearch] = useState('');
-  const [applicationsVisible, setApplicationsVisible] = useState(false);
+  const params = useLocalSearchParams();
+  const shouldOpenApplications = params?.tab === 'applications' || !!params?.applicantId;
+  const [applicationsVisible, setApplicationsVisible] = useState(shouldOpenApplications);
   const [actionBusyUid, setActionBusyUid] = useState('');
   const [rejectingUid, setRejectingUid] = useState('');
   const [rejectReason, setRejectReason] = useState('');
   const [toast, setToast] = useState({ visible: false, message: '', type: 'info' });
+
+  useEffect(() => {
+    if (params?.tab === 'applications' || params?.applicantId) {
+      setApplicationsVisible(true);
+    }
+  }, [params?.tab, params?.applicantId]);
 
   const showToast = (message, type = 'info') => {
     setToast({ visible: true, message, type });

@@ -34,9 +34,9 @@ export const createAdminAccount = async (account) => {
 export const manageAdminAccount = async (uid, action, changes = {}) => {
   const updated = (await request('/api/admin/accounts', 'PATCH', { uid, action, ...changes })).account;
   invalidateAdminData(ADMIN_CACHE_KEYS.accounts);
-  if (['deactivate', 'reactivate', 'updateProfile', 'reassignManager', 'updateAccount'].includes(action)) invalidateAdminData(ADMIN_CACHE_KEYS.dashboard);
-  if (updated?.role === 'manager' && ['deactivate', 'reactivate', 'reassignManager', 'updateProfile', 'updateAccount'].includes(action)) invalidateAdminData(ADMIN_CACHE_KEYS.branches);
-  if (updated?.role === 'distributor' && ['deactivate', 'reactivate', 'updateProfile', 'updateAccount'].includes(action)) invalidateAdminData(ADMIN_CACHE_KEYS.distributors);
+  if (['deactivate', 'suspend', 'reactivate', 'updateProfile', 'reassignManager', 'updateAccount'].includes(action)) invalidateAdminData(ADMIN_CACHE_KEYS.dashboard);
+  if (updated?.role === 'manager' && ['deactivate', 'suspend', 'reactivate', 'reassignManager', 'updateProfile', 'updateAccount'].includes(action)) invalidateAdminData(ADMIN_CACHE_KEYS.branches);
+  if (updated?.role === 'distributor' && ['deactivate', 'suspend', 'reactivate', 'updateProfile', 'updateAccount'].includes(action)) invalidateAdminData(ADMIN_CACHE_KEYS.distributors);
   return updated;
 };
 export const getDistributors = async () => (await request('/api/admin/distributors')).distributors || [];

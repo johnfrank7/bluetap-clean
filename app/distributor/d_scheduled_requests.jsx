@@ -4,6 +4,7 @@ import {
   Alert,
   Modal,
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -24,7 +25,7 @@ import PortalSwipeContainer, { DISTRIBUTOR_TABS } from '../../components/PortalS
 import { createPortalStyleSheet, useBlueTapTheme } from '../../components/BlueTapTheme';
 import TopToastFeedback from '../../components/TopToastFeedback';
 import { USER_PORTAL_BOTTOM_CONTENT_INSET, USER_PORTAL_LAYOUT } from '../../constants/userPortalLayout';
-import { BLUETAP_COLORS } from '../../constants/bluetapTheme';
+import { BLUETAP_COLORS, BLUETAP_DARK_COLORS } from '../../constants/bluetapTheme';
 import {
   normalizeDistributorOrderStatus,
   rescheduleAssignedDelivery,
@@ -70,9 +71,23 @@ const getQuantityNumber = (quantity) => {
 const getDetailsRequestData = (request) => {
   if (!request) return null;
 
-  const totalAmount = getAmountNumber(request.amountDue);
+  const totalAmount = getAmountNumber(
+    request.totalAtOrder ?? request.totalAmount ?? request.total_cost ?? request.amountDue
+  );
   const quantity = getQuantityNumber(request.quantity);
-  const unitPrice = quantity > 0 ? totalAmount / quantity : totalAmount;
+  const unitPrice = quantity > 0 && totalAmount !== undefined ? totalAmount / quantity : totalAmount;
+
+  const items = Array.isArray(request.items) && request.items.length > 0
+    ? request.items
+    : [
+        {
+          id: request.id,
+          productName: request.productName || 'Product',
+          quantity: request.quantity,
+          unitPrice,
+          subtotal: request.subtotalAtOrder ?? request.subtotal ?? totalAmount,
+        },
+      ];
 
   return {
     requestId: request.id,
@@ -83,8 +98,8 @@ const getDetailsRequestData = (request) => {
     containerType: request.container,
     quantity: request.quantity,
     totalAmount,
-    waterStation: 'Not set',
-    paymentMethod: 'Not set',
+    waterStation: request.waterStation || request.water_station || 'Not set',
+    paymentMethod: request.paymentMethod || request.payment_method || 'Not set',
     requesterName: request.requester,
     requesterUniqueId: formatDisplayUniqueId(request.requesterId || request.requester_unique_id || request.requesterUniqueId, 'Not assigned'),
     customerName: request.requester,
@@ -99,16 +114,15 @@ const getDetailsRequestData = (request) => {
     failureReasonCode: request.failureReasonCode,
     failureReasonLabel: request.failureReasonLabel,
     failureReasonNote: request.failureReasonNote,
-    items: [
-      {
-        id: request.id,
-        productName: request.productName,
-        quantity: request.quantity,
-        unitPrice,
-        subtotal: totalAmount,
-      },
-    ],
-    grandTotalAmount: totalAmount,
+    subtotal: request.subtotalAtOrder ?? request.subtotal,
+    subtotalAtOrder: request.subtotalAtOrder ?? request.subtotal,
+    deliveryFee: request.deliveryFeeAtOrder ?? request.deliveryFee,
+    deliveryFeeAtOrder: request.deliveryFeeAtOrder ?? request.deliveryFee,
+    deliveryFeePolicy: request.deliveryFeePolicy || null,
+    distanceKmAtOrder: request.distanceKmAtOrder,
+    totalAtOrder: request.totalAtOrder ?? totalAmount,
+    items,
+    grandTotalAmount: request.totalAtOrder ?? totalAmount,
   };
 };
 
@@ -242,7 +256,8 @@ export default function DistributorScheduledRequests() {
   const [toast, setToast] = useState({ visible: false, message: '', type: 'success' });
 
   const { isComplete, loading: profileLoading } = useDistributorProfile();
-  const { orders, loading, error, refresh } = useAssignedDistributorOrders();
+  const { orders, loading, error, refresh, hasLoadedOnce, refreshing } = useAssignedDistributorOrders();
+  const [retrying, setRetrying] = useState(false);
   const scheduledRequests = useMemo(
     () =>
       orders
@@ -251,6 +266,18 @@ export default function DistributorScheduledRequests() {
     [orders]
   );
   const scheduledPresentation = useAnimatedPresenceList(scheduledRequests, (request) => request.sourceId);
+
+  const handleRetry = async () => {
+    if (retrying || refreshing) return;
+    setRetrying(true);
+    try {
+      await refresh();
+    } catch {
+      // Error is tracked in hook state
+    } finally {
+      setRetrying(false);
+    }
+  };
 
   React.useEffect(() => {
     const rawTarget = params.orderId || params.id;
@@ -287,13 +314,21 @@ export default function DistributorScheduledRequests() {
     setActionError('');
     setProcessingRequestId(request.sourceId);
     try {
-      await updateAssignedDistributorOrder(request.sourceId, action);
-      await refresh();
+      await updateAssignedDistributorOrder(request.sourceId, action, {
+        expectedAssignmentVersion: request.assignmentVersion,
+      });
+      try {
+        await refresh();
+      } catch {
+        // Non-blocking background sync error
+      }
       const isDelivered = action === 'mark-delivered';
       setToast({ visible: true, message: isDelivered ? 'Delivery completed successfully!' : 'Delivery started.', type: isDelivered ? 'success' : 'info' });
     } catch (updateError) {
       setActionError(updateError.message || 'The delivery could not be updated.');
-      setToast({ visible: true, message: updateError.message || 'The delivery could not be updated.', type: 'error' });
+      if (updateError.statusUnknown) {
+        setToast({ visible: true, message: updateError.message || 'Unable to confirm the action. Please refresh or check the order status.', type: 'info' });
+      }
     } finally {
       setProcessingRequestId('');
     }
@@ -318,13 +353,21 @@ export default function DistributorScheduledRequests() {
     setProcessingRequestId(reschedulingRequest.sourceId);
     setRescheduleError('');
     try {
-      await rescheduleAssignedDelivery(reschedulingRequest.sourceId, target.toISOString());
-      await refresh();
+      await rescheduleAssignedDelivery(reschedulingRequest.sourceId, target.toISOString(), {
+        expectedAssignmentVersion: reschedulingRequest.assignmentVersion,
+      });
+      try {
+        await refresh();
+      } catch {
+        // Non-blocking background sync error
+      }
       setReschedulingRequest(null);
       setToast({ visible: true, message: 'Delivery rescheduled successfully.', type: 'success' });
     } catch (err) {
       setRescheduleError(err.message || 'Failed to reschedule delivery.');
-      setToast({ visible: true, message: err.message || 'Failed to reschedule delivery.', type: 'error' });
+      if (err.statusUnknown) {
+        setToast({ visible: true, message: err.message || 'Unable to confirm the action. Please refresh or check the order status.', type: 'info' });
+      }
     } finally {
       setProcessingRequestId('');
     }
@@ -370,61 +413,160 @@ export default function DistributorScheduledRequests() {
             </View>
           </View>
 
-          <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+          <ScrollView
+            contentContainerStyle={styles.scrollContent}
+            showsVerticalScrollIndicator={false}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing && hasLoadedOnce}
+                onRefresh={handleRetry}
+                colors={[BLUE]}
+                tintColor={BLUE}
+              />
+            }
+          >
             {!!actionError && (
-              <View style={styles.actionErrorCard}>
-                <Text style={styles.actionErrorText}>{actionError}</Text>
+              <View style={styles.actionErrorCard} accessibilityRole="alert">
+                <View style={styles.actionErrorTextWrapper}>
+                  <Text style={styles.actionErrorText}>{actionError}</Text>
+                </View>
+                <TouchableOpacity
+                  accessibilityRole="button"
+                  accessibilityLabel="Dismiss error"
+                  onPress={() => setActionError('')}
+                  style={styles.actionErrorDismissBtn}
+                >
+                  <Text style={styles.actionErrorDismissText}>Dismiss</Text>
+                </TouchableOpacity>
               </View>
             )}
 
-            {loading ? (
-              <View style={styles.emptyCard}>
+            {loading && !hasLoadedOnce ? (
+              <View style={styles.emptyCard} accessibilityRole="progressbar" accessibilityLabel="Loading assigned schedule">
                 <ActivityIndicator color={BLUE} />
-                <Text style={styles.emptyText}>Loading assigned schedule...</Text>
+                <Text style={[styles.emptyText, { color: colors.textSecondary }]}>Loading assigned schedule...</Text>
               </View>
-            ) : error ? (
-              <View style={styles.emptyCard}>
-                <Text style={styles.emptyTitle}>Schedule unavailable.</Text>
-                <Text style={styles.emptyText}>{error}</Text>
-                <TouchableOpacity onPress={refresh} style={styles.secondaryActionButton}>
-                  <Text style={styles.secondaryActionText}>Try Again</Text>
+            ) : error && !hasLoadedOnce && scheduledPresentation.length === 0 ? (
+              <View style={styles.emptyCard} accessibilityRole="alert">
+                <Text style={[styles.emptyTitle, { color: colors.textPrimary }]}>Schedule unavailable.</Text>
+                <Text style={[styles.emptyText, { color: colors.textSecondary }]}>{error}</Text>
+                <TouchableOpacity
+                  accessibilityRole="button"
+                  accessibilityLabel="Try again"
+                  disabled={retrying || refreshing}
+                  onPress={handleRetry}
+                  style={[styles.secondaryActionButton, (retrying || refreshing) && styles.actionButtonDisabled]}
+                >
+                  {retrying || refreshing ? (
+                    <ActivityIndicator size="small" color={BLUE} />
+                  ) : (
+                    <Text style={styles.secondaryActionText}>Try Again</Text>
+                  )}
                 </TouchableOpacity>
               </View>
-            ) : scheduledPresentation.length === 0 ? (
-              <BlueTapEmptyState
-                variant="schedule"
-                title="No Scheduled Deliveries"
-                description="Accepted and upcoming assigned deliveries will appear here."
-              />
             ) : (
-              scheduledPresentation.map((entry) => (
-                <AnimatedPresenceItem key={entry.id} phase={entry.phase}>
-                <ScheduledRequestCard
-                  request={entry.item}
-                  actionsDisabled={entry.actionsDisabled}
-                  processing={processingRequestId === entry.id}
-                  onAdvance={advanceDelivery}
-                  onOpenRescheduleModal={(req) => {
-                    if (!isComplete) {
-                      Alert.alert(
-                        'Profile Incomplete',
-                        'Please complete your distributor profile before updating deliveries.',
-                        [
-                          { text: 'Cancel', style: 'cancel' },
-                          { text: 'Complete Profile', onPress: () => router.push('/distributor/d_profile') },
-                        ]
-                      );
-                      return;
-                    }
-                    setReschedulingRequest(req);
-                    setSelectedDayOffset(1);
-                    setSelectedSlotIndex(0);
-                    setRescheduleError('');
-                  }}
-                  onViewDetails={(request) => setSelectedRequestId(request.sourceId)}
-                />
-                </AnimatedPresenceItem>
-              ))
+              <>
+                {!!error && (
+                  <View
+                    style={[
+                      styles.staleNoticeCard,
+                      {
+                        backgroundColor: isDark ? BLUETAP_DARK_COLORS.warningSoft : BLUETAP_COLORS.warningSoft,
+                        borderColor: isDark ? BLUETAP_DARK_COLORS.warning : BLUETAP_COLORS.warning,
+                      },
+                    ]}
+                    accessibilityRole="alert"
+                  >
+                    <View style={styles.staleNoticeTextContainer}>
+                      <Text
+                        style={[
+                          styles.staleNoticeTitle,
+                          { color: isDark ? BLUETAP_DARK_COLORS.warning : BLUETAP_COLORS.warning },
+                        ]}
+                      >
+                        Unable to refresh deliveries
+                      </Text>
+                      <Text
+                        style={[
+                          styles.staleNoticeSubtitle,
+                          { color: isDark ? BLUETAP_DARK_COLORS.textSecondary : BLUETAP_COLORS.textSecondary },
+                        ]}
+                      >
+                        {scheduledPresentation.length === 0
+                          ? 'Showing previously confirmed empty schedule.'
+                          : 'Showing previously loaded information.'}
+                      </Text>
+                    </View>
+                    <TouchableOpacity
+                      accessibilityRole="button"
+                      accessibilityLabel="Retry refreshing deliveries"
+                      disabled={retrying || refreshing}
+                      onPress={handleRetry}
+                      style={[
+                        styles.staleRetryButton,
+                        {
+                          backgroundColor: colors.surface,
+                          borderColor: isDark ? BLUETAP_DARK_COLORS.warning : BLUETAP_COLORS.warning,
+                        },
+                        (retrying || refreshing) && styles.actionButtonDisabled,
+                      ]}
+                    >
+                      {retrying || refreshing ? (
+                        <ActivityIndicator
+                          size="small"
+                          color={isDark ? BLUETAP_DARK_COLORS.warning : BLUETAP_COLORS.warning}
+                        />
+                      ) : (
+                        <Text
+                          style={[
+                            styles.staleRetryText,
+                            { color: isDark ? BLUETAP_DARK_COLORS.warning : BLUETAP_COLORS.warning },
+                          ]}
+                        >
+                          Retry
+                        </Text>
+                      )}
+                    </TouchableOpacity>
+                  </View>
+                )}
+
+                {scheduledPresentation.length === 0 ? (
+                  <BlueTapEmptyState
+                    variant="schedule"
+                    title="No Scheduled Deliveries"
+                    description="Once you accept an assigned delivery, it will appear here when scheduled."
+                  />
+                ) : (
+                  scheduledPresentation.map((entry) => (
+                    <AnimatedPresenceItem key={entry.id} phase={entry.phase}>
+                      <ScheduledRequestCard
+                        request={entry.item}
+                        actionsDisabled={entry.actionsDisabled}
+                        processing={processingRequestId === entry.id}
+                        onAdvance={advanceDelivery}
+                        onOpenRescheduleModal={(req) => {
+                          if (!isComplete) {
+                            Alert.alert(
+                              'Profile Incomplete',
+                              'Please complete your distributor profile before updating deliveries.',
+                              [
+                                { text: 'Cancel', style: 'cancel' },
+                                { text: 'Complete Profile', onPress: () => router.push('/distributor/d_profile') },
+                              ]
+                            );
+                            return;
+                          }
+                          setReschedulingRequest(req);
+                          setSelectedDayOffset(1);
+                          setSelectedSlotIndex(0);
+                          setRescheduleError('');
+                        }}
+                        onViewDetails={(request) => setSelectedRequestId(request.sourceId)}
+                      />
+                    </AnimatedPresenceItem>
+                  ))
+                )}
+              </>
             )}
           </ScrollView>
         </View>
@@ -757,10 +899,63 @@ const styles = createPortalStyleSheet({
     borderRadius: 8,
     padding: 10,
     marginBottom: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  actionErrorTextWrapper: {
+    flex: 1,
   },
   actionErrorText: {
     color: BLUETAP_COLORS.danger,
     fontSize: 13,
+    fontWeight: '700',
+  },
+  actionErrorDismissBtn: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    backgroundColor: 'rgba(181, 47, 47, 0.1)',
+  },
+  actionErrorDismissText: {
+    color: BLUETAP_COLORS.danger,
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  staleNoticeCard: {
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  staleNoticeTextContainer: {
+    flex: 1,
+  },
+  staleNoticeTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    marginBottom: 2,
+  },
+  staleNoticeSubtitle: {
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  staleRetryButton: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 64,
+  },
+  staleRetryText: {
+    fontSize: 12,
     fontWeight: '700',
   },
   modalOverlay: {

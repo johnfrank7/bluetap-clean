@@ -58,10 +58,34 @@ function toManagerOrder(id, data = {}, branchName = '') {
   };
 }
 
+function isEligiblePendingDistributor(user = {}) {
+  if (!user || typeof user !== 'object') return false;
+  if (user.role !== 'distributor') return false;
+  if (user.registrationCompleted === false) return false;
+  const onboarding = String(user.onboardingStatus || '').trim().toLowerCase();
+  if (['face_enrollment_pending', 'finalization_pending', 'incomplete', 'abandoned', 'failed'].includes(onboarding)) {
+    return false;
+  }
+  if (user.emailVerificationRequired === true && user.emailVerified === false) {
+    return false;
+  }
+  const otpStatus = String(user.emailOtpVerification?.status || '').trim().toLowerCase();
+  if (['pending', 'unverified', 'failed'].includes(otpStatus)) {
+    return false;
+  }
+  const faceStatus = String(user.faceVerification?.status || '').trim().toLowerCase();
+  if (['passed_pending_finalization', 'in_progress', 'pending_enrollment', 'failed'].includes(faceStatus)) {
+    return false;
+  }
+  const status = statusOf(user.distributorStatus || user.approvalStatus || user.status || user.accountStatus);
+  return status === 'pending';
+}
+
 function pendingBranchApplications(users = [], branchId = '') {
-  return users.filter((user) => user.role === 'distributor' && user.requestedBranchId === branchId &&
-    statusOf(user.distributorStatus || user.approvalStatus || user.status) === 'pending');
+  if (!branchId) return [];
+  return users.filter((user) => user.requestedBranchId === branchId && isEligiblePendingDistributor(user));
 }
 
 module.exports = { REVIEW_STATUS, DISPATCH_STATUS, EDITABLE_STATUSES, statusOf, belongsToBranch,
-  needsReview, needsException, needsDispatch, compareDispatchPriority, canEdit, getManagerQueues, toManagerOrder, pendingBranchApplications };
+  needsReview, needsException, needsDispatch, compareDispatchPriority, canEdit, getManagerQueues, toManagerOrder,
+  isEligiblePendingDistributor, pendingBranchApplications };

@@ -1,8 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -19,6 +17,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { auth } from '../../firebase';
 import { findLocalUserForAuthRole } from '../../localUsers';
 import RequestDetailsModal from '../../components/RequestDetailsModal';
+import CancelRequestModal from '../../components/CancelRequestModal';
 import { useRequesterData } from '../../components/RoleDataProviders';
 import RequesterEditOrderModal from '../../components/RequesterEditOrderModal';
 import SoftStatusBadge, { normalizeStatus } from '../../components/SoftStatusBadge';
@@ -222,6 +221,13 @@ const getDetailsRequestData = (request) =>
         branchLocation: request.branchLocation,
         branchId: request.currentBranchId || request.branchId,
         items: getRequestItems(request),
+        subtotalAtOrder: request.subtotalAtOrder ?? request.subtotal,
+        subtotal: request.subtotalAtOrder ?? request.subtotal,
+        deliveryFeeAtOrder: request.deliveryFeeAtOrder ?? request.deliveryFee ?? request.delivery_fee,
+        deliveryFee: request.deliveryFeeAtOrder ?? request.deliveryFee ?? request.delivery_fee,
+        deliveryFeePolicy: request.deliveryFeePolicy || null,
+        distanceKmAtOrder: request.distanceKmAtOrder ?? request.distanceKmSnapshot,
+        totalAtOrder: request.totalAtOrder ?? request.total_cost ?? getTotalAmount(request),
         grandTotalAmount: getTotalAmount(request),
         failureReason: request.failureReason,
         failureReasonCode: request.failureReasonCode,
@@ -361,6 +367,7 @@ export default function RequesterRequests() {
   const [editingRequest, setEditingRequest] = useState(null);
   const [activeTab, setActiveTab] = useState(ACTIVE_TAB);
   const [cancellingRequestId, setCancellingRequestId] = useState('');
+  const [requestToCancel, setRequestToCancel] = useState(null);
   const [toast, setToast] = useState({ visible: false, message: '', type: 'info' });
   const [ordersLoading, setOrdersLoading] = useState(true);
   const [ordersError, setOrdersError] = useState('');
@@ -419,7 +426,7 @@ export default function RequesterRequests() {
   };
 
   const cancelPendingRequest = async (request) => {
-    if (cancellingRequestId) return;
+    if (!request?.id || cancellingRequestId) return;
 
     try {
       setCancellingRequestId(request.id);
@@ -431,50 +438,37 @@ export default function RequesterRequests() {
             : currentRequest
         )
       );
-      setToast({ visible: true, message: 'Order request cancelled successfully.', type: 'info' });
+      setRequestToCancel(null);
+      setToast({ visible: true, message: 'Water request cancelled successfully.', type: 'info' });
       const requesterId = auth.currentUser?.uid;
       if (requesterId) {
         refreshRequesterRequests(requesterId);
       }
     } catch (error) {
-      if (error.savedLocal) {
-        setRequests((currentRequests) =>
-          currentRequests.map((currentRequest) =>
-            currentRequest.id === request.id
-              ? { ...currentRequest, ...error.localRequest, status: 'Cancelled' }
-              : currentRequest
-          )
-        );
-        setToast({ visible: true, message: 'Order request cancelled locally.', type: 'info' });
-        return;
-      }
-
-      setToast({ visible: true, message: error.message || 'Cancel failed.', type: 'error' });
+      setRequestToCancel(null);
+      setToast({
+        visible: true,
+        message: error.message || 'Unable to confirm cancellation. Please check your order status.',
+        type: 'error',
+      });
     } finally {
       setCancellingRequestId('');
     }
   };
 
   const confirmCancelRequest = (request) => {
-    if (Platform.OS === 'web') {
-      const confirmed = typeof window !== 'undefined' ? window.confirm('Are you sure you want to cancel this pending request?') : true;
-      if (confirmed) {
-        cancelPendingRequest(request);
-      }
-      return;
-    }
-    Alert.alert(
-      'Cancel Request',
-      'Are you sure you want to cancel this pending request?',
-      [
-        { text: 'No', style: 'cancel' },
-        {
-          text: 'Yes, Cancel',
-          style: 'destructive',
-          onPress: () => cancelPendingRequest(request),
-        },
-      ]
-    );
+    if (!request) return;
+    setRequestToCancel(request);
+  };
+
+  const closeCancelModal = () => {
+    if (cancellingRequestId) return;
+    setRequestToCancel(null);
+  };
+
+  const proceedWithCancelRequest = async () => {
+    if (!requestToCancel || cancellingRequestId) return;
+    await cancelPendingRequest(requestToCancel);
   };
 
   return (
@@ -631,6 +625,14 @@ export default function RequesterRequests() {
                 setEditingRequest(null);
                 setToast({ visible: true, message: 'Order updated successfully.', type: 'success' });
               }}
+            />
+
+            <CancelRequestModal
+              visible={Boolean(requestToCancel)}
+              request={requestToCancel}
+              busy={Boolean(cancellingRequestId && requestToCancel?.id === cancellingRequestId)}
+              onKeep={closeCancelModal}
+              onConfirm={proceedWithCancelRequest}
             />
           </View>
         </PortalSwipeContainer>

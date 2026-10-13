@@ -149,7 +149,7 @@ const getDetailsRequestData = (request) => {
   const status = request.status || 'Pending';
   const isPending = normalizeStatus(status) === 'pending';
   const totalAmount = getAmountNumber(
-    request.totalAmount ?? request.total_amount ?? request.total_cost
+    request.totalAtOrder ?? request.totalAmount ?? request.total_amount ?? request.total_cost
   );
   const productPrice = getAmountNumber(
     request.productPrice ?? request.product_price ?? request.price
@@ -165,6 +165,18 @@ const getDetailsRequestData = (request) => {
   const distributorUniqueId = isPending
     ? ''
     : request.distributorId || request.distributor_unique_id || '';
+
+  const items = Array.isArray(request.items) && request.items.length > 0
+    ? request.items
+    : [
+        {
+          id: request.id,
+          productName: request.productName || request.product_name,
+          quantity: request.quantity,
+          unitPrice,
+          subtotal: request.subtotalAtOrder ?? request.subtotal ?? totalAmount,
+        },
+      ];
 
   return {
     requestId: request.id,
@@ -187,16 +199,15 @@ const getDetailsRequestData = (request) => {
     deliveryLocation: request.deliveryLocation,
     branchLocation: request.branchLocation,
     branchId: request.branchId,
-    items: [
-      {
-        id: request.id,
-        productName: request.productName || request.product_name,
-        quantity: request.quantity,
-        unitPrice,
-        subtotal: totalAmount,
-      },
-    ],
-    grandTotalAmount: totalAmount,
+    subtotal: request.subtotalAtOrder ?? request.subtotal,
+    subtotalAtOrder: request.subtotalAtOrder ?? request.subtotal,
+    deliveryFee: request.deliveryFeeAtOrder ?? request.deliveryFee,
+    deliveryFeeAtOrder: request.deliveryFeeAtOrder ?? request.deliveryFee,
+    deliveryFeePolicy: request.deliveryFeePolicy || null,
+    distanceKmAtOrder: request.distanceKmAtOrder,
+    totalAtOrder: request.totalAtOrder ?? totalAmount,
+    items,
+    grandTotalAmount: request.totalAtOrder ?? totalAmount,
   };
 };
 
@@ -299,15 +310,22 @@ const PendingRequestCard = memo(function PendingRequestCard({
       <View style={styles.cardActionsRow}>
         <TouchableOpacity
           activeOpacity={0.8}
-          style={styles.secondaryActionButton}
+          style={[
+            styles.secondaryActionButton,
+            isProcessing && styles.actionButtonDisabled,
+          ]}
           onPress={() => onViewDetails(request)}
+          disabled={isProcessing}
         >
           <Text style={styles.secondaryActionText}>View Details</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
           activeOpacity={0.8}
-          style={styles.declineActionButton}
+          style={[
+            styles.declineActionButton,
+            isProcessing && styles.actionButtonDisabled,
+          ]}
           onPress={() => onDecline(request)}
           disabled={isProcessing}
         >
@@ -445,13 +463,19 @@ export default function DistributorRequests() {
     if (processingRequestId) return;
     setProcessingRequestId(request.sourceId);
     try {
-      await acceptAssignedOrder(request.sourceId);
+      await acceptAssignedOrder(request.sourceId, {
+        expectedAssignmentVersion: request.assignmentVersion,
+      });
       await refresh();
       setToast({ visible: true, message: 'Assignment accepted successfully.', type: 'success' });
       showSuccessFeedback();
     } catch (acceptErr) {
       console.log('Accept error:', acceptErr);
-      setToast({ visible: true, message: acceptErr.message || 'Failed to accept assignment.', type: 'error' });
+      if (acceptErr.statusUnknown) {
+        setToast({ visible: true, message: acceptErr.message || 'Unable to confirm the action. Please refresh or check the order status.', type: 'info' });
+      } else {
+        setToast({ visible: true, message: acceptErr.message || 'Failed to accept assignment.', type: 'error' });
+      }
     } finally {
       setProcessingRequestId('');
     }
@@ -479,14 +503,20 @@ export default function DistributorRequests() {
     setDeclining(true);
     setDeclineError('');
     try {
-      await declineAssignedOrder(declineTargetRequest.sourceId, declineReason);
+      await declineAssignedOrder(declineTargetRequest.sourceId, declineReason, {
+        expectedAssignmentVersion: declineTargetRequest.assignmentVersion,
+      });
       await refresh();
       setDeclineTargetRequest(null);
       setToast({ visible: true, message: 'Assignment declined and returned to dispatch queue.', type: 'info' });
       showSuccessFeedback();
     } catch (err) {
       setDeclineError(err.message || 'Failed to decline assignment.');
-      setToast({ visible: true, message: err.message || 'Failed to decline assignment.', type: 'error' });
+      if (err.statusUnknown) {
+        setToast({ visible: true, message: err.message || 'Unable to confirm the action. Please refresh or check the order status.', type: 'info' });
+      } else {
+        setToast({ visible: true, message: err.message || 'Failed to decline assignment.', type: 'error' });
+      }
     } finally {
       setDeclining(false);
     }
@@ -622,6 +652,7 @@ export default function DistributorRequests() {
     try {
       await updateAssignedDistributorOrder(selectedRequest.sourceId, 'schedule-delivery', {
         scheduledAt: resolvedSchedule.scheduledAt,
+        expectedAssignmentVersion: selectedRequest.assignmentVersion,
       });
       await refresh();
       closeScheduleSheet(true);
@@ -629,7 +660,11 @@ export default function DistributorRequests() {
       showSuccessFeedback();
     } catch (submitError) {
       setScheduleError(submitError.message || 'The delivery schedule could not be saved.');
-      setToast({ visible: true, message: submitError.message || 'The delivery schedule could not be saved.', type: 'error' });
+      if (submitError.statusUnknown) {
+        setToast({ visible: true, message: submitError.message || 'Unable to confirm the action. Please refresh or check the order status.', type: 'info' });
+      } else {
+        setToast({ visible: true, message: submitError.message || 'The delivery schedule could not be saved.', type: 'error' });
+      }
     } finally {
       setProcessingRequestId('');
     }
@@ -1062,19 +1097,19 @@ const styles = createPortalStyleSheet({
     flexGrow: 1,
     flexBasis: 104,
     minWidth: 0,
-    minHeight: 38,
+    minHeight: 44,
     paddingHorizontal: 12,
-    borderRadius: 8,
-    borderWidth: 1,
+    borderRadius: 12,
+    borderWidth: 1.5,
     borderColor: BLUETAP_COLORS.danger,
-    backgroundColor: BLUETAP_COLORS.dangerSoft,
+    backgroundColor: BLUETAP_COLORS.surface,
     alignItems: 'center',
     justifyContent: 'center',
   },
   declineActionText: {
     color: BLUETAP_COLORS.danger,
-    fontSize: 12,
-    fontWeight: '800',
+    fontSize: 13,
+    fontWeight: 'bold',
   },
   declineModalBackdrop: {
     flex: 1,
@@ -1146,6 +1181,7 @@ const styles = createPortalStyleSheet({
     flexBasis: 104,
     minWidth: 0,
     minHeight: 44,
+    paddingHorizontal: 12,
     borderWidth: 1.5,
     borderColor: BLUE,
     backgroundColor: BLUETAP_COLORS.surface,
@@ -1156,19 +1192,20 @@ const styles = createPortalStyleSheet({
   secondaryActionText: {
     color: BLUE,
     fontSize: 13,
-    fontWeight: '600',
+    fontWeight: 'bold',
   },
   primaryActionButton: {
     flexGrow: 1,
     flexBasis: 142,
     minWidth: 0,
     minHeight: 44,
-    backgroundColor: BLUE,
-    borderRadius: 16,
+    paddingHorizontal: 12,
+    backgroundColor: BLUETAP_COLORS.success,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
     ...createShadow({
-      color: BLUE,
+      color: BLUETAP_COLORS.success,
       elevation: 4,
       opacity: 0.18,
       radius: 10,

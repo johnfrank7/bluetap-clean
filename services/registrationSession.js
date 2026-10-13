@@ -107,4 +107,6 @@ export const getRegistrationBranches = async () => {
   return result.branches.filter((branch) => typeof branch?.id === 'string' && typeof branch?.name === 'string');
 };
 export const getRegistrationSessionStatus = (registrationSessionId) => callRegistrationApi('/api/auth/registration-session-status', { registrationSessionId });
+export const getRegistrationAvailability = (username, email, registrationSessionId) => callRegistrationApi('/api/auth/registration-availability', { username, email, registrationSessionId });
+export const cancelRegistrationSession = (registrationSessionId) => callRegistrationApi('/api/auth/cancel-registration-session', { registrationSessionId }, 5000);
 export const acceptRegistrationTerms = (registrationSessionId) => callRegistrationApi('/api/auth/accept-registration-terms', { registrationSessionId });

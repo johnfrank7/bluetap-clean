@@ -16,6 +16,7 @@ const {
   validateDeliveryPricingInput,
   updateBranchDeliveryPricingInTransaction,
 } = require('../pricing/deliveryPricingService');
+const { ACCOUNT_STATUS, canonicalAccountStatus } = require('../auth/accountStatus');
 
 function bodyOf(req) {
   if (req.body && typeof req.body === 'object') return req.body;
@@ -231,6 +232,9 @@ function createManagerWorkspaceHandler(getAdmin = getFirebaseAdmin) {
               if (clean(target.branchId, 128) !== branchId) {
                 throw new OtpError(403, 'CROSS_BRANCH_FORBIDDEN', 'You can only suspend Distributors assigned to your branch.');
               }
+              if (['pending', 'rejected'].includes(distributorState(target))) {
+                throw new OtpError(409, 'DISTRIBUTOR_NOT_ACTIVE', 'Only approved or active distributors can be suspended from the branch.');
+              }
               const beforeState = distributorState(target);
               tx.update(targetRef, {
                 distributorStatus: 'suspended',
@@ -380,11 +384,24 @@ function createManagerWorkspaceHandler(getAdmin = getFirebaseAdmin) {
             if (['admin', 'manager'].includes(target.role)) {
               throw new OtpError(403, 'PRIVILEGED_TARGET_FORBIDDEN', 'Managers cannot modify Admin or Manager accounts.');
             }
+            const explicitGlobalStatus = target.accountStatus ? String(target.accountStatus).trim().toLowerCase() : '';
+            if (explicitGlobalStatus === ACCOUNT_STATUS.SUSPENDED) {
+              throw new OtpError(409, 'ACCOUNT_GLOBALLY_SUSPENDED', 'This account is globally suspended by an Administrator and cannot be restored at the branch level.');
+            }
+            if (explicitGlobalStatus === ACCOUNT_STATUS.TERMINATED) {
+              throw new OtpError(409, 'ACCOUNT_TERMINATED', 'A terminated account cannot be restored.');
+            }
+            if (explicitGlobalStatus === ACCOUNT_STATUS.INACTIVE) {
+              throw new OtpError(409, 'ACCOUNT_INACTIVE', 'This account is inactive and cannot be restored at the branch level.');
+            }
             const targetPublicUid = clean(target.publicUid || target.displayUid || target.uniqueId, 80);
 
             if (target.role === 'distributor') {
               if (clean(target.branchId, 128) !== branchId) {
                 throw new OtpError(403, 'CROSS_BRANCH_FORBIDDEN', 'You can only restore Distributors assigned to your branch.');
+              }
+              if (['pending', 'rejected'].includes(distributorState(target))) {
+                throw new OtpError(409, 'DISTRIBUTOR_APPROVAL_REQUIRED', 'Pending or rejected distributor applicants cannot be restored through branch access controls. Use the application workflow.');
               }
               const beforeState = distributorState(target);
               tx.update(targetRef, {

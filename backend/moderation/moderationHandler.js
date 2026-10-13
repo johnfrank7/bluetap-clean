@@ -1,6 +1,7 @@
 const { randomUUID } = require('node:crypto');
 const { getFirebaseAdmin } = require('../firebase/firebaseAdmin');
 const { canonicalAccountStatus, ACCOUNT_STATUS } = require('../auth/accountStatus');
+const { syncAuthWithAccountStatus } = require('../auth/accountAuthConsistency');
 const { requireActiveManager, requireAdmin, verifiedIdentity } = require('../auth/authorization');
 const { applyCors } = require('../utils/cors');
 const { OtpError } = require('../utils/otpError');
@@ -21,6 +22,8 @@ const {
 
 const MANAGER_ACTIONS = new Set(['dismiss', 'warn', 'suspend_branch_chat', 'suspend_branch_ordering', 'escalate']);
 const ADMIN_ACTIONS = new Set(['dismiss', 'warn', 'suspend_platform_chat', 'suspend_platform_ordering', 'suspend_account', 'terminate_account', 'reactivate']);
+const ALL_MODERATION_ACTIONS = new Set([...MANAGER_ACTIONS, ...ADMIN_ACTIONS]);
+const ABUSE_REVIEW_ACTIONS = new Set(['dismiss', 'warn', 'suspend_branch_ordering', 'suspend_platform_ordering', 'suspend_account', 'terminate_account', 'escalate']);
 const RESTRICTION_ACTIONS = new Set(['suspend_branch_chat', 'suspend_branch_ordering', 'suspend_platform_chat', 'suspend_platform_ordering']);
 const NOTICE_ACTIONS = new Set(['warn', ...RESTRICTION_ACTIONS, 'suspend_account']);
 
@@ -100,8 +103,13 @@ function safeAbuseReview(review = {}) {
     status: clean(review.status || 'open', 24),
     firstIncidentAt: isoTimestamp(review.firstIncidentAt),
     lastIncidentAt: isoTimestamp(review.lastIncidentAt),
+    createdAt: isoTimestamp(review.createdAt || review.firstIncidentAt),
+    updatedAt: isoTimestamp(review.updatedAt),
+    reviewedAt: isoTimestamp(review.reviewedAt),
+    actionTaken: clean(review.actionTaken, 80) || null,
     incidents: (review.incidents || []).slice(-10).map((incident) => ({
-      orderReference: clean(incident.orderReference, 80),
+      orderId: clean(incident.orderId, 128) || null,
+      orderReference: clean(incident.orderReference || incident.orderId, 80) || 'Unavailable',
       type: clean(incident.type, 48),
       category: clean(incident.category, 80),
       stage: clean(incident.stage, 48),
@@ -150,11 +158,42 @@ async function reportList(db, { branchId = '', status = '', limit = 25, cursor =
   };
 }
 
-async function abuseReviewList(db, { branchId = '', limit = 25 } = {}) {
+async function abuseReviewList(db, { branchId = '', status = '', limit = 25 } = {}) {
   let query = db.collection('orderAbuseReviews');
   if (branchId) query = query.where('branchId', '==', branchId);
+  if (status === 'active' || status === 'open') query = query.where('status', '==', 'open');
+  else if (status === 'resolved') query = query.where('status', '==', 'resolved');
+  else if (status) query = query.where('status', '==', status);
   const snapshot = await query.orderBy('updatedAt', 'desc').limit(limit).get();
   return { abuseReviews: (snapshot.docs || []).map((item) => safeAbuseReview(withId(item))) };
+}
+
+async function abuseReviewDetail(db, abuseReviewId, branchId = '') {
+  const snapshot = await db.collection('orderAbuseReviews').doc(clean(abuseReviewId, 128)).get();
+  const review = withId(snapshot);
+  if (!review || (branchId && clean(review.branchId, 128) !== branchId)) {
+    throw new OtpError(404, 'ABUSE_REVIEW_NOT_FOUND', 'The order-abuse review was not found.');
+  }
+  const targetUid = clean(review.requesterUid, 128);
+  const [actions, chatRestriction, orderingRestriction] = await Promise.all([
+    db.collection('moderationActions').where('orderAbuseReviewId', '==', review.id).orderBy('createdAt', 'desc').limit(50).get(),
+    targetUid ? db.collection('chatRestrictions').doc(targetUid).get() : Promise.resolve({ exists: false }),
+    targetUid ? db.collection('orderingRestrictions').doc(targetUid).get() : Promise.resolve({ exists: false }),
+  ]);
+  const now = Date.now();
+  const restrictions = [];
+  for (const [kind, restrictionSnapshot] of [['chat', chatRestriction], ['ordering', orderingRestriction]]) {
+    if (!restrictionSnapshot.exists) continue;
+    const data = restrictionSnapshot.data() || {};
+    if (data.platform && timeOf(data.platform.endsAt) > now) restrictions.push({ kind, ...safeRestriction(data.platform) });
+    const branch = data.branches?.[review.branchId];
+    if (branch && timeOf(branch.endsAt) > now) restrictions.push({ kind, ...safeRestriction(branch) });
+  }
+  return {
+    abuseReview: safeAbuseReview(review),
+    actions: (actions.docs || []).map((item) => safeAction(withId(item))),
+    restrictions,
+  };
 }
 
 async function reportDetail(db, reportId, branchId = '') {
@@ -197,27 +236,38 @@ function restrictionCollection(scope) {
   return scope.endsWith('_chat') ? 'chatRestrictions' : 'orderingRestrictions';
 }
 
+const REQUESTED_ACCOUNT_STATUS = {
+  suspend_account: ACCOUNT_STATUS.SUSPENDED,
+  terminate_account: ACCOUNT_STATUS.TERMINATED,
+  reactivate: ACCOUNT_STATUS.ACTIVE,
+};
+
 function accountStatusChanges(profile, action) {
   const current = canonicalAccountStatus(profile);
   if (action === 'suspend_account') {
     if (current !== ACCOUNT_STATUS.ACTIVE) throw new OtpError(409, 'ACCOUNT_NOT_ACTIVE', 'Only an active account can be suspended.');
-    return { accountStatus: ACCOUNT_STATUS.SUSPENDED, ...(profile.role === 'requester' ? { status: 'Suspended' } : {}) };
+    return {
+      accountStatus: ACCOUNT_STATUS.SUSPENDED,
+      ...(profile.role === 'requester' ? { status: 'Suspended' } : {}),
+      ...(profile.role === 'distributor' ? { status: 'Suspended', distributorStatus: 'suspended' } : {}),
+    };
   }
   if (action === 'terminate_account') {
-    return { accountStatus: ACCOUNT_STATUS.TERMINATED, ...(profile.role === 'requester' ? { status: 'Terminated' } : {}) };
+    return {
+      accountStatus: ACCOUNT_STATUS.TERMINATED,
+      ...(profile.role === 'requester' ? { status: 'Terminated' } : {}),
+      ...(profile.role === 'distributor' ? { status: 'Terminated', distributorStatus: 'terminated' } : {}),
+    };
   }
   if (action === 'reactivate') {
     if (![ACCOUNT_STATUS.INACTIVE, ACCOUNT_STATUS.SUSPENDED].includes(current)) throw new OtpError(409, 'ACCOUNT_NOT_REACTIVATABLE', 'Only an inactive or suspended account can be reactivated.');
-    return { accountStatus: ACCOUNT_STATUS.ACTIVE, ...(profile.role === 'requester' ? { status: 'Active' } : {}) };
+    return {
+      accountStatus: ACCOUNT_STATUS.ACTIVE,
+      ...(profile.role === 'requester' ? { status: 'Active' } : {}),
+      ...(profile.role === 'distributor' ? { status: 'Active', distributorStatus: 'active' } : {}),
+    };
   }
   return null;
-}
-
-async function applyAccountAuthState(auth, targetUid, action) {
-  if (!['suspend_account', 'terminate_account', 'reactivate'].includes(action)) return;
-  const disabled = action !== 'reactivate';
-  await auth.updateUser(targetUid, { disabled });
-  if (disabled) await auth.revokeRefreshTokens(targetUid);
 }
 
 function casePayload(report, abuseReview) {
@@ -234,29 +284,48 @@ function casePayload(report, abuseReview) {
 }
 
 async function applyModerationAction({ auth, db, actor, actorRole, actorBranch = null, body, now = new Date(), createActionId = randomUUID }) {
-  const allowed = actorRole === 'manager' ? MANAGER_ACTIONS : ADMIN_ACTIONS;
   const action = clean(body.action, 80).toLowerCase();
-  if (!allowed.has(action)) throw new OtpError(403, 'MODERATION_ACTION_DENIED', 'This moderation action is not permitted.');
-  const reportId = clean(body.reportId, 128);
-  const abuseReviewId = clean(body.abuseReviewId, 128);
-  if ((!reportId && !abuseReviewId) || (reportId && abuseReviewId)) throw new OtpError(400, 'MODERATION_CASE_REQUIRED', 'Choose one report or order-abuse review.');
+  if (!action) {
+    throw new OtpError(400, 'MODERATION_ACTION_REQUIRED', 'Choose a moderation action.');
+  }
+  if (!ALL_MODERATION_ACTIONS.has(action)) {
+    throw new OtpError(400, 'MODERATION_ACTION_INVALID', 'Choose a supported moderation decision.');
+  }
+  const reportId = clean(body.reportId || (body.caseType === 'report' ? body.caseId : ''), 128);
+  const abuseReviewId = clean(body.abuseReviewId || body.orderAbuseReviewId || (body.caseType === 'order_abuse' ? body.caseId : ''), 128);
+  if ((!reportId && !abuseReviewId) || (reportId && abuseReviewId)) {
+    throw new OtpError(400, 'MODERATION_CASE_REQUIRED', 'Choose one report or order-abuse review.');
+  }
+  if (abuseReviewId && !ABUSE_REVIEW_ACTIONS.has(action)) {
+    throw new OtpError(400, 'MODERATION_ACTION_INVALID', 'This action is not available for an order-abuse review.');
+  }
+  const allowed = actorRole === 'manager' ? MANAGER_ACTIONS : ADMIN_ACTIONS;
+  if (!allowed.has(action)) {
+    throw new OtpError(403, 'MODERATION_ACTION_DENIED', 'This moderation action is not permitted.');
+  }
   const mutationId = clean(body.clientMutationId, 128);
   if (!mutationId) throw new OtpError(400, 'MODERATION_MUTATION_REQUIRED', 'A stable moderation mutation ID is required.');
   const reasonRequired = action !== 'dismiss';
   const reason = boundedText(body.reason, { required: reasonRequired, max: 1000, reason: 'MODERATION_REASON_TOO_LONG' });
   const privateNote = boundedText(body.privateNote, { max: 1000, reason: 'MODERATION_NOTE_TOO_LONG' });
   const duration = RESTRICTION_ACTIONS.has(action) ? durationDays(body.durationDays, actorRole) : null;
-  if (abuseReviewId && !['warn', 'suspend_branch_ordering', 'suspend_platform_ordering', 'suspend_account', 'terminate_account', 'escalate'].includes(action)) {
-    throw new OtpError(403, 'MODERATION_ACTION_DENIED', 'This action is not available for an order-abuse review.');
-  }
   const actorUid = actor.uid || actor.decoded?.uid;
+  const requestedAccountStatus = REQUESTED_ACCOUNT_STATUS[action] || null;
+
   const payloadHash = hashId(JSON.stringify({ action, reportId, abuseReviewId, reason, privateNote, duration }));
   const mutationRef = db.collection('moderationMutationIds').doc(hashId(actorUid, mutationId));
   const existingMutation = await mutationRef.get();
   if (existingMutation.exists) {
     if (existingMutation.data()?.payloadHash !== payloadHash) throw new OtpError(409, 'MODERATION_MUTATION_CONFLICT', 'This mutation ID was already used for a different action.');
     const existingAction = await db.collection('moderationActions').doc(existingMutation.data()?.actionId).get();
-    if (existingAction.exists) return { created: false, action: safeAction(withId(existingAction)) };
+    if (existingAction.exists) {
+      const targetUid = existingAction.data()?.targetUid;
+      if (requestedAccountStatus && targetUid && existingMutation.data()?.authSynced !== true) {
+        await syncAuthWithAccountStatus({ auth, db, uid: targetUid, expectedStatus: requestedAccountStatus });
+        await mutationRef.update({ authSynced: true }).catch(() => {});
+      }
+      return { created: false, action: safeAction(withId(existingAction)) };
+    }
   }
 
   const caseSnapshot = reportId
@@ -275,6 +344,10 @@ async function applyModerationAction({ auth, db, actor, actorRole, actorBranch =
   if (!targetSnapshot.exists) throw new OtpError(404, 'MODERATION_TARGET_NOT_FOUND', 'The reported account was not found.');
   const targetProfile = targetSnapshot.data() || {};
   if (!['requester', 'distributor'].includes(clean(targetProfile.role, 30))) throw new OtpError(403, 'MODERATION_TARGET_DENIED', 'This account cannot be moderated through this workflow.');
+  if (requestedAccountStatus && actorUid === source.targetUid) {
+    throw new OtpError(403, 'SELF_ACTION_DENIED', 'Administrators cannot change their own account status.');
+  }
+
   if (actorRole === 'manager' && report) {
     const conversation = await db.collection('chatConversations').doc(report.conversationId).get();
     const participants = conversation.exists ? conversation.data()?.participantUserUids || [] : [];
@@ -291,14 +364,13 @@ async function applyModerationAction({ auth, db, actor, actorRole, actorBranch =
   }
 
   const accountChanges = accountStatusChanges(targetProfile, action);
-  if (accountChanges) await applyAccountAuthState(auth, source.targetUid, action);
   const actionId = createActionId();
   const startsAt = now;
   const endsAt = duration ? new Date(timeOf(now) + duration * DAY_MS) : null;
   const scope = scopeForAction(action, actorRole);
   const branchName = actorRole === 'manager' ? clean(actorBranch?.name, 160) : '';
 
-  return db.runTransaction(async (tx) => {
+  const result = await db.runTransaction(async (tx) => {
     const latestMutation = await tx.get(mutationRef);
     if (latestMutation.exists) {
       if (latestMutation.data()?.payloadHash !== payloadHash) throw new OtpError(409, 'MODERATION_MUTATION_CONFLICT', 'This mutation ID was already used for a different action.');
@@ -311,6 +383,24 @@ async function applyModerationAction({ auth, db, actor, actorRole, actorBranch =
     const latestStatus = clean(latestCase.data()?.status || (reportId ? '' : 'open'), 24);
     if (reportId && !['open', 'escalated'].includes(latestStatus)) throw new OtpError(409, 'REPORT_NOT_ACTIONABLE', 'This report has already been resolved.');
     if (abuseReviewId && latestStatus === 'resolved') throw new OtpError(409, 'ABUSE_REVIEW_NOT_ACTIONABLE', 'This review has already been resolved.');
+
+    let latestTarget = targetProfile;
+    if (accountChanges) {
+      const userRef = db.collection('users').doc(source.targetUid);
+      const latestUserSnap = await tx.get(userRef);
+      if (!latestUserSnap.exists) throw new OtpError(404, 'MODERATION_TARGET_NOT_FOUND', 'The reported account was not found.');
+      latestTarget = latestUserSnap.data() || {};
+      const latestTargetStatus = canonicalAccountStatus(latestTarget);
+      if (latestTargetStatus !== canonicalAccountStatus(targetProfile)) {
+        throw new OtpError(409, 'ACCOUNT_STATE_CHANGED', 'This account was modified by another administrator.');
+      }
+      if (action === 'suspend_account' && latestTargetStatus !== ACCOUNT_STATUS.ACTIVE) {
+        throw new OtpError(409, 'ACCOUNT_NOT_ACTIVE', 'Only an active account can be suspended.');
+      }
+      if (latestTargetStatus === ACCOUNT_STATUS.TERMINATED) {
+        throw new OtpError(409, 'ACCOUNT_NOT_ACTIONABLE', 'A terminated account cannot be modified.');
+      }
+    }
 
     let restrictionRef = null;
     let restrictionProjection = null;
@@ -351,16 +441,18 @@ async function applyModerationAction({ auth, db, actor, actorRole, actorBranch =
     };
     const actionRef = db.collection('moderationActions').doc(actionId);
     tx.create(actionRef, actionRecord);
-    tx.create(mutationRef, { actorUid, actionId, payloadHash, createdAt: now });
+    tx.create(mutationRef, { actorUid, actionId, payloadHash, createdAt: now, authSynced: !requestedAccountStatus });
     if (restrictionRef) tx.set(restrictionRef, restrictionProjection);
     if (accountChanges) {
       tx.update(db.collection('users').doc(source.targetUid), { ...accountChanges, updatedAt: now, updatedBy: actorUid });
       tx.set(db.collection('adminAuditLogs').doc(), {
         action: action === 'suspend_account' ? 'ACCOUNT_SUSPENDED' : action === 'terminate_account' ? 'ACCOUNT_TERMINATED' : 'ACCOUNT_REACTIVATED',
         actorUid,
+        actorRole: 'admin',
         targetUid: source.targetUid,
-        role: targetProfile.role,
-        before: { accountStatus: canonicalAccountStatus(targetProfile) },
+        targetRole: latestTarget.role,
+        role: latestTarget.role,
+        before: { accountStatus: canonicalAccountStatus(latestTarget) },
         after: { accountStatus: accountChanges.accountStatus },
         createdAt: now,
       });
@@ -388,6 +480,12 @@ async function applyModerationAction({ auth, db, actor, actorRole, actorBranch =
     if (source.branchId) tx.set(db.collection('moderationActivity').doc(`branch_${source.branchId}`), { branchId: source.branchId, updatedAt: now, revision: randomUUID() });
     return { created: true, action: safeAction({ id: actionId, ...actionRecord }) };
   });
+
+  if (result.created && requestedAccountStatus) {
+    await syncAuthWithAccountStatus({ auth, db, uid: source.targetUid, expectedStatus: requestedAccountStatus });
+    await mutationRef.update({ authSynced: true }).catch(() => {});
+  }
+  return result;
 }
 
 function errorResponse(res, error) {
@@ -420,11 +518,35 @@ function createModerationHandler(role, getAdmin = getFirebaseAdmin, dependencies
         return res.status(result.created ? 201 : 200).json(result);
       }
       const params = paramsOf(req, `/api/${role}/moderation`);
-      const kind = clean(params.get('kind') || 'reports', 24);
+      const rawKind = clean(params.get('kind') || 'reports', 24).toLowerCase();
       const limit = pageSize(params.get('limit'));
       const branchId = role === 'manager' ? actor.branch.id : '';
-      if (kind === 'detail') return res.status(200).json(await reportDetail(db, params.get('reportId'), branchId));
-      if (kind === 'abuse') return res.status(200).json(await abuseReviewList(db, { branchId, limit }));
+      if (rawKind === 'detail') {
+        const abuseReviewId = clean(params.get('abuseReviewId') || (params.get('caseType') === 'order_abuse' ? params.get('caseId') : ''), 128);
+        const reportId = clean(params.get('reportId') || (params.get('caseType') === 'report' ? params.get('caseId') : params.get('id')), 128);
+        if (!abuseReviewId && !reportId) {
+          throw new OtpError(400, 'MODERATION_CASE_REQUIRED', 'A report or abuse review ID is required.');
+        }
+        if (abuseReviewId) {
+          return res.status(200).json(await abuseReviewDetail(db, abuseReviewId, branchId));
+        }
+        try {
+          return res.status(200).json(await reportDetail(db, reportId, branchId));
+        } catch (detailError) {
+          if (detailError?.reason === 'REPORT_NOT_FOUND') {
+            const fallbackReview = await db.collection('orderAbuseReviews').doc(reportId).get();
+            if (fallbackReview.exists) {
+              return res.status(200).json(await abuseReviewDetail(db, reportId, branchId));
+            }
+          }
+          throw detailError;
+        }
+      }
+      const isAbuseKind = ['abuse', 'order_abuse', 'orderabuse', 'abuse_review', 'abuse_reviews'].includes(rawKind);
+      if (isAbuseKind) {
+        const status = statusFilter(params.get('status'));
+        return res.status(200).json(await abuseReviewList(db, { branchId, status, limit }));
+      }
       return res.status(200).json(await reportList(db, { branchId, status: statusFilter(params.get('status')), limit, cursor: clean(params.get('cursor'), 128) }));
     } catch (error) { return errorResponse(res, error); }
   };
@@ -509,8 +631,12 @@ const createManagerModerationHandler = (getAdmin, dependencies) => createModerat
 const createAdminModerationHandler = (getAdmin, dependencies) => createModerationHandler('admin', getAdmin, dependencies);
 
 module.exports = {
+  ABUSE_REVIEW_ACTIONS,
   ADMIN_ACTIONS,
+  ALL_MODERATION_ACTIONS,
   MANAGER_ACTIONS,
+  abuseReviewDetail,
+  abuseReviewList,
   applyModerationAction,
   createAdminChatReviewHandler,
   createAdminModerationHandler,

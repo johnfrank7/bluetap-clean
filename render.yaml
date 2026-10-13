@@ -24,12 +24,14 @@ services:
         sync: false
       - key: SUPABASE_SERVICE_ROLE_KEY
         sync: false
+      - key: APP_ENV
+        sync: false
       - key: SUPABASE_STORAGE_BUCKET
-        value: products-images
+        sync: false
       - key: EMAIL_PROVIDER
         value: vercel-relay
       - key: VERCEL_MAIL_RELAY_URL
-        value: https://bluetap-beta.vercel.app/api/internal/send-otp-email
+        sync: false
       - key: INTERNAL_MAIL_RELAY_SECRET
         sync: false
       - key: EMAIL_OTP_HASH_SECRET

@@ -96,12 +96,12 @@ export default function useUnsavedChangesGuard({
     }
   }, [firstIncompleteRef, onContinueEditing]);
 
-  const handleDiscardAndLeave = React.useCallback(() => {
+  const handleDiscardAndLeave = React.useCallback(async () => {
     setShowPrompt(false);
     if (typeof onDiscard === 'function') {
       try {
-        onDiscard();
-      } catch {}
+        if (await onDiscard() === false) { pendingActionRef.current = null; return; }
+      } catch { pendingActionRef.current = null; return; }
     }
     isDirtyRef.current = false;
     const action = pendingActionRef.current;

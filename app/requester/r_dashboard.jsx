@@ -7,7 +7,6 @@ import {
   TouchableOpacity,
   ScrollView,
   ActivityIndicator,
-  Alert,
   Modal,
   useWindowDimensions,
 } from 'react-native';
@@ -20,6 +19,8 @@ import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from '../../firebase';
 import { findLocalUserForAuthRole } from '../../localUsers';
 import RequestDetailsModal from '../../components/RequestDetailsModal';
+import CancelRequestModal from '../../components/CancelRequestModal';
+import TopToastFeedback from '../../components/TopToastFeedback';
 import { useRequesterData } from '../../components/RoleDataProviders';
 import SoftStatusBadge from '../../components/SoftStatusBadge';
 import { createShadow } from '../../components/shadowStyles';
@@ -197,7 +198,7 @@ const getRequestTotalAmount = (request) => {
   );
 };
 const isPendingRequest = (request) =>
-  ['pending', 'outside radius pending approval'].includes(
+  ['pending', 'outside radius pending approval', 'manager approval pending'].includes(
     normalizeRequesterOrderStatus(request?.status)
   );
 const getProductGallons = (product) => {
@@ -289,7 +290,7 @@ export default function RequesterDashboard() {
   const [cancellingRequestId, setCancellingRequestId] = useState('');
   const [requestToCancel, setRequestToCancel] = useState(null);
   const [detailsRequest, setDetailsRequest] = useState(null);
-  const [notification, setNotification] = useState(null);
+  const [toast, setToast] = useState({ visible: false, message: '', type: 'info' });
   const [requesterName, setRequesterName] = useState('Requester');
   const productCarouselWidth = Math.max(
     1,
@@ -376,7 +377,7 @@ export default function RequesterDashboard() {
   };
 
   const cancelPendingRequest = async (request) => {
-    if (cancellingRequestId) return;
+    if (!request?.id || cancellingRequestId) return;
 
     try {
       setCancellingRequestId(request.id);
@@ -384,45 +385,41 @@ export default function RequesterDashboard() {
       setCurrentRequests((requests) =>
         requests.filter((currentRequest) => currentRequest.id !== request.id)
       );
-      setNotification({
-        title: 'Request Cancelled',
-        message: 'Your pending request has been cancelled.',
+      setRequestToCancel(null);
+      setToast({
+        visible: true,
+        message: 'Water request cancelled successfully.',
+        type: 'info',
       });
-    } catch (error) {
-      if (error.savedLocal) {
-        setCurrentRequests((requests) =>
-          requests.filter((currentRequest) => currentRequest.id !== request.id)
-        );
-        setNotification({
-          title: 'Saved Locally',
-          message:
-            'Your request was cancelled on this device, but Firebase did not accept the update.',
-        });
-        return;
+      const requesterId = auth.currentUser?.uid;
+      if (requesterId) {
+        refreshRequesterRequests(requesterId);
       }
-
-      Alert.alert('Cancel failed', error.message);
+    } catch (error) {
+      setRequestToCancel(null);
+      setToast({
+        visible: true,
+        message: error.message || 'Unable to confirm cancellation. Please check your order status.',
+        type: 'error',
+      });
     } finally {
       setCancellingRequestId('');
     }
   };
 
   const confirmCancelRequest = (request) => {
+    if (!request) return;
     setRequestToCancel(request);
   };
 
   const closeCancelModal = () => {
-    if (requestToCancel?.id && cancellingRequestId === requestToCancel.id) return;
-
+    if (cancellingRequestId) return;
     setRequestToCancel(null);
   };
 
   const proceedWithCancelRequest = async () => {
-    if (!requestToCancel) return;
-
-    const selectedRequest = requestToCancel;
-    setRequestToCancel(null);
-    await cancelPendingRequest(selectedRequest);
+    if (!requestToCancel || cancellingRequestId) return;
+    await cancelPendingRequest(requestToCancel);
   };
 
   const openProductRequest = useCallback(
@@ -492,8 +489,13 @@ export default function RequesterDashboard() {
         branchLocation: liveDetailsRequest.branchLocation,
         branchId: liveDetailsRequest.currentBranchId || liveDetailsRequest.branchId,
         items: getRequestItems(liveDetailsRequest),
-        subtotalAtOrder: liveDetailsRequest.subtotalAtOrder,
-        deliveryFeeAtOrder: liveDetailsRequest.deliveryFeeAtOrder,
+        subtotalAtOrder: liveDetailsRequest.subtotalAtOrder ?? liveDetailsRequest.subtotal,
+        subtotal: liveDetailsRequest.subtotalAtOrder ?? liveDetailsRequest.subtotal,
+        deliveryFeeAtOrder: liveDetailsRequest.deliveryFeeAtOrder ?? liveDetailsRequest.deliveryFee ?? liveDetailsRequest.delivery_fee,
+        deliveryFee: liveDetailsRequest.deliveryFeeAtOrder ?? liveDetailsRequest.deliveryFee ?? liveDetailsRequest.delivery_fee,
+        deliveryFeePolicy: liveDetailsRequest.deliveryFeePolicy || null,
+        distanceKmAtOrder: liveDetailsRequest.distanceKmAtOrder ?? liveDetailsRequest.distanceKmSnapshot,
+        totalAtOrder: liveDetailsRequest.totalAtOrder ?? liveDetailsRequest.total_cost ?? getRequestTotalAmount(liveDetailsRequest),
         grandTotalAmount: getRequestTotalAmount(liveDetailsRequest),
         failureReason: liveDetailsRequest.failureReason,
         failureReasonCode: liveDetailsRequest.failureReasonCode,
@@ -729,62 +731,32 @@ export default function RequesterDashboard() {
         </View>
         </PortalSwipeContainer>
 
-        <Modal visible={!!requestToCancel} transparent animationType="fade">
-          <View style={styles.modalBackground}>
-            <View style={styles.modalContainer}>
-              <Text style={styles.modalTitle}>Cancel Request</Text>
-              <Text style={styles.modalMessage}>
-                Are you sure you want to cancel this pending request?
-                {'\n\n'}
-                This action cannot be undone.
-              </Text>
-
-              <View style={styles.modalActions}>
-                <TouchableOpacity
-                  style={styles.modalSecondaryButton}
-                  onPress={closeCancelModal}
-                  disabled={!!cancellingRequestId}
-                >
-                  <Text style={styles.modalSecondaryButtonText}>No</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[
-                    styles.modalPrimaryButton,
-                    !!cancellingRequestId && styles.modalButtonDisabled,
-                  ]}
-                  onPress={proceedWithCancelRequest}
-                  disabled={!!cancellingRequestId}
-                >
-                  <Text style={styles.modalPrimaryButtonText}>Yes, Cancel</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          </View>
-        </Modal>
+        <CancelRequestModal
+          visible={Boolean(requestToCancel)}
+          request={requestToCancel}
+          busy={Boolean(cancellingRequestId && requestToCancel?.id === cancellingRequestId)}
+          onKeep={closeCancelModal}
+          onConfirm={proceedWithCancelRequest}
+        />
 
         <RequestDetailsModal
           visible={!!detailsRequest}
           onClose={() => setDetailsRequest(null)}
           request={detailsRequestData}
           branches={requesterData.branches}
+          onCancel={detailsRequest && isPendingRequest(detailsRequest) ? () => {
+            const reqToCancel = detailsRequest;
+            setDetailsRequest(null);
+            confirmCancelRequest(reqToCancel);
+          } : undefined}
         />
 
-        <Modal visible={!!notification} transparent animationType="fade">
-          <View style={styles.modalBackground}>
-            <View style={styles.modalContainer}>
-              <Text style={styles.modalTitle}>{notification?.title}</Text>
-              <Text style={styles.modalMessage}>{notification?.message}</Text>
-
-              <TouchableOpacity
-                style={styles.modalFullButton}
-                onPress={() => setNotification(null)}
-              >
-                <Text style={styles.modalPrimaryButtonText}>OK</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </Modal>
+        <TopToastFeedback
+          visible={toast.visible}
+          message={toast.message}
+          type={toast.type}
+          onDismiss={() => setToast((t) => ({ ...t, visible: false }))}
+        />
 
         <Modal
           visible={viewAllModalVisible}
@@ -1175,82 +1147,6 @@ const styles = createPortalStyleSheet({
     fontSize: 13,
     lineHeight: 18,
     marginTop: 4,
-  },
-  modalBackground: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 24,
-  },
-  modalContainer: {
-    width: '100%',
-    maxWidth: 320,
-    backgroundColor: '#FFFFFF',
-    borderRadius: USER_PORTAL_LAYOUT.cardRadius,
-    padding: 20,
-    alignItems: 'center',
-  },
-  modalTitle: {
-    color: '#187BCD',
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginBottom: 14,
-    textAlign: 'center',
-  },
-  modalMessage: {
-    width: '100%',
-    color: '#455A64',
-    fontSize: 14,
-    lineHeight: 20,
-    textAlign: 'center',
-    marginBottom: 16,
-  },
-  modalActions: {
-    width: '100%',
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  modalSecondaryButton: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: '#187BCD',
-    borderRadius: 10,
-    paddingVertical: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 8,
-  },
-  modalSecondaryButtonText: {
-    color: '#187BCD',
-    fontSize: 14,
-    fontWeight: 'bold',
-  },
-  modalPrimaryButton: {
-    flex: 1,
-    backgroundColor: '#187BCD',
-    borderRadius: 10,
-    paddingVertical: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginLeft: 8,
-  },
-  modalFullButton: {
-    width: '100%',
-    backgroundColor: '#187BCD',
-    borderRadius: 10,
-    paddingVertical: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 2,
-  },
-  modalPrimaryButtonText: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: 'bold',
-  },
-  modalButtonDisabled: {
-    opacity: 0.7,
   },
   viewAllProductsRow: {
     alignItems: 'center',

@@ -7,7 +7,7 @@ import { getDocFromServer, doc } from 'firebase/firestore';
 import { onAuthStateChanged, signInWithCustomToken, signInWithEmailAndPassword, signOut } from 'firebase/auth';
 
 import { auth, db } from '../firebase';
-import { cacheValidatedPrivilegedAccess, clearAllAuthSessions, fetchFirestoreUserProfile, getRoleHomePath, isValidRole, saveRoleSession } from '../services/authSession';
+import { cacheValidatedPrivilegedAccess, clearAllAuthSessions, fetchFirestoreUserProfile, getAuthSessionEpoch, getRoleHomePath, isCurrentAuthSession, isValidRole, saveRoleSession } from '../services/authSession';
 import { loginWithUsername } from '../services/usernameAuth';
 import { warmLoginBackend } from '../services/apiWarmup';
 import PasswordVisibilityButton from './PasswordVisibilityButton';
@@ -87,6 +87,7 @@ export default function PrivilegedLogin() {
   const [pendingDestination, setPendingDestination] = React.useState(null);
   const [navigationAttempt, setNavigationAttempt] = React.useState(0);
   const pathnameRef = React.useRef(currentPathname);
+  const pendingAuthEpochRef = React.useRef(null);
   pathnameRef.current = currentPathname;
   const retryNavigation = () => {
     setError('');
@@ -95,6 +96,7 @@ export default function PrivilegedLogin() {
 
   React.useEffect(() => {
     if (!pendingDestination || !rootNavigationState?.key || navigationCompletedRef.current) return;
+    if (pendingAuthEpochRef.current !== getAuthSessionEpoch() || !auth.currentUser) return;
     logPrivilegedStage('NAVIGATION_ROUTER_READY', { currentPathname });
     navigationCompletedRef.current = true;
     try {
@@ -110,6 +112,7 @@ export default function PrivilegedLogin() {
   React.useEffect(() => { warmLoginBackend(); }, []);
 
   const finishAuthenticatedLogin = React.useCallback(async (user) => {
+    const epoch = getAuthSessionEpoch();
     if (!user || !auth.currentUser || auth.currentUser.uid !== user.uid) {
       throw accessError('ADMIN_AUTH_SESSION_MISSING');
     }
@@ -148,6 +151,7 @@ export default function PrivilegedLogin() {
       throw accessError('ADMIN_PROFILE_READ_DENIED');
     }
     if (!profileSnapshot.exists()) throw accessError('ADMIN_PROFILE_MISSING');
+    if (!isCurrentAuthSession(user, epoch)) return;
 
     const profile = { ...profileSnapshot.data(), uid: user.uid };
     if (profile.role !== role || !hasTrustedRole(role, token.claims, profile)) {
@@ -165,6 +169,7 @@ export default function PrivilegedLogin() {
     completePrivilegedLoginValidation(role, user.uid);
     logPrivilegedStage('ACCESS_GRANTED');
     logPrivilegedStage('NAVIGATION_REQUESTED', { currentPathname: pathnameRef.current });
+    pendingAuthEpochRef.current = epoch;
     setPendingDestination('/admin/dashboard');
   }, []);
 
@@ -193,6 +198,7 @@ export default function PrivilegedLogin() {
     let active = true;
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (!active || !shouldValidateExistingSession(role, user, submitting.current)) return;
+      const observedEpoch = getAuthSessionEpoch();
       setLoading(true);
       setError('');
       logPrivilegedStage('VALIDATION_CALLED_FROM_AUTH_LISTENER');
@@ -200,7 +206,7 @@ export default function PrivilegedLogin() {
         await runPrivilegedLoginValidation(role, user, () => finishAuthenticatedLogin(user));
       }
       catch (loginError) {
-        if (!active) return;
+        if (!active || observedEpoch !== getAuthSessionEpoch() || auth.currentUser?.uid !== user.uid) return;
         try {
           const profile = await fetchFirestoreUserProfile(user);
           if (profile && isValidRole(profile.role) && profile.role !== role) {
@@ -219,6 +225,7 @@ export default function PrivilegedLogin() {
     if (loading || submitting.current || pendingDestination) return;
     if (!identifier.trim() || !password) return setError('Enter your username or email and password.');
     submitting.current = true;
+    const submissionEpoch = getAuthSessionEpoch();
     resetPrivilegedLoginValidation(role);
     setLoading(true); setError('');
     try {
@@ -239,13 +246,20 @@ export default function PrivilegedLogin() {
         }
       }
 
-      const credential = normalized.includes('@')
-        ? await signInWithEmailAndPassword(auth, normalized, password)
-        : await signInWithCustomToken(auth, await loginWithUsername(normalized, password, { portal: role }));
+      const customToken = normalized.includes('@') ? null : await loginWithUsername(normalized, password, { portal: role });
+      if (submissionEpoch !== getAuthSessionEpoch()) return;
+      const credential = customToken
+        ? await signInWithCustomToken(auth, customToken)
+        : await signInWithEmailAndPassword(auth, normalized, password);
+      if (!isCurrentAuthSession(credential.user, submissionEpoch)) {
+        if (auth.currentUser?.uid === credential.user.uid) await signOut(auth);
+        return;
+      }
       logPrivilegedStage('SIGNIN_SUCCESS');
       logPrivilegedStage('VALIDATION_CALLED_FROM_LOGIN');
       await runPrivilegedLoginValidation(role, credential.user, () => finishAuthenticatedLogin(credential.user));
     } catch (loginError) {
+      if (submissionEpoch !== getAuthSessionEpoch()) return;
       if (!/^(ADMIN|MANAGER)_/.test(String(loginError?.code || ''))) {
         logPrivilegedStage('SIGNIN_FAILED', {
           firebaseCode: safeFirebaseAuthCode(loginError, 'auth/invalid-credential'),

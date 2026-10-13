@@ -31,7 +31,12 @@ export function loadModerationCases(role, { status = '', cursor = '', kind = 're
   return request(`/api/${role}/moderation?${params.toString()}`);
 }
 
-export const loadModerationDetail = (role, reportId) => request(`/api/${role}/moderation?kind=detail&reportId=${encodeURIComponent(reportId)}`);
+export function loadModerationDetail(role, caseId, kind = 'reports') {
+  const isAbuse = ['abuse', 'order_abuse', 'orderabuse', 'abuse_review', 'abuse_reviews'].includes(String(kind || '').toLowerCase());
+  const paramKey = isAbuse ? 'abuseReviewId' : 'reportId';
+  const params = new URLSearchParams({ kind: 'detail', [paramKey]: String(caseId || '') });
+  return request(`/api/${role}/moderation?${params.toString()}`);
+}
 export const applyModerationAction = (role, body) => request(`/api/${role}/moderation`, { method: 'POST', body });
 export const loadExpandedChatReview = (body) => request('/api/admin/chat-review', { method: 'POST', body });
 export const loadModerationNotices = () => request('/api/moderation/notices');

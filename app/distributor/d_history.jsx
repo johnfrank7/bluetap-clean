@@ -48,9 +48,23 @@ const getQuantityNumber = (quantity) => {
 const getDetailsRequestData = (request) => {
   if (!request) return null;
 
-  const totalAmount = getAmountNumber(request.amountPaid);
+  const totalAmount = getAmountNumber(
+    request.totalAtOrder ?? request.totalAmount ?? request.total_cost ?? request.amountPaid
+  );
   const quantity = getQuantityNumber(request.quantity);
-  const unitPrice = quantity > 0 ? totalAmount / quantity : totalAmount;
+  const unitPrice = quantity > 0 && totalAmount !== undefined ? totalAmount / quantity : totalAmount;
+
+  const items = Array.isArray(request.items) && request.items.length > 0
+    ? request.items
+    : [
+        {
+          id: request.id,
+          productName: request.productName || 'Product',
+          quantity: request.quantity,
+          unitPrice,
+          subtotal: request.subtotalAtOrder ?? request.subtotal ?? totalAmount,
+        },
+      ];
 
   return {
     requestId: request.id,
@@ -61,8 +75,8 @@ const getDetailsRequestData = (request) => {
     containerType: request.container,
     quantity: request.quantity,
     totalAmount,
-    waterStation: 'Not set',
-    paymentMethod: 'Not set',
+    waterStation: request.waterStation || request.water_station || 'Not set',
+    paymentMethod: request.paymentMethod || request.payment_method || 'Not set',
     requesterName: request.requester,
     requesterUniqueId: formatDisplayUniqueId(
       request.requesterId ||
@@ -87,16 +101,15 @@ const getDetailsRequestData = (request) => {
     failureReasonCode: request.failureReasonCode,
     failureReasonLabel: request.failureReasonLabel,
     failureReasonNote: request.failureReasonNote,
-    items: [
-      {
-        id: request.id,
-        productName: request.productName,
-        quantity: request.quantity,
-        unitPrice,
-        subtotal: totalAmount,
-      },
-    ],
-    grandTotalAmount: totalAmount,
+    subtotal: request.subtotalAtOrder ?? request.subtotal,
+    subtotalAtOrder: request.subtotalAtOrder ?? request.subtotal,
+    deliveryFee: request.deliveryFeeAtOrder ?? request.deliveryFee,
+    deliveryFeeAtOrder: request.deliveryFeeAtOrder ?? request.deliveryFee,
+    deliveryFeePolicy: request.deliveryFeePolicy || null,
+    distanceKmAtOrder: request.distanceKmAtOrder,
+    totalAtOrder: request.totalAtOrder ?? totalAmount,
+    items,
+    grandTotalAmount: request.totalAtOrder ?? totalAmount,
   };
 };
 

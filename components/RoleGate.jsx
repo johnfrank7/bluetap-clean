@@ -1,15 +1,16 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
-import { onAuthStateChanged, signOut } from 'firebase/auth';
+import { onAuthStateChanged } from 'firebase/auth';
 import { doc, onSnapshot } from 'firebase/firestore';
 
 import { auth, db } from '../firebase';
 import {
-  clearAllAuthSessions,
   clearModuleSession,
   getCachedPrivilegedAccess,
   invalidatePrivilegedValidationCache,
+  isLogoutInProgress,
+  signOutAndClearSessions,
   validateRoleAccess,
 } from '../services/authSession';
 import SessionSecurityGuard from './SessionSecurityGuard';
@@ -70,12 +71,13 @@ export default function RoleGate({ role, allowedRoles, children, bypass = false,
     const accountState = String(result.status || '').startsWith('account-') ? String(result.status).slice('account-'.length) : '';
     if (accountState) accountStateRef.current = accountState;
     if (result.shouldSignOut) {
-      clearAllAuthSessions();
-
       try {
-        await signOut(auth);
+        await signOutAndClearSessions();
       } catch (error) {
-        console.log('Unauthorized sign out error:', error.message);
+        if (validationRunRef.current === runId) {
+          setGateState({ status: 'unauthorized', message: 'Sign out could not complete. Please try again.' });
+        }
+        return;
       }
     }
 
@@ -143,6 +145,10 @@ export default function RoleGate({ role, allowedRoles, children, bypass = false,
   }, [bypass, validateAccess]);
 
   if (bypass) return children;
+
+  if (isLogoutInProgress() || (gateState.status === 'authorized' && !auth.currentUser)) {
+    return <View style={styles.gate}><ActivityIndicator size="large" color="#187BCD" /></View>;
+  }
 
   // Preserve the mounted navigator during the login-to-dashboard handoff.
   // This is the same UID/role/TTL-checked cache used by validateRoleAccess.

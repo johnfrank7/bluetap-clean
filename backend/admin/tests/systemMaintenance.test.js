@@ -192,6 +192,7 @@ test('preview selects only expired ephemeral records and performs zero mutations
     expiredNotifications: 0,
     expiredRegistrationSessions: 1,
     expiredUsernameReservations: 1,
+    expiredEmailReservations: 0,
     expiredVerificationSessions: 2,
     expiredRateLimitRecords: 3,
     ordersEligibleForArchive: 1,
@@ -238,6 +239,30 @@ test('cleanup preserves protected data, deletes ephemeral records, and archives 
   assert.equal(cleanupAudit.actorUid, 'admin-1');
   assert.equal(JSON.stringify(cleanupAudit).includes('secret-hash'), false);
   assert.equal(JSON.stringify(cleanupAudit).includes('private-owner-hash'), false);
+});
+
+test('cleanup retains expired registration sessions that still identify an Auth or pending profile', async () => {
+  const f = fixture({
+    'registrationSessions/auth-orphan': { completed: false, createdAt: hoursAgo(60), expiresAt: hoursAgo(59), finalization: { status: 'recovery_required', uid: 'auth-orphan-uid' } },
+    'registrationSessions/pending-profile': { completed: false, createdAt: hoursAgo(60), expiresAt: hoursAgo(59), userUid: 'pending-uid' },
+  });
+  const preview = await previewCleanup(f.db, DEFAULT_RETENTION_POLICY, NOW);
+  assert.equal(preview.counts.expiredRegistrationSessions, 0);
+  await runCleanup(f.db, DEFAULT_RETENTION_POLICY, 'admin-1', NOW);
+  assert.equal(f.records.has('registrationSessions/auth-orphan'), true);
+  assert.equal(f.records.has('registrationSessions/pending-profile'), true);
+});
+
+test('cleanup removes only expired registration email reservations', async () => {
+  const f = fixture({
+    'registrationEmailReservations/expired-hash': { registrationSessionId: 'old', createdAt: hoursAgo(60), expiresAt: hoursAgo(59) },
+    'registrationEmailReservations/active-hash': { registrationSessionId: 'active', createdAt: hoursAgo(60), expiresAt: new Date(NOW + 60000) },
+  });
+  const preview = await previewCleanup(f.db, DEFAULT_RETENTION_POLICY, NOW);
+  assert.equal(preview.counts.expiredEmailReservations, 1);
+  await runCleanup(f.db, DEFAULT_RETENTION_POLICY, 'admin-1', NOW);
+  assert.equal(f.records.has('registrationEmailReservations/expired-hash'), false);
+  assert.equal(f.records.has('registrationEmailReservations/active-hash'), true);
 });
 
 test('chat retention preserves open report evidence and purges eligible resolved evidence', async () => {

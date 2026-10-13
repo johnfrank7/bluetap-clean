@@ -6,6 +6,7 @@
  * and conversation epoch reconciliation.
  */
 
+const { randomUUID } = require('node:crypto');
 const { reconcileDistributorMembershipInTransaction } = require('../chat/conversationLifecycleService');
 const { accountStatusFlags } = require('../auth/accountStatus');
 const { OtpError } = require('../utils/otpError');
@@ -137,17 +138,23 @@ async function approveDistributorApplicationInTransaction({
       schemaVersion: 1,
       actionId: noticeRef.id,
       type: 'distributor_application_approved',
-      title: `Distributor application approved: ${branch.name}`,
+      title: 'Application Approved',
       category: 'DISTRIBUTOR_APPLICATION',
       scope: 'branch',
       branchId: branch.id,
-      branchName: branch.name,
+      branchName: clean(branch.name, 120),
       approvedByRole: actorRole,
       createdAt: now,
       seenAt: null,
       acknowledgedAt: null,
     });
   }
+
+  tx.set(db.collection('moderationActivity').doc(`user_${targetRef.id}`), {
+    uid: targetRef.id,
+    updatedAt: now,
+    revision: randomUUID(),
+  });
 
   return { branch, changes, data, idempotent: false, previousStatus };
 }

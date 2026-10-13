@@ -15,7 +15,7 @@ function createRegistrationSessionHandler(action, getAdmin = getFirebaseAdmin, w
     try {
       let body = req.body;
       if (typeof body === 'string') { try { body = JSON.parse(body); } catch { throw new OtpError(400, 'invalid-request', 'Invalid request.'); } }
-      const { db } = getAdmin();
+      const { db, auth } = getAdmin();
       if (action === 'policy') {
         const policy = publicRegistrationPolicy(await loadRegistrationSecurity(db, { strict: true }));
         try {
@@ -24,7 +24,7 @@ function createRegistrationSessionHandler(action, getAdmin = getFirebaseAdmin, w
         return res.status(200).json({ securityPolicy: policy });
       }
       const service = createRegistrationSessionService({
-        db,
+        db, auth,
         hashSecret: process.env.EMAIL_OTP_HASH_SECRET,
         deviceHashSecret: process.env.REGISTRATION_DEVICE_HASH_SECRET,
         ipHashSecret: process.env.REGISTRATION_IP_HASH_SECRET,
@@ -33,6 +33,7 @@ function createRegistrationSessionHandler(action, getAdmin = getFirebaseAdmin, w
       const result = action === 'branches' ? { branches: await service.activeBranches() }
         : action === 'create' ? await service.create(body, ip)
         : action === 'start' ? await service.start(body?.registrationSessionId)
+        : action === 'cancel' ? await service.cancel(body?.registrationSessionId)
           : action === 'terms' ? await service.acceptTerms(body?.registrationSessionId)
             : await service.status(body?.registrationSessionId);
       if (action === 'create' && result.securityPolicy?.faceVerificationRequired === true) {

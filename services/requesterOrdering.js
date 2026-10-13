@@ -21,6 +21,7 @@ async function requesterRequest(path, { method = 'GET', body } = {}) {
   if (!response.ok) {
     const error = new Error(result?.error?.message || 'Requester data is temporarily unavailable.');
     error.code = result?.error?.reason || 'service-unavailable';
+    error.status = response.status;
     throw error;
   }
   return result || {};

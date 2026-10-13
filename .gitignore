@@ -38,6 +38,8 @@ yarn-error.*
 .env.*
 !.env.example
 !**/.env.example
+!.env.staging.example
+!**/.env.staging.example
 *service-account*.json
 *service_account*.json
 serviceAccountKey.json

@@ -22,12 +22,69 @@ const DRAWER_WIDTH = 286;
 
 function Tooltip({ visible, label, colors }) { return visible ? <View pointerEvents="none" style={[styles.tooltip, { backgroundColor: colors.tooltip }]}><Text style={[styles.tooltipText, { color: colors.tooltipText }]}>{label}</Text></View> : null; }
 
+export function formatBadgeCount(badgeCount) {
+  if (badgeCount === undefined || badgeCount === null || badgeCount === false) return null;
+  if (typeof badgeCount === 'number') {
+    if (!Number.isFinite(badgeCount) || badgeCount <= 0) return null;
+    return badgeCount > 99 ? '99+' : String(badgeCount);
+  }
+  if (typeof badgeCount === 'string') {
+    const trimmed = badgeCount.trim();
+    if (!trimmed || trimmed === '0' || trimmed === '-0') return null;
+    const parsed = Number(trimmed);
+    if (Number.isFinite(parsed)) {
+      if (parsed <= 0) return null;
+      return parsed > 99 ? '99+' : String(parsed);
+    }
+    if (/^[1-9]\d*\+$/.test(trimmed)) {
+      return trimmed;
+    }
+    return null;
+  }
+  return null;
+}
+
 function NavItem({ item, active, collapsed, onPress, onPrefetch, colors, badgeCount }) {
-  const [tooltip, setTooltip] = React.useState(false); const [icon, baseLabel] = item;
-  const hasBadge = Number.isFinite(badgeCount);
-  const label = hasBadge ? `${baseLabel} [${badgeCount}]` : baseLabel;
+  const [tooltip, setTooltip] = React.useState(false);
+  const [icon, baseLabel] = item;
+  const visibleBadge = formatBadgeCount(badgeCount);
+  const hasBadge = visibleBadge !== null;
+  const label = hasBadge ? `${baseLabel} [${visibleBadge}]` : baseLabel;
   const prepare = () => { setTooltip(true); onPrefetch?.(); };
-  return <View style={styles.navItemWrap}><TouchableOpacity accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ selected: active }} accessibilityHint={collapsed ? label : undefined} onFocus={prepare} onBlur={() => setTooltip(false)} onHoverIn={prepare} onHoverOut={() => setTooltip(false)} onPress={onPress} style={[styles.navItem, collapsed && styles.navItemCollapsed, active && { backgroundColor: colors.sidebarActive, borderColor: 'rgba(255,255,255,.42)' }]}><AdminIcon name={icon} size={20} />{!collapsed && <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingRight: 4 }}><Text numberOfLines={1} style={styles.navText}>{baseLabel}</Text>{hasBadge && <View style={[styles.badgePill, { backgroundColor: badgeCount > 0 ? colors.warning : 'rgba(255,255,255,0.2)' }]}><Text style={styles.badgePillText}>{badgeCount}</Text></View>}</View>}{active && <View style={styles.activeMarker} />}</TouchableOpacity><Tooltip visible={collapsed && tooltip} label={label} colors={colors} /></View>;
+  return (
+    <View style={styles.navItemWrap}>
+      <TouchableOpacity
+        accessibilityRole="button"
+        accessibilityLabel={label}
+        accessibilityState={{ selected: active }}
+        accessibilityHint={collapsed ? label : undefined}
+        onFocus={prepare}
+        onBlur={() => setTooltip(false)}
+        onHoverIn={prepare}
+        onHoverOut={() => setTooltip(false)}
+        onPress={onPress}
+        style={[
+          styles.navItem,
+          collapsed && styles.navItemCollapsed,
+          active && { backgroundColor: colors.sidebarActive, borderColor: 'rgba(255,255,255,.42)' },
+        ]}
+      >
+        <AdminIcon name={icon} size={20} />
+        {!collapsed && (
+          <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingRight: 4 }}>
+            <Text numberOfLines={1} style={styles.navText}>{baseLabel}</Text>
+            {hasBadge && (
+              <View style={[styles.badgePill, { backgroundColor: colors.warning }]}>
+                <Text style={styles.badgePillText}>{visibleBadge}</Text>
+              </View>
+            )}
+          </View>
+        )}
+        {active && <View style={styles.activeMarker} />}
+      </TouchableOpacity>
+      <Tooltip visible={collapsed && tooltip} label={label} colors={colors} />
+    </View>
+  );
 }
 
 function ThemeSwitcher({ collapsed, colors }) {
@@ -43,6 +100,8 @@ function LogoutControl({ collapsed, onPress, colors }) {
 function AdminShellLayout({ title, subtitle, children }) {
   const { replaceOnce } = useSingleFlightNavigation(); const pathname = usePathname(); const { width } = useWindowDimensions(); const { colors, resolvedTheme } = useAdminTheme(); const compact = width < 900;
   const [collapsed, setCollapsed] = React.useState(false), [drawerOpen, setDrawerOpen] = React.useState(false), [confirmLogout, setConfirmLogout] = React.useState(false);
+  const [logoutError, setLogoutError] = React.useState('');
+  const logoutPending = React.useRef(false);
   const { actionableRequestsCount, pendingDistributorCount } = useAdminRealtimeData();
   const moderationCount = useModerationActivityBadge('admin');
   const sidebarWidth = React.useRef(new Animated.Value(DESKTOP_WIDTH)).current, drawerProgress = React.useRef(new Animated.Value(0)).current;
@@ -54,9 +113,135 @@ function AdminShellLayout({ title, subtitle, children }) {
   React.useEffect(() => { if (!globalThis.addEventListener) return undefined; const onKeyDown = (event) => { if (event.key !== 'Escape') return; if (confirmLogout) setConfirmLogout(false); else if (drawerOpen) setDrawerOpen(false); }; globalThis.addEventListener('keydown', onKeyDown); return () => globalThis.removeEventListener?.('keydown', onKeyDown); }, [confirmLogout, drawerOpen]);
   const toggleNavigation = () => compact ? setDrawerOpen((open) => !open) : setCollapsed((value) => !value);
   const navigate = (path) => { replaceOnce(path); if (compact) setDrawerOpen(false); };
-  const completeLogout = async () => { setConfirmLogout(false); await signOutAndClearSessions(); replaceOnce('/admin/login'); };
-  const renderSidebar = (isCollapsed, mobile = false) => <Animated.View style={[styles.sidebar, mobile && styles.drawer, { width: mobile ? DRAWER_WIDTH : sidebarWidth, backgroundColor: colors.sidebar, borderRightColor: colors.sidebarBorder, transform: mobile ? [{ translateX: drawerProgress.interpolate({ inputRange: [0, 1], outputRange: [-DRAWER_WIDTH, 0] }) }] : undefined }]}><View style={[styles.brand, { borderBottomColor: colors.sidebarBorder }, isCollapsed && styles.brandCollapsed]}><Image source={require('../assets/icons/bluetapwhitelogo.png')} style={[styles.brandLogo, isCollapsed && styles.brandLogoCollapsed]} resizeMode="contain" />{!isCollapsed && <View><Text style={styles.brandName}>BlueTap</Text><Text style={styles.brandRole}>Administrator</Text></View>}</View><ScrollView style={styles.navigationScroll} contentContainerStyle={styles.navigation} showsVerticalScrollIndicator={false}>{links.map((item) => { const isReq = item[0] === 'requests'; const isDistributor = item[0] === 'distributors'; const isReports = item[0] === 'reports'; const isActive = pathname === item[2] || (isReq && (pathname === '/admin/requests' || pathname === '/admin/request')); return <NavItem key={item[2]} item={item} active={isActive} collapsed={isCollapsed} colors={colors} badgeCount={isReq ? actionableRequestsCount : isDistributor ? pendingDistributorCount : isReports ? moderationCount : undefined} onPrefetch={() => prefetchAdminDestination(item[2])} onPress={() => navigate(item[2])} />; })}</ScrollView><View style={styles.sidebarBottom}><ThemeSwitcher collapsed={isCollapsed} colors={colors} /><LogoutControl collapsed={isCollapsed} colors={colors} onPress={() => setConfirmLogout(true)} /></View></Animated.View>;
-  return <SafeAreaView style={[styles.root, { backgroundColor: colors.background }]}><StatusBar style={resolvedTheme === 'dark' ? 'light' : 'dark'} /><View style={styles.layout}>{!compact && renderSidebar(collapsed)}<View style={styles.main}><View style={[styles.header, compact && styles.compactHeader, { backgroundColor: colors.header, borderBottomColor: colors.border }]}><TouchableOpacity accessibilityRole="button" accessibilityLabel="Toggle navigation" onPress={toggleNavigation} style={[styles.menuButton, { backgroundColor: colors.primarySoft, borderColor: colors.border }]}><AdminIcon name={compact ? (drawerOpen ? 'close' : 'menu') : (collapsed ? 'menu' : 'close')} color={colors.primary} size={23} /></TouchableOpacity><View style={styles.heading}><Text numberOfLines={1} style={[styles.title, { color: colors.textPrimary }]}>{title}</Text>{!!subtitle && <Text numberOfLines={2} style={[styles.subtitle, { color: colors.textSecondary }]}>{subtitle}</Text>}</View>{!compact && <View style={[styles.adminBadge, { backgroundColor: colors.primarySoft, borderColor: colors.border }]}><AdminIcon name="security" color={colors.primary} size={16} /><Text style={[styles.adminBadgeText, { color: colors.primary }]}>Admin</Text></View>}</View><ScrollView contentContainerStyle={[styles.content, compact && styles.compactContent]} keyboardShouldPersistTaps="handled"><PageEnterTransition axis="y" distance={8} duration={230} resetKey={pathname} style={styles.contentEntry}>{children}</PageEnterTransition></ScrollView></View>{compact && <>{drawerOpen && <Pressable accessibilityRole="button" accessibilityLabel="Close navigation" onPress={() => setDrawerOpen(false)} style={[styles.backdrop, { backgroundColor: colors.overlay }]} />}{renderSidebar(false, true)}</>}</View><Modal visible={confirmLogout} transparent animationType="fade" onRequestClose={() => setConfirmLogout(false)}><View style={[styles.modalBackdrop, { backgroundColor: colors.overlay }]}><View accessibilityViewIsModal style={[styles.modal, { backgroundColor: colors.surface, borderColor: colors.border }]}><View style={[styles.modalIcon, { backgroundColor: colors.dangerSoft }]}><AdminIcon name="logout" color={colors.danger} size={24} /></View><Text style={[styles.modalTitle, { color: colors.textPrimary }]}>Log out of BlueTap?</Text><Text style={[styles.modalBody, { color: colors.textSecondary }]}>You will need to sign in again to access Administrator tools.</Text><View style={styles.modalActions}><TouchableOpacity accessibilityRole="button" accessibilityLabel="Cancel logout" onPress={() => setConfirmLogout(false)} style={[styles.modalSecondary, { borderColor: colors.border, backgroundColor: colors.surfaceAlt }]}><Text style={[styles.modalSecondaryText, { color: colors.textPrimary }]}>Cancel</Text></TouchableOpacity><TouchableOpacity accessibilityRole="button" accessibilityLabel="Confirm logout" onPress={completeLogout} style={[styles.modalDanger, { backgroundColor: colors.danger }]}><Text style={styles.modalDangerText}>Log out</Text></TouchableOpacity></View></View></View></Modal></SafeAreaView>;
+  const completeLogout = async () => {
+    if (logoutPending.current) return;
+    logoutPending.current = true;
+    setLogoutError('');
+    try {
+      await signOutAndClearSessions();
+      setConfirmLogout(false);
+      replaceOnce('/admin/login');
+    } catch {
+      setLogoutError('Sign out could not complete. Please try again.');
+    } finally {
+      logoutPending.current = false;
+    }
+  };
+  const renderSidebar = (isCollapsed, mobile = false) => (
+    <Animated.View
+      style={[
+        styles.sidebar,
+        mobile && styles.drawer,
+        {
+          width: mobile ? DRAWER_WIDTH : sidebarWidth,
+          backgroundColor: colors.sidebar,
+          borderRightColor: colors.sidebarBorder,
+          transform: mobile
+            ? [{ translateX: drawerProgress.interpolate({ inputRange: [0, 1], outputRange: [-DRAWER_WIDTH, 0] }) }]
+            : undefined,
+        },
+      ]}
+    >
+      <View style={[styles.brand, { borderBottomColor: colors.sidebarBorder }, isCollapsed && styles.brandCollapsed]}>
+        <Image
+          source={require('../assets/icons/bluetapwhitelogo.png')}
+          style={[styles.brandLogo, isCollapsed && styles.brandLogoCollapsed]}
+          resizeMode="contain"
+        />
+        {!isCollapsed && (
+          <View>
+            <Text style={styles.brandName}>BlueTap</Text>
+            <Text style={styles.brandRole}>Administrator</Text>
+          </View>
+        )}
+      </View>
+      <ScrollView
+        style={styles.navigationScroll}
+        contentContainerStyle={styles.navigation}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        bounces={false}
+        overScrollMode="never"
+      >
+        {links.map((item) => {
+          const isReq = item[0] === 'requests';
+          const isDistributor = item[0] === 'distributors';
+          const isReports = item[0] === 'reports';
+          const isActive = pathname === item[2] || (isReq && (pathname === '/admin/requests' || pathname === '/admin/request'));
+          return (
+            <NavItem
+              key={item[2]}
+              item={item}
+              active={isActive}
+              collapsed={isCollapsed}
+              colors={colors}
+              badgeCount={isReq ? actionableRequestsCount : isDistributor ? pendingDistributorCount : isReports ? moderationCount : undefined}
+              onPrefetch={() => prefetchAdminDestination(item[2])}
+              onPress={() => navigate(item[2])}
+            />
+          );
+        })}
+      </ScrollView>
+      <View style={styles.sidebarBottom}>
+        <ThemeSwitcher collapsed={isCollapsed} colors={colors} />
+        <LogoutControl collapsed={isCollapsed} colors={colors} onPress={() => setConfirmLogout(true)} />
+      </View>
+    </Animated.View>
+  );
+  return (
+    <SafeAreaView style={[styles.root, { backgroundColor: colors.background }]}>
+      <StatusBar style={resolvedTheme === 'dark' ? 'light' : 'dark'} />
+      <View style={styles.layout}>
+        {!compact && renderSidebar(collapsed)}
+        <View style={styles.main}>
+          <View style={[styles.header, compact && styles.compactHeader, { backgroundColor: colors.header, borderBottomColor: colors.border }]}>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Toggle navigation" onPress={toggleNavigation} style={[styles.menuButton, { backgroundColor: colors.primarySoft, borderColor: colors.border }]}>
+              <AdminIcon name={compact ? (drawerOpen ? 'close' : 'menu') : (collapsed ? 'menu' : 'close')} color={colors.primary} size={23} />
+            </TouchableOpacity>
+            <View style={styles.heading}>
+              <Text numberOfLines={1} style={[styles.title, { color: colors.textPrimary }]}>{title}</Text>
+              {!!subtitle && <Text numberOfLines={2} style={[styles.subtitle, { color: colors.textSecondary }]}>{subtitle}</Text>}
+            </View>
+            {!compact && <View style={[styles.adminBadge, { backgroundColor: colors.primarySoft, borderColor: colors.border }]}>
+              <AdminIcon name="security" color={colors.primary} size={16} />
+              <Text style={[styles.adminBadgeText, { color: colors.primary }]}>Admin</Text>
+            </View>}
+          </View>
+          <ScrollView contentContainerStyle={[styles.content, compact && styles.compactContent]} keyboardShouldPersistTaps="handled">
+            <PageEnterTransition axis="y" distance={8} duration={230} resetKey={pathname} style={styles.contentEntry}>
+              {children}
+            </PageEnterTransition>
+          </ScrollView>
+        </View>
+        {compact && (
+          <>
+            {drawerOpen && <Pressable accessibilityRole="button" accessibilityLabel="Close navigation" onPress={() => setDrawerOpen(false)} style={[styles.backdrop, { backgroundColor: colors.overlay }]} />}
+            {renderSidebar(false, true)}
+          </>
+        )}
+      </View>
+      <Modal visible={confirmLogout} transparent animationType="fade" onRequestClose={() => setConfirmLogout(false)}>
+        <View style={[styles.modalBackdrop, { backgroundColor: colors.overlay }]}>
+          <View accessibilityViewIsModal style={[styles.modal, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <View style={[styles.modalIcon, { backgroundColor: colors.dangerSoft }]}>
+              <AdminIcon name="logout" color={colors.danger} size={24} />
+            </View>
+            <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>Log out of BlueTap?</Text>
+            <Text style={[styles.modalBody, { color: colors.textSecondary }]}>You will need to sign in again to access Administrator tools.</Text>
+            {!!logoutError && <Text accessibilityRole="alert" style={[styles.modalBody, { color: colors.danger }]}>{logoutError}</Text>}
+            <View style={styles.modalActions}>
+              <TouchableOpacity accessibilityRole="button" accessibilityLabel="Cancel logout" onPress={() => setConfirmLogout(false)} style={[styles.modalSecondary, { borderColor: colors.border, backgroundColor: colors.surfaceAlt }]}>
+                <Text style={[styles.modalSecondaryText, { color: colors.textPrimary }]}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity accessibilityRole="button" accessibilityLabel="Confirm logout" onPress={completeLogout} style={[styles.modalDanger, { backgroundColor: colors.danger }]}>
+                <Text style={styles.modalDangerText}>Log out</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    </SafeAreaView>
+  );
 }
 
 export default function AdminShell(props) {
@@ -64,4 +249,103 @@ export default function AdminShell(props) {
   return <View dataSet={{ bluetapTheme: resolvedTheme }} style={styles.root}><AdminShellLayout {...props} /></View>;
 }
 
-const styles = StyleSheet.create({ root:{flex:1},layout:{flex:1,flexDirection:'row'},sidebar:{zIndex:4,overflow:'visible',borderRightWidth:1},drawer:{position:'absolute',left:0,top:0,bottom:0,elevation:18,shadowColor:'#000',shadowOpacity:.32,shadowRadius:20,shadowOffset:{width:4,height:0}},brand:{height:86,flexDirection:'row',alignItems:'center',paddingHorizontal:22,gap:11,borderBottomWidth:1},brandCollapsed:{justifyContent:'center',paddingHorizontal:12},brandLogo:{width:34,height:34},brandLogoCollapsed:{width:38,height:38},brandName:{color:'#FFFFFF',fontSize:19,fontWeight:'900'},brandRole:{color:'#CBEAFF',fontSize:12,marginTop:2},navigationScroll:{flex:1},navigation:{paddingHorizontal:12,paddingTop:16,paddingBottom:8},navItemWrap:{position:'relative',zIndex:10},navItem:{minHeight:48,flexDirection:'row',alignItems:'center',gap:12,paddingHorizontal:13,marginBottom:6,borderRadius:12,borderWidth:1,borderColor:'transparent'},navItemCollapsed:{justifyContent:'center',paddingHorizontal:0},navText:{color:'#F5FBFF',fontSize:13,fontWeight:'800',flex:1},activeMarker:{width:4,height:18,borderRadius:999,backgroundColor:'#E0F3FF'},tooltip:{position:'absolute',left:68,top:7,minHeight:34,justifyContent:'center',borderRadius:8,paddingHorizontal:10,zIndex:30,shadowColor:'#000',shadowOpacity:.18,shadowRadius:8,shadowOffset:{width:0,height:3},elevation:8},tooltipText:{fontSize:12,fontWeight:'800',whiteSpace:'nowrap'},sidebarBottom:{marginTop:'auto'},themeSection:{borderTopWidth:1,paddingHorizontal:16,paddingVertical:14},themeToggle:{minHeight:42,flexDirection:'row',alignItems:'center',gap:12,paddingHorizontal:2,borderRadius:12},themeToggleCollapsed:{justifyContent:'center',paddingHorizontal:0},themeTrack:{width:52,height:28,borderRadius:999,padding:3,justifyContent:'center'},themeThumb:{width:22,height:22,borderRadius:999,backgroundColor:'#FFFFFF',shadowColor:'#000',shadowOpacity:.18,shadowRadius:3,shadowOffset:{width:0,height:1},elevation:2},themeThumbDark:{alignSelf:'flex-end'},themeLabel:{color:'#FFFFFF',fontSize:13,fontWeight:'800'},logout:{minHeight:60,flexDirection:'row',alignItems:'center',gap:12,paddingHorizontal:22,borderTopWidth:1},logoutCollapsed:{justifyContent:'center',paddingHorizontal:0},logoutText:{color:'#FFE1E1',fontWeight:'900',fontSize:13},main:{flex:1,minWidth:0},header:{minHeight:92,flexDirection:'row',alignItems:'center',gap:12,paddingHorizontal:24,borderBottomWidth:1},compactHeader:{paddingHorizontal:14},menuButton:{width:42,height:42,borderRadius:11,borderWidth:1,alignItems:'center',justifyContent:'center'},heading:{flex:1,minWidth:0},title:{fontSize:24,fontWeight:'900'},subtitle:{fontSize:13,lineHeight:18,marginTop:3},adminBadge:{minHeight:34,flexDirection:'row',alignItems:'center',gap:6,borderWidth:1,borderRadius:999,paddingHorizontal:10},adminBadgeText:{fontSize:12,fontWeight:'900'},content:{paddingHorizontal:28,paddingBottom:32,paddingTop:4,flexGrow:1},contentEntry:{flexGrow:1},compactContent:{paddingHorizontal:14},backdrop:{position:'absolute',top:0,right:0,bottom:0,left:0,zIndex:3},modalBackdrop:{flex:1,alignItems:'center',justifyContent:'center',padding:20},modal:{width:'100%',maxWidth:420,borderWidth:1,borderRadius:18,padding:22},modalIcon:{width:46,height:46,borderRadius:14,alignItems:'center',justifyContent:'center',marginBottom:14},modalTitle:{fontSize:20,fontWeight:'900'},modalBody:{fontSize:14,lineHeight:21,marginTop:7},modalActions:{flexDirection:'row',justifyContent:'flex-end',gap:10,marginTop:22},modalSecondary:{minHeight:44,paddingHorizontal:17,justifyContent:'center',borderWidth:1,borderRadius:10},modalSecondaryText:{fontWeight:'800'},modalDanger:{minHeight:44,paddingHorizontal:17,justifyContent:'center',borderRadius:10},modalDangerText:{color:'#FFFFFF',fontWeight:'900'},badgePill:{paddingHorizontal:6,paddingVertical:2,borderRadius:999,minWidth:20,alignItems:'center',justifyContent:'center'},badgePillText:{color:'#FFFFFF',fontSize:11,fontWeight:'900'},headerThemeBtn:{width:34,height:34,borderRadius:10,borderWidth:1,alignItems:'center',justifyContent:'center',marginRight:8} });
+const styles = StyleSheet.create({
+  root: { flex: 1, height: '100%' },
+  layout: { flex: 1, flexDirection: 'row', minHeight: 0, height: '100%' },
+  sidebar: {
+    zIndex: 4,
+    overflow: 'visible',
+    borderRightWidth: 1,
+    height: '100%',
+    maxHeight: '100%',
+    minHeight: 0,
+    flexDirection: 'column',
+  },
+  drawer: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    height: '100%',
+    maxHeight: '100%',
+    minHeight: 0,
+    flexDirection: 'column',
+    elevation: 18,
+    shadowColor: '#000',
+    shadowOpacity: 0.32,
+    shadowRadius: 20,
+    shadowOffset: { width: 4, height: 0 },
+  },
+  brand: {
+    height: 86,
+    flexShrink: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 22,
+    gap: 11,
+    borderBottomWidth: 1,
+  },
+  brandCollapsed: { justifyContent: 'center', paddingHorizontal: 12 },
+  brandLogo: { width: 34, height: 34 },
+  brandLogoCollapsed: { width: 38, height: 38 },
+  brandName: { color: '#FFFFFF', fontSize: 19, fontWeight: '900' },
+  brandRole: { color: '#CBEAFF', fontSize: 12, marginTop: 2 },
+  navigationScroll: {
+    flex: 1,
+    minHeight: 0,
+    flexShrink: 1,
+  },
+  navigation: {
+    paddingHorizontal: 12,
+    paddingTop: 16,
+    paddingBottom: 16,
+    flexGrow: 1,
+  },
+  navItemWrap: { position: 'relative', zIndex: 10 },
+  navItem: { minHeight: 48, flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 13, marginBottom: 6, borderRadius: 12, borderWidth: 1, borderColor: 'transparent' },
+  navItemCollapsed: { justifyContent: 'center', paddingHorizontal: 0 },
+  navText: { color: '#F5FBFF', fontSize: 13, fontWeight: '800', flex: 1 },
+  activeMarker: { width: 4, height: 18, borderRadius: 999, backgroundColor: '#E0F3FF' },
+  tooltip: { position: 'absolute', left: 68, top: 7, minHeight: 34, justifyContent: 'center', borderRadius: 8, paddingHorizontal: 10, zIndex: 30, shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 8, shadowOffset: { width: 0, height: 3 }, elevation: 8 },
+  tooltipText: { fontSize: 12, fontWeight: '800', whiteSpace: 'nowrap' },
+  sidebarBottom: {
+    marginTop: 'auto',
+    flexShrink: 0,
+  },
+  themeSection: { borderTopWidth: 1, paddingHorizontal: 16, paddingVertical: 14 },
+  themeToggle: { minHeight: 42, flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 2, borderRadius: 12 },
+  themeToggleCollapsed: { justifyContent: 'center', paddingHorizontal: 0 },
+  themeTrack: { width: 52, height: 28, borderRadius: 999, padding: 3, justifyContent: 'center' },
+  themeThumb: { width: 22, height: 22, borderRadius: 999, backgroundColor: '#FFFFFF', shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 3, shadowOffset: { width: 0, height: 1 }, elevation: 2 },
+  themeThumbDark: { alignSelf: 'flex-end' },
+  themeLabel: { color: '#FFFFFF', fontSize: 13, fontWeight: '800' },
+  logout: { minHeight: 60, flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 22, borderTopWidth: 1 },
+  logoutCollapsed: { justifyContent: 'center', paddingHorizontal: 0 },
+  logoutText: { color: '#FFE1E1', fontWeight: '900', fontSize: 13 },
+  main: { flex: 1, minWidth: 0, minHeight: 0, height: '100%' },
+  header: { minHeight: 92, flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 24, borderBottomWidth: 1 },
+  compactHeader: { paddingHorizontal: 14 },
+  menuButton: { width: 42, height: 42, borderRadius: 11, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  heading: { flex: 1, minWidth: 0 },
+  title: { fontSize: 24, fontWeight: '900' },
+  subtitle: { fontSize: 13, lineHeight: 18, marginTop: 3 },
+  adminBadge: { minHeight: 34, flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1, borderRadius: 999, paddingHorizontal: 10 },
+  adminBadgeText: { fontSize: 12, fontWeight: '900' },
+  content: { paddingHorizontal: 28, paddingBottom: 32, paddingTop: 4, flexGrow: 1 },
+  contentEntry: { flexGrow: 1 },
+  compactContent: { paddingHorizontal: 14 },
+  backdrop: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, zIndex: 3 },
+  modalBackdrop: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 20 },
+  modal: { width: '100%', maxWidth: 420, borderWidth: 1, borderRadius: 18, padding: 22 },
+  modalIcon: { width: 46, height: 46, borderRadius: 14, alignItems: 'center', justifyContent: 'center', marginBottom: 14 },
+  modalTitle: { fontSize: 20, fontWeight: '900' },
+  modalBody: { fontSize: 14, lineHeight: 21, marginTop: 7 },
+  modalActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 22 },
+  modalSecondary: { minHeight: 44, paddingHorizontal: 17, justifyContent: 'center', borderWidth: 1, borderRadius: 10 },
+  modalSecondaryText: { fontWeight: '800' },
+  modalDanger: { minHeight: 44, paddingHorizontal: 17, justifyContent: 'center', borderRadius: 10 },
+  modalDangerText: { color: '#FFFFFF', fontWeight: '900' },
+  badgePill: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 999, minWidth: 20, alignItems: 'center', justifyContent: 'center' },
+  badgePillText: { color: '#FFFFFF', fontSize: 11, fontWeight: '900' },
+  headerThemeBtn: { width: 34, height: 34, borderRadius: 10, borderWidth: 1, alignItems: 'center', justifyContent: 'center', marginRight: 8 },
+});

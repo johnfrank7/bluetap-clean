@@ -69,8 +69,8 @@ let pendingRegistration = null;
 export const setPendingRegistration = (profile, result) => {
   pendingRegistration = { profile, ...result, draftExpiresAt: Date.now() + 30 * 60 * 1000 };
 };
-export const clearPendingRegistration = () => {
-  clearPendingFaceEnrollment(pendingRegistration?.profile?.registrationSessionId);
+export const clearPendingRegistration = ({ preserveFaceEnrollment = false } = {}) => {
+  if (!preserveFaceEnrollment) clearPendingFaceEnrollment(pendingRegistration?.profile?.registrationSessionId);
   pendingRegistration = null;
 };
 export const getPendingRegistration = () => {

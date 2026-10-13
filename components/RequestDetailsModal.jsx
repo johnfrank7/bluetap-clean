@@ -203,6 +203,22 @@ export default function RequestDetailsModal({
               </View>
             )}
 
+            {(activeRequest?.transferState === 'accepted' || !!activeRequest?.transferFromBranchNameSnapshot) && (
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>Branch Transfer</Text>
+                <View style={styles.failureCard}>
+                  <Text style={styles.summaryLabel}>
+                    Transferred from {displayValue(activeRequest.transferFromBranchNameSnapshot || activeRequest.transferFromBranchName || 'Previous Branch')}
+                  </Text>
+                  {!!activeRequest.transferReason && (
+                    <Text style={styles.failureValue}>
+                      Reason: {activeRequest.transferReason}
+                    </Text>
+                  )}
+                </View>
+              </View>
+            )}
+
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>Delivery Location Map</Text>
               {Number.isFinite(request?.deliveryLocation?.latitude) && Number.isFinite(request?.deliveryLocation?.longitude) ? (
@@ -290,15 +306,15 @@ export default function RequestDetailsModal({
               <View style={styles.totalsCard}>
                 <View style={styles.totalRow}>
                   <Text style={styles.totalLabel}>Subtotal</Text>
-                  <Text style={styles.totalValue}>{formatAmount(activeRequest?.subtotal ?? activeRequest?.subtotalAtOrder ?? products.reduce((sum, item) => sum + Number(item.subtotal || 0), 0))}</Text>
+                  <Text style={styles.totalValue}>{activeRequest?.formattedSubtotal || formatAmount(activeRequest?.subtotal ?? activeRequest?.subtotalAtOrder ?? (products.length ? products.reduce((sum, item) => sum + Number(item.subtotal || 0), 0) : undefined))}</Text>
                 </View>
                 <View style={styles.totalRow}>
                   <Text style={styles.totalLabel}>Delivery Fee</Text>
-                  <Text style={styles.totalValue}>{formatAmount(activeRequest?.deliveryFee ?? activeRequest?.deliveryFeeAtOrder ?? 0)}</Text>
+                  <Text style={styles.totalValue}>{activeRequest?.formattedDeliveryFee || formatAmount(activeRequest?.deliveryFee ?? activeRequest?.deliveryFeeAtOrder)}</Text>
                 </View>
                 <View style={[styles.totalRow, styles.grandTotalRow]}>
                   <Text style={styles.grandTotalLabel}>Grand Total</Text>
-                  <Text style={styles.grandTotalValue}>{formatAmount(activeRequest?.grandTotal ?? activeRequest?.grandTotalAmount ?? activeRequest?.total_cost ?? activeRequest?.totalAtOrder ?? activeRequest?.totalAmount)}</Text>
+                  <Text style={styles.grandTotalValue}>{activeRequest?.formattedGrandTotal || formatAmount(activeRequest?.grandTotal ?? activeRequest?.grandTotalAmount ?? activeRequest?.total_cost ?? activeRequest?.totalAtOrder ?? activeRequest?.totalAmount)}</Text>
                 </View>
               </View>
 
