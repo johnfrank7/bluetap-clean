@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { createUsernameHandler } = require('../usernameHandler');
+const { createUsernameHandler, getPasswordApiKey, clearVerifiedWebKeyCache } = require('../usernameHandler');
 const { normalizeUsername } = require('../username');
 
 const response = () => ({
@@ -564,4 +564,289 @@ test('public login error formatting formats retry duration correctly', () => {
   assert.equal(getPublicLoginErrorMessage({ code: 'LOGIN_RATE_LIMITED', retryAfterSeconds: 45 }), 'Too many login attempts. Try again in 45 seconds.');
   assert.equal(getPublicLoginErrorMessage({ code: 'LOGIN_RATE_LIMITED' }), 'Too many login attempts. Please try again later.');
   assert.equal(getPublicLoginErrorMessage({ code: 'username/too-many-attempts' }), 'Too many login attempts. Please try again later.');
+});
+
+test('staging Firebase configuration: getPasswordApiKey accepts staging project number and authorized domains', async (t) => {
+  const originalEnv = {
+    APP_ENV: process.env.APP_ENV,
+    FIREBASE_PROJECT_ID: process.env.FIREBASE_PROJECT_ID,
+    FIREBASE_WEB_API_KEY: process.env.FIREBASE_WEB_API_KEY,
+    FIREBASE_MESSAGING_SENDER_ID: process.env.FIREBASE_MESSAGING_SENDER_ID,
+  };
+  process.env.APP_ENV = 'staging';
+  process.env.FIREBASE_PROJECT_ID = 'bluetap-staging';
+  process.env.FIREBASE_WEB_API_KEY = 'staging-test-key-abc';
+  delete process.env.FIREBASE_MESSAGING_SENDER_ID;
+  clearVerifiedWebKeyCache();
+
+  t.mock.method(global, 'fetch', async (url) => {
+    assert.match(url, /identitytoolkit\.googleapis\.com\/v1\/projects/);
+    return {
+      ok: true,
+      json: async () => ({
+        projectId: '452379686635',
+        authorizedDomains: [
+          'localhost',
+          'bluetap-staging.firebaseapp.com',
+          'bluetap-staging.web.app',
+        ],
+      }),
+    };
+  });
+
+  try {
+    const key = await getPasswordApiKey();
+    assert.equal(key, 'staging-test-key-abc');
+  } finally {
+    clearVerifiedWebKeyCache();
+    for (const [k, v] of Object.entries(originalEnv)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
+});
+
+test('staging Firebase configuration: getPasswordApiKey accepts explicit FIREBASE_MESSAGING_SENDER_ID matching returned project number', async (t) => {
+  const originalEnv = {
+    APP_ENV: process.env.APP_ENV,
+    FIREBASE_PROJECT_ID: process.env.FIREBASE_PROJECT_ID,
+    FIREBASE_WEB_API_KEY: process.env.FIREBASE_WEB_API_KEY,
+    FIREBASE_MESSAGING_SENDER_ID: process.env.FIREBASE_MESSAGING_SENDER_ID,
+  };
+  process.env.APP_ENV = 'staging';
+  process.env.FIREBASE_PROJECT_ID = 'bluetap-staging';
+  process.env.FIREBASE_WEB_API_KEY = 'staging-test-key-sender';
+  process.env.FIREBASE_MESSAGING_SENDER_ID = '452379686635';
+  clearVerifiedWebKeyCache();
+
+  t.mock.method(global, 'fetch', async () => {
+    return {
+      ok: true,
+      json: async () => ({
+        projectId: '452379686635',
+      }),
+    };
+  });
+
+  try {
+    const key = await getPasswordApiKey();
+    assert.equal(key, 'staging-test-key-sender');
+  } finally {
+    clearVerifiedWebKeyCache();
+    for (const [k, v] of Object.entries(originalEnv)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
+});
+
+test('staging Firebase configuration: explicit FIREBASE_PROJECT_NUMBER mismatch fails closed even if authorizedDomains match', async (t) => {
+  const originalEnv = {
+    APP_ENV: process.env.APP_ENV,
+    FIREBASE_PROJECT_ID: process.env.FIREBASE_PROJECT_ID,
+    FIREBASE_WEB_API_KEY: process.env.FIREBASE_WEB_API_KEY,
+    FIREBASE_PROJECT_NUMBER: process.env.FIREBASE_PROJECT_NUMBER,
+  };
+  process.env.APP_ENV = 'staging';
+  process.env.FIREBASE_PROJECT_ID = 'bluetap-staging';
+  process.env.FIREBASE_WEB_API_KEY = 'staging-test-key-mismatch';
+  process.env.FIREBASE_PROJECT_NUMBER = '999999999999';
+  clearVerifiedWebKeyCache();
+
+  t.mock.method(global, 'fetch', async () => ({
+    ok: true,
+    json: async () => ({
+      projectId: '452379686635',
+      authorizedDomains: [
+        'localhost',
+        'bluetap-staging.firebaseapp.com',
+        'bluetap-staging.web.app',
+      ],
+    }),
+  }));
+
+  try {
+    await assert.rejects(
+      getPasswordApiKey(),
+      /Project number does not match configured FIREBASE_PROJECT_NUMBER/i
+    );
+  } finally {
+    clearVerifiedWebKeyCache();
+    for (const [k, v] of Object.entries(originalEnv)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
+});
+
+test('staging Firebase configuration: getPasswordApiKey fails closed for foreign or production project API keys', async (t) => {
+  const originalEnv = {
+    APP_ENV: process.env.APP_ENV,
+    FIREBASE_PROJECT_ID: process.env.FIREBASE_PROJECT_ID,
+    FIREBASE_WEB_API_KEY: process.env.FIREBASE_WEB_API_KEY,
+  };
+  process.env.APP_ENV = 'staging';
+  process.env.FIREBASE_PROJECT_ID = 'bluetap-staging';
+  process.env.FIREBASE_WEB_API_KEY = 'foreign-project-key';
+  clearVerifiedWebKeyCache();
+
+  // 1. Foreign project fails closed
+  t.mock.method(global, 'fetch', async () => ({
+    ok: true,
+    json: async () => ({
+      projectId: '999999999999',
+      authorizedDomains: ['another-project.firebaseapp.com'],
+    }),
+  }));
+
+  try {
+    await assert.rejects(
+      getPasswordApiKey(),
+      /Firebase Web API key project mismatch/i
+    );
+  } finally {
+    clearVerifiedWebKeyCache();
+  }
+
+  // 2. Production project API key on staging fails closed
+  process.env.FIREBASE_WEB_API_KEY = 'production-key-on-staging';
+  clearVerifiedWebKeyCache();
+  t.mock.method(global, 'fetch', async () => ({
+    ok: true,
+    json: async () => ({
+      projectId: '17869630531',
+      authorizedDomains: ['bluetap-8c98d.firebaseapp.com'],
+    }),
+  }));
+
+  try {
+    await assert.rejects(
+      getPasswordApiKey(),
+      /Firebase Web API key project mismatch/i
+    );
+  } finally {
+    clearVerifiedWebKeyCache();
+    for (const [k, v] of Object.entries(originalEnv)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
+});
+
+test('staging public login: both username and email login succeed with valid staging Firebase configuration', async (t) => {
+  const originalEnv = {
+    APP_ENV: process.env.APP_ENV,
+    FIREBASE_PROJECT_ID: process.env.FIREBASE_PROJECT_ID,
+    FIREBASE_WEB_API_KEY: process.env.FIREBASE_WEB_API_KEY,
+    EMAIL_OTP_HASH_SECRET: process.env.EMAIL_OTP_HASH_SECRET,
+  };
+  process.env.APP_ENV = 'staging';
+  process.env.FIREBASE_PROJECT_ID = 'bluetap-staging';
+  process.env.FIREBASE_WEB_API_KEY = 'staging-web-api-key-test';
+  process.env.EMAIL_OTP_HASH_SECRET = 'staging-rate-limit-secret';
+  clearVerifiedWebKeyCache();
+
+  t.mock.method(global, 'fetch', async (url) => {
+    if (url.includes('/v1/projects?')) {
+      return {
+        ok: true,
+        json: async () => ({
+          projectId: '452379686635',
+          authorizedDomains: ['localhost', 'bluetap-staging.firebaseapp.com'],
+        }),
+      };
+    }
+    if (url.includes('/v1/accounts:signInWithPassword')) {
+      return {
+        ok: true,
+        json: async () => ({
+          localId: 'expected-user',
+          idToken: 'staging-id-token',
+        }),
+      };
+    }
+    throw new Error(`Unexpected fetch URL: ${url}`);
+  });
+
+  try {
+    const handler = createUsernameHandler('login', () => fixture());
+
+    // 1. Username login in staging
+    const resUsername = response();
+    await handler({
+      method: 'POST',
+      headers: {},
+      socket: { remoteAddress: 'staging-ip-1' },
+      body: { username: 'JohnBlueTap', password: 'correct-password' },
+    }, resUsername);
+    assert.equal(resUsername.statusCode, 200);
+    assert.equal(resUsername.body.customToken, 'custom-expected-user');
+    assert.equal(resUsername.body.profile.uid, 'expected-user');
+    assert.equal(resUsername.body.profile.role, 'requester');
+
+    // 2. Email login in staging
+    const resEmail = response();
+    await handler({
+      method: 'POST',
+      headers: {},
+      socket: { remoteAddress: 'staging-ip-2' },
+      body: { username: 'private@example.test', password: 'correct-password' },
+    }, resEmail);
+    assert.equal(resEmail.statusCode, 200);
+    assert.equal(resEmail.body.customToken, 'custom-expected-user');
+    assert.equal(resEmail.body.profile.uid, 'expected-user');
+  } finally {
+    clearVerifiedWebKeyCache();
+    for (const [k, v] of Object.entries(originalEnv)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
+});
+
+test('staging public login: wrong project API key fails closed with 503 SERVER_ERROR', async (t) => {
+  const originalEnv = {
+    APP_ENV: process.env.APP_ENV,
+    FIREBASE_PROJECT_ID: process.env.FIREBASE_PROJECT_ID,
+    FIREBASE_WEB_API_KEY: process.env.FIREBASE_WEB_API_KEY,
+    EMAIL_OTP_HASH_SECRET: process.env.EMAIL_OTP_HASH_SECRET,
+  };
+  process.env.APP_ENV = 'staging';
+  process.env.FIREBASE_PROJECT_ID = 'bluetap-staging';
+  process.env.FIREBASE_WEB_API_KEY = 'mismatched-key';
+  process.env.EMAIL_OTP_HASH_SECRET = 'staging-rate-limit-secret';
+  clearVerifiedWebKeyCache();
+
+  t.mock.method(global, 'fetch', async (url) => {
+    if (url.includes('/v1/projects?')) {
+      return {
+        ok: true,
+        json: async () => ({
+          projectId: '888888888888',
+          authorizedDomains: ['foreign-project.firebaseapp.com'],
+        }),
+      };
+    }
+    throw new Error('signInWithPassword must not be reached');
+  });
+
+  try {
+    const handler = createUsernameHandler('login', () => fixture());
+    const res = response();
+    await handler({
+      method: 'POST',
+      headers: {},
+      socket: { remoteAddress: 'staging-fail-ip' },
+      body: { username: 'JohnBlueTap', password: 'any-password' },
+    }, res);
+    assert.equal(res.statusCode, 503);
+    assert.equal(res.body.error.code, 'SERVER_ERROR');
+    assert.equal(res.body.error.reason, 'service-unavailable');
+  } finally {
+    clearVerifiedWebKeyCache();
+    for (const [k, v] of Object.entries(originalEnv)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
 });

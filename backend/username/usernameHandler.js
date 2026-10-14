@@ -83,12 +83,37 @@ async function getPasswordApiKey() {
       signal: AbortSignal.timeout(15000),
     });
     const config = await response.json().catch(() => null);
-    const returnedProject = String(config?.projectId || '');
-    const allowedProjects = [expectedProjectId];
-    if (expectedProjectId === firebaseWebConfig.projectId) {
-      allowedProjects.push(firebaseWebConfig.messagingSenderId);
+    const returnedProject = String(config?.projectId || '').trim();
+
+    const explicitProjectNumber = (
+      process.env.FIREBASE_PROJECT_NUMBER ||
+      process.env.FIREBASE_MESSAGING_SENDER_ID ||
+      process.env.FIREBASE_WEB_PROJECT_NUMBER ||
+      process.env.EXPO_PUBLIC_FIREBASE_PROJECT_NUMBER ||
+      process.env.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID ||
+      (expectedProjectId === firebaseWebConfig.projectId ? firebaseWebConfig.messagingSenderId : null)
+    )?.trim() || null;
+
+    if (explicitProjectNumber && returnedProject.toLowerCase() !== explicitProjectNumber.toLowerCase()) {
+      stage('FIREBASE_CONFIGURATION_FAILED');
+      throw new Error('Firebase Web API key project mismatch: Project number does not match configured FIREBASE_PROJECT_NUMBER');
     }
-    if (!response.ok || !allowedProjects.includes(returnedProject)) {
+
+    const hasAuthorizedDomainMatch = Array.isArray(config?.authorizedDomains) &&
+      config.authorizedDomains.some((domain) => {
+        if (typeof domain !== 'string') return false;
+        const norm = domain.trim().toLowerCase();
+        const expected = expectedProjectId.trim().toLowerCase();
+        return norm === `${expected}.firebaseapp.com` || norm === `${expected}.web.app`;
+      });
+    const isProjectIdMatch = returnedProject.toLowerCase() === expectedProjectId.toLowerCase();
+    const isNumericProjectMatch = Boolean(explicitProjectNumber && returnedProject.toLowerCase() === explicitProjectNumber.toLowerCase());
+
+    const isProjectMatch = explicitProjectNumber
+      ? isNumericProjectMatch && (hasAuthorizedDomainMatch || isProjectIdMatch || !Array.isArray(config?.authorizedDomains))
+      : (hasAuthorizedDomainMatch || isProjectIdMatch);
+
+    if (!response.ok || !isProjectMatch) {
       stage('FIREBASE_CONFIGURATION_FAILED');
       throw new Error('Firebase Web API key project mismatch');
     }
@@ -448,9 +473,14 @@ function createUsernameHandler(action, getAdmin = getFirebaseAdmin, { now = Date
   };
 }
 
+function clearVerifiedWebKeyCache() {
+  verifiedWebKey = null;
+}
+
 module.exports = {
   createUsernameHandler,
   getPasswordApiKey,
+  clearVerifiedWebKeyCache,
   checkUsername,
   checkIpRateLimit,
   checkAccountRateLimit,
