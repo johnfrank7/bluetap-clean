@@ -38,5 +38,3 @@ test('RequestFormPage Section 3 provides desktop web and mobile horizontal produ
   assert.match(css, /\[data-product-scroll='true'\]::-webkit-scrollbar/);
   assert.match(css, /\[data-product-scroll='true'\]::-webkit-scrollbar-thumb/);
 });
-
-\n

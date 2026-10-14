@@ -119,5 +119,3 @@ export function useAssistantTypewriter({
 }
 
 export default useAssistantTypewriter;
-
-\n

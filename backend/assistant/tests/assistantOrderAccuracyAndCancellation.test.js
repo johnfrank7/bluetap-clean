@@ -1346,5 +1346,3 @@ test('Phase 16.1 Test 10: Distributor role safety - distributor assistant cannot
   assert.ok(!response.actions.some((a) => a.label?.includes('Cancel Order')));
   assert.doesNotMatch(response.message, /you can still cancel this request/i);
 });
-
-\n

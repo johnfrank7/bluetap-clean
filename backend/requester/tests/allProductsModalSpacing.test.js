@@ -65,5 +65,3 @@ test('All Products modal provides proper content container spacing and item cont
     'ProductCard action button must meet 44px touch target height'
   );
 });
-
-\n

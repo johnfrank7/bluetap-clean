@@ -81,5 +81,3 @@ test('performance timing logger instruments request duration safely without leak
   assert.match(ordering, /recordTiming\('json_parse'/);
   assert.match(ordering, /recordTiming\('catalog_cache_hit'/);
 });
-
-\n

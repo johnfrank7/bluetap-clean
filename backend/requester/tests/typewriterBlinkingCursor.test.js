@@ -75,5 +75,3 @@ test('Phase 13B.3 stability: clock updates do not restart animation and reduced-
   assert.match(dashboard, /numberOfLines=\{1\}/);
   assert.match(dashboard, /ellipsizeMode="tail"/);
 });
-
-\n

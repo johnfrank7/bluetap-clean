@@ -36,5 +36,3 @@ export function startTiming(metricName, initialDetails = {}) {
     },
   };
 }
-
-\n
