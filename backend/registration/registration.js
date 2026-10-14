@@ -256,7 +256,8 @@ function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, render 
         status: 'passed_pending_finalization', verifiedAt: face.verifiedAt || new Date(now()),
         verificationId: face.verificationReference || null,
         verificationReference: face.verificationReference || null,
-        livenessPassed: face.livenessPassed === true ? true : null,
+        livenessPassed: face.livenessPassed === true,
+        antiSpoofing: face.antiSpoofing === true,
         duplicateCheck: face.duplicateCheck || 'unknown',
         verificationMode: face.verificationMode || 'provider',
         providerVerified: true, failureReason: null,
@@ -265,7 +266,7 @@ function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, render 
         model: typeof face.model === 'string' ? face.model : null,
         detectorBackend: typeof face.detectorBackend === 'string' ? face.detectorBackend : null,
       } : { required: false, status: 'not_required', verifiedAt: null, verificationId: null,
-        verificationReference: null, livenessPassed: null, duplicateCheck: 'not_required',
+        verificationReference: null, livenessPassed: null, antiSpoofing: false, duplicateCheck: 'not_required',
         verificationMode: 'not_required', providerVerified: false, failureReason: null };
       const termsAcceptance = {
         accepted: true, acceptedAt: session.termsAcceptance.acceptedAt || new Date(now()),
@@ -389,7 +390,8 @@ function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, render 
       const face = session.faceVerification;
       const finalizedFaceVerification = {
         status: 'verified', verifiedAt: face.verifiedAt || new Date(now()), verificationId: user.uid, verificationReference: user.uid,
-        livenessPassed: face.livenessPassed === true, duplicateCheck: 'clear', verificationMode: 'finalized-enrollment', providerVerified: true,
+        livenessPassed: face.livenessPassed === true, antiSpoofing: face.antiSpoofing === true,
+        duplicateCheck: 'clear', verificationMode: 'finalized-enrollment', providerVerified: true,
         model: face.model || 'SFace', detectorBackend: face.detectorBackend || 'yunet', failureReason: null,
       };
       tx.update(profileRef, { onboardingStatus: 'complete', registrationCompleted: true, updatedAt: new Date(now()), faceVerification: finalizedFaceVerification });

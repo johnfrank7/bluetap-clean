@@ -306,6 +306,41 @@ test('final enrollment binds the final uid without copying biometric fields', as
   assert.equal(f.records.get('registrationSessions/' + f.sessionId).completed, true);
   assert.equal(f.renderCalls[1].body.get('uid'), 'new-user');
   assert.equal(f.renderCalls[1].body.get('registration_session_id'), f.sessionId);
+  assert.equal(profile.faceVerification.antiSpoofing, false);
+});
+
+test('SFace capture with livenessPassed: false finalizes successfully with antiSpoofing: false', async () => {
+  const f = fixture();
+  f.setSessionProfile(form, { livenessPassed: false });
+  const session = f.records.get('registrationSessions/' + f.sessionId);
+  Object.assign(session.faceVerification, { verificationMode: 'web-camera-capture', verificationReference: f.sessionId, model: 'SFace', detectorBackend: 'yunet', livenessPassed: false, antiSpoofing: false });
+  const result = await f.service.request('new@example.test', 'test-ip');
+  await f.service.complete(result.challenge, f.sent[0].code, form);
+  const profile = f.records.get('users/new-user');
+  assert.equal(profile.faceVerification.verificationReference, 'new-user');
+  assert.equal(profile.faceVerification.livenessPassed, false);
+  assert.equal(profile.faceVerification.antiSpoofing, false);
+  assert.equal(profile.faceVerification.providerVerified, true);
+  assert.equal(profile.faceVerification.duplicateCheck, 'clear');
+  assert.equal(profile.faceVerification.status, 'verified');
+  assert.equal(profile.onboardingStatus, 'complete');
+  assert.equal(profile.registrationCompleted, true);
+});
+
+test('distributor registration finalizes successfully with livenessPassed: false', async () => {
+  const f = fixture();
+  const distForm = { ...form, role: 'distributor', requestedBranchId: 'branch-a' };
+  f.setSessionProfile(distForm, { livenessPassed: false });
+  const session = f.records.get('registrationSessions/' + f.sessionId);
+  Object.assign(session.faceVerification, { verificationMode: 'web-camera-capture', verificationReference: f.sessionId, model: 'SFace', detectorBackend: 'yunet', livenessPassed: false, antiSpoofing: false });
+  const result = await f.service.request('new-dist@example.test', 'test-ip');
+  await f.service.complete(result.challenge, f.sent[0].code, distForm);
+  const profile = f.records.get('users/new-user');
+  assert.equal(profile.role, 'distributor');
+  assert.equal(profile.faceVerification.verificationReference, 'new-user');
+  assert.equal(profile.faceVerification.livenessPassed, false);
+  assert.equal(profile.faceVerification.antiSpoofing, false);
+  assert.equal(profile.faceVerification.status, 'verified');
 });
 
 test('tampered challenge and privileged roles cannot create an account', async () => {

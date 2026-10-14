@@ -13,6 +13,8 @@ const snapshot = {
 
 test('trusted recovery requires a complete, UID-bound finalized snapshot', async () => {
   assert.equal(validSnapshot(snapshot, user), true);
+  assert.equal(validSnapshot({ ...snapshot, faceVerification: { ...snapshot.faceVerification, livenessPassed: false, antiSpoofing: false } }, user), true);
+  assert.equal(validSnapshot({ ...snapshot, faceVerification: { required: false, status: 'not_required', duplicateCheck: 'not_required', verificationReference: null } }, user), true);
   assert.equal(validSnapshot({ ...snapshot, uid: 'attacker' }, user), false);
   assert.equal(validSnapshot({ ...snapshot, faceVerification: { ...snapshot.faceVerification, status: 'unverified' } }, user), false);
 });

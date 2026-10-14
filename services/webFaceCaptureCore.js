@@ -6,9 +6,8 @@ function getRegistrationFaceCaptureMode(platform) {
 }
 
 function isTrustedRegistrationFaceVerification(verification = {}) {
-  return verification.status === 'passed_pending_finalization' &&
-    verification.duplicateCheck === 'clear' &&
-    verification.livenessPassed === true;
+  return ['passed_pending_finalization', 'verified'].includes(verification.status) &&
+    verification.duplicateCheck === 'clear';
 }
 
 function browserCameraSupported(navigatorValue) {

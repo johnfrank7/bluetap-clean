@@ -127,7 +127,9 @@ function createRegistrationFaceService({ db, detector = defaultDetector, render 
       if (typeof duplicate?.duplicateDetected !== 'boolean' || typeof duplicate?.reviewRequired !== 'boolean' ||
           !Number.isFinite(duplicate?.threshold) || !(duplicate.distance === null || Number.isFinite(duplicate.distance))) throw contractError();
       if (duplicate.duplicateDetected || duplicate.reviewRequired) {
-        const face = { status: 'review_required', verifiedAt: null, duplicateCheck: 'flagged', livenessPassed: true };
+        const face = { status: 'review_required', verifiedAt: null, duplicateCheck: 'flagged',
+          livenessPassed: !webCapture && data.faceVerification?.livenessPassed === true,
+          antiSpoofing: false };
         await update(id, (current, save) => { check(current, challengeId, 'processing'); save({ faceVerification: face, faceChallenge: { ...current.faceChallenge, state: 'used' } }); });
         return { faceVerification: publicFace(face) };
       }
@@ -140,7 +142,9 @@ function createRegistrationFaceService({ db, detector = defaultDetector, render 
       const stored = await callFaceStage('FACE_STORE_STARTED', 'FACE_STORE_FAILED', '/store-registration-face', temporary, signal);
       if (stored?.stored !== true || stored?.duplicateDetected !== false || stored?.reviewRequired !== false ||
           stored?.registrationSessionId !== id || typeof stored?.expiresAt !== 'string') throw contractError();
-      const face = { status: 'passed_pending_finalization', verifiedAt: timestamp(), duplicateCheck: 'clear', livenessPassed: true,
+      const face = { status: 'passed_pending_finalization', verifiedAt: timestamp(), duplicateCheck: 'clear',
+        livenessPassed: !webCapture && data.faceVerification?.livenessPassed === true,
+        antiSpoofing: false,
         verificationReference: id, captureHash: hash(String(image)), verificationMode: webCapture ? 'web-camera-capture' : 'registration-capture', providerVerified: true,
         model: 'SFace', detectorBackend: 'yunet', failureReason: null };
       await update(id, (current, save) => { check(current, challengeId, 'processing'); save({ faceVerification: face, faceEnrollmentPending: false, faceChallenge: { ...current.faceChallenge, state: 'used' } }); });

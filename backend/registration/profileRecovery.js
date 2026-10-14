@@ -5,14 +5,19 @@ const { createRenderFaceClient } = require('../verification/renderFaceClient');
 const cleanEmail = (value) => (value || '').toString().trim().toLowerCase();
 const validSnapshot = (snapshot, user) => {
   const face = snapshot?.faceVerification || {};
+  const faceValid = face.status === 'not_required' || (
+    face.status === 'verified' &&
+    face.duplicateCheck === 'clear' &&
+    typeof face.verificationReference === 'string' &&
+    face.verificationReference.length > 0
+  );
   return snapshot && snapshot.uid === user.uid && cleanEmail(snapshot.email) === cleanEmail(user.email) &&
     ['requester', 'distributor'].includes(snapshot.role) &&
     snapshot.registrationCompleted === true && snapshot.onboardingStatus === 'complete' &&
     snapshot.emailVerified === true && snapshot.emailVerificationRequired === true &&
     snapshot.termsAcceptance?.accepted === true && typeof snapshot.username === 'string' &&
     typeof snapshot.usernameNormalized === 'string' && typeof snapshot.unique_id === 'string' &&
-    face.status === 'verified' && face.duplicateCheck === 'clear' && face.livenessPassed === true &&
-    typeof face.verificationReference === 'string' && face.verificationReference.length > 0;
+    faceValid;
 };
 
 async function recoverProfile({ auth, db, uid }) {

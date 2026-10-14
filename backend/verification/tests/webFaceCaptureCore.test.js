@@ -15,9 +15,11 @@ test('web uses the browser camera flow while Android and iOS retain the native f
 
 test('Step 3 is enabled only by the complete trusted verification state', () => {
   assert.equal(isTrustedRegistrationFaceVerification({ status: 'passed_pending_finalization', duplicateCheck: 'clear', livenessPassed: true }), true);
+  assert.equal(isTrustedRegistrationFaceVerification({ status: 'passed_pending_finalization', duplicateCheck: 'clear', livenessPassed: false }), true);
+  assert.equal(isTrustedRegistrationFaceVerification({ status: 'verified', duplicateCheck: 'clear', livenessPassed: false }), true);
   assert.equal(isTrustedRegistrationFaceVerification({ status: 'passed_pending_finalization', duplicateCheck: 'unknown', livenessPassed: true }), false);
-  assert.equal(isTrustedRegistrationFaceVerification({ status: 'passed_pending_finalization', duplicateCheck: 'clear', livenessPassed: false }), false);
-  assert.equal(isTrustedRegistrationFaceVerification({ status: 'unverified', duplicateCheck: 'clear', livenessPassed: true }), false);
+  assert.equal(isTrustedRegistrationFaceVerification({ status: 'passed_pending_finalization', duplicateCheck: 'flagged' }), false);
+  assert.equal(isTrustedRegistrationFaceVerification({ status: 'unverified', duplicateCheck: 'clear' }), false);
 });
 
 test('browser camera support and permission failures are explicit', () => {

@@ -47,9 +47,12 @@ test('web capture performs a temporary trusted check without enrollment', async 
   const result = await f.webComplete({ faceVerification: { status: 'verified', livenessPassed: true } });
   assert.equal(result.faceVerification.status, 'passed_pending_finalization');
   assert.equal(result.faceVerification.duplicateCheck, 'clear');
+  assert.equal(result.faceVerification.livenessPassed, false);
   assert.deepEqual(f.calls.map((call) => call.path), ['/ready', '/verify-face', '/check-duplicate', '/store-registration-face']);
   assert.equal(f.data().faceVerification.verificationMode, 'web-camera-capture');
   assert.equal(f.data().faceVerification.providerVerified, true);
+  assert.equal(f.data().faceVerification.livenessPassed, false);
+  assert.equal(f.data().faceVerification.antiSpoofing, false);
   assert.equal(JSON.stringify([...f.records]).includes('base64'), false);
 });
 test('web capture fails closed for missing challenge, expired session, rejected match, and duplicates', async () => {

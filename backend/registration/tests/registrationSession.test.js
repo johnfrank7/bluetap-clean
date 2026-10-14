@@ -50,6 +50,12 @@ test('public start cannot bypass verification', async () => {
   await setTrustedFaceVerification(f.db, provider.registrationSessionId, { livenessPassed: true, duplicateCheck: 'clear', verificationReference: 'provider-reference' }, f.now);
   assert.equal((await f.service.status(provider.registrationSessionId)).faceVerification.status, 'verified');
   assert.equal((await f.service.acceptTerms(provider.registrationSessionId)).accepted, true);
+
+  const providerTruthful = await f.service.create(personal, 'third-ip');
+  await setTrustedFaceVerification(f.db, providerTruthful.registrationSessionId, { providerVerified: true, duplicateCheck: 'clear', verificationReference: 'truthful-reference', livenessPassed: false, antiSpoofing: false }, f.now);
+  assert.equal((await f.service.status(providerTruthful.registrationSessionId)).faceVerification.status, 'verified');
+  assert.equal((await f.service.status(providerTruthful.registrationSessionId)).faceVerification.livenessPassed, false);
+  assert.equal((await f.service.acceptTerms(providerTruthful.registrationSessionId)).accepted, true);
 });
 
 test('duplicate flag requires review and expired sessions fail closed', async () => {

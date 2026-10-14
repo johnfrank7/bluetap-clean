@@ -10,8 +10,10 @@ const INSTALLATION_ID = SESSION_ID;
 const TERMS_VERSION = '1.0';
 const PRIVACY_VERSION = '1.0';
 const isRegistrationFaceVerified = (face = {}) => ['passed_pending_finalization', 'verified'].includes(face.status) &&
-  face.providerVerified === true && face.livenessPassed === true &&
-  face.duplicateCheck === 'clear' && typeof face.verificationReference === 'string' &&
+  face.providerVerified === true &&
+  face.duplicateCheck === 'clear' &&
+  face.failureReason == null &&
+  typeof face.verificationReference === 'string' &&
   face.verificationReference.length > 0;
 const millis = (value) => value?.toMillis?.() || (value instanceof Date ? value.getTime() : Number(value) || 0);
 
@@ -178,7 +180,7 @@ function createRegistrationSessionService({ db, auth, hashSecret, deviceHashSecr
 // public endpoint and never accept these values from the registration browser.
 async function setTrustedFaceVerification(db, id, result, now = Date.now) {
   const ref = sessionRef(db, id);
-  const allowed = result?.livenessPassed === true && result?.duplicateCheck === 'clear';
+  const allowed = (result?.providerVerified === true || result?.livenessPassed === true || result?.status === 'verified') && result?.duplicateCheck === 'clear';
   const status = result?.duplicateCheck === 'flagged' ? 'review_required' : allowed ? 'verified' : 'failed';
   await db.runTransaction(async (tx) => {
     const data = (await tx.get(ref)).data();
@@ -192,6 +194,7 @@ async function setTrustedFaceVerification(db, id, result, now = Date.now) {
       duplicateCheck: result?.duplicateCheck === 'flagged' ? 'flagged' : result?.duplicateCheck === 'clear' ? 'clear' : 'unknown',
       verificationReference: typeof result?.verificationReference === 'string' ? result.verificationReference.slice(0, 200) : null,
       livenessPassed: result?.livenessPassed === true,
+      antiSpoofing: result?.antiSpoofing === true,
       verificationMode: 'provider',
       providerVerified: allowed,
     } });

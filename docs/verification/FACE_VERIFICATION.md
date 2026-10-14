@@ -110,10 +110,12 @@ repeats duplicate search itself, so a new match at enrollment also requires revi
 Only clear duplicate search sets temporary `status:passed_pending_finalization`.
 After OTP and account/profile creation, final enrollment sets `status:verified`,
 a Firestore server timestamp, `duplicateCheck:clear`, the final UID enrollment reference,
-`model:SFace`, and `detectorBackend:yunet`. The existing `livenessPassed` field
-also remains true for a server-approved `web-camera-capture` session so the
-existing registration gate remains compatible; it means the capture workflow was
-approved by the backend, not that active presentation-attack liveness was proven.
+`model:SFace`, and `detectorBackend:yunet`. The `livenessPassed` field is explicitly
+reported as `false` and `antiSpoofing:false` because the upstream OpenCV SFace + YuNet
+service runs with `ANTI_SPOOFING = False` and performs no presentation-attack detection.
+The registration gates decouple from synthetic liveness booleans and instead evaluate
+server-authoritative identity matching (`providerVerified:true`), clear duplicate check
+(`duplicateCheck:clear`), valid status, and verification references.
 Possible matches store review_required/flagged. Upstream unavailability leaves the
 session unverified.
 
