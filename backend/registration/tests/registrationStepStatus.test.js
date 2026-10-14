@@ -4,6 +4,7 @@ const test = require('node:test');
 const {
   REGISTRATION_STEP: STEP,
   buildRegistrationSteps,
+  buildRegistrationDisplaySteps,
   adjacentRegistrationStep,
   registrationEntryStep,
   unavailableRegistrationRoute,
@@ -89,4 +90,51 @@ test('explicit incomplete state marks only required steps red', () => {
     }),
     ['completed', 'current', 'future', 'incomplete', 'future']
   );
+});
+
+test('registration step displays and counts match each of the four policy combinations', () => {
+  const cases = [
+    {
+      name: 'Face ON + OTP ON',
+      policy: { faceVerificationRequired: true, emailOtpRequired: true },
+      expectedSteps: [1, 2, 3, 4, 5],
+      faceIncluded: true,
+      otpIncluded: true,
+      count: 5,
+    },
+    {
+      name: 'Face ON + OTP OFF',
+      policy: { faceVerificationRequired: true, emailOtpRequired: false },
+      expectedSteps: [1, 2, 3, 4],
+      faceIncluded: true,
+      otpIncluded: false,
+      count: 4,
+    },
+    {
+      name: 'Face OFF + OTP ON',
+      policy: { faceVerificationRequired: false, emailOtpRequired: true },
+      expectedSteps: [1, 2, 4, 5],
+      faceIncluded: false,
+      otpIncluded: true,
+      count: 4,
+    },
+    {
+      name: 'Face OFF + OTP OFF',
+      policy: { faceVerificationRequired: false, emailOtpRequired: false },
+      expectedSteps: [1, 2, 4],
+      faceIncluded: false,
+      otpIncluded: false,
+      count: 3,
+    },
+  ];
+
+  for (const c of cases) {
+    const steps = buildRegistrationSteps(c.policy);
+    const displaySteps = buildRegistrationDisplaySteps(c.policy);
+    assert.deepEqual(steps, c.expectedSteps, `${c.name} steps mismatch`);
+    assert.deepEqual(displaySteps, c.expectedSteps, `${c.name} display steps mismatch`);
+    assert.equal(steps.length, c.count, `${c.name} step count mismatch`);
+    assert.equal(steps.includes(STEP.identity), c.faceIncluded, `${c.name} face inclusion mismatch`);
+    assert.equal(steps.includes(STEP.verifyEmail), c.otpIncluded, `${c.name} otp inclusion mismatch`);
+  }
 });

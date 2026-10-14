@@ -727,7 +727,12 @@ function createRegistrationService({ auth, db, sendEmailOtp, hashSecret, render 
   async function completeWithoutOtp(challenge, input, finalFaceImage) {
     const { email, usernameNormalized, registrationSessionId } = readChallenge(challenge);
     const profile = validateProfile(input);
-    const session = await verifiedSession(registrationSessionId, profile);
+    const snapshot = await db.collection('registrationSessions').doc(registrationSessionId).get();
+    const session = snapshot.data();
+    if (session?.completed === true && session?.finalization?.status === 'completed') {
+      return retryFinalization(challenge, input, finalFaceImage);
+    }
+    await verifiedSession(registrationSessionId, profile);
     if (requiresOtp(session)) throw new OtpError(403, 'EMAIL_OTP_REQUIRED', 'Email OTP verification is required.');
     await authorizeFinalization(email, registrationSessionId, false);
     const result = await finish(email, usernameNormalized, registrationSessionId, input, finalFaceImage, false, false);

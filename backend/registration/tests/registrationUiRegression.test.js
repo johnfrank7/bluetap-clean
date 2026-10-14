@@ -32,3 +32,13 @@ test('OTP input preserves paste/autofill and uses semantic light/dark theme colo
   assert.match(verification, /backgroundColor: colors\.surfaceAlt/);
   assert.match(verification, /borderColor: colors\.border/);
 });
+
+test('signup executes completeRegistrationWithoutOtp and routes directly to role destination when otpRequired is false', () => {
+  assert.match(signup, /if\s*\(result\.otpRequired\s*===\s*false\)\s*\{/);
+  assert.match(signup, /const completed = await completeRegistrationWithoutOtp\(\);/);
+  assert.match(signup, /await signInWithCustomToken\(auth, completed\.customToken\);/);
+  assert.match(signup, /saveRoleSession\(\{ uid: auth\.currentUser\.uid, email: profile\.email, role: completed\.role \}\);/);
+  assert.match(signup, /clearPendingRegistration\(\);/);
+  assert.match(signup, /router\.replace\(completed\.role === 'distributor' \? '\/registration-status' : getRoleHomePath\(completed\.role\)\);/);
+  assert.match(signup, /router\.replace\(\{\s*pathname:\s*'\/email-verification'/);
+});

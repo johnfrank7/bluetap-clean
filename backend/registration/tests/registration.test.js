@@ -102,16 +102,19 @@ function fixture() {
       ...(profile.role === 'distributor' ? { requestedBranchId: profile.requestedBranchId || 'branch-a', requestedBranchNameSnapshot: 'Branch A' } : {}),
       securityPolicySnapshot: { faceVerificationRequired: options.faceRequired !== false, emailOtpRequired: options.otpRequired !== false, maxAccountsPerDevice: 3, maxAccountsPerIp: 3, policyVersion: 1 },
       registrationLimitKeys: { deviceHash: 'device-hash', ipHash: 'ip-hash' },
-      faceVerification: options.faceStatus === 'temporary'
-        ? { status: 'temporary', verifiedAt: null, duplicateCheck: 'unknown', verificationReference: null, livenessPassed: null, verificationMode: 'temporary', providerVerified: false }
-        : { status: options.faceStatus || 'passed_pending_finalization', verifiedAt: new Date(time), duplicateCheck: options.duplicateCheck || 'clear', verificationReference: sessionId, captureHash: createHash('sha256').update(finalFaceImage).digest('hex'), livenessPassed: options.livenessPassed !== false, verificationMode: 'registration-capture', providerVerified: true },
+      faceVerification: options.faceRequired === false && !options.faceStatus
+        ? { required: false, status: 'not_required', verifiedAt: null, duplicateCheck: 'not_required', verificationReference: null, livenessPassed: null }
+        : options.faceStatus === 'temporary'
+          ? { status: 'temporary', verifiedAt: null, duplicateCheck: 'unknown', verificationReference: null, livenessPassed: null, verificationMode: 'temporary', providerVerified: false }
+          : { status: options.faceStatus || 'passed_pending_finalization', verifiedAt: new Date(time), duplicateCheck: options.duplicateCheck || 'clear', verificationReference: sessionId, captureHash: createHash('sha256').update(finalFaceImage).digest('hex'), livenessPassed: options.livenessPassed !== false, verificationMode: 'registration-capture', providerVerified: true },
       termsAcceptance: options.terms === false ? null : { accepted: true, acceptedAt: new Date(time), termsVersion: '1.0', privacyVersion: '1.0' },
       completed: false, expiresAt: new Date(time + 3600000),
     });
   };
   setSessionProfile();
   const registrationService = { ...service, request: (email, ip, username = form.username, id = sessionId) => service.request(email, username, id, ip),
-    complete: (challenge, code, input) => service.complete(challenge, code, input, finalFaceImage) };
+    complete: (challenge, code, input, image = finalFaceImage) => service.complete(challenge, code, input, image),
+    completeWithoutOtp: (challenge, input, image = finalFaceImage) => service.completeWithoutOtp(challenge, input, image) };
   return { service: registrationService, db, auth, users, records, sent, get creates() { return creates; }, get time() { return time; },
     sessionId, setSessionProfile, addSession: (id, { sameDevice = false } = {}) => {
       const original = records.get('registrationSessions/' + sessionId);
@@ -724,4 +727,261 @@ test('email send limit returns remaining wait and permits requests after window 
   f.setSessionProfile();
   await f.service.request('new@example.test', 'test-ip');
   assert.equal(f.sent.length, 7);
+});
+
+test('policy matrix: combination 1 (Face ON + OTP ON) for Distributor requires both verifications', async () => {
+  const f = fixture();
+  const distributor = { ...form, role: 'distributor', requestedBranchId: 'branch-a' };
+  f.setSessionProfile(distributor, { faceRequired: true, otpRequired: true });
+  const result = await f.service.request('dist1@example.test', 'test-ip');
+  assert.equal(result.otpRequired, true);
+  assert.equal(f.sent.length, 1);
+  const completed = await f.service.complete(result.challenge, f.sent[0].code, distributor);
+  assert.equal(completed.finalized, true);
+  assert.equal(completed.role, 'distributor');
+  assert.deepEqual(f.renderCalls.map((c) => c.path), ['/ready', '/enroll-face']);
+  const profile = f.records.get('users/new-user');
+  assert.equal(profile.role, 'distributor');
+  assert.equal(profile.distributorStatus, 'pending');
+  assert.equal(profile.approvalStatus, 'pending');
+  assert.equal(profile.branchId, null);
+  assert.equal(profile.requestedBranchId, 'branch-a');
+  assert.equal(profile.publicUid, 'Dis001');
+  assert.equal(profile.unique_id, 'DIS-000001');
+  assert.equal(profile.faceVerification.status, 'verified');
+  assert.equal(profile.emailVerified, true);
+  assert.equal(profile.emailVerificationRequired, true);
+  assert.equal(profile.emailOtpVerification.status, 'verified');
+  assert.equal(profile.registrationCompleted, true);
+  assert.equal(profile.onboardingStatus, 'complete');
+});
+
+test('policy matrix: combination 2 (Face ON + OTP OFF) for Distributor requires Face only and finalizes via completeWithoutOtp', async () => {
+  const f = fixture();
+  const distributor = { ...form, role: 'distributor', requestedBranchId: 'branch-a' };
+  f.setSessionProfile(distributor, { faceRequired: true, otpRequired: false });
+  const result = await f.service.request('dist2@example.test', 'test-ip');
+  assert.equal(result.otpRequired, false);
+  assert.equal(f.sent.length, 0);
+  const completed = await f.service.completeWithoutOtp(result.challenge, distributor);
+  assert.equal(completed.finalized, true);
+  assert.equal(completed.role, 'distributor');
+  assert.deepEqual(f.renderCalls.map((c) => c.path), ['/ready', '/enroll-face']);
+  const profile = f.records.get('users/new-user');
+  assert.equal(profile.role, 'distributor');
+  assert.equal(profile.distributorStatus, 'pending');
+  assert.equal(profile.approvalStatus, 'pending');
+  assert.equal(profile.branchId, null);
+  assert.equal(profile.requestedBranchId, 'branch-a');
+  assert.equal(profile.publicUid, 'Dis001');
+  assert.equal(profile.unique_id, 'DIS-000001');
+  assert.equal(profile.faceVerification.status, 'verified');
+  assert.equal(profile.emailVerified, false);
+  assert.equal(profile.emailVerificationRequired, false);
+  assert.equal(profile.emailOtpVerification.status, 'not_required');
+  assert.equal(profile.registrationCompleted, true);
+  assert.equal(profile.onboardingStatus, 'complete');
+});
+
+test('policy matrix: combination 3 (Face OFF + OTP ON) for Distributor requires Email OTP only and skips Face service', async () => {
+  const f = fixture();
+  const distributor = { ...form, role: 'distributor', requestedBranchId: 'branch-a' };
+  f.setSessionProfile(distributor, { faceRequired: false, otpRequired: true });
+  const result = await f.service.request('dist3@example.test', 'test-ip');
+  assert.equal(result.otpRequired, true);
+  assert.equal(f.sent.length, 1);
+  const completed = await f.service.complete(result.challenge, f.sent[0].code, distributor, null);
+  assert.equal(completed.finalized, true);
+  assert.equal(completed.role, 'distributor');
+  assert.equal(f.renderCalls.length, 0);
+  const profile = f.records.get('users/new-user');
+  assert.equal(profile.role, 'distributor');
+  assert.equal(profile.distributorStatus, 'pending');
+  assert.equal(profile.approvalStatus, 'pending');
+  assert.equal(profile.branchId, null);
+  assert.equal(profile.requestedBranchId, 'branch-a');
+  assert.equal(profile.publicUid, 'Dis001');
+  assert.equal(profile.unique_id, 'DIS-000001');
+  assert.equal(profile.faceVerification.status, 'not_required');
+  assert.equal(profile.emailVerified, true);
+  assert.equal(profile.emailVerificationRequired, true);
+  assert.equal(profile.emailOtpVerification.status, 'verified');
+  assert.equal(profile.registrationCompleted, true);
+  assert.equal(profile.onboardingStatus, 'complete');
+});
+
+test('policy matrix: combination 4 (Face OFF + OTP OFF) for Distributor finalizes immediately with neither verification', async () => {
+  const f = fixture();
+  const distributor = { ...form, role: 'distributor', requestedBranchId: 'branch-a' };
+  f.setSessionProfile(distributor, { faceRequired: false, otpRequired: false });
+  const result = await f.service.request('dist4@example.test', 'test-ip');
+  assert.equal(result.otpRequired, false);
+  assert.equal(f.sent.length, 0);
+  const completed = await f.service.completeWithoutOtp(result.challenge, distributor, null);
+  assert.equal(completed.finalized, true);
+  assert.equal(completed.role, 'distributor');
+  assert.equal(f.renderCalls.length, 0);
+  const profile = f.records.get('users/new-user');
+  assert.equal(profile.role, 'distributor');
+  assert.equal(profile.distributorStatus, 'pending');
+  assert.equal(profile.approvalStatus, 'pending');
+  assert.equal(profile.branchId, null);
+  assert.equal(profile.requestedBranchId, 'branch-a');
+  assert.equal(profile.publicUid, 'Dis001');
+  assert.equal(profile.unique_id, 'DIS-000001');
+  assert.equal(profile.faceVerification.status, 'not_required');
+  assert.equal(profile.emailVerified, false);
+  assert.equal(profile.emailVerificationRequired, false);
+  assert.equal(profile.emailOtpVerification.status, 'not_required');
+  assert.equal(profile.registrationCompleted, true);
+  assert.equal(profile.onboardingStatus, 'complete');
+});
+
+test('enabling OTP prevents completeWithoutOtp bypass across Face ON and Face OFF policies', async () => {
+  // Case A: Face ON + OTP ON
+  const fOn = fixture();
+  fOn.setSessionProfile(form, { faceRequired: true, otpRequired: true });
+  const reqOn = await fOn.service.request('on@example.test', 'test-ip');
+  await assert.rejects(fOn.service.completeWithoutOtp(reqOn.challenge, form), reason('EMAIL_OTP_REQUIRED'));
+  assert.equal(fOn.creates, 0);
+  assert.equal(fOn.records.has('users/new-user'), false);
+
+  // Case B: Face OFF + OTP ON
+  const fOff = fixture();
+  fOff.setSessionProfile(form, { faceRequired: false, otpRequired: true });
+  const reqOff = await fOff.service.request('off@example.test', 'test-ip');
+  await assert.rejects(fOff.service.completeWithoutOtp(reqOff.challenge, form), reason('EMAIL_OTP_REQUIRED'));
+  assert.equal(fOff.creates, 0);
+  assert.equal(fOff.records.has('users/new-user'), false);
+});
+
+test('enabling Face prevents unauthorized face bypass across OTP ON and OTP OFF policies', async () => {
+  // Case A: Face ON + OTP OFF, unverified face in session blocks request
+  const fUnverified = fixture();
+  fUnverified.setSessionProfile(form, { faceRequired: true, otpRequired: false, faceStatus: 'unverified', duplicateCheck: 'unknown', livenessPassed: false });
+  await assert.rejects(fUnverified.service.request('face1@example.test', 'test-ip'), reason('face-verification-required'));
+  assert.equal(fUnverified.creates, 0);
+
+  // Case B: Face ON + OTP OFF, review_required / flagged duplicate blocks request
+  const fFlagged = fixture();
+  fFlagged.setSessionProfile(form, { faceRequired: true, otpRequired: false, faceStatus: 'review_required', duplicateCheck: 'flagged' });
+  await assert.rejects(fFlagged.service.request('face2@example.test', 'test-ip'), reason('face-review-required'));
+
+  // Case C: Face ON + OTP OFF, verified face in session but completeWithoutOtp missing or wrong face image
+  const fMissingImg = fixture();
+  fMissingImg.setSessionProfile(form, { faceRequired: true, otpRequired: false });
+  const reqMissing = await fMissingImg.service.request('face3@example.test', 'test-ip');
+  await assert.rejects(fMissingImg.service.completeWithoutOtp(reqMissing.challenge, form, null), reason('face-capture-required'));
+  await assert.rejects(fMissingImg.service.completeWithoutOtp(reqMissing.challenge, form, 'data:image/jpeg;base64,corrupted'), reason('face-capture-required'));
+  assert.equal(fMissingImg.creates, 0);
+
+  // Case D: Face ON + OTP ON, complete called with corrupted face image
+  const fOtpMismatched = fixture();
+  fOtpMismatched.setSessionProfile(form, { faceRequired: true, otpRequired: true });
+  const reqOtp = await fOtpMismatched.service.request('face4@example.test', 'test-ip');
+  await assert.rejects(fOtpMismatched.service.complete(reqOtp.challenge, fOtpMismatched.sent[0].code, form, 'data:image/jpeg;base64,mismatched'), reason('face-capture-required'));
+  assert.equal(fOtpMismatched.creates, 0);
+});
+
+test('backend enforces trusted session policy snapshot regardless of client-supplied values', async () => {
+  const f = fixture();
+  f.setSessionProfile(form, { faceRequired: true, otpRequired: true });
+  const result = await f.service.request('forged@example.test', 'test-ip');
+
+  // Client attempts to bypass by passing forged policy in input to completeWithoutOtp
+  const forgedInput = {
+    ...form,
+    securityPolicy: { faceVerificationRequired: false, emailOtpRequired: false },
+    faceVerification: { status: 'verified', providerVerified: true },
+    emailVerified: true,
+  };
+  await assert.rejects(f.service.completeWithoutOtp(result.challenge, forgedInput), reason('EMAIL_OTP_REQUIRED'));
+  assert.equal(f.creates, 0);
+
+  // Client attempts privilege escalation during OTP completion
+  const forgedRole = {
+    ...form,
+    role: 'admin',
+    approvalStatus: 'approved',
+    branchId: 'admin-branch',
+  };
+  await assert.rejects(f.service.complete(result.challenge, f.sent[0].code, forgedRole), reason('invalid-registration'));
+  assert.equal(f.creates, 0);
+});
+
+test('disabled verification methods do not block registration when external services are unavailable', async () => {
+  // Case A: Face disabled, DeepFace service broken -> OTP registration succeeds cleanly
+  const fFaceDown = fixture();
+  fFaceDown.setSessionProfile(form, { faceRequired: false, otpRequired: true });
+  fFaceDown.failEnrollment();
+  const reqFaceDown = await fFaceDown.service.request('facedown@example.test', 'test-ip');
+  const resFaceDown = await fFaceDown.service.complete(reqFaceDown.challenge, fFaceDown.sent[0].code, form, null);
+  assert.equal(resFaceDown.finalized, true);
+  assert.equal(fFaceDown.renderCalls.length, 0);
+  assert.equal(fFaceDown.records.get('users/new-user').faceVerification.status, 'not_required');
+
+  // Case B: OTP disabled, Email provider broken -> Face registration succeeds cleanly
+  const fEmailDown = fixture();
+  fEmailDown.setSessionProfile(form, { faceRequired: true, otpRequired: false });
+  fEmailDown.failEmail();
+  const reqEmailDown = await fEmailDown.service.request('emaildown@example.test', 'test-ip');
+  assert.equal(reqEmailDown.otpRequired, false);
+  assert.equal(fEmailDown.sent.length, 0);
+  const resEmailDown = await fEmailDown.service.completeWithoutOtp(reqEmailDown.challenge, form);
+  assert.equal(resEmailDown.finalized, true);
+  assert.equal(fEmailDown.records.get('users/new-user').emailOtpVerification.status, 'not_required');
+
+  // Case C: Both disabled, both DeepFace and Email broken -> Registration succeeds cleanly
+  const fBothDown = fixture();
+  fBothDown.setSessionProfile(form, { faceRequired: false, otpRequired: false });
+  fBothDown.failEnrollment();
+  fBothDown.failEmail();
+  const reqBothDown = await fBothDown.service.request('bothdown@example.test', 'test-ip');
+  assert.equal(reqBothDown.otpRequired, false);
+  const resBothDown = await fBothDown.service.completeWithoutOtp(reqBothDown.challenge, form, null);
+  assert.equal(resBothDown.finalized, true);
+  assert.equal(fBothDown.renderCalls.length, 0);
+  assert.equal(fBothDown.sent.length, 0);
+  assert.equal(fBothDown.records.get('users/new-user').faceVerification.status, 'not_required');
+  assert.equal(fBothDown.records.get('users/new-user').emailOtpVerification.status, 'not_required');
+});
+
+test('in-flight registration session preserves its security policy snapshot when Admin changes global policy', async () => {
+  const f = fixture();
+  // Session A created when policy is Face ON + OTP ON
+  f.setSessionProfile(form, { faceRequired: true, otpRequired: true });
+  const resultA = await f.service.request('sessiona@example.test', 'test-ip');
+
+  // Admin toggles policy globally to Face OFF + OTP OFF
+  f.records.set('systemConfig/registrationSecurity', {
+    faceVerificationEnabled: false, emailOtpEnabled: false,
+    maxAccountsPerDevice: 3, maxAccountsPerIp: 3, version: 2,
+  });
+
+  // Session A was snapshotted with Face ON + OTP ON: it CANNOT complete without OTP
+  await assert.rejects(f.service.completeWithoutOtp(resultA.challenge, form), reason('EMAIL_OTP_REQUIRED'));
+
+  // Session A completes with OTP and enrolls face
+  const completedA = await f.service.complete(resultA.challenge, f.sent[0].code, form);
+  assert.equal(completedA.finalized, true);
+  assert.equal(f.records.get('users/new-user').faceVerification.status, 'verified');
+  assert.equal(f.records.get('users/new-user').emailVerified, true);
+});
+
+test('completeWithoutOtp is idempotent on network retry and does not duplicate account or counters', async () => {
+  const f = fixture();
+  f.setSessionProfile(form, { faceRequired: false, otpRequired: false });
+  const result = await f.service.request('retry@example.test', 'test-ip');
+  assert.equal(result.otpRequired, false);
+  const first = await f.service.completeWithoutOtp(result.challenge, form, null);
+  assert.equal(first.finalized, true);
+  assert.equal(f.creates, 1);
+  assert.equal(f.records.get('counters/unique_ids').requester, 1);
+
+  // Network retry with identical challenge and form
+  const second = await f.service.completeWithoutOtp(result.challenge, form, null);
+  assert.equal(second.finalized, true);
+  assert.equal(f.creates, 1);
+  assert.equal(f.records.get('counters/unique_ids').requester, 1);
+  assert.equal(first.customToken, second.customToken);
 });
