@@ -23,31 +23,48 @@ export function OrderCard({ card = {}, onAction }) {
   } = card;
 
   const isTerminalSuccess = status === 'delivered';
+  const isCancelledOrder = Boolean(card.isCancelled || ['cancelled', 'canceled'].includes(status));
+  const isFailedOrder = Boolean(isFailed || card.isFailed || status?.includes('delivery_failed'));
+
+  const headerBadgeLabel = card.headerLabel || (
+    isCancelledOrder
+      ? 'CANCELLED WATER REQUEST'
+      : isFailedOrder
+        ? 'FAILED DELIVERY'
+        : isTerminalSuccess
+          ? 'COMPLETED WATER REQUEST'
+          : 'ACTIVE WATER REQUEST'
+  );
+
   const badgeBg = isFailed
     ? (isDark ? '#48262A' : '#FCE9E8')
-    : isOutsideRadius
-      ? (isDark ? '#493814' : '#FFF7E5')
-      : isTerminalSuccess
-        ? (isDark ? '#103B2A' : '#E3F7EC')
-        : (isDark ? '#163B59' : '#EAF6FF');
+    : isCancelledOrder
+      ? (isDark ? '#48262A' : '#FCE9E8')
+      : isOutsideRadius
+        ? (isDark ? '#493814' : '#FFF7E5')
+        : isTerminalSuccess
+          ? (isDark ? '#103B2A' : '#E3F7EC')
+          : (isDark ? '#163B59' : '#EAF6FF');
 
   const badgeColor = isFailed
     ? (isDark ? '#EF4444' : '#B52F2F')
-    : isOutsideRadius
-      ? (isDark ? '#F59E0B' : '#A96800')
-      : isTerminalSuccess
-        ? (isDark ? '#22C55E' : '#167347')
-        : (isDark ? '#70BDF2' : '#187BCD');
+    : isCancelledOrder
+      ? (isDark ? '#EF4444' : '#B52F2F')
+      : isOutsideRadius
+        ? (isDark ? '#F59E0B' : '#A96800')
+        : isTerminalSuccess
+          ? (isDark ? '#22C55E' : '#167347')
+          : (isDark ? '#70BDF2' : '#187BCD');
 
   return (
     <View style={[styles.card, { backgroundColor: isDark ? colors.surface : '#FFFFFF', borderColor: isDark ? colors.border : '#D7ECFF' }]}>
       <View style={styles.cardHeader}>
         <View style={styles.orderIdGroup}>
-          <Text style={[styles.orderLabel, { color: colors.textSecondary }]}>ACTIVE WATER REQUEST</Text>
+          <Text style={[styles.orderLabel, { color: colors.textSecondary }]}>{headerBadgeLabel}</Text>
           <Text style={[styles.orderId, { color: colors.textPrimary }]}>{publicOrderId || 'Active Order'}</Text>
         </View>
         <View style={[styles.statusBadge, { backgroundColor: badgeBg }]}>
-          <Text style={[styles.statusBadgeText, { color: badgeColor }]}>{statusLabel || 'Pending'}</Text>
+          <Text style={[styles.statusBadgeText, { color: badgeColor }]}>{statusLabel || (isCancelledOrder ? 'Cancelled' : 'Pending')}</Text>
         </View>
       </View>
 
@@ -99,7 +116,7 @@ export function OrderCard({ card = {}, onAction }) {
         </View>
       )}
 
-      {(Boolean(id) || Boolean(branchId)) && onAction && (
+      {(Boolean(id) || Boolean(branchId) || Boolean(card.isCancellable)) && onAction && (
         <View style={styles.cardActions}>
           {Boolean(id) && (
             <TouchableOpacity
@@ -129,6 +146,26 @@ export function OrderCard({ card = {}, onAction }) {
             >
               <Text style={[styles.secondaryActionText, { color: isDark ? colors.primaryLight : colors.primary }]}>
                 Contact Station
+              </Text>
+            </TouchableOpacity>
+          )}
+
+          {Boolean(card.isCancellable && id) && (
+            <TouchableOpacity
+              activeOpacity={0.8}
+              style={[
+                styles.secondaryActionBtn,
+                {
+                  borderColor: isDark ? '#EF4444' : '#DC2626',
+                  backgroundColor: isDark ? 'rgba(239, 68, 68, 0.12)' : '#FEE2E2',
+                },
+              ]}
+              onPress={() => onAction({ type: 'CANCEL_ORDER', orderId: id, publicOrderId })}
+              accessibilityRole="button"
+              accessibilityLabel="Cancel Order"
+            >
+              <Text style={[styles.secondaryActionText, { color: isDark ? '#FCA5A5' : '#B91C1C' }]}>
+                Cancel Order
               </Text>
             </TouchableOpacity>
           )}

@@ -3,6 +3,7 @@ import { useLocalSearchParams } from 'expo-router';
 import {
   ActivityIndicator,
   Modal,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -66,6 +67,25 @@ const orderProducts = (order) =>
 const orderDistance = (order) =>
   order.distanceKmSnapshot == null ? 'Distance unavailable' : `Approx. ${Number(order.distanceKmSnapshot).toFixed(1)} km`;
 
+function ManagerActionButton({ children, disabled = false, onPress, style }) {
+  const baseStyle = StyleSheet.flatten(style);
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityState={{ disabled: Boolean(disabled) }}
+      disabled={disabled}
+      onPress={onPress}
+      style={({ hovered, pressed }) => [
+        baseStyle,
+        hovered && !disabled && { opacity: 0.9 },
+        pressed && !disabled && { opacity: 0.8 },
+      ]}
+    >
+      {children}
+    </Pressable>
+  );
+}
+
 function OutsideRadiusApprovalQueue({ orders, loading, styles, colors, isDark, onShowToast, onOpenOrder }) {
   const [error, setError] = useState('');
   const [updatingId, setUpdatingId] = useState('');
@@ -100,6 +120,7 @@ function OutsideRadiusApprovalQueue({ orders, loading, styles, colors, isDark, o
             Review delivery requests outside your branch radius or above a product order limit.
           </Text>
         </View>
+        <ManagerPill tone={orders.length ? 'red' : 'blue'}>{orders.length} pending</ManagerPill>
       </View>
 
       {!!error && (
@@ -116,8 +137,8 @@ function OutsideRadiusApprovalQueue({ orders, loading, styles, colors, isDark, o
         <BlueTapEmptyState
           compact
           variant="exceptions"
-          title="No Delivery Exceptions"
-          description="Orders that need branch approval will appear here."
+          title="No approvals pending"
+          description="Requests requiring your review will appear here."
           themeColors={colors}
           dark={isDark}
           style={styles.visualEmpty}
@@ -135,50 +156,64 @@ function OutsideRadiusApprovalQueue({ orders, loading, styles, colors, isDark, o
             <AnimatedPresenceItem key={entry.id} phase={entry.phase}>
             <View style={styles.orderItem}>
               <View style={styles.orderHeaderRow}>
-                <View style={{ flex: 1 }}>
+                <View style={{ flex: 1, minWidth: 0 }}>
                   <Text style={styles.requesterName}>{order.requesterName || 'Requester'}</Text>
                   <Text style={styles.orderIdText}>#{order.requestId || order.id}</Text>
                 </View>
-                <ManagerPill tone="cyan">{approvalLabel(order)}</ManagerPill>
+                <View style={styles.orderHeaderAside}>
+                  <ManagerPill tone="cyan">{approvalLabel(order)}</ManagerPill>
+                </View>
               </View>
 
-              <Text style={styles.productsSummary}>{products}</Text>
+              <View style={styles.productPricingRow}>
+                <View style={styles.requestProductInfo}>
+                  <Text style={[styles.productsSummary, styles.productsSummaryInline]}>{products}</Text>
+                  <View style={styles.requestDeliveryInfo}>
+                    <Text style={styles.detailLine}>
+                      Delivery: {order.address || (order.deliveryLocation ? `${order.deliveryLocation.latitude.toFixed(5)}, ${order.deliveryLocation.longitude.toFixed(5)}` : 'Location provided')}
+                    </Text>
+                    {order.distanceKmSnapshot != null && <Text style={styles.detailLine}>
+                      Distance: Approx. {Number(order.distanceKmSnapshot).toFixed(1)} km{order.serviceRadiusKmSnapshot != null ? ` · Branch radius ${order.serviceRadiusKmSnapshot} km` : ''}
+                    </Text>}
+                  </View>
+                </View>
+                <View style={styles.orderTotalSummary}>
+                  <Text style={styles.totalLabel}>ORDER TOTAL</Text>
+                  <Text style={styles.amountText}>{formatAmount(order.totalAtOrder)}</Text>
+                  {!!order.deliveryFeeAtOrder && (
+                    <Text style={styles.deliveryFeeText}>Includes {formatAmount(order.deliveryFeeAtOrder)} delivery</Text>
+                  )}
+                </View>
+              </View>
 
-              <View style={styles.detailsBlock}>
-                <Text style={styles.detailLine}>
-                  Delivery: {order.address || (order.deliveryLocation ? `${order.deliveryLocation.latitude.toFixed(5)}, ${order.deliveryLocation.longitude.toFixed(5)}` : 'Location provided')}
-                </Text>
-                {order.outsideServiceArea && <Text style={styles.detailLine}>
-                  Approx. {Number(order.distanceKmSnapshot || 0).toFixed(1)} km · Branch radius {order.serviceRadiusKmSnapshot} km
-                </Text>}
+              {(order.productLimitViolations?.length > 0 || order.approvalReasons?.includes('NON_STANDARD_DELIVERY_DAY') || order.requesterUniqueId) && <View style={styles.detailsBlock}>
                 {(order.productLimitViolations || []).map((item) => <Text key={item.productId} style={styles.detailLine}>
                   {item.productNameSnapshot}: requested {item.requestedQuantity} · limit {item.configuredLimit}. Order exceeds the configured requester product limit.
                 </Text>)}
                 {order.approvalReasons?.includes('NON_STANDARD_DELIVERY_DAY') && <Text style={styles.detailLine}>The requested date falls outside the effective product delivery weekdays and requires Manager review.</Text>}
                 {!!order.requesterUniqueId && <Text style={styles.detailLine}>Requester UID: {order.requesterUniqueId}</Text>}
-                <Text style={styles.amountText}>{formatAmount(order.totalAtOrder)}</Text>
-              </View>
+              </View>}
 
-              <View style={styles.actionRow}>
+              <View style={[styles.actionRow, styles.requestActionRow]}>
                 <View style={styles.chatActionWrap}><ManagerOrderChatAction order={order} disabled={entry.actionsDisabled} style={styles.managerChatButton} /></View>
-                <TouchableOpacity disabled={entry.actionsDisabled} onPress={() => onOpenOrder(order)} style={[styles.actionButton, styles.viewDetailsBtn, entry.actionsDisabled && styles.actionDisabled]}>
+                <ManagerActionButton disabled={entry.actionsDisabled} onPress={() => onOpenOrder(order)} style={[styles.actionButton, styles.viewDetailsBtn, entry.actionsDisabled && styles.actionDisabled]}>
                   <Text style={styles.viewDetailsBtnText}>View Details</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
+                </ManagerActionButton>
+                <ManagerActionButton
                   disabled={isUpdating || entry.actionsDisabled}
                   onPress={() => decide(order, 'approve')}
                   style={[styles.actionButton, styles.approveButton, (isUpdating || entry.actionsDisabled) && styles.actionDisabled]}
                 >
                   <Text style={styles.approveButtonText}>{isUpdating ? 'Saving…' : 'Approve'}</Text>
-                </TouchableOpacity>
+                </ManagerActionButton>
 
-                <TouchableOpacity
+                <ManagerActionButton
                   disabled={isUpdating || entry.actionsDisabled}
                   onPress={() => decide(order, 'decline')}
                   style={[styles.actionButton, styles.declineButton, (isUpdating || entry.actionsDisabled) && styles.actionDisabled]}
                 >
                   <Text style={styles.declineButtonText}>Reject</Text>
-                </TouchableOpacity>
+                </ManagerActionButton>
               </View>
             </View>
             </AnimatedPresenceItem>
@@ -497,6 +532,7 @@ function BranchTransfersQueue({ data, styles, colors, isDark, onShowToast, onOpe
 
   const incoming = data.incomingTransfers || [];
   const decisions = data.sourceDecisionEvents || [];
+  const [showTransferDecisions, setShowTransferDecisions] = useState(false);
 
   return (
     <View style={styles.card}>
@@ -508,6 +544,7 @@ function BranchTransfersQueue({ data, styles, colors, isDark, onShowToast, onOpe
             Review inbound order transfer requests and review decisions for outbound transfers.
           </Text>
         </View>
+        <ManagerPill>{incoming.length} incoming</ManagerPill>
       </View>
 
       {!!error && (
@@ -523,8 +560,8 @@ function BranchTransfersQueue({ data, styles, colors, isDark, onShowToast, onOpe
         <BlueTapEmptyState
           compact
           variant="coordination"
-          title="No Transfer Requests"
-          description="Incoming branch transfer requests will appear here for review."
+          title="No transfer requests"
+          description="Incoming branch transfers will appear here."
           themeColors={colors}
           dark={isDark}
           style={styles.inlineVisualEmpty}
@@ -536,36 +573,52 @@ function BranchTransfersQueue({ data, styles, colors, isDark, onShowToast, onOpe
 
           return (
             <View key={order.id} style={styles.transferItem}>
-              <Text style={styles.requesterName}>
-                Transfer from {order.transferFromBranchName || 'another branch'}
-              </Text>
-              <Text style={styles.orderIdText}>
-                #{order.requestId || order.id} · {order.requesterName || 'Requester'}
-              </Text>
-              <Text style={styles.productsSummary}>{orderProducts(order)}</Text>
-              <Text style={styles.detailLine}>
-                {orderDistance(order)} · Note: {order.transferReason || 'No note provided'}
-              </Text>
+              <View style={styles.orderHeaderRow}>
+                <View style={styles.orderHeaderMain}>
+                  <Text style={styles.requesterName}>Transfer from {order.transferFromBranchName || 'another branch'}</Text>
+                  <Text style={styles.orderIdText}>#{order.requestId || order.id} · {order.requesterName || 'Requester'}</Text>
+                </View>
+                <View style={styles.orderHeaderAside}>
+                  <ManagerPill tone="cyan">{order.status?.replace(/_/g, ' ') || 'Transfer review'}</ManagerPill>
+                </View>
+              </View>
 
-              <View style={styles.actionRow}>
-                <TouchableOpacity onPress={() => onOpenOrder(order)} style={[styles.actionButton, styles.viewDetailsBtn]}>
+              <View style={styles.productPricingRow}>
+                <View style={styles.requestProductInfo}>
+                  <Text style={[styles.productsSummary, styles.productsSummaryInline]}>{orderProducts(order)}</Text>
+                  <View style={styles.requestDeliveryInfo}>
+                    {!!order.address && <Text style={styles.detailLine}>Delivery: {order.address}</Text>}
+                    <Text style={styles.detailLine}>Distance: {orderDistance(order)}</Text>
+                    {!!order.transferToBranchName && <Text style={styles.detailLine}>Destination: {order.transferToBranchName}</Text>}
+                    <Text style={styles.detailLine}>Transfer note: {order.transferReason || 'No note provided'}</Text>
+                  </View>
+                </View>
+                <View style={styles.orderTotalSummary}>
+                  <Text style={styles.totalLabel}>ORDER TOTAL</Text>
+                  <Text style={styles.amountText}>{formatAmount(order.totalAtOrder)}</Text>
+                  {!!order.deliveryFeeAtOrder && <Text style={styles.deliveryFeeText}>Includes {formatAmount(order.deliveryFeeAtOrder)} delivery</Text>}
+                </View>
+              </View>
+
+              <View style={[styles.actionRow, styles.requestActionRow]}>
+                <ManagerActionButton onPress={() => onOpenOrder(order)} style={[styles.actionButton, styles.viewDetailsBtn]}>
                   <Text style={styles.viewDetailsBtnText}>View Details</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
+                </ManagerActionButton>
+                <ManagerActionButton
                   disabled={isUpdating}
                   onPress={() => act(order.id, 'accept-transfer')}
                   style={[styles.actionButton, styles.approveButton, isUpdating && styles.actionDisabled]}
                 >
                   <Text style={styles.approveButtonText}>{isUpdating ? 'Saving…' : 'Accept Transfer'}</Text>
-                </TouchableOpacity>
+                </ManagerActionButton>
 
-                <TouchableOpacity
+                <ManagerActionButton
                   disabled={isUpdating}
                   onPress={() => setDecliningOrderId(isDeclining ? '' : order.id)}
                   style={[styles.actionButton, styles.declineButton]}
                 >
                   <Text style={styles.declineButtonText}>Decline</Text>
-                </TouchableOpacity>
+                </ManagerActionButton>
               </View>
 
               {isDeclining && (
@@ -593,26 +646,47 @@ function BranchTransfersQueue({ data, styles, colors, isDark, onShowToast, onOpe
       )}
 
       {/* Decision Events */}
-      <Text style={[styles.subSectionTitle, { marginTop: 18 }]}>Transfer decisions ({decisions.length})</Text>
+      <View style={[styles.decisionsHeader, { marginTop: 18 }]}>
+        <Text style={[styles.subSectionTitle, styles.decisionsHeaderTitle]}>Recent Transfer decisions</Text>
+        <ManagerPill>{decisions.length}</ManagerPill>
+        {decisions.length > 0 && (
+          <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel={`${showTransferDecisions ? 'Hide' : 'Show'} recent transfer decisions`}
+            accessibilityState={{ expanded: showTransferDecisions }}
+            onPress={() => setShowTransferDecisions((visible) => !visible)}
+            style={styles.decisionsToggle}
+          >
+            <Text style={styles.decisionsToggleText}>{showTransferDecisions ? 'Hide' : 'Show'}</Text>
+          </TouchableOpacity>
+        )}
+      </View>
       {decisions.length === 0 ? (
         <BlueTapEmptyState
           compact
           variant="coordination"
-          title="No Transfer Updates"
-          description="Accepted or declined outbound transfer decisions will appear here."
+          title="No transfer updates yet"
+          description="Accepted or declined transfer decisions will appear here."
           themeColors={colors}
           dark={isDark}
           style={styles.inlineVisualEmpty}
         />
-      ) : (
+      ) : showTransferDecisions ? (
         decisions.map((event) => {
           const accepted = event.decision === 'accepted';
           return (
             <View key={event.id} style={styles.decisionItem}>
-              <ManagerPill tone={accepted ? 'green' : 'red'}>{accepted ? 'Accepted' : 'Declined'}</ManagerPill>
+              <View style={styles.orderHeaderRow}>
+                <View style={styles.orderHeaderMain}>
+                  <Text style={styles.requesterName}>Transfer outcome · {event.targetBranchName || 'Target branch'}</Text>
+                  <Text style={styles.orderIdText}>Order #{event.requestId || 'order'}</Text>
+                </View>
+                <View style={styles.orderHeaderAside}>
+                  <ManagerPill tone={accepted ? 'green' : 'red'}>{accepted ? 'Accepted' : 'Declined'}</ManagerPill>
+                </View>
+              </View>
               <Text style={styles.decisionText}>
-                {event.targetBranchName || 'Target branch'} {accepted ? 'accepted' : 'declined'} the transfer of Order #
-                {event.requestId || 'order'}.
+                {event.targetBranchName || 'Target branch'} {accepted ? 'accepted' : 'declined'} the transfer.
               </Text>
               {!!scheduleLabel(event.decidedAt) && <Text style={styles.detailLine}>{scheduleLabel(event.decidedAt)}</Text>}
               {!accepted && !!event.declineReason && (
@@ -621,7 +695,7 @@ function BranchTransfersQueue({ data, styles, colors, isDark, onShowToast, onOpe
             </View>
           );
         })
-      )}
+      ) : null}
       </ScrollView>
     </View>
   );
@@ -663,14 +737,15 @@ function ReceivedRequestsQueue({ orders, loading, styles, colors, isDark, onShow
           <Text style={styles.cardTitle}>Upcoming & Active Branch Orders ({orders.length})</Text>
           <Text style={styles.helperText}>Accept a branch order for dispatch or reject it with a reason.</Text>
         </View>
+        <ManagerPill>{orders.length} pending</ManagerPill>
       </View>
       {!!error && <View accessibilityRole="alert" style={styles.errorBanner}><Text style={styles.errorBannerText}>{error}</Text></View>}
       {loading ? <View style={styles.emptyContainer}><ActivityIndicator color={colors.primary} /></View> : presentedOrders.length === 0 ? (
         <BlueTapEmptyState
           compact
           variant="orders"
-          title="No Orders Awaiting Review"
-          description="New branch orders will appear here when they need your review."
+          title="All caught up!"
+          description="No branch orders are waiting for review."
           themeColors={colors}
           dark={isDark}
           style={styles.visualEmpty}
@@ -681,29 +756,43 @@ function ReceivedRequestsQueue({ orders, loading, styles, colors, isDark, onShow
             const order = entry.item;
             return <AnimatedPresenceItem key={entry.id} phase={entry.phase}><View style={styles.orderItem}>
             <View style={styles.orderHeaderRow}>
-              <View style={{ flex: 1 }}>
+              <View style={{ flex: 1, minWidth: 0 }}>
                 <Text style={styles.requesterName}>{order.requesterName || 'Requester'}</Text>
                 <Text style={styles.orderIdText}>#{order.requestId || order.id}</Text>
               </View>
-              <ManagerPill tone="blue">Pending review</ManagerPill>
+              <View style={styles.orderHeaderAside}>
+                <ManagerPill tone="blue">Pending review</ManagerPill>
+              </View>
             </View>
-            <Text style={styles.productsSummary}>{orderProducts(order)}</Text>
-            <Text style={styles.detailLine}>Delivery: {order.address || 'Address provided'}</Text>
-            <Text style={styles.detailLine}>Distance: {orderDistance(order)}</Text>
-            <Text style={styles.amountText}>{formatAmount(order.totalAtOrder)}</Text>
-            <View style={styles.actionRow}>
+            <View style={styles.productPricingRow}>
+              <View style={styles.requestProductInfo}>
+                <Text style={[styles.productsSummary, styles.productsSummaryInline]}>{orderProducts(order)}</Text>
+                <View style={styles.requestDeliveryInfo}>
+                  <Text style={styles.detailLine}>Delivery: {order.address || 'Address provided'}</Text>
+                  <Text style={styles.detailLine}>Distance: {orderDistance(order)}</Text>
+                </View>
+              </View>
+              <View style={styles.orderTotalSummary}>
+                <Text style={styles.totalLabel}>ORDER TOTAL</Text>
+                <Text style={styles.amountText}>{formatAmount(order.totalAtOrder)}</Text>
+                {!!order.deliveryFeeAtOrder && (
+                  <Text style={styles.deliveryFeeText}>Includes {formatAmount(order.deliveryFeeAtOrder)} delivery</Text>
+                )}
+              </View>
+            </View>
+            <View style={[styles.actionRow, styles.requestActionRow]}>
               <View style={styles.chatActionWrap}>
                 <ManagerOrderChatAction order={order} disabled={entry.actionsDisabled} style={styles.managerChatButton} />
               </View>
-              <TouchableOpacity disabled={entry.actionsDisabled} onPress={() => onOpenOrder(order)} style={[styles.actionButton, styles.viewDetailsBtn, entry.actionsDisabled && styles.actionDisabled]}>
+                <ManagerActionButton disabled={entry.actionsDisabled} onPress={() => onOpenOrder(order)} style={[styles.actionButton, styles.viewDetailsBtn, entry.actionsDisabled && styles.actionDisabled]}>
                 <Text style={styles.viewDetailsBtnText}>View Details</Text>
-              </TouchableOpacity>
-              <TouchableOpacity disabled={!!updatingId || entry.actionsDisabled} onPress={() => decide(order, 'accept-order')} style={[styles.actionButton, styles.approveButton, (!!updatingId || entry.actionsDisabled) && styles.actionDisabled]}>
+                </ManagerActionButton>
+                <ManagerActionButton disabled={!!updatingId || entry.actionsDisabled} onPress={() => decide(order, 'accept-order')} style={[styles.actionButton, styles.approveButton, (!!updatingId || entry.actionsDisabled) && styles.actionDisabled]}>
                 <Text style={styles.approveButtonText}>{updatingId === order.id ? 'Saving…' : 'Accept'}</Text>
-              </TouchableOpacity>
-              <TouchableOpacity disabled={!!updatingId || entry.actionsDisabled} onPress={() => { setRejectingId(rejectingId === order.id ? '' : order.id); setReason(''); setError(''); }} style={[styles.actionButton, styles.declineButton, entry.actionsDisabled && styles.actionDisabled]}>
+                </ManagerActionButton>
+                <ManagerActionButton disabled={!!updatingId || entry.actionsDisabled} onPress={() => { setRejectingId(rejectingId === order.id ? '' : order.id); setReason(''); setError(''); }} style={[styles.actionButton, styles.declineButton, entry.actionsDisabled && styles.actionDisabled]}>
                 <Text style={styles.declineButtonText}>Reject</Text>
-              </TouchableOpacity>
+                </ManagerActionButton>
             </View>
             {rejectingId === entry.id && !entry.actionsDisabled && <View style={styles.declineBox}>
               <TextInput value={reason} onChangeText={setReason} maxLength={240} multiline placeholder="Reason shown to the requester" placeholderTextColor={colors.placeholder} style={styles.inputField} />
@@ -745,6 +834,7 @@ function BranchOrdersOverview({ data, loading, styles, colors, isDark, onOpenOrd
             Review active branch orders and make eligible pre-delivery adjustments.
           </Text>
         </View>
+        <ManagerPill>{orders.length} active</ManagerPill>
       </View>
 
       <View style={styles.searchBarWrap}>
@@ -761,8 +851,8 @@ function BranchOrdersOverview({ data, loading, styles, colors, isDark, onOpenOrd
         <BlueTapEmptyState
           compact
           variant="management"
-          title="No Active Branch Orders"
-          description="Orders eligible for review or pre-delivery adjustment will appear here."
+          title="No active branch orders"
+          description="Orders eligible for review or adjustment will appear here."
           themeColors={colors}
           dark={isDark}
           style={styles.visualEmpty}
@@ -776,23 +866,37 @@ function BranchOrdersOverview({ data, loading, styles, colors, isDark, onOpenOrd
             <AnimatedPresenceItem key={entry.id} phase={entry.phase}>
             <View style={styles.orderItem}>
               <View style={styles.orderHeaderRow}>
-                <View style={{ flex: 1 }}>
+                <View style={{ flex: 1, minWidth: 0 }}>
                   <Text style={styles.requesterName}>{order.requesterName || 'Requester'}</Text>
                   <Text style={styles.orderIdText}>#{order.requestId || order.id}</Text>
                 </View>
-                <ManagerPill tone={isEditable ? 'blue' : 'green'}>{order.status?.replace(/_/g, ' ')}</ManagerPill>
+                <View style={styles.orderHeaderAside}>
+                  <ManagerPill tone={isEditable ? 'blue' : 'green'}>{order.status?.replace(/_/g, ' ')}</ManagerPill>
+                </View>
               </View>
 
-              <Text style={styles.productsSummary}>{orderProducts(order)}</Text>
-              <Text style={styles.detailLine}>Delivery: {order.address || 'Address provided'}</Text>
-              <Text style={styles.amountText}>{formatAmount(order.totalAtOrder)}</Text>
-
-              <View style={styles.actionRow}>
-                <TouchableOpacity disabled={entry.actionsDisabled} onPress={() => onOpenOrder(order)} style={[styles.actionButton, styles.editOrderBtn, entry.actionsDisabled && styles.actionDisabled]}>
+              <View style={styles.productPricingRow}>
+                <View style={styles.requestProductInfo}>
+                  <Text style={[styles.productsSummary, styles.productsSummaryInline]}>{orderProducts(order)}</Text>
+                  <View style={styles.requestDeliveryInfo}>
+                    <Text style={styles.detailLine}>Delivery: {order.address || 'Address provided'}</Text>
+                    {order.distanceKmSnapshot != null && <Text style={styles.detailLine}>Distance: {orderDistance(order)}</Text>}
+                  </View>
+                </View>
+                <View style={styles.orderTotalSummary}>
+                  <Text style={styles.totalLabel}>ORDER TOTAL</Text>
+                  <Text style={styles.amountText}>{formatAmount(order.totalAtOrder)}</Text>
+                  {!!order.deliveryFeeAtOrder && (
+                    <Text style={styles.deliveryFeeText}>Includes {formatAmount(order.deliveryFeeAtOrder)} delivery</Text>
+                  )}
+                </View>
+              </View>
+              <View style={[styles.actionRow, styles.requestActionRow]}>
+                <ManagerActionButton disabled={entry.actionsDisabled} onPress={() => onOpenOrder(order)} style={[styles.actionButton, styles.editOrderBtn, entry.actionsDisabled && styles.actionDisabled]}>
                   <Text style={styles.editOrderBtnText}>
                     {isEditable ? 'Edit Order Details' : 'View Order Details'}
                   </Text>
-                </TouchableOpacity>
+                </ManagerActionButton>
               </View>
             </View>
             </AnimatedPresenceItem>
@@ -972,6 +1076,13 @@ const createStyles = (colors, width = 1200) =>
       width: '100%',
       minWidth: 0,
     },
+    orderHeaderAside: {
+      flexDirection: width < 377 ? 'row' : 'column',
+      alignItems: width < 377 ? 'center' : 'flex-end',
+      justifyContent: 'space-between',
+      alignSelf: width < 377 ? 'stretch' : 'auto',
+      gap: 6,
+    },
     eyebrow: {
       color: colors.primary,
       fontSize: 10,
@@ -997,6 +1108,32 @@ const createStyles = (colors, width = 1200) =>
       fontSize: 13,
       fontWeight: '800',
       marginBottom: 8,
+    },
+    decisionsHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      paddingVertical: 8,
+      borderTopWidth: 1,
+      borderTopColor: colors.border,
+    },
+    decisionsToggle: {
+      minHeight: 40,
+      minWidth: 56,
+      paddingHorizontal: 12,
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 9,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginLeft: 'auto',
+      backgroundColor: colors.surfaceAlt,
+    },
+    decisionsToggleText: { color: colors.primary, fontSize: 12, fontWeight: '800' },
+    decisionsHeaderTitle: {
+      flex: 1,
+      minWidth: 0,
+      marginBottom: 0,
     },
     refreshButton: {
       minHeight: 36,
@@ -1042,12 +1179,12 @@ const createStyles = (colors, width = 1200) =>
     },
     visualEmpty: {
       width: '100%',
-      minHeight: 150,
-      marginVertical: 0,
+      minHeight: 96,
+      marginVertical: 4,
     },
     inlineVisualEmpty: {
       width: '100%',
-      minHeight: 130,
+      minHeight: 96,
       marginVertical: 4,
     },
     sectionScroll: { maxHeight: 440 },
@@ -1068,6 +1205,10 @@ const createStyles = (colors, width = 1200) =>
       width: '100%',
       minWidth: 0,
     },
+    orderHeaderMain: {
+      flex: 1,
+      minWidth: 0,
+    },
     requesterName: {
       color: colors.textPrimary,
       fontSize: 14,
@@ -1084,13 +1225,53 @@ const createStyles = (colors, width = 1200) =>
       color: colors.textPrimary,
       fontSize: 13,
       fontWeight: '700',
-      marginTop: 6,
+      marginTop: 8,
       flexShrink: 1,
       minWidth: 0,
     },
-    detailsBlock: {
+    productPricingRow: {
+      flexDirection: width < 550 ? 'column' : 'row',
+      alignItems: width < 550 ? 'stretch' : 'flex-start',
+      justifyContent: 'space-between',
+      gap: 8,
+      marginTop: 8,
+      width: '100%',
+      minWidth: 0,
+    },
+    productsSummaryInline: {
+      flex: 1,
+      marginTop: 0,
+    },
+    requestProductInfo: {
+      flex: 1,
+      minWidth: 0,
+    },
+    requestDeliveryInfo: {
       gap: 3,
-      marginTop: 6,
+      marginTop: 4,
+      minWidth: 0,
+    },
+    orderTotalSummary: {
+      minWidth: width < 550 ? 0 : 160,
+      flexShrink: 0,
+      alignItems: width < 550 ? 'flex-start' : 'flex-end',
+    },
+    totalLabel: {
+      color: colors.textSecondary,
+      fontSize: 10,
+      fontWeight: '800',
+      letterSpacing: 0.6,
+    },
+    deliveryFeeText: {
+      color: colors.textSecondary,
+      fontSize: 11,
+      lineHeight: 15,
+      marginTop: 2,
+      textAlign: width < 550 ? 'left' : 'right',
+    },
+    detailsBlock: {
+      gap: 4,
+      marginTop: 4,
       width: '100%',
       minWidth: 0,
     },
@@ -1113,12 +1294,19 @@ const createStyles = (colors, width = 1200) =>
       justifyContent: width >= 800 ? 'flex-end' : 'flex-start',
       alignItems: 'center',
       gap: 8,
+      marginTop: 8,
+    },
+    requestActionRow: {
+      borderTopWidth: 1,
+      borderTopColor: colors.border,
       marginTop: 10,
+      paddingTop: 10,
     },
     chatActionWrap: {
-      flexGrow: 1,
-      flexBasis: width < 430 ? '48%' : 118,
-      minWidth: 0,
+      flexGrow: width < 430 ? 1 : 0,
+      flexShrink: 0,
+      flexBasis: width < 430 ? '48%' : 138,
+      minWidth: width < 430 ? 0 : 138,
       minHeight: 44,
       maxHeight: 48,
       height: 44,
@@ -1132,9 +1320,10 @@ const createStyles = (colors, width = 1200) =>
       borderRadius: 10,
     },
     actionButton: {
-      flexGrow: 1,
-      flexBasis: width < 430 ? '48%' : 118,
-      minWidth: 0,
+      flexGrow: width < 430 ? 1 : 0,
+      flexShrink: 0,
+      flexBasis: width < 430 ? '48%' : 138,
+      minWidth: width < 430 ? 0 : 138,
       minHeight: 44,
       maxHeight: 48,
       height: 44,
@@ -1169,11 +1358,11 @@ const createStyles = (colors, width = 1200) =>
     },
     editOrderBtn: {
       borderWidth: 1,
-      borderColor: colors.primary,
-      backgroundColor: colors.primarySoft,
+      borderColor: colors.primaryAction,
+      backgroundColor: colors.primaryAction,
     },
     editOrderBtnText: {
-      color: colors.primary,
+      color: colors.onPrimary || '#FFFFFF',
       fontSize: 12,
       fontWeight: '800',
     },
@@ -1211,8 +1400,8 @@ const createStyles = (colors, width = 1200) =>
       borderColor: colors.border,
       backgroundColor: colors.surfaceAlt,
       borderRadius: 12,
-      padding: 12,
-      marginBottom: 8,
+      padding: 14,
+      marginBottom: 10,
     },
     decisionText: {
       color: colors.textPrimary,
@@ -1232,7 +1421,7 @@ const createStyles = (colors, width = 1200) =>
       width: 200,
     },
     searchInput: {
-      height: 38,
+      height: 44,
       borderWidth: 1,
       borderColor: colors.border,
       borderRadius: 8,

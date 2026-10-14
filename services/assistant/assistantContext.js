@@ -1,6 +1,9 @@
 import {
   isActiveRequesterOrderStatus,
+  isApprovedRequesterOrderStatus,
+  isCancellableRequesterOrderStatus,
   isHistoryRequesterOrderStatus,
+  normalizeRequesterOrderStatus,
   requesterOrderStatusLabel,
 } from '../../constants/requesterOrderStatus';
 import { formatDeliveryFailureReason } from '../../constants/deliveryFailureReasons';
@@ -61,6 +64,7 @@ export function sanitizeOrder(order = {}) {
   const branchId = clean(
     order.currentBranchId ||
     order.branchId ||
+    order.branch_id ||
     order.water_station_id ||
     order.branch ||
     ''
@@ -102,6 +106,9 @@ export function sanitizeOrder(order = {}) {
     schedule,
     safeFailureReason,
     isOutsideRadius,
+    isAwaitingApproval: ['outside radius pending approval', 'manager approval pending', 'waiting for branch approval', 'awaiting branch approval'].includes(normalizeRequesterOrderStatus(order.status)),
+    isApproved: isApprovedRequesterOrderStatus(order.status),
+    isCancellable: isCancellableRequesterOrderStatus(order.status),
     isDelivered: status === 'delivered',
     isCancelled: ['cancelled', 'canceled'].includes(status),
     isFailed: status.includes('delivery_failed'),
@@ -228,6 +235,13 @@ export function buildSafeAssistantContext({
   const hasActiveRestriction = orderingRestrictions.length > 0 || chatRestrictions.length > 0;
   const activeRestriction = orderingRestrictions[0] || chatRestrictions[0] || null;
 
+  const ordersLoading = Boolean(requesterData.loading);
+  const ordersUnavailable = Boolean(
+    requesterData.error || (!Array.isArray(requesterData.orders) && !ordersLoading)
+  );
+  const canPlaceNewOrder =
+    !primaryActiveOrder && orderingRestrictions.length === 0 && !ordersLoading && !ordersUnavailable;
+
   return {
     requester: {
       firstName,
@@ -239,6 +253,9 @@ export function buildSafeAssistantContext({
     activeOrders,
     hasActiveOrder: Boolean(primaryActiveOrder),
     hasPendingOrder: Boolean(primaryActiveOrder && primaryActiveOrder.status === 'pending'),
+    ordersLoading,
+    ordersUnavailable,
+    canPlaceNewOrder,
     hasActiveRestriction,
     activeRestriction,
     recentOrders: historyOrders.slice(0, 5),
@@ -485,22 +502,28 @@ export function buildSafeDistributorContext({
   const rawOrders = Array.isArray(distributorData.orders) ? distributorData.orders : [];
   const sanitizedOrders = rawOrders.map((ord) => sanitizeDistributorOrder(ord, { now }));
 
-  // Primary active assignment
+  const ordersLoading = Boolean(distributorData.loading);
+  const ordersUnavailable = Boolean(
+    distributorData.error || (!Array.isArray(distributorData.orders) && !ordersLoading)
+  );
+
+  // Primary active assignment (only non-terminal assignments actually assigned to distributor)
   const activeAssignments = sanitizedOrders.filter((ord) =>
-    ['out_for_delivery', 'scheduled', 'accepted', 'distributor_assigned', 'pending'].includes(ord.status) ||
-    (ord.isFailed && ord.chatGraceActive)
+    (!ord.isDelivered && !ord.isCancelled) &&
+    (['out_for_delivery', 'scheduled', 'accepted', 'distributor_assigned'].includes(ord.status) ||
+     (ord.isFailed && ord.chatGraceActive))
   );
   const currentAssignment = activeAssignments[0] || null;
 
   // Today's schedule
   const todayKey = getLocalDateKey(now);
   const todaySchedule = sanitizedOrders
-    .filter((ord) => ord.scheduledDateKey === todayKey && !ord.isDelivered && !ord.isCancelled)
+    .filter((ord) => ord.scheduledDateKey === todayKey && !ord.isDelivered && !ord.isCancelled && !ord.isFailed)
     .slice(0, 5);
 
   // Next delivery
   const upcomingDeliveries = sanitizedOrders
-    .filter((ord) => ['scheduled', 'out_for_delivery', 'accepted', 'distributor_assigned'].includes(ord.status));
+    .filter((ord) => ['scheduled', 'out_for_delivery', 'accepted', 'distributor_assigned'].includes(ord.status) && !ord.isDelivered && !ord.isCancelled && !ord.isFailed);
   const nextDelivery = upcomingDeliveries[0] || null;
 
   // History
@@ -539,6 +562,8 @@ export function buildSafeDistributorContext({
     currentAssignment,
     hasActiveAssignment: Boolean(currentAssignment && !currentAssignment.isFailed),
     isDeliveryFailed,
+    ordersLoading,
+    ordersUnavailable,
     todaySchedule,
     hasSchedule: todaySchedule.length > 0,
     nextDelivery,

@@ -4,7 +4,7 @@ import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useProtectedReadSession } from '../services/useProtectedReadSession';
 import { ensureManagerProfile } from '../services/managerProfile';
-const { getManagerQueues, pendingBranchApplications } = require('../services/managerOperational');
+const { getManagerQueues, pendingBranchApplications, extractBranchRequesters } = require('../services/managerOperational');
 
 const emptyState = {
   branch: null,
@@ -14,6 +14,8 @@ const emptyState = {
   incomingTransfers: [],
   applicants: [],
   pendingApplications: [],
+  requesters: [],
+  branchRequestersCount: 0,
   sourceDecisionEvents: [],
   requestsCount: 0,
   dispatchCount: 0,
@@ -30,6 +32,8 @@ const emptyState = {
 };
 
 const ManagerRealtimeContext = React.createContext(emptyState);
+
+export { extractBranchRequesters };
 
 const revisionFor = (requests, incomingTransfers, users) => ['ready',
   ...requests,
@@ -91,10 +95,13 @@ export function ManagerRealtimeDataProvider({ children }) {
       if (!active) return;
       const loading = !(ready.branch && ready.users && ready.requests);
       const queues = getManagerQueues(current.requests, current.incomingTransfers, branchId);
+      const branchRequesters = extractBranchRequesters(current.requests, current.users);
       const next = {
         ...current,
         branchId,
         managerUid,
+        requesters: branchRequesters,
+        branchRequestersCount: branchRequesters.length,
         pendingApplications: pendingBranchApplications(current.applicants, branchId),
         requestsCount: queues.requestsCount,
         dispatchCount: queues.dispatchCount,
@@ -166,7 +173,20 @@ export function ManagerRealtimeDataProvider({ children }) {
   }, [branchId, managerUid, primeProfile, retry, retryVersion]);
 
   return (
-      <ManagerRealtimeContext.Provider value={{ ...(state.branchId === branchId && state.managerUid === managerUid ? state : { ...emptyState, branchId, managerUid, retry, primeProfile }), profile: session.profile, branch: session.branch, profileLoading: session.profileLoading, branchLoading: session.branchLoading, readiness: session.readiness, authReady: session.authReady, uid: session.uid }}>
+    <ManagerRealtimeContext.Provider
+      value={{
+        ...(state.branchId === branchId && state.managerUid === managerUid
+          ? state
+          : { ...emptyState, branchId, managerUid, retry, primeProfile }),
+        profile: state.profile || session.profile,
+        branch: state.branch || session.branch,
+        profileLoading: session.profileLoading,
+        branchLoading: session.branchLoading,
+        readiness: session.readiness,
+        authReady: session.authReady,
+        uid: session.uid,
+      }}
+    >
       {children}
     </ManagerRealtimeContext.Provider>
   );

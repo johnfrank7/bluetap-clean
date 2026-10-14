@@ -220,7 +220,7 @@ export function AssistantQuickActions({ safeContext, onSelectAction, disabled, r
         {
           id: 'cancel',
           label: '❌ Can I cancel?',
-          intent: ASSISTANT_INTENTS.CANCELLED_ORDER_HELP,
+          intent: ASSISTANT_INTENTS.CANCEL_ORDER_ELIGIBILITY,
           prompt: 'Can I cancel my current order?',
           query: 'Can I cancel my current order?',
         },

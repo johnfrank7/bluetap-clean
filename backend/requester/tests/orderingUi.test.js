@@ -285,7 +285,7 @@ test('distributor dashboard metrics are live, actionable, semantic, and map code
 test('Manager dispatch presents durable source-branch transfer decisions without a chat surface', () => {
   assert.match(managerRequests, /sourceDecisionEvents/);
   assert.match(managerRequests, /Transfer decisions/);
-  assert.match(managerRequests, /accepted.*transfer of Order|declined.*transfer of Order/);
+  assert.match(managerRequests, /Transfer outcome|accepted.*transfer|declined.*transfer/);
   assert.doesNotMatch(managerRequests, /conversation|typing indicator|read receipt/);
 });
 

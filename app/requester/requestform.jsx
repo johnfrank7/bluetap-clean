@@ -1,17 +1,18 @@
 import React from 'react';
-import { ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import LocationMap from '../../components/LocationMap';
 import ProductCard from '../../components/ProductCard';
+import BlueTapIcon from '../../components/BlueTapIcon';
 import { createPortalStyleSheet, useBlueTapTheme } from '../../components/BlueTapTheme';
 import TopToastFeedback from '../../components/TopToastFeedback';
 import { ModerationNoticeBanner, useModerationNotices } from '../../components/ModerationNotices';
 import { BLUETAP_COLORS, BLUETAP_LAYOUT } from '../../constants/bluetapTheme';
 import { USER_PORTAL_BOTTOM_CONTENT_INSET, USER_PORTAL_LAYOUT } from '../../constants/userPortalLayout';
 import { haversineDistanceKm, rankProviderBranches, rankBranchesByDistance, requestCurrentLocation } from '../../services/location';
-import { getRequesterCatalog, getRequesterOrders } from '../../services/requesterOrdering';
+import { getCachedCatalog, getRequesterCatalog, getRequesterOrders } from '../../services/requesterOrdering';
 import { buildBuyAgainDraft } from '../../services/buyAgain';
 import { createRequest, subscribeRequesterCurrentRequests } from '../../services/requests';
 import { auth } from '../../firebase';
@@ -60,9 +61,21 @@ function resolvePublicOrderReference(order = {}) {
   return '';
 }
 
-function Section({ number, title, helper, children }) {
+function Section({ number, title, helper, rightAction, children }) {
   useBlueTapTheme();
-  return <View style={styles.section}><View style={styles.sectionHeading}><View style={styles.number}><Text style={styles.numberText}>{number}</Text></View><View style={styles.sectionTitleWrap}><Text style={styles.sectionTitle}>{title}</Text>{!!helper&&<Text style={styles.sectionHelper}>{helper}</Text>}</View></View>{children}</View>;
+  return (
+    <View style={styles.section}>
+      <View style={styles.sectionHeading}>
+        <View style={styles.number}><Text style={styles.numberText}>{number}</Text></View>
+        <View style={styles.sectionTitleWrap}>
+          <Text style={styles.sectionTitle}>{title}</Text>
+          {!!helper && <Text style={styles.sectionHelper}>{helper}</Text>}
+        </View>
+        {rightAction}
+      </View>
+      {children}
+    </View>
+  );
 }
 
 function LimitWarning({ items, colors }) {
@@ -75,14 +88,31 @@ export default function RequestFormPage() {
   const { colors, isDark } = useBlueTapTheme();
   const { activeRestrictions } = useModerationNotices();
   const router = useRouter(); const params = useLocalSearchParams(); const preferredProductId = firstParam(params.productId); const buyAgainOrderId = firstParam(params.buyAgainOrderId);
-  const [catalog,setCatalog] = React.useState(null); const [loading,setLoading] = React.useState(true); const [loadError,setLoadError] = React.useState('');
+  const [catalog, setCatalog] = React.useState(() => getCachedCatalog());
+  const [loading, setLoading] = React.useState(() => !getCachedCatalog());
+  const [loadError, setLoadError] = React.useState('');
   const [deliveryLocation,setDeliveryLocation] = React.useState(null); const [locationState,setLocationState] = React.useState('idle'); const [locationError,setLocationError] = React.useState('');
   const [selectedBranchId,setSelectedBranchId] = React.useState(''); const [items,setItems] = React.useState([]); const [container,setContainer] = React.useState(containers[0]); const [submitting,setSubmitting] = React.useState(false); const [submitError,setSubmitError] = React.useState(''); const [reviewing,setReviewing] = React.useState(false);
   const [activeOrders,setActiveOrders] = React.useState([]); const [saveAsDefaultLocation,setSaveAsDefaultLocation] = React.useState(false);
   const [toast,setToast] = React.useState({ visible: false, message: '', type: 'error' });
   const [buyAgainTemplate,setBuyAgainTemplate] = React.useState(null); const [buyAgainMessage,setBuyAgainMessage] = React.useState(''); const appliedBuyAgainId = React.useRef('');
-  const load = React.useCallback(async (force=false) => { setLoading(true); setLoadError(''); try { setCatalog(await getRequesterCatalog({force})); } catch(error){setLoadError(error.message);} finally{setLoading(false);} },[]);
-  React.useEffect(()=>{load(Boolean(buyAgainOrderId));},[load,buyAgainOrderId]);
+  const load = React.useCallback(async (force = false) => {
+    if (force || !getCachedCatalog()) {
+      setLoading(true);
+    }
+    setLoadError('');
+    try {
+      const nextCatalog = await getRequesterCatalog({ force });
+      setCatalog(nextCatalog);
+    } catch (error) {
+      if (!getCachedCatalog()) {
+        setLoadError(error.message || 'Unable to load ordering right now.');
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+  React.useEffect(() => { load(Boolean(buyAgainOrderId)); }, [load, buyAgainOrderId]);
   React.useEffect(() => { if (!buyAgainOrderId) return; let active = true; getRequesterOrders().then((orders) => { if (!active) return; const order = orders.find((entry) => entry.id === buyAgainOrderId && String(entry.status).toLowerCase() === 'delivered'); if (order) setBuyAgainTemplate(order); else setBuyAgainMessage('This previous order is unavailable for Buy Again.'); }).catch(() => { if (active) setBuyAgainMessage('Previous order details could not be loaded.'); }); return () => { active = false; }; }, [buyAgainOrderId]);
 
   React.useEffect(() => {
@@ -155,6 +185,33 @@ export default function RequestFormPage() {
   const changeQuantity = (productId,delta) => setItems((current)=>current.map((item)=>item.productId===productId?{...item,quantity:item.quantity+delta}:item).filter((item)=>item.quantity>0));
   const canReview = !hasActiveOrder&&!orderingRestriction&&profileComplete&&deliveryLocation&&selectedBranch&&items.length>0;
   const scrollViewRef = React.useRef(null);
+  const productsScrollRef = React.useRef(null);
+  const [canScrollLeft, setCanScrollLeft] = React.useState(false);
+  const [canScrollRight, setCanScrollRight] = React.useState(true);
+  const scrollOffsetRef = React.useRef(0);
+
+  const handleProductsScroll = React.useCallback((event) => {
+    const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+    const x = contentOffset?.x || 0;
+    scrollOffsetRef.current = x;
+    setCanScrollLeft(x > 5);
+    setCanScrollRight(x < (contentSize?.width || 0) - (layoutMeasurement?.width || 0) - 5);
+  }, []);
+
+  const scrollProducts = React.useCallback((direction) => {
+    if (!productsScrollRef.current) return;
+    const step = 272;
+    const targetX = Math.max(0, scrollOffsetRef.current + direction * step);
+    productsScrollRef.current.scrollTo({ x: targetX, animated: true });
+    scrollOffsetRef.current = targetX;
+  }, []);
+
+  React.useEffect(() => {
+    scrollOffsetRef.current = 0;
+    setCanScrollLeft(false);
+    setCanScrollRight((products?.length || 0) > 1);
+    productsScrollRef.current?.scrollTo({ x: 0, animated: false });
+  }, [selectedBranchId, products.length]);
 
   const isFormDirty = Boolean(
     items.length > 0 ||
@@ -283,10 +340,70 @@ export default function RequestFormPage() {
         })}
         {selectedOutsideServiceArea&&<View style={styles.outsideNotice}><Text style={styles.outsideNoticeTitle}>Outside normal delivery area</Text><Text style={styles.outsideNoticeText}>This delivery location is approximately {selectedDistance.toFixed(1)} km away. This branch normally delivers within {selectedRadius} km. The request requires branch approval.</Text><View style={styles.outsideActions}><TouchableOpacity onPress={()=>{setSelectedBranchId('');setItems([]);setReviewing(false);}} style={styles.outsideSecondary}><Text style={styles.outsideSecondaryText}>Choose another provider</Text></TouchableOpacity></View></View>}
       </Section>
-      <Section number="3" title="Select products" helper={selectedBranch?'Only products available from this provider are shown.':'Select a provider to view its catalog.'}>
+      <Section
+        number="3"
+        title="Select products"
+        helper={selectedBranch ? 'Only products available from this provider are shown.' : 'Select a provider to view its catalog.'}
+        rightAction={
+          selectedBranch && products.length > 1 ? (
+            <View style={styles.carouselArrows}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Previous product"
+                disabled={!canScrollLeft}
+                onPress={() => scrollProducts(-1)}
+                style={({ hovered, pressed }) => [
+                  styles.carouselArrow,
+                  { backgroundColor: colors.surface, borderColor: colors.border },
+                  hovered && styles.carouselArrowHovered,
+                  pressed && styles.carouselArrowPressed,
+                  !canScrollLeft && styles.carouselArrowDisabled,
+                ]}
+              >
+                <BlueTapIcon name="chevron-left" size={20} color={canScrollLeft ? (colors.iconInteractive || colors.primary) : (colors.textMuted || '#94A3B8')} />
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Next product"
+                disabled={!canScrollRight}
+                onPress={() => scrollProducts(1)}
+                style={({ hovered, pressed }) => [
+                  styles.carouselArrow,
+                  { backgroundColor: colors.surface, borderColor: colors.border },
+                  hovered && styles.carouselArrowHovered,
+                  pressed && styles.carouselArrowPressed,
+                  !canScrollRight && styles.carouselArrowDisabled,
+                ]}
+              >
+                <BlueTapIcon name="chevron-right" size={20} color={canScrollRight ? (colors.iconInteractive || colors.primary) : (colors.textMuted || '#94A3B8')} />
+              </Pressable>
+            </View>
+          ) : null
+        }
+      >
         <LimitWarning items={itemDetails} colors={colors} />
         {selectedBranch && products.length > 0 && <View style={styles.deliveryAvailability}><Text style={styles.deliveryAvailabilityTitle}>Delivery Schedule</Text><Text style={styles.deliveryAvailabilityText}>Availability reflects {selectedBranch.name}'s effective branch policy. Requests outside a standard day or quantity limit are sent to the Manager for review.</Text></View>}
-        {!selectedBranch?<View style={styles.empty}><Text style={styles.emptyTitle}>Provider required</Text></View>:products.length===0?<View style={styles.empty}><Text style={styles.emptyTitle}>No products available</Text></View>:<ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.products}>{products.map((product)=><View key={product.id} style={styles.productWrap}><ProductCard product={product} compact selected={items.some((item)=>item.productId===product.id)} onOrder={addProduct}/></View>)}</ScrollView>}
+        {!selectedBranch ? (
+          <View style={styles.empty}><Text style={styles.emptyTitle}>Provider required</Text></View>
+        ) : products.length === 0 ? (
+          <View style={styles.empty}><Text style={styles.emptyTitle}>No products available</Text></View>
+        ) : (
+          <ScrollView
+            ref={productsScrollRef}
+            horizontal
+            showsHorizontalScrollIndicator={true}
+            onScroll={handleProductsScroll}
+            scrollEventThrottle={16}
+            dataSet={{ productScroll: 'true' }}
+            contentContainerStyle={styles.products}
+          >
+            {products.map((product) => (
+              <View key={product.id} style={styles.productWrap}>
+                <ProductCard product={product} compact compactSelection selected={items.some((item) => item.productId === product.id)} onOrder={addProduct} />
+              </View>
+            ))}
+          </ScrollView>
+        )}
         {itemDetails.map((item)=><View key={item.productId} style={styles.itemRow}><View style={styles.itemInfo}><Text style={styles.itemName}>{item.product.product_name}</Text><Text style={styles.itemPrice}>{formatPrice(item.product.price)} each · {formatPrice(item.lineTotal)}</Text></View><View style={styles.quantity}><TouchableOpacity onPress={()=>changeQuantity(item.productId,-1)} style={styles.quantityButton}><Text style={styles.quantityText}>−</Text></TouchableOpacity><Text style={styles.quantityValue}>{item.quantity}</Text><TouchableOpacity onPress={()=>changeQuantity(item.productId,1)} style={styles.quantityButton}><Text style={styles.quantityText}>+</Text></TouchableOpacity></View></View>)}
       </Section>
       <Section number="4" title="Order details"><View style={styles.choiceRow}>{containers.map((option)=><TouchableOpacity key={option} onPress={()=>setContainer(option)} style={[styles.choice,container===option&&styles.choiceActive]}><Text style={[styles.choiceText,container===option&&styles.choiceTextActive]}>{option}</Text></TouchableOpacity>)}</View></Section>
@@ -370,4 +487,4 @@ const restrictionStyles = createPortalStyleSheet({
   selectTextReset:{marginLeft:0},
 });
 
-const styles = createPortalStyleSheet({gradient:{flex:1,minWidth:0},safe:{flex:1,minWidth:0,backgroundColor:'transparent'},flex:{flex:1,minWidth:0},content:{width:'100%',maxWidth:USER_PORTAL_LAYOUT.maxWidth,minWidth:0,alignSelf:'center',paddingHorizontal:USER_PORTAL_LAYOUT.gutter,paddingTop:24,paddingBottom:USER_PORTAL_BOTTOM_CONTENT_INSET},pageHeading:{width:'100%',maxWidth:'100%',minWidth:0,marginBottom:18},headerTopRow:{flexDirection:'row',alignItems:'center',justifyContent:'space-between',gap:12,marginBottom:6},backButton:{minHeight:44,minWidth:84,paddingHorizontal:14,paddingVertical:10,borderRadius:10,borderWidth:1,borderColor:'rgba(255,255,255,0.35)',backgroundColor:'rgba(255,255,255,0.12)',alignItems:'center',justifyContent:'center'},backButtonText:{color:'#FFFFFF',fontSize:13,fontWeight:'800'},eyebrow:{color:'#E3F2FD',fontSize:11,fontWeight:'900',letterSpacing:1},title:{color:'#FFFFFF',fontSize:28,fontWeight:'900',marginTop:5},subtitle:{color:'#E3F2FD',fontSize:14,lineHeight:21,marginTop:7,maxWidth:'100%'},section:{width:'100%',maxWidth:'100%',minWidth:0,backgroundColor:BLUETAP_COLORS.surface,borderWidth:1,borderColor:BLUETAP_COLORS.border,borderRadius:BLUETAP_LAYOUT.radius.lg,padding:18,marginBottom:16,...BLUETAP_LAYOUT.shadow},sectionHeading:{flexDirection:'row',alignItems:'flex-start',gap:12,marginBottom:16},number:{width:30,height:30,borderRadius:15,backgroundColor:BLUETAP_COLORS.primary,alignItems:'center',justifyContent:'center'},numberText:{color:'#FFF',fontWeight:'900'},sectionTitleWrap:{flex:1,minWidth:0},sectionTitle:{color:BLUETAP_COLORS.textPrimary,fontSize:17,fontWeight:'900'},sectionHelper:{color:BLUETAP_COLORS.textSecondary,fontSize:12,lineHeight:18,marginTop:3},deliveryAvailability:{backgroundColor:BLUETAP_COLORS.primarySoft,borderWidth:1,borderColor:BLUETAP_COLORS.border,borderRadius:10,padding:12,marginBottom:12},deliveryAvailabilityTitle:{color:BLUETAP_COLORS.textPrimary,fontSize:12,fontWeight:'900'},deliveryAvailabilityText:{color:BLUETAP_COLORS.textSecondary,fontSize:11,lineHeight:16,marginTop:3},primaryButton:{minHeight:46,alignItems:'center',justifyContent:'center',backgroundColor:BLUETAP_COLORS.primary,borderRadius:10,paddingHorizontal:16,alignSelf:'flex-start'},primaryText:{color:'#FFF',fontWeight:'900'},manualHint:{color:BLUETAP_COLORS.textSecondary,fontSize:12,marginVertical:12},locationStatus:{marginTop:10,backgroundColor:BLUETAP_COLORS.primarySoft,borderRadius:10,padding:11,borderWidth:1,borderColor:BLUETAP_COLORS.border},locationStatusTitle:{color:BLUETAP_COLORS.textPrimary,fontWeight:'900',fontSize:12},locationStatusText:{color:BLUETAP_COLORS.textSecondary,fontSize:11,lineHeight:16,marginTop:3},saveDefaultRow:{flexDirection:'row',alignItems:'center',gap:8,marginTop:12},checkbox:{width:20,height:20,borderRadius:4,borderWidth:1.5,borderColor:BLUETAP_COLORS.border,alignItems:'center',justifyContent:'center'},checkboxChecked:{backgroundColor:BLUETAP_COLORS.primary,borderColor:BLUETAP_COLORS.primary},checkmark:{color:'#FFF',fontSize:12,fontWeight:'900'},saveDefaultText:{color:BLUETAP_COLORS.textPrimary,fontSize:12,fontWeight:'700'},activeOrderBanner:{backgroundColor:'#FFF8E8',borderWidth:1,borderColor:BLUETAP_COLORS.warning,borderRadius:16,padding:16,marginBottom:16},activeOrderTitle:{color:BLUETAP_COLORS.textPrimary,fontWeight:'900',fontSize:15},activeOrderText:{color:BLUETAP_COLORS.textSecondary,fontSize:12,lineHeight:18,marginTop:4},activeOrderButton:{minHeight:44,alignItems:'center',justifyContent:'center',alignSelf:'flex-start',backgroundColor:BLUETAP_COLORS.primaryAction,paddingHorizontal:16,paddingVertical:10,borderRadius:10,marginTop:12},activeOrderButtonText:{color:'#FFFFFF',fontWeight:'900',fontSize:13,letterSpacing:0.2},inlineError:{backgroundColor:BLUETAP_COLORS.dangerSoft,borderRadius:10,padding:12,marginTop:10},inlineErrorText:{color:BLUETAP_COLORS.danger,fontSize:12,lineHeight:18},retryText:{color:BLUETAP_COLORS.primary,fontWeight:'900',marginTop:7},warning:{backgroundColor:'#FFF8E8',borderWidth:1.5,borderColor:BLUETAP_COLORS.warning,borderRadius:16,padding:16,marginBottom:16},warningTitle:{color:BLUETAP_COLORS.textPrimary,fontWeight:'900',fontSize:14},warningText:{color:BLUETAP_COLORS.textSecondary,fontSize:12,lineHeight:18,marginTop:5},linkButton:{backgroundColor:BLUETAP_COLORS.primary,borderRadius:8,paddingHorizontal:16,paddingVertical:10,alignSelf:'flex-start',marginTop:12},linkText:{color:'#FFFFFF',fontWeight:'900',fontSize:13},branchCard:{width:'100%',maxWidth:'100%',minWidth:0,flexDirection:'row',alignItems:'center',borderWidth:1,borderColor:BLUETAP_COLORS.border,borderRadius:12,padding:14,marginBottom:10,backgroundColor:BLUETAP_COLORS.surfaceAlt},nearestBranchCard:{},selected:{borderColor:BLUETAP_COLORS.primary,borderWidth:2,backgroundColor:BLUETAP_COLORS.primarySoft},branchMain:{flex:1,minWidth:0},branchTitleRow:{flexDirection:'row',alignItems:'center',gap:8,flexWrap:'wrap'},branchName:{color:BLUETAP_COLORS.textPrimary,fontSize:15,fontWeight:'900'},nearest:{color:BLUETAP_COLORS.success,fontSize:10,fontWeight:'900',backgroundColor:'#E8F7EF',borderRadius:999,paddingHorizontal:8,paddingVertical:4},branchAddress:{color:BLUETAP_COLORS.textSecondary,fontSize:12,lineHeight:17,marginTop:4},distance:{color:BLUETAP_COLORS.primary,fontSize:12,fontWeight:'800',marginTop:5},coverageState:{fontSize:11,fontWeight:'900',marginTop:5},withinCoverage:{color:BLUETAP_COLORS.success},outsideCoverage:{color:BLUETAP_COLORS.warning},selectText:{color:BLUETAP_COLORS.primary,fontWeight:'900',marginLeft:12},outsideNotice:{backgroundColor:'#FFF8E8',borderWidth:1,borderColor:BLUETAP_COLORS.warning,borderRadius:12,padding:14,marginTop:2},outsideNoticeTitle:{color:BLUETAP_COLORS.textPrimary,fontWeight:'900'},outsideNoticeText:{color:BLUETAP_COLORS.textSecondary,fontSize:12,lineHeight:18,marginTop:5},outsideActions:{flexDirection:'row',flexWrap:'wrap',gap:8,marginTop:12},outsidePrimary:{minHeight:40,borderRadius:9,paddingHorizontal:12,backgroundColor:BLUETAP_COLORS.primary,alignItems:'center',justifyContent:'center'},outsidePrimaryText:{color:'#FFF',fontWeight:'900',fontSize:12},outsideSecondary:{minHeight:40,borderRadius:9,paddingHorizontal:12,borderWidth:1,borderColor:BLUETAP_COLORS.primary,alignItems:'center',justifyContent:'center'},outsideSecondaryText:{color:BLUETAP_COLORS.primary,fontWeight:'900',fontSize:12},products:{gap:12,paddingBottom:8,maxWidth:'100%'},productWrap:{width:260,maxWidth:'100%',minWidth:0},itemRow:{flexDirection:'row',alignItems:'center',gap:12,borderTopWidth:1,borderTopColor:BLUETAP_COLORS.border,paddingTop:12,marginTop:12,minWidth:0},itemInfo:{flex:1,minWidth:0},itemName:{color:BLUETAP_COLORS.textPrimary,fontWeight:'900'},itemPrice:{color:BLUETAP_COLORS.textSecondary,fontSize:12,marginTop:4},quantity:{flexDirection:'row',alignItems:'center',gap:10},quantityButton:{width:34,height:34,borderRadius:10,backgroundColor:BLUETAP_COLORS.primarySoft,alignItems:'center',justifyContent:'center'},quantityText:{color:BLUETAP_COLORS.primary,fontSize:19,fontWeight:'900'},quantityValue:{minWidth:20,textAlign:'center',color:BLUETAP_COLORS.textPrimary,fontWeight:'900'},choiceRow:{flexDirection:'row',flexWrap:'wrap',gap:10,minWidth:0},choice:{minHeight:44,paddingHorizontal:16,borderWidth:1,borderColor:BLUETAP_COLORS.border,borderRadius:10,alignItems:'center',justifyContent:'center'},choiceActive:{backgroundColor:BLUETAP_COLORS.primary,borderColor:BLUETAP_COLORS.primary},choiceText:{color:BLUETAP_COLORS.textPrimary,fontWeight:'800'},choiceTextActive:{color:'#FFF'},reviewRow:{flexDirection:'row',justifyContent:'space-between',gap:18,borderBottomWidth:1,borderBottomColor:BLUETAP_COLORS.border,paddingVertical:10,minWidth:0},reviewLabelWrap:{flex:1,minWidth:0},feeBreakdownText:{color:BLUETAP_COLORS.textSecondary,fontSize:11,lineHeight:16,marginTop:2},reviewLabel:{color:BLUETAP_COLORS.textSecondary,fontSize:13},reviewValue:{color:BLUETAP_COLORS.textPrimary,fontWeight:'800',textAlign:'right',flex:1,minWidth:0},total:{color:BLUETAP_COLORS.primary,fontSize:18,fontWeight:'900'},reviewCoverage:{borderRadius:10,padding:12,marginTop:12,borderWidth:1},reviewWithin:{backgroundColor:'#E8F7EF',borderColor:BLUETAP_COLORS.success},reviewOutside:{backgroundColor:'#FFF8E8',borderColor:BLUETAP_COLORS.warning},reviewCoverageTitle:{color:BLUETAP_COLORS.textPrimary,fontWeight:'900',fontSize:12},reviewCoverageText:{color:BLUETAP_COLORS.textSecondary,fontSize:11,lineHeight:16,marginTop:3},securityNote:{color:BLUETAP_COLORS.muted,fontSize:11,lineHeight:17,marginTop:12},confirm:{backgroundColor:BLUETAP_COLORS.primarySoft,borderRadius:10,padding:12,marginTop:14},confirmTitle:{color:BLUETAP_COLORS.textPrimary,fontWeight:'900'},confirmText:{color:BLUETAP_COLORS.textSecondary,fontSize:12,lineHeight:18,marginTop:4},submitButton:{minHeight:50,backgroundColor:BLUETAP_COLORS.primary,borderRadius:11,alignItems:'center',justifyContent:'center',marginTop:16},submitText:{color:'#FFF',fontWeight:'900'},disabled:{opacity:.45},cancel:{alignItems:'center',padding:12},cancelText:{color:BLUETAP_COLORS.primary,fontWeight:'800'},submitError:{color:BLUETAP_COLORS.danger,fontSize:12,marginTop:12},empty:{borderWidth:1,borderStyle:'dashed',borderColor:BLUETAP_COLORS.border,borderRadius:12,padding:20,alignItems:'center'},emptyTitle:{color:BLUETAP_COLORS.textPrimary,fontWeight:'900',textAlign:'center'},emptyText:{color:BLUETAP_COLORS.textSecondary,fontSize:12,marginTop:5,textAlign:'center'},state:{alignItems:'center',padding:30,backgroundColor:BLUETAP_COLORS.surface,borderRadius:16,borderWidth:1,borderColor:BLUETAP_COLORS.border},stateText:{color:BLUETAP_COLORS.textSecondary,fontSize:13,lineHeight:19,textAlign:'center',marginVertical:10},errorTitle:{color:BLUETAP_COLORS.danger,fontWeight:'900'}});
+const styles = createPortalStyleSheet({gradient:{flex:1,minWidth:0},safe:{flex:1,minWidth:0,backgroundColor:'transparent'},flex:{flex:1,minWidth:0},content:{width:'100%',maxWidth:USER_PORTAL_LAYOUT.maxWidth,minWidth:0,alignSelf:'center',paddingHorizontal:USER_PORTAL_LAYOUT.gutter,paddingTop:24,paddingBottom:USER_PORTAL_BOTTOM_CONTENT_INSET},pageHeading:{width:'100%',maxWidth:'100%',minWidth:0,marginBottom:18},headerTopRow:{flexDirection:'row',alignItems:'center',justifyContent:'space-between',gap:12,marginBottom:6},backButton:{minHeight:44,minWidth:84,paddingHorizontal:14,paddingVertical:10,borderRadius:10,borderWidth:1,borderColor:'rgba(255,255,255,0.35)',backgroundColor:'rgba(255,255,255,0.12)',alignItems:'center',justifyContent:'center'},backButtonText:{color:'#FFFFFF',fontSize:13,fontWeight:'800'},eyebrow:{color:'#E3F2FD',fontSize:11,fontWeight:'900',letterSpacing:1},title:{color:'#FFFFFF',fontSize:28,fontWeight:'900',marginTop:5},subtitle:{color:'#E3F2FD',fontSize:14,lineHeight:21,marginTop:7,maxWidth:'100%'},section:{width:'100%',maxWidth:'100%',minWidth:0,backgroundColor:BLUETAP_COLORS.surface,borderWidth:1,borderColor:BLUETAP_COLORS.border,borderRadius:BLUETAP_LAYOUT.radius.lg,padding:18,marginBottom:16,...BLUETAP_LAYOUT.shadow},sectionHeading:{flexDirection:'row',alignItems:'flex-start',gap:12,marginBottom:16},number:{width:30,height:30,borderRadius:15,backgroundColor:BLUETAP_COLORS.primary,alignItems:'center',justifyContent:'center'},numberText:{color:'#FFF',fontWeight:'900'},sectionTitleWrap:{flex:1,minWidth:0},sectionTitle:{color:BLUETAP_COLORS.textPrimary,fontSize:17,fontWeight:'900'},sectionHelper:{color:BLUETAP_COLORS.textSecondary,fontSize:12,lineHeight:18,marginTop:3},deliveryAvailability:{backgroundColor:BLUETAP_COLORS.primarySoft,borderWidth:1,borderColor:BLUETAP_COLORS.border,borderRadius:10,padding:12,marginBottom:12},deliveryAvailabilityTitle:{color:BLUETAP_COLORS.textPrimary,fontSize:12,fontWeight:'900'},deliveryAvailabilityText:{color:BLUETAP_COLORS.textSecondary,fontSize:11,lineHeight:16,marginTop:3},primaryButton:{minHeight:46,alignItems:'center',justifyContent:'center',backgroundColor:BLUETAP_COLORS.primary,borderRadius:10,paddingHorizontal:16,alignSelf:'flex-start'},primaryText:{color:'#FFF',fontWeight:'900'},manualHint:{color:BLUETAP_COLORS.textSecondary,fontSize:12,marginVertical:12},locationStatus:{marginTop:10,backgroundColor:BLUETAP_COLORS.primarySoft,borderRadius:10,padding:11,borderWidth:1,borderColor:BLUETAP_COLORS.border},locationStatusTitle:{color:BLUETAP_COLORS.textPrimary,fontWeight:'900',fontSize:12},locationStatusText:{color:BLUETAP_COLORS.textSecondary,fontSize:11,lineHeight:16,marginTop:3},saveDefaultRow:{flexDirection:'row',alignItems:'center',gap:8,marginTop:12},checkbox:{width:20,height:20,borderRadius:4,borderWidth:1.5,borderColor:BLUETAP_COLORS.border,alignItems:'center',justifyContent:'center'},checkboxChecked:{backgroundColor:BLUETAP_COLORS.primary,borderColor:BLUETAP_COLORS.primary},checkmark:{color:'#FFF',fontSize:12,fontWeight:'900'},saveDefaultText:{color:BLUETAP_COLORS.textPrimary,fontSize:12,fontWeight:'700'},activeOrderBanner:{backgroundColor:'#FFF8E8',borderWidth:1,borderColor:BLUETAP_COLORS.warning,borderRadius:16,padding:16,marginBottom:16},activeOrderTitle:{color:BLUETAP_COLORS.textPrimary,fontWeight:'900',fontSize:15},activeOrderText:{color:BLUETAP_COLORS.textSecondary,fontSize:12,lineHeight:18,marginTop:4},activeOrderButton:{minHeight:44,alignItems:'center',justifyContent:'center',alignSelf:'flex-start',backgroundColor:BLUETAP_COLORS.primaryAction,paddingHorizontal:16,paddingVertical:10,borderRadius:10,marginTop:12},activeOrderButtonText:{color:'#FFFFFF',fontWeight:'900',fontSize:13,letterSpacing:0.2},inlineError:{backgroundColor:BLUETAP_COLORS.dangerSoft,borderRadius:10,padding:12,marginTop:10},inlineErrorText:{color:BLUETAP_COLORS.danger,fontSize:12,lineHeight:18},retryText:{color:BLUETAP_COLORS.primary,fontWeight:'900',marginTop:7},warning:{backgroundColor:'#FFF8E8',borderWidth:1.5,borderColor:BLUETAP_COLORS.warning,borderRadius:16,padding:16,marginBottom:16},warningTitle:{color:BLUETAP_COLORS.textPrimary,fontWeight:'900',fontSize:14},warningText:{color:BLUETAP_COLORS.textSecondary,fontSize:12,lineHeight:18,marginTop:5},linkButton:{backgroundColor:BLUETAP_COLORS.primary,borderRadius:8,paddingHorizontal:16,paddingVertical:10,alignSelf:'flex-start',marginTop:12},linkText:{color:'#FFFFFF',fontWeight:'900',fontSize:13},branchCard:{width:'100%',maxWidth:'100%',minWidth:0,flexDirection:'row',alignItems:'center',borderWidth:1,borderColor:BLUETAP_COLORS.border,borderRadius:12,padding:14,marginBottom:10,backgroundColor:BLUETAP_COLORS.surfaceAlt},nearestBranchCard:{},selected:{borderColor:BLUETAP_COLORS.primary,borderWidth:2,backgroundColor:BLUETAP_COLORS.primarySoft},branchMain:{flex:1,minWidth:0},branchTitleRow:{flexDirection:'row',alignItems:'center',gap:8,flexWrap:'wrap'},branchName:{color:BLUETAP_COLORS.textPrimary,fontSize:15,fontWeight:'900'},nearest:{color:BLUETAP_COLORS.success,fontSize:10,fontWeight:'900',backgroundColor:'#E8F7EF',borderRadius:999,paddingHorizontal:8,paddingVertical:4},branchAddress:{color:BLUETAP_COLORS.textSecondary,fontSize:12,lineHeight:17,marginTop:4},distance:{color:BLUETAP_COLORS.primary,fontSize:12,fontWeight:'800',marginTop:5},coverageState:{fontSize:11,fontWeight:'900',marginTop:5},withinCoverage:{color:BLUETAP_COLORS.success},outsideCoverage:{color:BLUETAP_COLORS.warning},selectText:{color:BLUETAP_COLORS.primary,fontWeight:'900',marginLeft:12},outsideNotice:{backgroundColor:'#FFF8E8',borderWidth:1,borderColor:BLUETAP_COLORS.warning,borderRadius:12,padding:14,marginTop:2},outsideNoticeTitle:{color:BLUETAP_COLORS.textPrimary,fontWeight:'900'},outsideNoticeText:{color:BLUETAP_COLORS.textSecondary,fontSize:12,lineHeight:18,marginTop:5},outsideActions:{flexDirection:'row',flexWrap:'wrap',gap:8,marginTop:12},outsidePrimary:{minHeight:40,borderRadius:9,paddingHorizontal:12,backgroundColor:BLUETAP_COLORS.primary,alignItems:'center',justifyContent:'center'},outsidePrimaryText:{color:'#FFF',fontWeight:'900',fontSize:12},outsideSecondary:{minHeight:40,borderRadius:9,paddingHorizontal:12,borderWidth:1,borderColor:BLUETAP_COLORS.primary,alignItems:'center',justifyContent:'center'},outsideSecondaryText:{color:BLUETAP_COLORS.primary,fontWeight:'900',fontSize:12},carouselArrows:{flexDirection:'row',gap:8,alignItems:'center'},carouselArrow:{width:36,height:36,borderRadius:18,alignItems:'center',justifyContent:'center',borderWidth:1},carouselArrowHovered:{transform:[{translateY:-1},{scale:1.03}]},carouselArrowPressed:{transform:[{scale:0.97}]},carouselArrowDisabled:{opacity:0.35},products:{gap:12,paddingBottom:12,maxWidth:'100%'},productWrap:{width:260,maxWidth:'100%',minWidth:0},itemRow:{flexDirection:'row',alignItems:'center',gap:12,borderTopWidth:1,borderTopColor:BLUETAP_COLORS.border,paddingTop:12,marginTop:12,minWidth:0},itemInfo:{flex:1,minWidth:0},itemName:{color:BLUETAP_COLORS.textPrimary,fontWeight:'900'},itemPrice:{color:BLUETAP_COLORS.textSecondary,fontSize:12,marginTop:4},quantity:{flexDirection:'row',alignItems:'center',gap:10},quantityButton:{width:34,height:34,borderRadius:10,backgroundColor:BLUETAP_COLORS.primarySoft,alignItems:'center',justifyContent:'center'},quantityText:{color:BLUETAP_COLORS.primary,fontSize:19,fontWeight:'900'},quantityValue:{minWidth:20,textAlign:'center',color:BLUETAP_COLORS.textPrimary,fontWeight:'900'},choiceRow:{flexDirection:'row',flexWrap:'wrap',gap:10,minWidth:0},choice:{minHeight:44,paddingHorizontal:16,borderWidth:1,borderColor:BLUETAP_COLORS.border,borderRadius:10,alignItems:'center',justifyContent:'center'},choiceActive:{backgroundColor:BLUETAP_COLORS.primary,borderColor:BLUETAP_COLORS.primary},choiceText:{color:BLUETAP_COLORS.textPrimary,fontWeight:'800'},choiceTextActive:{color:'#FFF'},reviewRow:{flexDirection:'row',justifyContent:'space-between',gap:18,borderBottomWidth:1,borderBottomColor:BLUETAP_COLORS.border,paddingVertical:10,minWidth:0},reviewLabelWrap:{flex:1,minWidth:0},feeBreakdownText:{color:BLUETAP_COLORS.textSecondary,fontSize:11,lineHeight:16,marginTop:2},reviewLabel:{color:BLUETAP_COLORS.textSecondary,fontSize:13},reviewValue:{color:BLUETAP_COLORS.textPrimary,fontWeight:'800',textAlign:'right',flex:1,minWidth:0},total:{color:BLUETAP_COLORS.primary,fontSize:18,fontWeight:'900'},reviewCoverage:{borderRadius:10,padding:12,marginTop:12,borderWidth:1},reviewWithin:{backgroundColor:'#E8F7EF',borderColor:BLUETAP_COLORS.success},reviewOutside:{backgroundColor:'#FFF8E8',borderColor:BLUETAP_COLORS.warning},reviewCoverageTitle:{color:BLUETAP_COLORS.textPrimary,fontWeight:'900',fontSize:12},reviewCoverageText:{color:BLUETAP_COLORS.textSecondary,fontSize:11,lineHeight:16,marginTop:3},securityNote:{color:BLUETAP_COLORS.muted,fontSize:11,lineHeight:17,marginTop:12},confirm:{backgroundColor:BLUETAP_COLORS.primarySoft,borderRadius:10,padding:12,marginTop:14},confirmTitle:{color:BLUETAP_COLORS.textPrimary,fontWeight:'900'},confirmText:{color:BLUETAP_COLORS.textSecondary,fontSize:12,lineHeight:18,marginTop:4},submitButton:{minHeight:50,backgroundColor:BLUETAP_COLORS.primary,borderRadius:11,alignItems:'center',justifyContent:'center',marginTop:16},submitText:{color:'#FFF',fontWeight:'900'},disabled:{opacity:.45},cancel:{alignItems:'center',padding:12},cancelText:{color:BLUETAP_COLORS.primary,fontWeight:'800'},submitError:{color:BLUETAP_COLORS.danger,fontSize:12,marginTop:12},empty:{borderWidth:1,borderStyle:'dashed',borderColor:BLUETAP_COLORS.border,borderRadius:12,padding:20,alignItems:'center'},emptyTitle:{color:BLUETAP_COLORS.textPrimary,fontWeight:'900',textAlign:'center'},emptyText:{color:BLUETAP_COLORS.textSecondary,fontSize:12,marginTop:5,textAlign:'center'},state:{alignItems:'center',padding:30,backgroundColor:BLUETAP_COLORS.surface,borderRadius:16,borderWidth:1,borderColor:BLUETAP_COLORS.border},stateText:{color:BLUETAP_COLORS.textSecondary,fontSize:13,lineHeight:19,textAlign:'center',marginVertical:10},errorTitle:{color:BLUETAP_COLORS.danger,fontWeight:'900'}});

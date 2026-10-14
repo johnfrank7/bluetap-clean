@@ -4,12 +4,38 @@ import { useBlueTapTheme } from '../BlueTapTheme';
 import BlueTapBrandMark from '../BlueTapBrandMark';
 import { createShadow } from '../shadowStyles';
 import AssistantCardRenderer, { AssistantCardRenderer as NamedRenderer } from './AssistantCards';
+import useAssistantTypewriterDefault, { useAssistantTypewriter as namedTypewriter } from './useAssistantTypewriter';
 
 const CardRenderer = AssistantCardRenderer || NamedRenderer;
+const defaultHookFallback = () => ({
+  displayedText: '',
+  isTyping: false,
+  cursorVisible: false,
+  completeImmediately: () => {},
+});
+const useTypewriter = useAssistantTypewriterDefault || namedTypewriter || defaultHookFallback;
 
-export function AssistantMessageBubble({ message = {}, onAction }) {
+export function AssistantMessageBubble({
+  message = {},
+  onAction,
+  isAnimating = false,
+  onAnimationComplete,
+  onAnimationTick,
+}) {
   const { colors, isDark } = useBlueTapTheme();
   const isUser = message.role === 'user';
+
+  const {
+    displayedText,
+    isTyping,
+    cursorVisible,
+    completeImmediately,
+  } = useTypewriter({
+    text: message.text,
+    isAnimating: isAnimating && !isUser,
+    onComplete: () => onAnimationComplete && onAnimationComplete(message.id),
+    onTick: onAnimationTick,
+  });
 
   if (isUser) {
     return (
@@ -57,7 +83,12 @@ export function AssistantMessageBubble({ message = {}, onAction }) {
       </View>
 
       <View style={styles.assistantContent}>
-        <View
+        <TouchableOpacity
+          activeOpacity={isTyping ? 0.92 : 1}
+          onPress={isTyping ? completeImmediately : undefined}
+          disabled={!isTyping}
+          accessibilityRole={isTyping ? 'button' : undefined}
+          accessibilityLabel={isTyping ? 'Tap to reveal full response' : undefined}
           style={[
             styles.assistantBubble,
             {
@@ -66,12 +97,29 @@ export function AssistantMessageBubble({ message = {}, onAction }) {
             },
           ]}
         >
-          <Text style={[styles.assistantText, { color: colors.textPrimary }]}>
-            {message.text}
-          </Text>
-        </View>
+          <View accessible accessibilityLabel={message.text}>
+            <Text
+              accessibilityElementsHidden={isTyping}
+              importantForAccessibility={isTyping ? 'no' : 'auto'}
+              style={[styles.assistantText, { color: colors.textPrimary }]}
+            >
+              {displayedText}
+              {isTyping && (
+                <Text
+                  style={[
+                    styles.cursor,
+                    { color: colors.primaryLight || colors.primary || '#187BCD' },
+                    !cursorVisible && styles.cursorHidden,
+                  ]}
+                >
+                  |
+                </Text>
+              )}
+            </Text>
+          </View>
+        </TouchableOpacity>
 
-        {Array.isArray(message.cards) && message.cards.length > 0 && (
+        {!isTyping && Array.isArray(message.cards) && message.cards.length > 0 && (
           <View style={styles.cardsContainer}>
             {message.cards.map((card, idx) => (
               <CardRenderer key={idx} card={card} onAction={onAction} />
@@ -79,12 +127,17 @@ export function AssistantMessageBubble({ message = {}, onAction }) {
           </View>
         )}
 
-        {visibleActions.length > 0 && (
+        {!isTyping && visibleActions.length > 0 && (
           <View style={styles.actionsContainer}>
             {visibleActions.map((act, idx) => (
               <TouchableOpacity
                 key={idx}
-                style={[styles.actionButton, { backgroundColor: colors.primary }]}
+                style={[
+                  styles.actionButton,
+                  act.type === 'CANCEL_ORDER'
+                    ? { backgroundColor: isDark ? '#DC2626' : '#EF4444' }
+                    : { backgroundColor: colors.primary },
+                ]}
                 onPress={() => onAction && onAction(act)}
                 activeOpacity={0.8}
                 accessibilityRole="button"
@@ -201,5 +254,15 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 12,
     fontWeight: '700',
+  },
+  cursor: {
+    fontSize: 14,
+    lineHeight: 20,
+    fontWeight: '300',
+    marginLeft: 2,
+    opacity: 1,
+  },
+  cursorHidden: {
+    opacity: 0,
   },
 });

@@ -16,7 +16,8 @@ const dayLabel = (days = []) => days.length === 7 ? 'Daily' : days.map((day) => 
 export default function ManagerProductsPage() {
   const { colors, resolvedTheme } = useAdminTheme();
   const compact = useWindowDimensions().width < 760;
-  const styles = React.useMemo(() => createStyles(colors, compact), [colors, compact]);
+  const isDark = resolvedTheme === 'dark';
+  const styles = React.useMemo(() => createStyles(colors, compact, isDark), [colors, compact, isDark]);
   const [workspace, setWorkspace] = React.useState(null);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState('');
@@ -159,10 +160,11 @@ export default function ManagerProductsPage() {
         <TouchableOpacity
           accessibilityRole="button"
           accessibilityLabel="Edit branch delivery pricing"
+          dataSet={{ bluetapCta: 'true' }}
           onPress={openPricingModal}
           style={styles.editPricingBtn}
         >
-          <Text style={styles.editPricingBtnText}>Edit delivery pricing</Text>
+          <Text style={styles.editPricingBtnText}>Edit pricing</Text>
         </TouchableOpacity>
       </View>
       <View style={styles.metricGrid}>
@@ -282,25 +284,33 @@ export default function ManagerProductsPage() {
 
 function Metric({ label, value, styles, small = false }) { return <View style={[styles.metric, small && styles.metricSmall]}><Text style={styles.metricLabel}>{label}</Text><Text style={styles.metricValue}>{value}</Text></View>; }
 
-const createStyles = (colors, compact) => StyleSheet.create({
+const createStyles = (colors, compact, isDark = false) => StyleSheet.create({
   pricingCard:{backgroundColor:colors.surface,borderWidth:1,borderColor:colors.border,borderRadius:16,padding:18,marginBottom:18},
-  pricingHeader:{flexDirection:compact?'column':'row',alignItems:compact?'flex-start':'center',justifyContent:'space-between',gap:12,marginBottom:15},
+  pricingHeader:{flexDirection:compact?'column':'row',alignItems:compact?'stretch':'center',justifyContent:'space-between',gap:14,marginBottom:16},
   editPricingBtn: {
     minHeight: 44,
-    paddingHorizontal: 16,
+    paddingHorizontal: 18,
     paddingVertical: 10,
-    backgroundColor: colors.primaryAction || '#0B57D0',
-    borderWidth: 1,
-    borderColor: colors.primaryAction || '#0B57D0',
+    backgroundColor: isDark ? '#1D78C1' : '#0B67AD',
+    borderWidth: 1.5,
+    borderColor: isDark ? '#38BDF8' : '#0B5FA8',
     borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
+    flexShrink: 0,
+    alignSelf: compact ? 'stretch' : 'flex-start',
     width: compact ? '100%' : 'auto',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: isDark ? 0.3 : 0.08,
+    shadowRadius: 4,
+    elevation: 2,
   },
   editPricingBtnText: {
-    color: colors.onPrimary || '#FFFFFF',
+    color: '#FFFFFF',
     fontWeight: '800',
     fontSize: 13,
+    letterSpacing: 0.3,
   },
   eyebrow:{color:colors.primary,fontSize:10,fontWeight:'900',letterSpacing:1},
   cardTitle:{color:colors.textPrimary,fontSize:18,fontWeight:'900',marginTop:4},

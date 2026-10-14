@@ -3,7 +3,7 @@ import { subscribeRequesterRequests } from '../services/requests';
 import { useAssignedDistributorOrders } from '../services/distributorOrders';
 import { useDistributorProfile } from '../services/distributorProfile';
 import { useProtectedReadSession } from '../services/useProtectedReadSession';
-import { getActiveBranches } from '../services/requesterOrdering';
+import { getActiveBranches, getCachedActiveBranches } from '../services/requesterOrdering';
 
 const RequesterDataContext = React.createContext({ orders: [], branches: [], loading: true, error: '' });
 const DistributorDataContext = React.createContext({ orders: [], profile: null, loading: true, error: '' });
@@ -11,7 +11,7 @@ const DistributorDataContext = React.createContext({ orders: [], profile: null, 
 export function RequesterDataProvider({ children }) {
   const session = useProtectedReadSession('requester');
   const [state, setState] = React.useState({ orders: [], loading: true, error: '' });
-  const [branches, setBranches] = React.useState([]);
+  const [branches, setBranches] = React.useState(() => getCachedActiveBranches() || []);
   React.useEffect(() => {
     if (session.readiness !== 'READY') {
       setState({ orders: [], loading: session.readiness !== 'GENUINE_DENIED', error: session.readiness === 'GENUINE_DENIED' ? session.error || 'Your order access could not be verified.' : '' });

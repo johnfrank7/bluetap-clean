@@ -63,5 +63,46 @@ function pendingBranchApplications(users = [], branchId = '') {
     statusOf(user.distributorStatus || user.approvalStatus || user.status) === 'pending');
 }
 
+function extractBranchRequesters(requests = [], users = []) {
+  const map = new Map();
+  users.forEach((user) => {
+    if (String(user.role || '').toLowerCase() === 'requester') {
+      const id = user.uid || user.id;
+      if (id) {
+        map.set(id, {
+          ...user,
+          id,
+          uid: id,
+          role: 'requester',
+        });
+      }
+    }
+  });
+  requests.forEach((req) => {
+    const uid = req.requesterUid || req.requester_id || req.userId || req.user_id;
+    if (uid) {
+      const existing = map.get(uid) || {};
+      map.set(uid, {
+        id: uid,
+        uid,
+        role: 'requester',
+        fullName: existing.fullName || req.requesterNameSnapshot || req.requester_name || req.requesterName || 'Unnamed Requester',
+        email: existing.email || req.requesterEmail || '',
+        phone: existing.phone || req.contactNumberSnapshot || req.contact_number || req.requesterContact || '',
+        address: existing.address || req.addressSnapshot || req.address || req.deliveryAddress || 'Not set',
+        barangay: existing.barangay || req.barangay || 'Not set',
+        publicUid: existing.publicUid || req.requesterUniqueIdSnapshot || req.requester_unique_id || req.requesterUniqueId || uid,
+        displayUid: existing.displayUid || req.requesterUniqueIdSnapshot || req.requester_unique_id || req.requesterUniqueId || uid,
+        uniqueId: existing.uniqueId || req.requesterUniqueIdSnapshot || req.requester_unique_id || req.requesterUniqueId || uid,
+        createdAt: existing.createdAt || req.createdAt || req.created_at || null,
+        branchSuspended: existing.branchSuspended === true,
+      });
+    }
+  });
+  return Array.from(map.values()).sort((a, b) =>
+    (a.fullName || '').localeCompare(b.fullName || '')
+  );
+}
+
 module.exports = { REVIEW_STATUS, DISPATCH_STATUS, EDITABLE_STATUSES, statusOf, belongsToBranch,
-  needsReview, needsException, needsDispatch, compareDispatchPriority, canEdit, getManagerQueues, toManagerOrder, pendingBranchApplications };
+  needsReview, needsException, needsDispatch, compareDispatchPriority, canEdit, getManagerQueues, toManagerOrder, pendingBranchApplications, extractBranchRequesters };

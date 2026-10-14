@@ -138,3 +138,67 @@ button#registration-primary-action[aria-disabled='true'] {
   border-color: #78b4e3 !important;
   opacity: 1 !important;
 }
+
+/* Keep empty state and action CTA buttons visible across web CSS resets. */
+button[data-bluetap-cta='true'],
+button[aria-label='Order Water Now'],
+button[aria-label='Place an Order'],
+button[aria-label='Edit branch delivery pricing'] {
+  background-color: var(--bluetap-primary) !important;
+  border-color: var(--bluetap-primary-dark) !important;
+  color: #ffffff !important;
+}
+
+button[data-bluetap-cta='true'] > div,
+button[aria-label='Order Water Now'] > div,
+button[aria-label='Place an Order'] > div,
+button[aria-label='Edit branch delivery pricing'] > div {
+  color: #ffffff !important;
+}
+
+[data-bluetap-theme='dark'] button[data-bluetap-cta='true'],
+[data-bluetap-theme='dark'] button[aria-label='Order Water Now'],
+[data-bluetap-theme='dark'] button[aria-label='Place an Order'],
+[data-bluetap-theme='dark'] button[aria-label='Edit branch delivery pricing'] {
+  background-color: #1d78c1 !important;
+  border-color: #38bdf8 !important;
+  color: #ffffff !important;
+}
+
+[data-bluetap-theme='dark'] button[data-bluetap-cta='true'] > div,
+[data-bluetap-theme='dark'] button[aria-label='Order Water Now'] > div,
+[data-bluetap-theme='dark'] button[aria-label='Place an Order'] > div,
+[data-bluetap-theme='dark'] button[aria-label='Edit branch delivery pricing'] > div {
+  color: #ffffff !important;
+}
+
+/* Custom scrollbar for horizontal product selection on web */
+[data-product-scroll='true']::-webkit-scrollbar {
+  height: 8px;
+}
+
+[data-product-scroll='true']::-webkit-scrollbar-track {
+  background: rgba(24, 123, 205, 0.08);
+  border-radius: 4px;
+}
+
+[data-product-scroll='true']::-webkit-scrollbar-thumb {
+  background: rgba(24, 123, 205, 0.35);
+  border-radius: 4px;
+}
+
+[data-product-scroll='true']::-webkit-scrollbar-thumb:hover {
+  background: rgba(24, 123, 205, 0.65);
+}
+
+[data-bluetap-theme='dark'] [data-product-scroll='true']::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+[data-bluetap-theme='dark'] [data-product-scroll='true']::-webkit-scrollbar-thumb {
+  background: rgba(112, 189, 242, 0.45);
+}
+
+[data-bluetap-theme='dark'] [data-product-scroll='true']::-webkit-scrollbar-thumb:hover {
+  background: rgba(112, 189, 242, 0.75);
+}

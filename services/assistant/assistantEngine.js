@@ -39,6 +39,10 @@ export function handleRequesterQuery({ intent, isCeb, safeContext = {}, userInpu
   const requesterName = safeContext.requester?.firstName || 'Requester';
   const activeOrder = safeContext.activeOrder || null;
   const hasActive = Boolean(activeOrder);
+  const ordersLoading = Boolean(safeContext.ordersLoading);
+  const ordersUnavailable = Boolean(safeContext.ordersUnavailable);
+  const hasOrderingRestriction = Boolean(safeContext.restrictions?.hasOrderingRestriction);
+  const activeRestriction = safeContext.restrictions?.ordering?.[0] || safeContext.activeRestriction || null;
 
   let message = '';
   const cards = [];
@@ -124,27 +128,45 @@ export function handleRequesterQuery({ intent, isCeb, safeContext = {}, userInpu
             }));
           }
         } else {
-          if (isCeb) {
-            message = `Wala kay kasamtangang aktibong request sa tubig karon. Gusto ba ka maghimo og bag-ong order?`;
+          if (ordersLoading) {
+            message = isCeb
+              ? 'Gisusi pa namo ang kahimtang sa imong order. Palihug paghulat og kadiyot samtang nag-load ang mga rekord.'
+              : 'We are currently checking your active order status. Please wait a moment while your records load.';
+            actions.push(createAction(ASSISTANT_ACTIONS.OPEN_REQUESTS, {
+              label: isCeb ? 'Tan-awa ang Requests' : 'View Requests',
+            }));
+          } else if (ordersUnavailable) {
+            message = isCeb
+              ? 'Dili ma-access ang imong mga rekord sa order karon. Palihug bisitaha ang My Orders aron masusi ang imong mga request.'
+              : 'Your order records are temporarily unavailable. Please visit My Orders to check your current requests.';
+            actions.push(createAction(ASSISTANT_ACTIONS.OPEN_REQUESTS, {
+              label: isCeb ? 'Tan-awa ang Requests' : 'View Requests',
+            }));
           } else {
-            message = `You do not have any active water requests right now. Would you like to place a new order?`;
-          }
-
-          if (safeContext.historyOrders && safeContext.historyOrders.length > 0) {
-            const last = safeContext.historyOrders[0];
             if (isCeb) {
-              message += ` Ang imong kataposang order (${last.publicOrderId}) kay "${last.statusLabel}".`;
+              message = `Wala kay kasamtangang aktibong request sa tubig karon.${!hasOrderingRestriction ? ' Gusto ba ka maghimo og bag-ong order?' : ''}`;
             } else {
-              message += ` Your previous request (${last.publicOrderId}) was marked as "${last.statusLabel}".`;
+              message = `You do not have any active water requests right now.${!hasOrderingRestriction ? ' Would you like to place a new order?' : ''}`;
             }
-          }
 
-          actions.push(createAction(ASSISTANT_ACTIONS.START_ORDER, {
-            label: isCeb ? 'Mag-order og Tubig' : 'Start an Order',
-          }));
-          actions.push(createAction(ASSISTANT_ACTIONS.OPEN_REQUESTS, {
-            label: isCeb ? 'Mga Past Requests' : 'Order History',
-          }));
+            if (safeContext.historyOrders && safeContext.historyOrders.length > 0) {
+              const last = safeContext.historyOrders[0];
+              if (isCeb) {
+                message += ` Ang imong kataposang order (${last.publicOrderId}) kay "${last.statusLabel}".`;
+              } else {
+                message += ` Your previous request (${last.publicOrderId}) was marked as "${last.statusLabel}".`;
+              }
+            }
+
+            if (!hasOrderingRestriction && safeContext.canPlaceNewOrder !== false) {
+              actions.push(createAction(ASSISTANT_ACTIONS.START_ORDER, {
+                label: isCeb ? 'Mag-order og Tubig' : 'Start an Order',
+              }));
+            }
+            actions.push(createAction(ASSISTANT_ACTIONS.OPEN_REQUESTS, {
+              label: isCeb ? 'Mga Past Requests' : 'Order History',
+            }));
+          }
         }
         break;
       }
@@ -266,27 +288,446 @@ export function handleRequesterQuery({ intent, isCeb, safeContext = {}, userInpu
         break;
       }
 
+      case ASSISTANT_INTENTS.CANCEL_ORDER_ELIGIBILITY: {
+        if (ordersLoading) {
+          message = isCeb
+            ? 'Gisusi pa namo ang kahimtang sa imong mga order. Palihug paghulat og kadiyot samtang nag-load ang mga rekord.'
+            : 'We are currently checking your active order status. Please wait a moment while your order records load.';
+          actions.push(createAction(ASSISTANT_ACTIONS.OPEN_REQUESTS, {
+            label: isCeb ? 'Tan-awa ang Requests' : 'View Requests',
+          }));
+          break;
+        }
+
+        if (ordersUnavailable) {
+          message = isCeb
+            ? 'Dili ma-access ang imong mga rekord sa order karon. Palihug bisitaha ang My Orders aron masusi ang imong mga request.'
+            : 'Your order records are temporarily unavailable. Please visit My Orders to check your current requests.';
+          actions.push(createAction(ASSISTANT_ACTIONS.OPEN_REQUESTS, {
+            label: isCeb ? 'Tan-awa ang Requests' : 'View Requests',
+          }));
+          break;
+        }
+
+        if (hasActive) {
+          if (activeOrder.isCancellable) {
+            if (activeOrder.isAwaitingApproval) {
+              message = isCeb
+                ? `Ang imong aktibong request (${activeOrder.publicOrderId}) sa ${activeOrder.branchName} naghulat pa sa pag-apruba sa Branch Manager ("${activeOrder.statusLabel}"). Pwede pa nimo kini direktang kanselahon samtang wala pa kini maaprobahan. Aron kanselahon, ablihi ang detalye sa imong order ug pilia ang "Cancel Request". Pangutan-on ka sa pagkumpirma una kini usbon.`
+                : `Your active order (${activeOrder.publicOrderId}) at ${activeOrder.branchName} is currently awaiting Branch Manager approval ("${activeOrder.statusLabel}"). You can still cancel this request directly before approval is completed. To cancel, please view your order details and select "Cancel Request". You will be asked to confirm before any changes are made.`;
+            } else {
+              message = isCeb
+                ? `Oo, ang imong aktibong request (${activeOrder.publicOrderId}) sa ${activeOrder.branchName} kay "${activeOrder.statusLabel}" ug pwede pa kini kanselahon tungod kay wala pa kini ma-approve o ma-dispatch sa distributor. Aron kanselahon, ablihi ang detalye sa imong order ug pilia ang "Cancel Request". Pangutan-on ka sa pagkumpirma una kini usbon.`
+                : `Yes, your active order (${activeOrder.publicOrderId}) at ${activeOrder.branchName} is currently "${activeOrder.statusLabel}" and can be cancelled because it has not yet been approved or dispatched to a distributor. To cancel, please view your order details and select "Cancel Request". You will be asked to confirm before any changes are made.`;
+            }
+
+            cards.push({
+              type: 'order',
+              ...activeOrder,
+            });
+
+            actions.push(createAction(ASSISTANT_ACTIONS.CANCEL_ORDER, {
+              label: isCeb ? 'Kanselahon ang Order' : 'Cancel Order',
+              orderId: activeOrder.id,
+              publicOrderId: activeOrder.publicOrderId,
+            }));
+            actions.push(createAction(ASSISTANT_ACTIONS.VIEW_ORDER, {
+              label: isCeb ? 'Tan-awa ang Request' : 'Review Order Details',
+              orderId: activeOrder.id,
+            }));
+            actions.push(createAction(ASSISTANT_ACTIONS.OPEN_REQUESTS, {
+              label: isCeb ? 'My Orders' : 'My Orders',
+            }));
+          } else {
+            message = isCeb
+              ? `Na-approve na sa water station ang imong order (${activeOrder.publicOrderId}), busa dili na nimo kini direktang ma-cancel. Kung kinahanglan nimo og tabang, palihog kontaka ang Branch Manager pinaagi sa BlueTap. Timan-i nga ang tabang sa pagkansela nagdepende sa pagrepaso sa Branch Manager ug operational policies.`
+              : `Your order (${activeOrder.publicOrderId}) has already been approved by the water station, so direct cancellation is no longer available. If you need assistance, please contact your Branch Manager through BlueTap. Cancellation assistance is subject to Branch Manager review and operational policies.`;
+
+            cards.push({
+              type: 'order',
+              ...activeOrder,
+            });
+
+            if (activeOrder.branchId) {
+              actions.push(createAction(ASSISTANT_ACTIONS.CONTACT_STATION, {
+                label: isCeb ? 'Kontaka ang Branch Manager' : 'Contact Branch Manager',
+                branchId: activeOrder.branchId,
+              }));
+            }
+            actions.push(createAction(ASSISTANT_ACTIONS.VIEW_ORDER, {
+              label: isCeb ? 'Tan-awa ang Order' : 'View Order Details',
+              orderId: activeOrder.id,
+            }));
+            actions.push(createAction(ASSISTANT_ACTIONS.OPEN_REQUESTS, {
+              label: isCeb ? 'My Orders' : 'My Orders',
+            }));
+          }
+        } else {
+          message = isCeb
+            ? 'Wala kay kasamtangang aktibong request sa tubig karon, busa walay order nga angayng kanselahon.'
+            : 'You do not have an active water order right now, so there is no order to cancel.';
+
+          if (safeContext.historyOrders && safeContext.historyOrders.length > 0) {
+            const last = safeContext.historyOrders[0];
+            message += isCeb
+              ? ` Ang imong miaging request (${last.publicOrderId}) kay "${last.statusLabel}" na.`
+              : ` Your previous request (${last.publicOrderId}) was already "${last.statusLabel}".`;
+          }
+
+          if (!hasOrderingRestriction && safeContext.canPlaceNewOrder !== false) {
+            actions.push(createAction(ASSISTANT_ACTIONS.START_ORDER, {
+              label: isCeb ? 'Mag-order og Tubig' : 'Start an Order',
+            }));
+          }
+          actions.push(createAction(ASSISTANT_ACTIONS.OPEN_REQUESTS, {
+            label: isCeb ? 'My Orders' : 'My Orders',
+          }));
+        }
+        break;
+      }
+
+      case ASSISTANT_INTENTS.REQUEST_CANCEL_ORDER: {
+        if (ordersLoading) {
+          message = isCeb
+            ? 'Gisusi pa namo ang kahimtang sa imong order. Palihug paghulat og kadiyot samtang nag-load ang mga rekord.'
+            : 'We are currently checking your active order status. Please wait a moment while your order records load.';
+          actions.push(createAction(ASSISTANT_ACTIONS.OPEN_REQUESTS, {
+            label: isCeb ? 'Tan-awa ang Requests' : 'View Requests',
+          }));
+          break;
+        }
+
+        if (ordersUnavailable) {
+          message = isCeb
+            ? 'Dili ma-access ang imong mga rekord sa order karon. Palihug bisitaha ang My Orders aron masusi ang imong mga request.'
+            : 'Your order records are temporarily unavailable. Please visit My Orders to check your current requests.';
+          actions.push(createAction(ASSISTANT_ACTIONS.OPEN_REQUESTS, {
+            label: isCeb ? 'Tan-awa ang Requests' : 'View Requests',
+          }));
+          break;
+        }
+
+        if (hasActive) {
+          if (activeOrder.isCancellable) {
+            message = isCeb
+              ? `Aron makansela ang imong aktibong request (${activeOrder.publicOrderId}, kasamtangang "${activeOrder.statusLabel}"), gikinahanglan sa BlueTap ang klarong pagkumpirma aron malikayan ang aksidenteng pagkansela. Palihug pindota sa ubos aron ma-review ang detalye sa imong order ug kumpirmaha ang "Cancel Request". Ang pagpili sa "Keep Order" magpabilin sa imong request nga walay usab.`
+              : `To cancel your active order (${activeOrder.publicOrderId}, currently "${activeOrder.statusLabel}"), BlueTap requires explicit confirmation to protect against accidental cancellations. Please tap below to review your order details and confirm "Cancel Request". Choosing "Keep Order" will leave your request unchanged.`;
+
+            cards.push({
+              type: 'order',
+              ...activeOrder,
+            });
+
+            actions.push(createAction(ASSISTANT_ACTIONS.CANCEL_ORDER, {
+              label: isCeb ? 'Kanselahon ang Order' : 'Cancel Order',
+              orderId: activeOrder.id,
+              publicOrderId: activeOrder.publicOrderId,
+            }));
+            actions.push(createAction(ASSISTANT_ACTIONS.VIEW_ORDER, {
+              label: isCeb ? 'Kanselahon ang Request' : 'Review & Cancel Request',
+              orderId: activeOrder.id,
+            }));
+            actions.push(createAction(ASSISTANT_ACTIONS.OPEN_REQUESTS, {
+              label: isCeb ? 'My Orders' : 'My Orders',
+            }));
+          } else {
+            message = isCeb
+              ? `Na-approve na sa water station ang imong order (${activeOrder.publicOrderId}), busa dili na nimo kini direktang ma-cancel. Kung kinahanglan nimo og tabang, palihog kontaka ang Branch Manager pinaagi sa BlueTap. Timan-i nga ang tabang sa pagkansela nagdepende sa pagrepaso sa Branch Manager ug operational policies.`
+              : `Your order (${activeOrder.publicOrderId}) has already been approved by the water station, so direct cancellation is no longer available. If you need assistance, please contact your Branch Manager through BlueTap. Cancellation assistance is subject to Branch Manager review and operational policies.`;
+
+            cards.push({
+              type: 'order',
+              ...activeOrder,
+            });
+
+            if (activeOrder.branchId) {
+              actions.push(createAction(ASSISTANT_ACTIONS.CONTACT_STATION, {
+                label: isCeb ? 'Kontaka ang Branch Manager' : 'Contact Branch Manager',
+                branchId: activeOrder.branchId,
+              }));
+            }
+            actions.push(createAction(ASSISTANT_ACTIONS.VIEW_ORDER, {
+              label: isCeb ? 'Tan-awa ang Order' : 'View Order Details',
+              orderId: activeOrder.id,
+            }));
+            actions.push(createAction(ASSISTANT_ACTIONS.OPEN_REQUESTS, {
+              label: isCeb ? 'My Orders' : 'My Orders',
+            }));
+          }
+        } else {
+          message = isCeb
+            ? 'Wala kay kasamtangang aktibong request sa tubig karon nga makansela.'
+            : 'You do not have an active water order right now to cancel.';
+
+          actions.push(createAction(ASSISTANT_ACTIONS.OPEN_REQUESTS, {
+            label: isCeb ? 'My Orders' : 'My Orders',
+          }));
+        }
+        break;
+      }
+
+      case ASSISTANT_INTENTS.CANCEL_ORDER_STATUS: {
+        if (ordersLoading) {
+          message = isCeb
+            ? 'Gisusi pa namo ang imong mga order. Palihug paghulat samtang nag-load ang mga rekord.'
+            : 'We are checking your order records. Please wait a moment while your order status loads.';
+          actions.push(createAction(ASSISTANT_ACTIONS.OPEN_REQUESTS, {
+            label: isCeb ? 'Tan-awa ang Requests' : 'View Requests',
+          }));
+          break;
+        }
+
+        if (hasActive) {
+          message = isCeb
+            ? `Dili, ang imong aktibong request (${activeOrder.publicOrderId}) wala makansela. Anaa kini karon sa status nga "${activeOrder.statusLabel}" sa ${activeOrder.branchName}.`
+            : `No, your active order (${activeOrder.publicOrderId}) has not been cancelled. It is currently "${activeOrder.statusLabel}" at ${activeOrder.branchName}.`;
+
+          cards.push({
+            type: 'order',
+            ...activeOrder,
+          });
+
+          actions.push(createAction(ASSISTANT_ACTIONS.VIEW_ORDER, {
+            label: isCeb ? 'Tan-awa ang Order' : 'View Order Details',
+            orderId: activeOrder.id,
+          }));
+          actions.push(createAction(ASSISTANT_ACTIONS.OPEN_REQUESTS, {
+            label: isCeb ? 'My Orders' : 'My Orders',
+          }));
+        } else {
+          const lastCancelled = (safeContext.historyOrders || []).find((o) => o.isCancelled) || null;
+          const lastOrder = safeContext.historyOrders?.[0] || null;
+
+          if (lastCancelled && lastCancelled === lastOrder) {
+            message = isCeb
+              ? `Oo, ang imong miaging order (${lastCancelled.publicOrderId}) gikansela. Wala kay laing aktibong order sa pagkakaron.`
+              : `Yes, your previous order (${lastCancelled.publicOrderId}) was cancelled. You currently have no other active orders.`;
+
+            if (hasOrderingRestriction) {
+              message += isCeb
+                ? ` Apan, ang imong account adunay ordering restriction karon (${activeRestriction?.title || 'Restricted'}).`
+                : ` However, your account currently has an ordering restriction (${activeRestriction?.title || 'Restricted'}).`;
+              actions.push(createAction(ASSISTANT_ACTIONS.OPEN_NOTIFICATIONS, {
+                label: isCeb ? 'Pahibalo sa Account' : 'Restriction Details',
+              }));
+            } else {
+              message += isCeb
+                ? ' Pwede na ka maghimo og bag-ong request sa tubig bisan kanus-a.'
+                : " You are eligible to place a new water request whenever you're ready.";
+              actions.push(createAction(ASSISTANT_ACTIONS.START_ORDER, {
+                label: isCeb ? 'Mag-order og Tubig' : 'Start an Order',
+              }));
+            }
+
+            cards.push({
+              type: 'order',
+              ...lastCancelled,
+            });
+          } else {
+            message = isCeb
+              ? `Walay bag-ong order sa imong account nga gikansela.${lastOrder ? ` Ang imong kataposang order (${lastOrder.publicOrderId}) kay "${lastOrder.statusLabel}".` : ''}`
+              : `No recent orders on your account have been cancelled.${lastOrder ? ` Your previous order (${lastOrder.publicOrderId}) was marked as "${lastOrder.statusLabel}".` : ''}`;
+
+            if (!hasOrderingRestriction && safeContext.canPlaceNewOrder !== false) {
+              actions.push(createAction(ASSISTANT_ACTIONS.START_ORDER, {
+                label: isCeb ? 'Mag-order og Tubig' : 'Start an Order',
+              }));
+            }
+          }
+
+          actions.push(createAction(ASSISTANT_ACTIONS.OPEN_REQUESTS, {
+            label: isCeb ? 'Order History' : 'Order History',
+          }));
+        }
+        break;
+      }
+
       case ASSISTANT_INTENTS.CANCELLED_ORDER_HELP: {
         const cancelledCandidate = (safeContext.historyOrders || []).find((o) => o.isCancelled) || null;
         if (cancelledCandidate) {
-          if (isCeb) {
-            message = `Ang imong request (${cancelledCandidate.publicOrderId}) gikansela. Mahimo kang maghimo og bag-ong request sa laing water station bisan unsang orasa.`;
-          } else {
-            message = `Your request (${cancelledCandidate.publicOrderId}) was cancelled. You can review your past requests or place a new request to another station at any time.`;
+          message = isCeb
+            ? `Ang imong request (${cancelledCandidate.publicOrderId}) gikansela. Ang mga request mahimong kanselahon samtang pending pa sa wala pa ma-dispatch, o balibaran sa branch kung dili makaya o gawas sa coverage.`
+            : `Your request (${cancelledCandidate.publicOrderId}) was cancelled. Requests can be cancelled while in pending status prior to dispatch, or declined by the branch if unfulfillable or outside service bounds.`;
+
+          cards.push({
+            type: 'order',
+            ...cancelledCandidate,
+          });
+
+          if (hasActive) {
+            message += isCeb
+              ? ` Timan-i nga aduna kay aktibong request karon (${activeOrder.publicOrderId}) nga anaa sa "${activeOrder.statusLabel}".`
+              : ` Note that you currently have an active order (${activeOrder.publicOrderId}) in progress ("${activeOrder.statusLabel}").`;
+
+            actions.push(createAction(ASSISTANT_ACTIONS.VIEW_ORDER, {
+              label: isCeb ? 'Tan-awa ang Aktibong Order' : 'View Active Order',
+              orderId: activeOrder.id,
+            }));
+          } else if (!hasOrderingRestriction && safeContext.canPlaceNewOrder !== false) {
+            message += isCeb
+              ? ` Wala kay aktibong order karon ug mahimo kang maghimo og bag-ong request bisan unsang orasa.`
+              : ` You do not have any active orders right now and can place a new request at any time.`;
+
+            actions.push(createAction(ASSISTANT_ACTIONS.START_ORDER, {
+              label: isCeb ? 'Bag-ong Order' : 'Start an Order',
+            }));
           }
         } else {
-          if (isCeb) {
-            message = `Ang mga request mahimong kanselahon sa dili pa ihatod sa distributor, o balibaran sa branch kung gawas sa coverage. Mahimo kang mag-order og usab.`;
-          } else {
-            message = `Orders can be cancelled prior to dispatch, or declined by a station if outside service area. You can place a new request to an available station.`;
+          message = isCeb
+            ? `Wala kay rekord sa nakansela nga order sa imong account. Ang mga request mahimo lamang kanselahon samtang pending pa kini.`
+            : `You do not have any cancelled orders recorded on your account. Orders can only be cancelled while in pending status prior to dispatch.`;
+
+          if (hasActive) {
+            actions.push(createAction(ASSISTANT_ACTIONS.VIEW_ORDER, {
+              label: isCeb ? 'Tan-awa ang Aktibong Order' : 'View Active Order',
+              orderId: activeOrder.id,
+            }));
+          } else if (!hasOrderingRestriction && safeContext.canPlaceNewOrder !== false) {
+            actions.push(createAction(ASSISTANT_ACTIONS.START_ORDER, {
+              label: isCeb ? 'Mag-order og Tubig' : 'Start an Order',
+            }));
           }
         }
-        actions.push(createAction(ASSISTANT_ACTIONS.START_ORDER, {
-          label: isCeb ? 'Bag-ong Order' : 'New Order',
-        }));
+
         actions.push(createAction(ASSISTANT_ACTIONS.OPEN_REQUESTS, {
           label: isCeb ? 'Order History' : 'Order History',
         }));
+        break;
+      }
+
+      case ASSISTANT_INTENTS.NEW_ORDER_ELIGIBILITY: {
+        if (ordersLoading) {
+          message = isCeb
+            ? 'Gisusi pa namo ang kahimtang sa imong order. Palihug paghulat og kadiyot samtang nag-load ang mga rekord.'
+            : 'We are currently verifying your order status. Please wait a moment while your active records load.';
+          actions.push(createAction(ASSISTANT_ACTIONS.OPEN_REQUESTS, {
+            label: isCeb ? 'Tan-awa ang Requests' : 'View Requests',
+          }));
+          break;
+        }
+
+        if (ordersUnavailable) {
+          message = isCeb
+            ? 'Dili ma-access ang status sa imong order karon. Palihug bisitaha ang My Orders aron masusi kon aduna bay aktibong order.'
+            : 'Your order records are temporarily unavailable. Please visit My Orders to verify if any order is currently active.';
+          actions.push(createAction(ASSISTANT_ACTIONS.OPEN_REQUESTS, {
+            label: isCeb ? 'Tan-awa ang Requests' : 'View Requests',
+          }));
+          break;
+        }
+
+        if (hasActive) {
+          message = isCeb
+            ? `Aduna kay kasamtangang aktibong request sa tubig (${activeOrder.publicOrderId}) sa ${activeOrder.branchName} nga anaa sa "${activeOrder.statusLabel}". Gilimitahan sa BlueTap ang usa ka aktibong order matag account aron maseguro ang paspas ug tukmang delivery. Kung mahuman na kini o makansela, makahimo na ka og bag-ong order.`
+            : `You currently have an active water request (${activeOrder.publicOrderId}) in progress, with status "${activeOrder.statusLabel}" at ${activeOrder.branchName}. BlueTap limits accounts to one active order at a time to ensure prompt delivery. Once this request is delivered or resolved, you can place a new order.`;
+
+          cards.push({
+            type: 'order',
+            ...activeOrder,
+          });
+
+          actions.push(createAction(ASSISTANT_ACTIONS.VIEW_ORDER, {
+            label: isCeb ? 'Tan-awa ang Aktibong Order' : 'View Active Order',
+            orderId: activeOrder.id,
+          }));
+          actions.push(createAction(ASSISTANT_ACTIONS.OPEN_REQUESTS, {
+            label: isCeb ? 'My Orders' : 'My Orders',
+          }));
+        } else if (hasOrderingRestriction) {
+          message = isCeb
+            ? `Ang imong account adunay ordering restriction karon (${activeRestriction?.title || 'Restricted'}). Dili ka makahimo og bag-ong order hangtod kini matapos o ma-resolbar sa tagdumala.`
+            : `Your account currently has an ordering restriction (${activeRestriction?.title || 'Restricted'}). You cannot place a new order until this restriction is resolved by an administrator.`;
+
+          if (activeRestriction) {
+            cards.push({
+              type: 'restriction',
+              ...activeRestriction,
+            });
+          }
+
+          actions.push(createAction(ASSISTANT_ACTIONS.OPEN_NOTIFICATIONS, {
+            label: isCeb ? 'Pahibalo sa Account' : 'Restriction Details',
+          }));
+        } else {
+          message = isCeb
+            ? 'Oo! Wala kay aktibong request sa tubig karon ug maayo ang kahimtang sa imong account. Mahimo kang mag-order og tubig bisan unsang orasa.'
+            : 'Yes! You do not have any active water requests right now and your account is in good standing. You can place a new water order at any time.';
+
+          actions.push(createAction(ASSISTANT_ACTIONS.START_ORDER, {
+            label: isCeb ? 'Mag-order og Tubig' : 'Start an Order',
+          }));
+          actions.push(createAction(ASSISTANT_ACTIONS.OPEN_REQUESTS, {
+            label: isCeb ? 'Order History' : 'Order History',
+          }));
+        }
+        break;
+      }
+
+      case ASSISTANT_INTENTS.START_ORDER: {
+        if (ordersLoading) {
+          message = isCeb
+            ? 'Gisusi pa namo ang kahimtang sa imong order. Palihug paghulat og kadiyot samtang nag-load ang mga rekord.'
+            : 'We are currently verifying your order status. Please wait a moment while your active records load.';
+          actions.push(createAction(ASSISTANT_ACTIONS.OPEN_REQUESTS, {
+            label: isCeb ? 'Tan-awa ang Requests' : 'View Requests',
+          }));
+          break;
+        }
+
+        if (ordersUnavailable) {
+          message = isCeb
+            ? 'Dili ma-access ang status sa imong order karon. Palihug bisitaha ang My Orders aron masusi kon aduna bay aktibong order.'
+            : 'Your order records are temporarily unavailable. Please visit My Orders to verify if any order is currently active.';
+          actions.push(createAction(ASSISTANT_ACTIONS.OPEN_REQUESTS, {
+            label: isCeb ? 'Tan-awa ang Requests' : 'View Requests',
+          }));
+          break;
+        }
+
+        if (hasActive) {
+          message = isCeb
+            ? `Aduna kay kasamtangang aktibong request sa tubig (${activeOrder.publicOrderId}) sa ${activeOrder.branchName} nga anaa sa "${activeOrder.statusLabel}". Gilimitahan sa BlueTap ang usa ka aktibong order matag account. Palihug hulata nga mahuman kini una maghimo og bag-ong order.`
+            : `You currently have an active water request (${activeOrder.publicOrderId}) at ${activeOrder.branchName} which is "${activeOrder.statusLabel}". BlueTap allows one active order at a time. Please wait for this delivery to complete before placing another order.`;
+
+          cards.push({
+            type: 'order',
+            ...activeOrder,
+          });
+
+          actions.push(createAction(ASSISTANT_ACTIONS.VIEW_ORDER, {
+            label: isCeb ? 'Tan-awa ang Aktibong Order' : 'View Active Order',
+            orderId: activeOrder.id,
+          }));
+          actions.push(createAction(ASSISTANT_ACTIONS.OPEN_REQUESTS, {
+            label: isCeb ? 'My Orders' : 'My Orders',
+          }));
+        } else if (hasOrderingRestriction) {
+          message = isCeb
+            ? `Ang imong account adunay ordering restriction karon (${activeRestriction?.title || 'Restricted'}). Dili ka makahimo og bag-ong order hangtod kini matapos o ma-resolbar.`
+            : `Your account currently has an ordering restriction (${activeRestriction?.title || 'Restricted'}). You cannot place a new order until this restriction is resolved.`;
+
+          if (activeRestriction) {
+            cards.push({
+              type: 'restriction',
+              ...activeRestriction,
+            });
+          }
+
+          actions.push(createAction(ASSISTANT_ACTIONS.OPEN_NOTIFICATIONS, {
+            label: isCeb ? 'Pahibalo sa Account' : 'Restriction Details',
+          }));
+        } else {
+          message = isCeb
+            ? 'Andam na mo-order og preskong tubig? Pislita ang buton sa ubos aron mapili ang imong station, mga sudlanan, ug delivery address.'
+            : 'Ready to order fresh water? Tap below to choose your preferred station, container types, and delivery address.';
+
+          actions.push(createAction(ASSISTANT_ACTIONS.START_ORDER, {
+            label: isCeb ? 'Mag-order og Tubig' : 'Start an Order',
+          }));
+          actions.push(createAction(ASSISTANT_ACTIONS.OPEN_REQUESTS, {
+            label: isCeb ? 'Mga Past Requests' : 'Order History',
+          }));
+        }
         break;
       }
 
@@ -551,6 +992,8 @@ export function handleDistributorQuery({ intent, isCeb, safeContext = {}, userIn
   const assignment = safeContext.currentAssignment || null;
   const hasAssignment = Boolean(assignment);
   const isFailed = Boolean(assignment && assignment.isFailed);
+  const ordersLoading = Boolean(safeContext.ordersLoading);
+  const ordersUnavailable = Boolean(safeContext.ordersUnavailable);
 
   let message = '';
   const cards = [];
@@ -602,10 +1045,20 @@ export function handleDistributorQuery({ intent, isCeb, safeContext = {}, userIn
           targetRole: 'distributor',
         }));
       } else {
-        if (isCeb) {
-          message = `Wala kay aktibong gi-assign nga delivery karon. Susiha ang imong iskedyul o bag-ong mga request aron makasugod.`;
+        if (ordersLoading) {
+          message = isCeb
+            ? 'Gisusi pa namo ang imong mga delivery assignment. Palihug paghulat samtang nag-load ang imong mga rekord.'
+            : 'We are currently checking your delivery assignments. Please wait a moment while your schedule loads.';
+        } else if (ordersUnavailable) {
+          message = isCeb
+            ? 'Dili ma-access ang imong mga rekord sa delivery karon. Palihug tan-awa ang imong schedule tab.'
+            : 'Your delivery assignment records are temporarily unavailable. Please check your schedule tab directly.';
         } else {
-          message = `You don't have an active delivery assignment right now. You can check your schedule or incoming requests.`;
+          if (isCeb) {
+            message = `Wala kay aktibong gi-assign nga delivery karon. Susiha ang imong iskedyul o bag-ong mga request aron makasugod.`;
+          } else {
+            message = `You don't have an active delivery assignment right now. You can check your schedule or incoming requests.`;
+          }
         }
 
         actions.push(createAction(ASSISTANT_ACTIONS.OPEN_SCHEDULE, {
@@ -652,10 +1105,20 @@ export function handleDistributorQuery({ intent, isCeb, safeContext = {}, userIn
           targetRole: 'distributor',
         }));
       } else {
-        if (isCeb) {
-          message = `Wala kay naka-iskedyul nga delivery para karong adlawa.`;
+        if (ordersLoading) {
+          message = isCeb
+            ? 'Gisusi pa namo ang imong iskedyul karong adlawa. Palihug paghulat samtang nag-load ang mga rekord.'
+            : 'We are checking your schedule for today. Please wait a moment while records load.';
+        } else if (ordersUnavailable) {
+          message = isCeb
+            ? 'Dili ma-access ang imong iskedyul karon. Palihug buksi ang iskedyul tab diretso.'
+            : 'Your schedule for today is temporarily unavailable. Please open your schedule tab directly.';
         } else {
-          message = `You don't have a scheduled delivery for today.`;
+          if (isCeb) {
+            message = `Wala kay naka-iskedyul nga delivery para karong adlawa.`;
+          } else {
+            message = `You don't have a scheduled delivery for today.`;
+          }
         }
 
         actions.push(createAction(ASSISTANT_ACTIONS.OPEN_SCHEDULE, {
@@ -699,10 +1162,20 @@ export function handleDistributorQuery({ intent, isCeb, safeContext = {}, userIn
           targetRole: 'distributor',
         }));
       } else {
-        if (isCeb) {
-          message = `Wala kay umaabot nga delivery nga naka-iskedyul karon.`;
+        if (ordersLoading) {
+          message = isCeb
+            ? 'Gisusi pa namo ang imong sunod nga delivery. Palihug paghulat og kadiyot.'
+            : 'We are currently checking your upcoming deliveries. Please wait a moment.';
+        } else if (ordersUnavailable) {
+          message = isCeb
+            ? 'Dili ma-access ang imong mga umaabot nga delivery karon.'
+            : 'Your upcoming deliveries are temporarily unavailable.';
         } else {
-          message = `You don't have any upcoming deliveries scheduled right now.`;
+          if (isCeb) {
+            message = `Wala kay umaabot nga delivery nga naka-iskedyul karon.`;
+          } else {
+            message = `You don't have any upcoming deliveries scheduled right now.`;
+          }
         }
 
         actions.push(createAction(ASSISTANT_ACTIONS.OPEN_REQUESTS, {
@@ -822,6 +1295,22 @@ export function handleDistributorQuery({ intent, isCeb, safeContext = {}, userIn
       actions.push(createAction(ASSISTANT_ACTIONS.CONTACT_STATION, {
         label: isCeb ? 'Kontaka ang Station' : 'Contact Station',
         branchId,
+        targetRole: 'distributor',
+      }));
+      break;
+    }
+
+    case ASSISTANT_INTENTS.CANCEL_ORDER_ELIGIBILITY:
+    case ASSISTANT_INTENTS.REQUEST_CANCEL_ORDER:
+    case ASSISTANT_INTENTS.CANCELLED_ORDER_HELP: {
+      if (isCeb) {
+        message = 'Ang mga Distributor walay pagtugot nga mokansela og mga order sa requester. Kung naay problema sa delivery o kinahanglang kanselahon ang request, palihog kontaka ang imong Branch Manager.';
+      } else {
+        message = 'Distributors do not have permission to cancel customer orders. If there is an issue with a delivery or an order needs cancellation, please contact your Branch Manager.';
+      }
+      actions.push(createAction(ASSISTANT_ACTIONS.CONTACT_STATION, {
+        label: isCeb ? 'Kontaka ang Station' : 'Contact Station',
+        branchId: safeContext.distributor?.branchId,
         targetRole: 'distributor',
       }));
       break;

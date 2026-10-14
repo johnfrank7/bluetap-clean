@@ -55,10 +55,41 @@ const requesterOrderStatusLabel = (status) => {
   return normalizedStatus.replace(/\b\w/g, (character) => character.toUpperCase());
 };
 
+const CANCELLABLE_REQUESTER_ORDER_STATUSES = new Set([
+  'pending',
+  'outside radius pending approval',
+  'manager approval pending',
+  'waiting for branch approval',
+  'awaiting branch approval',
+]);
+
+const isCancellableRequesterOrderStatus = (status) =>
+  CANCELLABLE_REQUESTER_ORDER_STATUSES.has(normalizeRequesterOrderStatus(status));
+
+const APPROVED_REQUESTER_ORDER_STATUSES = new Set([
+  'awaiting distributor assignment',
+  'distributor assigned',
+  'assigned',
+  'accepted',
+  'scheduled',
+  'out for delivery',
+  'delivery failed',
+  'delivery failed rescheduling',
+  'rescheduled',
+  'branch transfer pending',
+]);
+
+const isApprovedRequesterOrderStatus = (status) =>
+  APPROVED_REQUESTER_ORDER_STATUSES.has(normalizeRequesterOrderStatus(status));
+
 module.exports = {
   TERMINAL_REQUESTER_ORDER_STATUSES,
+  CANCELLABLE_REQUESTER_ORDER_STATUSES,
+  APPROVED_REQUESTER_ORDER_STATUSES,
   REQUESTER_ORDER_STATUS_LABELS,
   isActiveRequesterOrderStatus,
+  isApprovedRequesterOrderStatus,
+  isCancellableRequesterOrderStatus,
   isHistoryRequesterOrderStatus,
   normalizeRequesterOrderStatus,
   requesterOrderStatusLabel,

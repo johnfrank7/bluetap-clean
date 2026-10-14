@@ -11,6 +11,7 @@ export const ASSISTANT_ACTIONS = Object.freeze({
   VIEW_PROFILE: 'VIEW_PROFILE',
   CONTACT_REQUESTER: 'CONTACT_REQUESTER',
   CONTACT_STATION: 'CONTACT_STATION',
+  CANCEL_ORDER: 'CANCEL_ORDER',
 });
 
 export const ALLOWED_ACTION_TYPES = new Set(Object.values(ASSISTANT_ACTIONS));
@@ -187,6 +188,10 @@ export async function executeAssistantAction(action = {}, context = {}) {
         router.push('/requester/r_dashboard');
       }
       return { handled: true, target: '/requester/r_dashboard' };
+
+    case ASSISTANT_ACTIONS.CANCEL_ORDER:
+      // In-Assistant confirmation dialog handles cancellation directly
+      return { handled: true, action: 'CANCEL_ORDER', orderId };
 
     default:
       throw new Error(`Unhandled action: ${type}`);

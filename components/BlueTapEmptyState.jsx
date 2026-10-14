@@ -1,15 +1,18 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BLUETAP_COLORS } from '../constants/bluetapTheme';
 import { useBlueTapTheme } from './BlueTapTheme';
 import BlueTapIcon from './BlueTapIcon';
+import { createShadow } from './shadowStyles';
 
 export default function BlueTapEmptyState({
   title = 'No Water Orders Yet',
   description = 'When you have active requests or order history, they will appear here.',
   actionLabel,
   onAction,
+  actionStyle,
+  actionTextStyle,
   compact = false,
   style,
   themeColors,
@@ -21,13 +24,25 @@ export default function BlueTapEmptyState({
   const isDark = typeof dark === 'boolean' ? dark : portalTheme.isDark;
   const styles = createStyles(colors, isDark);
 
+  const flattenedStyle = StyleSheet.flatten(style) || {};
+  const isHardcodedWhite = isDark && (flattenedStyle.backgroundColor === '#FFFFFF' || flattenedStyle.backgroundColor === '#fff' || flattenedStyle.backgroundColor === 'white');
+  const resolvedStyle = isHardcodedWhite
+    ? [
+        style,
+        {
+          backgroundColor: colors.surfaceAlt || 'rgba(30, 41, 59, 0.75)',
+          borderColor: colors.border || 'rgba(51, 65, 85, 0.6)',
+        },
+      ]
+    : style;
+
   return (
-    <View style={[styles.container, compact && styles.containerCompact, style]}>
-      <View style={styles.illustrationWrapper}>
+    <View style={[styles.container, compact && styles.containerCompact, resolvedStyle]}>
+      <View style={[styles.illustrationWrapper, compact && styles.illustrationWrapperCompact]}>
         {variant !== 'default' ? (
-          <ContextIllustration variant={variant} styles={styles} colors={colors} />
+          <ContextIllustration variant={variant} styles={styles} colors={colors} compact={compact} />
         ) : <>
-        <View style={styles.dropletGlow} />
+        <View style={[styles.dropletGlow, compact && styles.dropletGlowCompact]} />
         <LinearGradient
           colors={isDark ? ['#38BDF8', '#0284C7'] : ['#7DD3FC', '#0284C7']}
           start={{ x: 0.2, y: 0 }}
@@ -35,7 +50,7 @@ export default function BlueTapEmptyState({
           style={[styles.droplet, compact && styles.dropletCompact]}
         >
           {/* Highlight shine */}
-          <View style={styles.dropletHighlight} />
+          <View style={[styles.dropletHighlight, compact && styles.dropletHighlightCompact]} />
 
           {/* Cute subtle face */}
           <View style={styles.face}>
@@ -43,7 +58,7 @@ export default function BlueTapEmptyState({
               <View style={styles.eye} />
               <View style={styles.eye} />
             </View>
-            {/* Sad / pout mouth curve */}
+            {/* Friendly smile curve */}
             <View style={styles.mouth} />
           </View>
         </LinearGradient>
@@ -53,19 +68,31 @@ export default function BlueTapEmptyState({
         </>}
       </View>
 
-      <Text style={styles.title}>{title}</Text>
-      {!!description && <Text style={styles.description}>{description}</Text>}
+      <Text style={[styles.title, compact && styles.titleCompact]}>{title}</Text>
+      {!!description && <Text style={[styles.description, compact && styles.descriptionCompact]}>{description}</Text>}
 
       {!!actionLabel && !!onAction && (
-        <TouchableOpacity
+        <Pressable
           onPress={onAction}
-          style={styles.actionButton}
-          activeOpacity={0.8}
+          style={({ pressed, hovered, focused }) => [
+            styles.actionButton,
+            isDark && styles.actionButtonDark,
+            hovered && (isDark ? styles.actionButtonHoveredDark : styles.actionButtonHovered),
+            pressed && (isDark ? styles.actionButtonPressedDark : styles.actionButtonPressed),
+            focused && (isDark ? styles.actionButtonFocusedDark : styles.actionButtonFocused),
+            {
+              backgroundColor: isDark
+                ? (pressed ? '#0D5FA3' : (hovered ? '#2186D9' : '#1D78C1'))
+                : (pressed ? '#0B5FA8' : (hovered ? '#1565C0' : '#187BCD')),
+            },
+            actionStyle,
+          ]}
           accessibilityRole="button"
           accessibilityLabel={actionLabel}
+          dataSet={{ bluetapCta: 'true' }}
         >
-          <Text style={styles.actionButtonText}>{actionLabel}</Text>
-        </TouchableOpacity>
+          <Text style={[styles.actionButtonText, { color: '#FFFFFF' }, actionTextStyle]}>{actionLabel}</Text>
+        </Pressable>
       )}
     </View>
   );
@@ -73,18 +100,18 @@ export default function BlueTapEmptyState({
 
 const ASSET_VARIANTS = new Set(['orders', 'requests', 'schedule', 'history', 'notifications', 'products', 'analytics', 'management', 'people', 'applications']);
 
-function ContextIllustration({ variant, styles, colors }) {
+function ContextIllustration({ variant, styles, colors, compact = false }) {
   if (ASSET_VARIANTS.has(variant) || ['coordination', 'exceptions'].includes(variant)) {
     return (
-      <View style={styles.contextIconSurface}>
-        <BlueTapIcon name={variant} size={32} color={colors.iconPrimary || colors.primary} />
+      <View style={[styles.contextIconSurface, compact && styles.contextIconSurfaceCompact]}>
+        <BlueTapIcon name={variant} size={compact ? 24 : 32} color={colors.iconPrimary || colors.primary} />
       </View>
     );
   }
   if (variant === 'dispatch' || variant === 'delivery') {
     return (
-      <View style={styles.contextIconSurface}>
-        <View style={styles.truck}>
+      <View style={[styles.contextIconSurface, compact && styles.contextIconSurfaceCompact]}>
+        <View style={[styles.truck, compact && { transform: [{ scale: 0.8 }] }]}>
           <View style={styles.truckCargo} />
           <View style={styles.truckCab} />
           <View style={[styles.truckWheel, styles.truckWheelLeft]} />
@@ -94,8 +121,8 @@ function ContextIllustration({ variant, styles, colors }) {
     );
   }
   return (
-    <View style={styles.contextIconSurface}>
-      <Text style={styles.contextSymbol}>{variant === 'coordination' ? '⇄' : '!'}</Text>
+    <View style={[styles.contextIconSurface, compact && styles.contextIconSurfaceCompact]}>
+      <Text style={[styles.contextSymbol, compact && { fontSize: 24, lineHeight: 28 }]}>{variant === 'coordination' ? '⇄' : '!'}</Text>
     </View>
   );
 }
@@ -105,18 +132,26 @@ const createStyles = (colors, isDark) =>
     container: {
       alignItems: 'center',
       justifyContent: 'center',
-      paddingVertical: 36,
-      paddingHorizontal: 24,
+      paddingVertical: 28,
+      paddingHorizontal: 22,
       borderRadius: 16,
-      backgroundColor: isDark ? 'rgba(30, 41, 59, 0.45)' : 'rgba(255, 255, 255, 0.85)',
+      backgroundColor: isDark ? (colors.surfaceAlt || 'rgba(30, 41, 59, 0.75)') : (colors.surface || '#FFFFFF'),
       borderWidth: 1,
-      borderColor: isDark ? 'rgba(51, 65, 85, 0.5)' : 'rgba(226, 232, 240, 0.8)',
-      marginVertical: 12,
+      borderColor: isDark ? (colors.border || 'rgba(51, 65, 85, 0.6)') : (colors.border || '#D7ECFF'),
+      marginVertical: 8,
+      width: '100%',
+      ...createShadow({
+        color: '#0D47A1',
+        elevation: 4,
+        opacity: 0.1,
+        radius: 8,
+        offset: { width: 0, height: 4 },
+      }),
     },
     containerCompact: {
-      paddingVertical: 22,
-      paddingHorizontal: 16,
-      marginVertical: 8,
+      paddingVertical: 18,
+      paddingHorizontal: 18,
+      marginVertical: 4,
     },
     illustrationWrapper: {
       alignItems: 'center',
@@ -124,15 +159,32 @@ const createStyles = (colors, isDark) =>
       marginBottom: 16,
       position: 'relative',
     },
+    illustrationWrapperCompact: {
+      marginBottom: 10,
+    },
     contextIconSurface: {
       width: 68,
       height: 68,
-      borderRadius: 22,
+      borderRadius: 34,
       alignItems: 'center',
       justifyContent: 'center',
       backgroundColor: isDark ? colors.surfaceAlt : colors.primarySoft,
       borderWidth: 1,
       borderColor: colors.border,
+    },
+    contextIconSurfaceCompact: {
+      width: 50,
+      height: 50,
+      borderRadius: 25,
+    },
+    titleCompact: {
+      fontSize: 15,
+      lineHeight: 20,
+    },
+    descriptionCompact: {
+      fontSize: 12,
+      lineHeight: 17,
+      marginTop: 3,
     },
     contextSymbol: {
       color: colors.primary,
@@ -180,6 +232,11 @@ const createStyles = (colors, isDark) =>
       borderRadius: 40,
       backgroundColor: isDark ? 'rgba(56, 189, 248, 0.15)' : 'rgba(186, 230, 253, 0.45)',
     },
+    dropletGlowCompact: {
+      width: 70,
+      height: 70,
+      borderRadius: 35,
+    },
     droplet: {
       width: 56,
       height: 56,
@@ -197,12 +254,12 @@ const createStyles = (colors, isDark) =>
       elevation: 5,
     },
     dropletCompact: {
-      width: 44,
-      height: 44,
+      width: 48,
+      height: 48,
       borderTopLeftRadius: 3,
-      borderTopRightRadius: 22,
-      borderBottomLeftRadius: 22,
-      borderBottomRightRadius: 22,
+      borderTopRightRadius: 24,
+      borderBottomLeftRadius: 24,
+      borderBottomRightRadius: 24,
     },
     dropletHighlight: {
       position: 'absolute',
@@ -213,6 +270,12 @@ const createStyles = (colors, isDark) =>
       borderRadius: 4,
       backgroundColor: 'rgba(255, 255, 255, 0.55)',
       transform: [{ rotate: '25deg' }],
+    },
+    dropletHighlightCompact: {
+      top: 6,
+      right: 10,
+      width: 8,
+      height: 5,
     },
     face: {
       transform: [{ rotate: '45deg' }],
@@ -234,10 +297,10 @@ const createStyles = (colors, isDark) =>
     mouth: {
       width: 8,
       height: 4,
-      borderTopWidth: 2,
-      borderTopColor: '#0F172A',
-      borderTopLeftRadius: 4,
-      borderTopRightRadius: 4,
+      borderBottomWidth: 2,
+      borderBottomColor: '#0F172A',
+      borderBottomLeftRadius: 4,
+      borderBottomRightRadius: 4,
     },
     puddle: {
       width: 42,
@@ -247,36 +310,85 @@ const createStyles = (colors, isDark) =>
       marginTop: 8,
     },
     puddleCompact: {
-      width: 32,
+      width: 36,
       height: 5,
       marginTop: 6,
     },
     title: {
-      fontSize: 16,
+      fontSize: 17,
       fontWeight: '700',
-      color: colors.textPrimary || '#1E293B',
+      color: colors.textPrimary || '#12304A',
       textAlign: 'center',
       marginBottom: 6,
     },
     description: {
       fontSize: 13,
-      lineHeight: 18,
+      lineHeight: 19,
       color: colors.textSecondary || '#64748B',
       textAlign: 'center',
-      maxWidth: 280,
-      marginBottom: 16,
+      maxWidth: 290,
+      marginBottom: 18,
     },
     actionButton: {
-      backgroundColor: colors.primaryAction || BLUETAP_COLORS.primaryAction,
-      paddingHorizontal: 20,
-      paddingVertical: 10,
-      borderRadius: 10,
+      backgroundColor: '#187BCD',
+      paddingHorizontal: 24,
+      paddingVertical: 12,
+      minHeight: 44,
+      borderRadius: 12,
       alignItems: 'center',
       justifyContent: 'center',
+      alignSelf: 'center',
+      borderWidth: 1,
+      borderColor: '#1565C0',
+      ...createShadow({
+        color: '#0B5FA8',
+        elevation: 3,
+        opacity: 0.18,
+        radius: 6,
+        offset: { width: 0, height: 3 },
+      }),
+    },
+    actionButtonDark: {
+      backgroundColor: '#1D78C1',
+      borderColor: '#38BDF8',
+      ...createShadow({
+        color: '#000000',
+        elevation: 4,
+        opacity: 0.3,
+        radius: 6,
+        offset: { width: 0, height: 3 },
+      }),
+    },
+    actionButtonHovered: {
+      backgroundColor: '#1565C0',
+      borderColor: '#0B5FA8',
+      transform: [{ translateY: -1 }],
+    },
+    actionButtonHoveredDark: {
+      backgroundColor: '#2186D9',
+      borderColor: '#70BDF2',
+      transform: [{ translateY: -1 }],
+    },
+    actionButtonPressed: {
+      backgroundColor: '#0B5FA8',
+      transform: [{ translateY: 0 }, { scale: 0.98 }],
+      opacity: 0.92,
+    },
+    actionButtonPressedDark: {
+      backgroundColor: '#0D5FA3',
+      transform: [{ translateY: 0 }, { scale: 0.98 }],
+      opacity: 0.92,
+    },
+    actionButtonFocused: {
+      borderColor: '#42A5F5',
+    },
+    actionButtonFocusedDark: {
+      borderColor: '#70BDF2',
     },
     actionButtonText: {
-      color: colors.onPrimary || BLUETAP_COLORS.onPrimary,
-      fontSize: 13,
+      color: '#FFFFFF',
+      fontSize: 14,
       fontWeight: '700',
+      letterSpacing: 0.2,
     },
   });

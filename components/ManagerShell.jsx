@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Animated,
+  Image,
   Modal,
   Pressable,
   ScrollView,
@@ -157,17 +158,41 @@ export default function ManagerShell({
   title,
 }) {
   const { colors, resolvedTheme } = useAdminTheme();
+  const isDark = resolvedTheme === 'dark';
   const { navigateOnce, replaceOnce } = useSingleFlightNavigation();
   const pathname = usePathname();
   const { width } = useWindowDimensions();
   const compact = width < 900;
   const managerSession = getModuleSession('manager');
-  const { requestsCount, dispatchCount } = useManagerRealtimeData();
+  const realtime = useManagerRealtimeData();
+  const { requestsCount, dispatchCount, profile: realtimeProfile } = realtime;
   const { unreadCount } = useManagerNotifications();
   const moderationCount = useModerationActivityBadge('manager');
   const [collapsed, setCollapsed] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [confirmLogout, setConfirmLogout] = useState(false);
+
+  const managerProfile = realtimeProfile || managerSession?.profile || {};
+  const managerDisplayName = React.useMemo(() => {
+    const raw = managerProfile.fullName ||
+      `${managerProfile.firstName || ''} ${managerProfile.lastName || ''}`.trim() ||
+      managerProfile.name ||
+      managerSession?.fullName ||
+      managerSession?.email ||
+      'Manager';
+    return String(raw).trim() || 'Manager';
+  }, [managerProfile, managerSession]);
+
+  const photoUrl = managerProfile.profilePhotoUrl || managerProfile.photoURL || managerProfile.avatarUrl || managerSession?.photoURL || '';
+
+  const managerInitials = React.useMemo(() => {
+    if (!managerDisplayName || managerDisplayName === 'Manager') return 'M';
+    const parts = managerDisplayName.split(/\s+/).filter(Boolean);
+    if (parts.length >= 2) {
+      return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+    }
+    return managerDisplayName.slice(0, 2).toUpperCase();
+  }, [managerDisplayName]);
 
   const sidebarWidth = useRef(new Animated.Value(DESKTOP_WIDTH)).current;
   const drawerProgress = useRef(new Animated.Value(0)).current;
@@ -373,10 +398,55 @@ export default function ManagerShell({
               <BlueTapIcon name="notifications" size={22} color={colors.iconInteractive || colors.primary} />
               {unreadCount > 0 && <View style={[styles.notificationCount, { backgroundColor: colors.danger, borderColor: colors.header }]}><Text style={styles.notificationCountText}>{unreadCount > 99 ? '99+' : unreadCount}</Text></View>}
             </TouchableOpacity>
-            {!compact && <View style={[styles.managerBadge, { backgroundColor: colors.primarySoft, borderColor: colors.border }]}>
-              <AdminIcon name="security" color={colors.primary} size={16} />
-              <Text style={[styles.managerBadgeText, { color: colors.primary }]}>Manager</Text>
-            </View>}
+
+            {/* Manager Identity Presentation */}
+            <View
+              style={styles.managerIdentity}
+              accessible={true}
+              accessibilityRole="summary"
+              accessibilityLabel={`Logged in as ${managerDisplayName}, Manager`}
+            >
+              <View
+                style={[
+                  styles.managerAvatar,
+                  {
+                    backgroundColor: colors.primarySoft,
+                    borderColor: isDark ? colors.border : 'rgba(24, 123, 205, 0.25)',
+                  },
+                ]}
+              >
+                {photoUrl ? (
+                  <Image
+                    source={{ uri: photoUrl }}
+                    style={styles.managerAvatarImg}
+                    accessibilityLabel="Manager avatar"
+                  />
+                ) : managerInitials ? (
+                  <Text style={[styles.managerInitials, { color: colors.primary }]}>
+                    {managerInitials}
+                  </Text>
+                ) : (
+                  <AdminIcon name="security" color={colors.primary} size={16} />
+                )}
+              </View>
+
+              {!compact && (
+              <View style={[styles.managerMetaCol, width < 1100 && styles.narrowManagerMetaCol]}>
+                  <Text
+                    numberOfLines={1}
+                    style={[styles.managerNameText, { color: colors.textPrimary }]}
+                  >
+                    {managerDisplayName}
+                  </Text>
+                  <View style={styles.managerRoleRow}>
+                    <AdminIcon name="security" color={colors.primary} size={12} />
+                    <Text style={[styles.managerRoleText, { color: colors.primary }]}>
+                      Manager
+                    </Text>
+                  </View>
+                </View>
+              )}
+            </View>
           </View>
 
           <ScrollView ref={contentScrollRef} contentContainerStyle={[styles.content, compact && styles.compactContent]} keyboardShouldPersistTaps="handled">
@@ -455,16 +525,61 @@ const styles = StyleSheet.create({
   logoutText: { color: '#FFE1E1', fontWeight: '900', fontSize: 13 },
   main: { flex: 1, minWidth: 0 },
   header: { minHeight: 92, flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 24, borderBottomWidth: 1 },
-  compactHeader: { paddingHorizontal: 14 },
+  compactHeader: { minHeight: 76, paddingHorizontal: 10, gap: 8 },
   menuButton: { width: 42, height: 42, borderRadius: 11, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   heading: { flex: 1, minWidth: 0 },
   title: { fontSize: 24, fontWeight: '900' },
-  subtitle: { fontSize: 13, lineHeight: 18, marginTop: 3 },
   managerBadge: { minHeight: 34, flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1, borderRadius: 999, paddingHorizontal: 10 },
   managerBadgeText: { fontSize: 12, fontWeight: '900' },
-  notificationButton: { width: 22, height: 22, alignItems: 'center', justifyContent: 'center', position: 'relative' },
+  managerIdentity: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginLeft: 4,
+  },
+  managerAvatar: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    borderWidth: 1.5,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  managerAvatarImg: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+  },
+  managerInitials: {
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  managerMetaCol: {
+    justifyContent: 'center',
+    minWidth: 0,
+    maxWidth: 160,
+  },
+  narrowManagerMetaCol: { maxWidth: 120 },
+  managerNameText: {
+    fontSize: 13,
+    fontWeight: '800',
+    lineHeight: 17,
+  },
+  managerRoleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 1,
+  },
+  managerRoleText: {
+    fontSize: 11,
+    fontWeight: '700',
+    lineHeight: 14,
+  },
+  notificationButton: { width: 44, height: 44, flexShrink: 0, alignItems: 'center', justifyContent: 'center', position: 'relative' },
   notificationIcon: { width: 22, height: 22 },
-  notificationCount: { position: 'absolute', right: -7, top: -7, minWidth: 18, height: 18, paddingHorizontal: 3, borderRadius: 10, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
+  notificationCount: { position: 'absolute', right: 1, top: 1, minWidth: 18, height: 18, paddingHorizontal: 3, borderRadius: 10, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
   notificationCountText: { color: '#FFFFFF', fontSize: 10, fontWeight: '900' },
   content: { paddingHorizontal: 28, paddingBottom: 32, paddingTop: 14, flexGrow: 1 },
   contentEntry: { flexGrow: 1 },

@@ -3,14 +3,14 @@ import { useRequesterData } from '../../components/RoleDataProviders';
 import { useModerationNotices } from '../../components/ModerationNotices';
 import { useRoleNotifications } from '../../components/RoleNotifications';
 import { buildSafeAssistantContext } from '../../services/assistant/assistantContext';
-import { getActiveProducts } from '../../services/requesterOrdering';
+import { getActiveProducts, getCachedActiveProducts } from '../../services/requesterOrdering';
 import AssistantScreen from '../../components/assistant/AssistantScreen';
 
 export function RequesterBlueTapAIPage() {
   const requesterData = useRequesterData();
   const moderationNotices = useModerationNotices();
   const roleNotifications = useRoleNotifications();
-  const [catalogProducts, setCatalogProducts] = useState([]);
+  const [catalogProducts, setCatalogProducts] = useState(() => getCachedActiveProducts() || []);
 
   useEffect(() => {
     let active = true;

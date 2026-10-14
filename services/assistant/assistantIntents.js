@@ -9,6 +9,10 @@ export const ASSISTANT_INTENTS = Object.freeze({
   ORDER_APPROVAL_HELP: 'ORDER_APPROVAL_HELP',
   FAILED_DELIVERY_HELP: 'FAILED_DELIVERY_HELP',
   CANCELLED_ORDER_HELP: 'CANCELLED_ORDER_HELP',
+  CANCEL_ORDER_ELIGIBILITY: 'CANCEL_ORDER_ELIGIBILITY',
+  REQUEST_CANCEL_ORDER: 'REQUEST_CANCEL_ORDER',
+  CANCEL_ORDER_STATUS: 'CANCEL_ORDER_STATUS',
+  NEW_ORDER_ELIGIBILITY: 'NEW_ORDER_ELIGIBILITY',
   FIND_PROVIDER: 'FIND_PROVIDER',
   DELIVERY_LOCATION_HELP: 'DELIVERY_LOCATION_HELP',
   PRODUCT_HELP: 'PRODUCT_HELP',
@@ -179,23 +183,103 @@ export function classifyIntentDetails(text = '') {
     };
   }
 
-  // 5. Cancelled Order / Cancellation Help (Evaluated before general order status)
+  // 5. New Order Eligibility (Can I place another order?)
   if (
-    /why (was|is) (my )?order cancel/i.test(norm) ||
-    /can i cancel/i.test(norm) ||
-    /cancel(led)? (my |the )?(order|request)/i.test(norm) ||
-    /cancel(led)? order/i.test(norm) ||
-    /order (was )?cancel/i.test(norm) ||
-    /pwede.*cancel/i.test(norm) ||
-    /ma-?cancel/i.test(norm) ||
-    /ngano(ng)? na cancel (akong )?order/i.test(norm) ||
-    /gi cancel (akong )?order/i.test(norm) ||
-    /na cancel akong order/i.test(norm)
+    /(can|may|am i (allowed|eligible|free) to) (i )?(place|make|start|submit|create) (an?|another|a new|one more|an additional) (order|request)/i.test(norm) ||
+    /(can|may|am i (allowed|eligible|free) to) (i )?(order|buy) (water|again|another|more|tubig)/i.test(norm) ||
+    /can i (order|place an order)( now| again)?/i.test(norm) ||
+    /can i place (an|another) order/i.test(norm) ||
+    /allowed to (place|make) (an|another|a new) order/i.test(norm) ||
+    /pwede (ba )?(ko )?(mag|mo )?order (og |ug )?(tubig|usab|lain|bag[\s-]*o)?/i.test(norm) ||
+    /makahimo (ba )?(ko )?(og |ug )?(bag[\s-]*ong|lain) (nga )?(order|request)/i.test(norm) ||
+    /maka[\s-]*order (ba )?(ko )?(og |ug )?(usab|lain|tubig)?/i.test(norm) ||
+    /pwede (ba )?(ko )?mo[\s-]*order (og |ug )?(usab|tubig)?/i.test(norm) ||
+    /pwede (ba )?(ko )?maghimo (og |ug )?(bag[\s-]*ong|lain) order/i.test(norm)
+  ) {
+    return {
+      intent: ASSISTANT_INTENTS.NEW_ORDER_ELIGIBILITY,
+      confidence: 'high',
+      matchedRule: 'NEW_ORDER_ELIGIBILITY',
+    };
+  }
+
+  // 6. Cancellation History / Why Cancelled
+  if (
+    /why (was|is|did) (my |the )?(previous |past |last |old )?(order|request) cancel/i.test(norm) ||
+    /why (was|is) (my |the )?(order|request) cancel/i.test(norm) ||
+    /why did (my )?(order|request) get cancel/i.test(norm) ||
+    /reason (why |for )?(my )?(order|request) (was )?cancel/i.test(norm) ||
+    /why was it cancel/i.test(norm) ||
+    /cancellation reason/i.test(norm) ||
+    /ngano(ng)? (na|gi)[\s-]*(cancel|kansela) (ang |akong )?(miaging |kataposang |past )?(order|request)/i.test(norm) ||
+    /ngano(ng)? (na|gi)[\s-]*(cancel|kansela) (ang |akong )?(order|request)/i.test(norm) ||
+    /ngano(ng)? gi[\s-]*kansela (akong )?order/i.test(norm) ||
+    /rason ngano(ng)? na[\s-]*cancel (akong )?order/i.test(norm)
   ) {
     return {
       intent: ASSISTANT_INTENTS.CANCELLED_ORDER_HELP,
       confidence: 'high',
       matchedRule: 'CANCELLED_ORDER_HELP',
+    };
+  }
+
+  // 7. Cancellation Status Question (Was my order cancelled?)
+  if (
+    /(was|is|did) (my |the )?(current |active )?(order|request) (already )?(been )?cancel(led)?/i.test(norm) ||
+    /has (my |the )?(order|request) been cancel(led)?/i.test(norm) ||
+    /check if (my )?(order|request) (is |was )?cancel(led)?/i.test(norm) ||
+    /order cancel(led)? na ba/i.test(norm) ||
+    /(na|gi)[\s-]*(cancel|kansela) (ba )?(na )?(ang |akong )?(kasamtangang |aktibong )?(order|request)/i.test(norm) ||
+    /(na|gi)[\s-]*(cancel|kansela) na ba/i.test(norm) ||
+    /(ang |akong )?order (na|gi)[\s-]*(cancel|kansela)/i.test(norm)
+  ) {
+    return {
+      intent: ASSISTANT_INTENTS.CANCEL_ORDER_STATUS,
+      confidence: 'high',
+      matchedRule: 'CANCEL_ORDER_STATUS',
+    };
+  }
+
+  // 8. Cancellation Eligibility Question (Can I cancel my current order?)
+  if (
+    /can i cancel (my )?(current |active |pending )?(order|request)/i.test(norm) ||
+    /can i cancel/i.test(norm) ||
+    /is (it possible|my order eligible) to cancel/i.test(norm) ||
+    /am i (allowed|able) to cancel/i.test(norm) ||
+    /how (can|do) i cancel (my )?(order|request)/i.test(norm) ||
+    /how to cancel (my )?(order|request)/i.test(norm) ||
+    /eligible (to |for )?cancel/i.test(norm) ||
+    /can (my )?(current |active |pending )?(order|request) be cancel/i.test(norm) ||
+    /pwede (ba )?(nako |nimo )?(ma|i)?[\s-]*(cancel|kanselahon|kansela) (ang |akong )?(kasamtangang |aktibong |pending )?(order|request)/i.test(norm) ||
+    /pwede (ba )?(nako |nimo )?(ma|i)?[\s-]*(cancel|kanselahon|kansela)/i.test(norm) ||
+    /pwede (ba )?(ma|i)?[\s-]*(cancel|kanselahon|kansela)/i.test(norm) ||
+    /maka[\s-]*cancel (ba )?(ko )?(sa |akong )?(kasamtangang |aktibong )?(order|request)/i.test(norm) ||
+    /unsaon (nako )?pag[\s-]*cancel (sa |akong )?order/i.test(norm) ||
+    /ma[\s-]*cancel ba (ang |akong )?order/i.test(norm)
+  ) {
+    return {
+      intent: ASSISTANT_INTENTS.CANCEL_ORDER_ELIGIBILITY,
+      confidence: 'high',
+      matchedRule: 'CANCEL_ORDER_ELIGIBILITY',
+    };
+  }
+
+  // 9. Cancellation Instruction (Cancel my current order.)
+  if (
+    /^(please )?(cancel|i[\s-]*cancel) (my |the )?(current |active |pending )?(order|request)/i.test(norm) ||
+    /cancel (my |the )?(current |active |pending )?(order|request)/i.test(norm) ||
+    /cancel (my |the )?water request/i.test(norm) ||
+    /cancel order now/i.test(norm) ||
+    /i (want|need|wish|would like) to cancel (my )?(order|request)/i.test(norm) ||
+    /^(palihug )?(i[\s-]*cancel|kansela|ikansela) (ang |akong )?(kasamtangang |aktibong |pending )?(order|request)/i.test(norm) ||
+    /(i[\s-]*cancel|kansela|ikansela) (ang |akong )?(kasamtangang |aktibong |pending )?(order|request)/i.test(norm) ||
+    /gusto nako (i[\s-]*cancel|kanselahon) (akong )?order/i.test(norm) ||
+    /palihog i[\s-]*cancel (akong )?order/i.test(norm)
+  ) {
+    return {
+      intent: ASSISTANT_INTENTS.REQUEST_CANCEL_ORDER,
+      confidence: 'high',
+      matchedRule: 'REQUEST_CANCEL_ORDER',
     };
   }
 

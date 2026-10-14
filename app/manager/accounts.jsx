@@ -17,6 +17,7 @@ import BlueTapEmptyState from '../../components/BlueTapEmptyState';
 import { TableSkeleton } from '../../components/AdminSkeleton';
 import ManagerShell from '../../components/ManagerShell';
 import RoleBadge from '../../components/RoleBadge';
+import { useManagerRealtimeData } from '../../components/ManagerRealtimeData';
 import TopToastFeedback from '../../components/TopToastFeedback';
 import { BLUETAP_LAYOUT } from '../../constants/bluetapTheme';
 import { BRANCH_SUSPENSION_REASONS } from '../../constants/branchSuspensionReasons';
@@ -219,6 +220,7 @@ export default function ManagerAccountsPage() {
   const compact = width < 768;
   const isDark = resolvedTheme === 'dark';
 
+  const realtime = useManagerRealtimeData();
   const [workspace, setWorkspace] = useState(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
@@ -252,21 +254,33 @@ export default function ManagerAccountsPage() {
 
   // Combine and normalize accounts
   const allAccounts = useMemo(() => {
-    if (!workspace) return [];
-    const distributors = (workspace.distributors || []).map((d) => ({
+    if (!workspace && !realtime?.requesters?.length) return [];
+    const distributors = (workspace?.distributors || []).map((d) => ({
       ...d,
       role: 'distributor',
       displayRole: 'Distributor',
     }));
-    const requesters = (workspace.requesters || []).map((r) => ({
-      ...r,
-      role: 'requester',
-      displayRole: 'Requester',
-    }));
-    return [...distributors, ...requesters].sort((a, b) =>
+    const requesterMap = new Map();
+    (workspace?.requesters || []).forEach((r) => {
+      const id = r.uid || r.id;
+      if (id) requesterMap.set(id, { ...r, role: 'requester', displayRole: 'Requester' });
+    });
+    (realtime?.requesters || []).forEach((r) => {
+      const id = r.uid || r.id;
+      if (id) {
+        const existing = requesterMap.get(id) || {};
+        requesterMap.set(id, {
+          ...existing,
+          ...r,
+          role: 'requester',
+          displayRole: 'Requester',
+        });
+      }
+    });
+    return [...distributors, ...requesterMap.values()].sort((a, b) =>
       (a.fullName || '').localeCompare(b.fullName || '')
     );
-  }, [workspace]);
+  }, [workspace, realtime?.requesters]);
 
   // Tab counts
   const allCount = allAccounts.length;

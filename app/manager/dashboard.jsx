@@ -7,21 +7,24 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   useWindowDimensions,
   View,
 } from 'react-native';
 import { getLocalUsers, subscribeLocalUsers } from '../../localUsers';
-import { getLocalRequests } from '../../services/requests';
+import { getLocalRequests, subscribeLocalRequests } from '../../services/requests';
+import { getManagerOrderAnalytics, mergeManagerBranchRequests } from '../../services/managerAnalytics';
 import { getProfileUniqueId } from '../../services/uniqueIds';
-import { getModuleSession } from '../../services/authSession';
 import { useAdminTheme } from '../../components/AdminTheme';
+import AdminIcon from '../../components/AdminIcon';
+import { accountPageMeta, accountPageNumbers, accountPageSlice } from '../../services/adminAccountsPagination';
 import ManagerShell, {
   MANAGER_COLORS,
   ManagerPill,
   ManagerWaterDrop,
 } from '../../components/ManagerShell';
-import { useManagerRealtimeData } from '../../components/ManagerRealtimeData';
+import { extractBranchRequesters, useManagerRealtimeData } from '../../components/ManagerRealtimeData';
 import {
   formatManagerNumber,
   useAnimatedNumber,
@@ -69,37 +72,6 @@ const BLUE_MID = '#42A5F5';
 const BLUE_LIGHT = '#E3F2FD';
 const LINE_THICKNESS = 3;
 const BARANGAY_DONUT_LIMIT = 8;
-
-const getDeliveredOrderStats = (requests = []) => {
-  let unitsSold = 0;
-  let snapshotRevenue = 0;
-
-  requests.forEach((req) => {
-    const status = String(req.status || '').toLowerCase().replace(/[\s-]+/g, '_');
-    if (status !== 'delivered') return;
-
-    if (Array.isArray(req.items) && req.items.length > 0) {
-      req.items.forEach((item) => {
-        const qty = Number(item.quantity || 0);
-        const subtotal = Number(
-          item.line_total ??
-          item.subtotal ??
-          item.totalAtOrder ??
-          (Number(item.unitPriceAtOrder ?? item.product_price ?? item.price ?? 0) * qty)
-        );
-        unitsSold += Number.isFinite(qty) ? qty : 0;
-        snapshotRevenue += Number.isFinite(subtotal) ? subtotal : 0;
-      });
-    } else {
-      const qty = Number(req.quantity || 0);
-      const total = Number(req.totalAtOrder ?? req.total_amount ?? req.totalAmount ?? req.total_cost ?? 0);
-      unitsSold += Number.isFinite(qty) ? qty : 0;
-      snapshotRevenue += Number.isFinite(total) ? total : 0;
-    }
-  });
-
-  return { unitsSold, snapshotRevenue };
-};
 
 const mergeByIdentity = (items) => {
   const itemMap = new Map();
@@ -226,16 +198,6 @@ const buildBarangayRows = (users = []) => {
         { label: 'San Jose', value: 0 },
         { label: 'Others', value: 0 },
       ];
-};
-
-const buildTrend = (totalSales) => {
-  const safeSales = Math.max(Number(totalSales || 0), 0);
-  const factors = [0.52, 0.6, 0.56, 0.68, 0.76, 1];
-
-  return ['Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul'].map((month, index) => ({
-    month,
-    value: safeSales > 0 ? Math.round(safeSales * factors[index]) : 0,
-  }));
 };
 
 const getNiceMax = (value) => {
@@ -444,7 +406,7 @@ const TrendPanel = ({
 
   return (
     <PanelSurface progress={panelProgress} style={styles.trendPanel}>
-      <Text style={styles.panelTitle}>Product sales trend (units ordered)</Text>
+      <Text style={styles.panelTitle}>Delivered units by month</Text>
       <View style={styles.lineChartWrap}>
         <View style={styles.yAxis}>
           {ticks.map((tick, index) => (
@@ -798,21 +760,24 @@ const StationsPanel = ({ progress, station }) => {
 };
 
 export default function ManagerDashboard() {
-  const { colors } = useAdminTheme();
+  const { colors, resolvedTheme } = useAdminTheme();
+  const isDark = resolvedTheme === 'dark';
   const { width } = useWindowDimensions();
-  styles = createStyles(colors, width);
-  const branchId = getModuleSession('manager')?.branchId || '';
-  const { users: realtimeUsers, requests: realtimeRequests, branch: realtimeBranch, loading: realtimeLoading, error: realtimeError } = useManagerRealtimeData();
+  styles = createStyles(colors, width, isDark);
+  const { branchId, users: realtimeUsers, requests: realtimeRequests, branch: realtimeBranch, requesters: realtimeRequesters = [], loading: realtimeLoading, error: realtimeError } = useManagerRealtimeData();
   const [registeredDistributors, setRegisteredDistributors] = useState([]);
   const [allUsers, setAllUsers] = useState([]);
+  const [allRequesters, setAllRequesters] = useState([]);
   const [search, setSearch] = useState('');
   const [accountsTab, setAccountsTab] = useState('distributors');
+  const [currentPage, setCurrentPage] = useState(1);
   const [branchData, setBranchData] = useState(null);
   const [dashboardStats, setDashboardStats] = useState({
     registeredUsers: 0,
     registeredDistributors: 0,
     registeredRequesters: 0,
     productSales: 0,
+    salesTrend: [],
     stations: 1,
   });
   const [loading, setLoading] = useState(true);
@@ -861,27 +826,29 @@ export default function ManagerDashboard() {
         ...realtimeUsers,
         ...getLocalUsers().filter((user) => user.branchId === branchId),
       ]);
-      const localRequests = getLocalRequests().filter((request) => request.branchId === branchId);
-      const requestIds = new Set(realtimeRequests.map((item) => item.id));
-      const allRequests = [
-        ...realtimeRequests,
-        ...localRequests.filter((item) => !requestIds.has(item.id)),
-      ];
-      const registeredRequesters = mergedUsers.filter(
-        (user) => normalizeRole(user.role) === 'requester'
-      ).length;
+      const allRequests = mergeManagerBranchRequests(realtimeRequests, getLocalRequests(), branchId);
+      const branchRequesters = extractBranchRequesters(allRequests, [
+        ...mergedUsers,
+        ...getLocalUsers(),
+        ...realtimeRequesters,
+      ]);
       const registeredDistributorCount = mergedUsers.filter(
         (user) => normalizeRole(user.role) === 'distributor'
       ).length;
+      const registeredRequesterCount = branchRequesters.length;
+      const registeredUsers = registeredDistributorCount + registeredRequesterCount;
 
-      const { unitsSold, snapshotRevenue } = getDeliveredOrderStats(allRequests);
+      const orderAnalytics = getManagerOrderAnalytics(allRequests);
+      const { units: unitsSold, revenue: snapshotRevenue } = orderAnalytics;
 
       setAllUsers(mergedUsers);
+      setAllRequesters(branchRequesters);
       setDashboardStats({
-        registeredUsers: mergedUsers.length,
+        registeredUsers,
         registeredDistributors: registeredDistributorCount,
-        registeredRequesters,
+        registeredRequesters: registeredRequesterCount,
         productSales: unitsSold,
+        salesTrend: orderAnalytics.trend,
         stations: 1,
       });
       setBranchData({
@@ -895,8 +862,12 @@ export default function ManagerDashboard() {
 
     refreshDashboardStats();
     const unsubscribeLocalUsers = subscribeLocalUsers(refreshDashboardStats);
-    return unsubscribeLocalUsers;
-  }, [branchId, realtimeBranch, realtimeRequests, realtimeUsers]);
+    const unsubscribeLocalRequests = subscribeLocalRequests(refreshDashboardStats);
+    return () => {
+      unsubscribeLocalUsers();
+      unsubscribeLocalRequests();
+    };
+  }, [branchId, realtimeBranch, realtimeRequests, realtimeRequesters, realtimeUsers]);
 
   const filteredDistributors = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase();
@@ -906,48 +877,76 @@ export default function ManagerDashboard() {
     return registeredDistributors.filter((distributor) =>
       [
         getFullName(distributor),
+        distributor.username,
+        distributor.userName,
         getProfileUniqueId(distributor),
         distributor.email,
         distributor.phone,
         getBarangay(distributor),
       ]
+        .filter(Boolean)
         .join(' ')
         .toLowerCase()
         .includes(normalizedSearch)
     );
   }, [registeredDistributors, search]);
-  const registeredRequesters = useMemo(
-    () =>
-      allUsers.filter((user) => normalizeRole(user.role) === 'requester'),
-    [allUsers]
-  );
+  const registeredRequesters = useMemo(() => allRequesters, [allRequesters]);
   const filteredRequesters = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase();
 
-    if (!normalizedSearch) return registeredRequesters;
+    if (!normalizedSearch) return allRequesters;
 
-    return registeredRequesters.filter((requester) =>
+    return allRequesters.filter((requester) =>
       [
         getFullName(requester),
+        requester.username,
+        requester.userName,
         getProfileUniqueId(requester),
         requester.email,
         requester.phone,
         getBarangay(requester),
       ]
+        .filter(Boolean)
         .join(' ')
         .toLowerCase()
         .includes(normalizedSearch)
     );
-  }, [registeredRequesters, search]);
+  }, [allRequesters, search]);
   const activeAccounts =
     accountsTab === 'requesters' ? filteredRequesters : filteredDistributors;
   const activeAccountsLabel =
     accountsTab === 'requesters' ? 'requesters' : 'distributors';
 
-  const barangayRows = useMemo(() => buildBarangayRows(allUsers), [allUsers]);
+  const { totalPages, start, end, accounts: paginatedAccounts } = useMemo(
+    () => accountPageSlice(activeAccounts, currentPage),
+    [activeAccounts, currentPage]
+  );
+  const pageNumbers = useMemo(
+    () => accountPageNumbers(currentPage, totalPages),
+    [currentPage, totalPages]
+  );
+
+  const handleTabChange = (tab) => {
+    setAccountsTab(tab);
+    setCurrentPage(1);
+  };
+
+  const handleSearchChange = (text) => {
+    setSearch(text);
+    setCurrentPage(1);
+  };
+
+  const barangayRows = useMemo(
+    () =>
+      buildBarangayRows([
+        ...allUsers.filter((user) => normalizeRole(user.role) === 'distributor'),
+        ...allRequesters,
+      ]),
+    [allUsers, allRequesters]
+  );
   const trendData = useMemo(
-    () => buildTrend(dashboardStats.productSales),
-    [dashboardStats.productSales]
+    () => dashboardStats.salesTrend,
+    [dashboardStats.salesTrend]
   );
 
   useEffect(() => {
@@ -1015,15 +1014,13 @@ export default function ManagerDashboard() {
     <ManagerShell
       active="dashboard"
       title="Data overview"
-      subtitle="BlueTap network - updated just now"
-      searchValue={search}
-      onSearchChange={setSearch}
+      subtitle={realtimeBranch?.name ? `${realtimeBranch.name} • Your Branch Overview` : 'Your Branch Overview'}
     >
       <View style={styles.metricGrid}>
         <MetricCard
           label="OVERALL REGISTERED USERS"
           value={dashboardStats.registeredUsers}
-          helper="+18 this month"
+          helper="Distributors & branch requesters"
           accent={BLUE}
           delay={0}
           enabled={statsReady}
@@ -1033,7 +1030,7 @@ export default function ManagerDashboard() {
         <MetricCard
           label="REGISTERED DISTRIBUTORS"
           value={dashboardStats.registeredDistributors}
-          helper="Approved and pending"
+          helper="Approved and active"
           accent={BLUE_DARK}
           delay={120}
           enabled={statsReady}
@@ -1043,7 +1040,7 @@ export default function ManagerDashboard() {
         <MetricCard
           label="REGISTERED REQUESTERS"
           value={dashboardStats.registeredRequesters}
-          helper="Active user base"
+          helper="Branch water requesters"
           accent={BLUE_MID}
           delay={240}
           enabled={statsReady}
@@ -1099,46 +1096,86 @@ export default function ManagerDashboard() {
 
       <View style={styles.tableCard}>
         <View style={styles.tableHeader}>
-          <Text style={styles.tableTitle}>Registered accounts</Text>
-          <View style={styles.tableTabs}>
-            <TouchableOpacity
-              activeOpacity={0.82}
-              style={
-                accountsTab === 'distributors'
-                  ? styles.tableTabActive
-                  : styles.tableTab
-              }
-              onPress={() => setAccountsTab('distributors')}
-            >
-              <Text
+          <View style={styles.tableHeaderLeft}>
+            <Text style={styles.tableTitle}>Registered accounts</Text>
+            <Text style={styles.tableRecordCount}>
+              {activeAccounts.length === 0
+                ? 'No matching accounts'
+                : activeAccounts.length === 1
+                ? '1 account matching'
+                : `${activeAccounts.length} accounts matching`}
+            </Text>
+          </View>
+
+          <View style={styles.tableHeaderControls}>
+            <View style={[styles.searchBox, { borderColor: colors.border, backgroundColor: isDark ? colors.surfaceAlt : '#F8FAFC' }]}>
+              <AdminIcon name="search" size={16} color={colors.textSecondary} />
+              <TextInput
+                value={search}
+                onChangeText={handleSearchChange}
+                placeholder="Search name, username, ID, email..."
+                placeholderTextColor={colors.placeholder || colors.textSecondary}
+                style={[styles.searchInput, { color: colors.textPrimary }]}
+                accessibilityLabel="Search registered accounts"
+              />
+              {!!search && (
+                <TouchableOpacity
+                  onPress={() => handleSearchChange('')}
+                  accessibilityRole="button"
+                  accessibilityLabel="Clear search"
+                  hitSlop={8}
+                >
+                  <AdminIcon name="close" size={14} color={colors.textSecondary} />
+                </TouchableOpacity>
+              )}
+            </View>
+
+            <View style={styles.tableTabs}>
+              <TouchableOpacity
+                activeOpacity={0.82}
+                accessibilityRole="tab"
+                accessibilityState={{ selected: accountsTab === 'distributors' }}
+                accessibilityLabel={`Distributors (${registeredDistributors.length})`}
                 style={
                   accountsTab === 'distributors'
-                    ? styles.tableTabActiveText
-                    : styles.tableTabText
+                    ? styles.tableTabActive
+                    : styles.tableTab
                 }
+                onPress={() => handleTabChange('distributors')}
               >
-                Distributors {registeredDistributors.length}
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              activeOpacity={0.82}
-              style={
-                accountsTab === 'requesters'
-                  ? styles.tableTabActive
-                  : styles.tableTab
-              }
-              onPress={() => setAccountsTab('requesters')}
-            >
-              <Text
+                <Text
+                  style={
+                    accountsTab === 'distributors'
+                      ? styles.tableTabActiveText
+                      : styles.tableTabText
+                  }
+                >
+                  Distributors {registeredDistributors.length}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                activeOpacity={0.82}
+                accessibilityRole="tab"
+                accessibilityState={{ selected: accountsTab === 'requesters' }}
+                accessibilityLabel={`Requesters (${dashboardStats.registeredRequesters})`}
                 style={
                   accountsTab === 'requesters'
-                    ? styles.tableTabActiveText
-                    : styles.tableTabText
+                    ? styles.tableTabActive
+                    : styles.tableTab
                 }
+                onPress={() => handleTabChange('requesters')}
               >
-                Requesters {dashboardStats.registeredRequesters}
-              </Text>
-            </TouchableOpacity>
+                <Text
+                  style={
+                    accountsTab === 'requesters'
+                      ? styles.tableTabActiveText
+                      : styles.tableTabText
+                  }
+                >
+                  Requesters {dashboardStats.registeredRequesters}
+                </Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
 
@@ -1161,12 +1198,14 @@ export default function ManagerDashboard() {
             ) : activeAccounts.length === 0 ? (
               <View style={styles.emptyState}>
                 <Text style={styles.emptyText}>
-                  No registered {activeAccountsLabel} yet.
+                  {search.trim()
+                    ? `No ${activeAccountsLabel} matching "${search.trim()}".`
+                    : `No registered ${activeAccountsLabel} yet.`}
                 </Text>
                 {!!loadError && <Text style={styles.errorText}>Firestore: {loadError}</Text>}
               </View>
             ) : (
-              activeAccounts.map((account) => {
+              paginatedAccounts.map((account) => {
                 const fullName = getFullName(account);
                 const accountId = account.uid || account.id;
                 const isDistributorRow = accountsTab === 'distributors';
@@ -1186,12 +1225,93 @@ export default function ManagerDashboard() {
             )}
           </View>
         </ScrollView>
+
+        {activeAccounts.length > 0 && (
+          <View style={[styles.paginationBar, { borderTopColor: colors.border }]}>
+            <Text style={[styles.paginationSummary, { color: colors.textSecondary }]}>
+              Showing {start + 1}–{end} of {activeAccounts.length} accounts · Page {currentPage} of {totalPages}
+            </Text>
+            <View style={styles.paginationControls}>
+              <TouchableOpacity
+                accessibilityRole="button"
+                accessibilityLabel="Previous page"
+                accessibilityState={{ disabled: currentPage === 1 }}
+                disabled={currentPage === 1}
+                onPress={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                style={[
+                  styles.paginationButton,
+                  {
+                    backgroundColor: isDark ? colors.surfaceAlt : colors.surface,
+                    borderColor: colors.border,
+                  },
+                  currentPage === 1 && styles.paginationDisabled,
+                ]}
+              >
+                <Text style={[styles.paginationButtonText, { color: currentPage === 1 ? colors.muted : colors.textPrimary }]}>
+                  Previous
+                </Text>
+              </TouchableOpacity>
+
+              {pageNumbers.map((p, idx) =>
+                typeof p === 'string' ? (
+                  <Text key={`ellipsis-${idx}`} style={[styles.paginationEllipsis, { color: colors.textSecondary }]}>
+                    …
+                  </Text>
+                ) : (
+                  <TouchableOpacity
+                    key={`page-${p}`}
+                    accessibilityRole="button"
+                    accessibilityLabel={p === currentPage ? `Current page, page ${p}` : `Go to page ${p}`}
+                    accessibilityState={{ selected: p === currentPage }}
+                    onPress={() => setCurrentPage(p)}
+                    style={[
+                      styles.paginationPageNumber,
+                      {
+                        backgroundColor: p === currentPage ? colors.primaryAction : (isDark ? colors.surfaceAlt : colors.surface),
+                        borderColor: p === currentPage ? colors.primaryAction : colors.border,
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.paginationPageText,
+                        { color: p === currentPage ? (colors.onPrimary || '#FFFFFF') : colors.textPrimary },
+                      ]}
+                    >
+                      {p}
+                    </Text>
+                  </TouchableOpacity>
+                )
+              )}
+
+              <TouchableOpacity
+                accessibilityRole="button"
+                accessibilityLabel="Next page"
+                accessibilityState={{ disabled: currentPage === totalPages }}
+                disabled={currentPage === totalPages}
+                onPress={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                style={[
+                  styles.paginationButton,
+                  {
+                    backgroundColor: isDark ? colors.surfaceAlt : colors.surface,
+                    borderColor: colors.border,
+                  },
+                  currentPage === totalPages && styles.paginationDisabled,
+                ]}
+              >
+                <Text style={[styles.paginationButtonText, { color: currentPage === totalPages ? colors.muted : colors.textPrimary }]}>
+                  Next
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
       </View>
     </ManagerShell>
   );
 }
 
-const createStyles = (colors, width = 1200) => StyleSheet.create({
+const createStyles = (colors, width = 1200, isDark = false) => StyleSheet.create({
   metricGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -1531,26 +1651,62 @@ const createStyles = (colors, width = 1200) => StyleSheet.create({
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: 8,
+    borderRadius: 16,
     padding: width < 430 ? 14 : 20,
+    marginTop: 8,
   },
   tableHeader: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    alignItems: 'center',
+    flexDirection: width < 840 ? 'column' : 'row',
+    alignItems: width < 840 ? 'flex-start' : 'center',
     justifyContent: 'space-between',
-    gap: 10,
+    gap: 14,
     marginBottom: 16,
+  },
+  tableHeaderLeft: {
+    minWidth: 0,
+    flexShrink: 1,
   },
   tableTitle: {
     color: colors.textPrimary,
-    fontSize: 16,
-    fontWeight: 'bold',
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  tableRecordCount: {
+    color: colors.textSecondary,
+    fontSize: 12,
+    fontWeight: '600',
+    marginTop: 2,
+  },
+  tableHeaderControls: {
+    flexDirection: width < 540 ? 'column' : 'row',
+    alignItems: width < 540 ? 'stretch' : 'center',
+    gap: 10,
+    width: width < 840 ? '100%' : 'auto',
+    minWidth: 0,
+  },
+  searchBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    minHeight: 44,
+    minWidth: 0,
+    width: width < 840 ? '100%' : 260,
+  },
+  searchInput: {
+    flex: 1,
+    minWidth: 0,
+    flexShrink: 1,
+    fontSize: 13,
+    paddingVertical: 6,
   },
   tableTabs: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
+    flexWrap: width < 420 ? 'nowrap' : 'wrap',
     gap: 8,
+    width: width < 540 ? '100%' : 'auto',
   },
   tableScroll: { flexGrow: 1 },
   table: { minWidth: 900, flexGrow: 1 },
@@ -1559,9 +1715,13 @@ const createStyles = (colors, width = 1200) => StyleSheet.create({
     backgroundColor: colors.primaryAction,
     paddingHorizontal: 16,
     paddingVertical: 10,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flex: width < 420 ? 1 : undefined,
   },
   tableTabActiveText: {
-    color: colors.onPrimary,
+    color: colors.onPrimary || '#FFFFFF',
     fontSize: 12,
     fontWeight: 'bold',
   },
@@ -1572,6 +1732,10 @@ const createStyles = (colors, width = 1200) => StyleSheet.create({
     backgroundColor: colors.surface,
     paddingHorizontal: 16,
     paddingVertical: 10,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flex: width < 420 ? 1 : undefined,
   },
   tableTabText: {
     color: colors.textSecondary,
@@ -1579,19 +1743,24 @@ const createStyles = (colors, width = 1200) => StyleSheet.create({
     fontWeight: 'bold',
   },
   tableRow: {
-    minHeight: 42,
+    minHeight: 48,
     flexDirection: 'row',
     alignItems: 'center',
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
+    paddingVertical: 10,
   },
   tableHeadRow: {
-    minHeight: 38,
+    minHeight: 40,
+    borderBottomWidth: 1.5,
+    borderBottomColor: colors.border,
+    paddingVertical: 8,
   },
   th: {
     color: colors.textSecondary,
     fontSize: 11,
-    fontWeight: 'bold',
+    fontWeight: '800',
+    letterSpacing: 0.5,
   },
   td: {
     color: colors.textSecondary,
@@ -1627,7 +1796,7 @@ const createStyles = (colors, width = 1200) => StyleSheet.create({
     flex: 0.85,
   },
   actionsCol: {
-    flex: 0.8,
+    flex: 0.85,
     textAlign: 'right',
   },
   actionsCell: {
@@ -1653,9 +1822,10 @@ const createStyles = (colors, width = 1200) => StyleSheet.create({
     opacity: 0.6,
   },
   emptyState: {
-    minHeight: 86,
+    minHeight: 100,
     alignItems: 'center',
     justifyContent: 'center',
+    paddingVertical: 20,
   },
   emptyText: {
     color: colors.textSecondary,
@@ -1666,5 +1836,57 @@ const createStyles = (colors, width = 1200) => StyleSheet.create({
     color: colors.danger,
     fontSize: 12,
     marginTop: 8,
+  },
+  paginationBar: {
+    flexDirection: width < 640 ? 'column' : 'row',
+    alignItems: width < 640 ? 'flex-start' : 'center',
+    justifyContent: 'space-between',
+    borderTopWidth: 1,
+    paddingTop: 16,
+    marginTop: 8,
+    gap: 12,
+  },
+  paginationSummary: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  paginationControls: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 6,
+  },
+  paginationButton: {
+    minHeight: 36,
+    paddingHorizontal: 14,
+    borderWidth: 1,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  paginationButtonText: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  paginationPageNumber: {
+    minWidth: 36,
+    height: 36,
+    paddingHorizontal: 10,
+    borderWidth: 1,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  paginationPageText: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  paginationEllipsis: {
+    fontSize: 14,
+    fontWeight: '700',
+    paddingHorizontal: 4,
+  },
+  paginationDisabled: {
+    opacity: 0.45,
   },
 });

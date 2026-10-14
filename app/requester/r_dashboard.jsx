@@ -28,12 +28,16 @@ import BlueTapEmptyState from '../../components/BlueTapEmptyState';
 import LocalTimeCard from '../../components/LocalTimeCard';
 import PortalSwipeContainer, { PortalSwipeIgnore, REQUESTER_TABS } from '../../components/PortalSwipeContainer';
 import { createPortalStyleSheet, useBlueTapTheme } from '../../components/BlueTapTheme';
+import { useReducedMotionPreference } from '../../components/BlueTapThemeTransition';
 import { RequesterOrderChatActions } from '../../components/chat/ChatOrderActions';
 import { ModerationNoticeBanner } from '../../components/ModerationNotices';
 import { USER_PORTAL_BOTTOM_CONTENT_INSET, USER_PORTAL_LAYOUT } from '../../constants/userPortalLayout';
 import { BLUETAP_COLORS } from '../../constants/bluetapTheme';
-import { normalizeRequesterOrderStatus } from '../../constants/requesterOrderStatus';
-import { getActiveProducts } from '../../services/requesterOrdering';
+import {
+  isCancellableRequesterOrderStatus,
+  normalizeRequesterOrderStatus,
+} from '../../constants/requesterOrderStatus';
+import { getActiveProducts, getCachedActiveProducts } from '../../services/requesterOrdering';
 import { useLiveGreeting } from '../../services/liveTime';
 import {
   cancelRequest,
@@ -197,9 +201,7 @@ const getRequestTotalAmount = (request) => {
   );
 };
 const isPendingRequest = (request) =>
-  ['pending', 'outside radius pending approval'].includes(
-    normalizeRequesterOrderStatus(request?.status)
-  );
+  isCancellableRequesterOrderStatus(request?.status);
 const getProductGallons = (product) => {
   const sizeText =
     product.capacity ||
@@ -255,20 +257,156 @@ const isUnavailableStock = (stockText) =>
   stockText.toLowerCase().includes('out') ||
   stockText.toLowerCase().includes('unavailable');
 
-function TypewriterGreeting({ text, style }) {
-  const [displayed, setDisplayed] = useState('');
-  useEffect(() => {
-    let i = 0;
-    setDisplayed('');
-    const timer = setInterval(() => {
-      i++;
-      setDisplayed(text.slice(0, i));
-      if (i >= text.length) clearInterval(timer);
-    }, 35);
-    return () => clearInterval(timer);
-  }, [text]);
+const GREETING_TYPING_SPEED = 65;
+const GREETING_BACKSPACING_SPEED = 25;
+const GREETING_DEFAULT_HOLD = 5000;
+const GREETING_PROMO_HOLD = 3000;
+const GREETING_ERASE_PAUSE = 250;
+const GREETING_CURSOR_BLINK_INTERVAL = 500;
 
-  return <Text style={style}>{displayed || text}</Text>;
+const GREETING_PROMO_PHRASES = [
+  'Need water? Order now!',
+  'Fresh water, one tap away!',
+];
+
+function TypewriterGreeting({ text, style }) {
+  const { colors, isDark } = useBlueTapTheme();
+  const reduceMotion = useReducedMotionPreference();
+  const textRef = useRef(text);
+  textRef.current = text;
+
+  const [displayed, setDisplayed] = useState(() => (reduceMotion ? text : ''));
+  const [cursorVisible, setCursorVisible] = useState(true);
+
+  useEffect(() => {
+    if (reduceMotion) {
+      setDisplayed(text);
+      setCursorVisible(false);
+      return;
+    }
+
+    let isMounted = true;
+    let timeoutId = null;
+    let blinkIntervalId = null;
+
+    let phraseIndex = 0;
+    let charIndex = 0;
+    let isDeleting = false;
+
+    const stopBlinking = () => {
+      if (blinkIntervalId) {
+        clearInterval(blinkIntervalId);
+        blinkIntervalId = null;
+      }
+      if (isMounted) {
+        setCursorVisible(true);
+      }
+    };
+
+    const startBlinking = () => {
+      stopBlinking();
+      blinkIntervalId = setInterval(() => {
+        setCursorVisible((prev) => !prev);
+      }, GREETING_CURSOR_BLINK_INTERVAL);
+    };
+
+    const getPhrase = (index) => {
+      if (index === 0) {
+        return textRef.current || 'Welcome!';
+      }
+      return GREETING_PROMO_PHRASES[index - 1] || textRef.current || 'Welcome!';
+    };
+
+    const getHoldDuration = (index) => {
+      return index === 0 ? GREETING_DEFAULT_HOLD : GREETING_PROMO_HOLD;
+    };
+
+    const schedule = (callback, delay) => {
+      if (!isMounted) return;
+      timeoutId = setTimeout(callback, delay);
+    };
+
+    const tick = () => {
+      if (!isMounted) return;
+
+      const currentPhrase = getPhrase(phraseIndex);
+
+      if (!isDeleting) {
+        charIndex++;
+        setDisplayed(currentPhrase.slice(0, charIndex));
+
+        if (charIndex >= currentPhrase.length) {
+          isDeleting = true;
+          startBlinking();
+          schedule(tick, getHoldDuration(phraseIndex));
+          return;
+        }
+
+        schedule(tick, GREETING_TYPING_SPEED);
+      } else {
+        if (blinkIntervalId) {
+          stopBlinking();
+        }
+        charIndex--;
+        setDisplayed(currentPhrase.slice(0, Math.max(0, charIndex)));
+
+        if (charIndex <= 0) {
+          isDeleting = false;
+          charIndex = 0;
+          phraseIndex = (phraseIndex + 1) % 3;
+          schedule(tick, GREETING_ERASE_PAUSE);
+          return;
+        }
+
+        schedule(tick, GREETING_BACKSPACING_SPEED);
+      }
+    };
+
+    stopBlinking();
+    schedule(tick, 150);
+
+    return () => {
+      isMounted = false;
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+      if (blinkIntervalId) {
+        clearInterval(blinkIntervalId);
+      }
+    };
+  }, [reduceMotion]);
+
+  useEffect(() => {
+    if (reduceMotion) {
+      setDisplayed(text);
+      setCursorVisible(false);
+    }
+  }, [reduceMotion, text]);
+
+  return (
+    <View style={styles.greetingWrapper} accessible accessibilityLabel={text}>
+      <Text
+        numberOfLines={1}
+        ellipsizeMode="tail"
+        accessibilityElementsHidden
+        importantForAccessibility="no"
+        style={style}
+      >
+        {reduceMotion ? text : displayed}
+        {!reduceMotion && (
+          <Text
+            style={[
+              styles.greetingCursor,
+              isDark && { color: colors.primaryLight || '#70BDF2' },
+              !cursorVisible && styles.greetingCursorHidden,
+            ]}
+          >
+            |
+          </Text>
+        )}
+      </Text>
+    </View>
+  );
 }
 
 export default function RequesterDashboard() {
@@ -277,8 +415,8 @@ export default function RequesterDashboard() {
   const productCarouselRef = useRef(null);
   const { width: windowWidth } = useWindowDimensions();
   const liveGreeting = useLiveGreeting();
-  const [products, setProducts] = useState([]);
-  const [productsLoading, setProductsLoading] = useState(true);
+  const [products, setProducts] = useState(() => getCachedActiveProducts() || []);
+  const [productsLoading, setProductsLoading] = useState(() => !(getCachedActiveProducts()?.length > 0));
   const [productsError, setProductsError] = useState('');
   const [activeProductIndex, setActiveProductIndex] = useState(0);
   const [viewAllModalVisible, setViewAllModalVisible] = useState(false);
@@ -304,17 +442,25 @@ export default function RequesterDashboard() {
     (productCarouselWidth - productCarouselItemWidth) / 2;
 
   const loadProducts = useCallback(async (force = false) => {
-    setProductsLoading(true);
+    if (force || !products.length) {
+      setProductsLoading(true);
+    }
     setProductsError('');
     try {
-      setProducts(await getActiveProducts({ force }));
+      const nextProducts = force
+        ? await getActiveProducts({ force: true })
+        : await getActiveProducts();
+      setProducts(nextProducts);
+      setProductsError('');
     } catch (error) {
-      setProducts([]);
-      setProductsError(error?.message || 'Unable to load products right now.');
+      if (force || !products.length) {
+        setProducts([]);
+        setProductsError(error?.message || 'Unable to load products right now.');
+      }
     } finally {
       setProductsLoading(false);
     }
-  }, []);
+  }, [products.length]);
 
   useEffect(() => {
     let mounted = true;
@@ -328,14 +474,32 @@ export default function RequesterDashboard() {
         return;
       }
 
-      getActiveProducts({ force: true })
+      const cached = getCachedActiveProducts();
+      if (cached && cached.length > 0) {
+        if (mounted) {
+          setProducts(cached);
+          setProductsLoading(false);
+        }
+      } else {
+        if (mounted) setProductsLoading(true);
+      }
+
+      getActiveProducts()
         .then((nextProducts) => {
-          if (mounted) setProducts(nextProducts);
+          if (mounted) {
+            setProducts(nextProducts);
+            setProductsError('');
+          }
         })
         .catch((error) => {
           if (mounted) {
-            setProducts([]);
-            setProductsError(error?.message || 'Unable to load products right now.');
+            setProducts((current) => {
+              if (!current || current.length === 0) {
+                setProductsError(error?.message || 'Unable to load products right now.');
+                return [];
+              }
+              return current;
+            });
           }
         })
         .finally(() => {
@@ -523,7 +687,7 @@ export default function RequesterDashboard() {
               <View style={styles.welcomeSection}>
                 <Text style={[styles.welcomeText, isDark && { color: colors.textPrimary }]}>WELCOME!</Text>
                 <TypewriterGreeting
-                  text={`${liveGreeting}, ${requesterName}`}
+                  text={`${liveGreeting}, ${requesterName}!`}
                   style={[styles.greetingText, isDark && { color: colors.textPrimary }]}
                 />
               </View>
@@ -793,23 +957,27 @@ export default function RequesterDashboard() {
           onRequestClose={() => setViewAllModalVisible(false)}
         >
           <View style={styles.allProductsModalBackdrop}>
-            <View style={styles.allProductsModalCard}>
-              <View style={styles.allProductsModalHeader}>
+            <View style={[styles.allProductsModalCard, isDark && { backgroundColor: colors.surfaceAlt, borderColor: colors.border, borderWidth: 1 }]}>
+              <View style={[styles.allProductsModalHeader, isDark && { borderBottomColor: colors.border }]}>
                 <View>
-                  <Text style={styles.allProductsModalTitle}>All Products</Text>
-                  <Text style={styles.allProductsModalSubtitle}>Available branch catalog</Text>
+                  <Text style={[styles.allProductsModalTitle, isDark && { color: colors.textPrimary }]}>All Products</Text>
+                  <Text style={[styles.allProductsModalSubtitle, isDark && { color: colors.textSecondary }]}>Available branch catalog</Text>
                 </View>
                 <TouchableOpacity
                   accessibilityRole="button"
                   accessibilityLabel="Close"
                   onPress={() => setViewAllModalVisible(false)}
-                  style={styles.allProductsCloseBtn}
+                  style={[styles.allProductsCloseBtn, isDark && { backgroundColor: colors.surface }]}
                 >
-                  <Text style={styles.allProductsCloseText}>×</Text>
+                  <Text style={[styles.allProductsCloseText, isDark && { color: colors.textPrimary }]}>×</Text>
                 </TouchableOpacity>
               </View>
 
-              <ScrollView style={styles.allProductsList} showsVerticalScrollIndicator={false}>
+              <ScrollView
+                style={styles.allProductsList}
+                contentContainerStyle={styles.allProductsContentContainer}
+                showsVerticalScrollIndicator={false}
+              >
                 {products.map((item) => (
                   <View key={item.id} style={styles.allProductsItemWrapper}>
                     <ProductCard
@@ -869,11 +1037,25 @@ const styles = createPortalStyleSheet({
     fontWeight: 'bold',
     letterSpacing: 0,
   },
+  greetingWrapper: {
+    minHeight: 22,
+    justifyContent: 'center',
+    marginTop: 4,
+  },
   greetingText: {
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '700',
-    marginTop: 4,
+    lineHeight: 22,
+  },
+  greetingCursor: {
+    color: '#FFFFFF',
+    fontWeight: '300',
+    marginLeft: 2,
+    opacity: 1,
+  },
+  greetingCursorHidden: {
+    opacity: 0,
   },
   productsSection: {
     marginTop: 20,
@@ -885,7 +1067,7 @@ const styles = createPortalStyleSheet({
     width: '100%',
     height: '100%',
     paddingHorizontal: 6,
-    paddingVertical: 8,
+    paddingVertical: 6,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1280,8 +1462,8 @@ const styles = createPortalStyleSheet({
   },
   allProductsModalCard: {
     width: '100%',
-    maxWidth: 420,
-    maxHeight: '80%',
+    maxWidth: 400,
+    maxHeight: '85%',
     backgroundColor: '#FFFFFF',
     borderRadius: 20,
     padding: 20,
@@ -1327,10 +1509,17 @@ const styles = createPortalStyleSheet({
     fontWeight: '700',
   },
   allProductsList: {
-    paddingBottom: 16,
-    gap: 16,
+    width: '100%',
+    flexGrow: 1,
+  },
+  allProductsContentContainer: {
+    paddingTop: 6,
+    paddingBottom: 24,
+    paddingHorizontal: 4,
+    gap: 18,
   },
   allProductsItemWrapper: {
+    width: '100%',
     alignItems: 'center',
   },
 });

@@ -48,6 +48,7 @@ test('shared product cards reserve equal geometry and anchor their action', () =
   const dashboard = read('app', 'requester', 'r_dashboard.jsx');
   assert.match(source, /maxWidth:320,minHeight:356/);
   assert.match(source, /compactCard:\{maxWidth:304,minHeight:344\}/);
+  assert.match(source, /compactSelectionCard:\{minHeight:312,height:312\}/);
   assert.match(source, /borderRadius:USER_PORTAL_LAYOUT\.cardRadius/);
   assert.match(source, /name:\{minHeight:38/);
   assert.match(source, /marginTop:'auto'/);
@@ -139,4 +140,101 @@ test('floating portal navigation stays compact without shrinking touch targets',
   assert.match(nav, /minHeight: USER_PORTAL_LAYOUT\.navHeight/);
   assert.match(assistant, /USER_PORTAL_LAYOUT\.navHeight \+/);
   assert.match(assistant, /USER_PORTAL_LAYOUT\.navBottomOffset \+/);
+});
+
+test('ProductCard reflects Phase 13A typography, description rendering, and high-contrast dark theme surfaces', () => {
+  const source = read('components', 'ProductCard.jsx');
+  assert.match(source, /product\?\.description/);
+  assert.match(source, /numberOfLines=\{1\} ellipsizeMode="tail" style=\{\[styles\.description/);
+  assert.match(source, /fontSize:18,lineHeight:22,fontWeight:'800'/);
+  assert.match(source, /description:\{fontSize:13,lineHeight:17,marginTop:3\}/);
+  assert.match(source, /detail:\{minHeight:17,fontSize:13,lineHeight:17/);
+  assert.match(source, /price:\{fontSize:22,lineHeight:26,fontWeight:'900'/);
+  assert.match(source, /policyNote:\{fontSize:12,lineHeight:16/);
+  assert.match(source, /cardBg = isDark \? colors\.surfaceAlt : colors\.surface/);
+  assert.match(source, /isDark \? '#234E72' : colors\.border/);
+  assert.match(source, /imageBg = isDark \? colors\.surface : colors\.surfaceAlt/);
+  assert.match(source, /isDark \? '#CBD5E1' : colors\.textSecondary/);
+  assert.match(source, /isDark \? \(colors\.primaryLight \|\| '#70BDF2'\) : colors\.primary/);
+  assert.match(source, /compactImageSurface:\{height:112,width:'100%',padding:6\}/);
+  assert.match(source, /compactSelectionImageSurface:\{height:92,width:'100%',padding:6\}/);
+  assert.match(source, /height:356/);
+});
+
+test('Requester dashboard implements Phase 13B.3 smooth continuous looping typewriter animation with fast backspacing, natural blinking cursor, and reduced motion', () => {
+  const dashboard = read('app', 'requester', 'r_dashboard.jsx');
+  assert.match(dashboard, /'Need water\? Order now!'/);
+  assert.match(dashboard, /'Fresh water, one tap away!'/);
+  assert.match(dashboard, /textRef\.current/);
+  assert.match(dashboard, /GREETING_TYPING_SPEED = 65/);
+  assert.match(dashboard, /GREETING_BACKSPACING_SPEED = 25/);
+  assert.match(dashboard, /GREETING_DEFAULT_HOLD = 5000/);
+  assert.match(dashboard, /GREETING_PROMO_HOLD = 3000/);
+  assert.match(dashboard, /GREETING_ERASE_PAUSE = 250/);
+  assert.match(dashboard, /phraseIndex = \(phraseIndex \+ 1\) % 3/);
+  assert.match(dashboard, /useReducedMotionPreference/);
+  assert.match(dashboard, /if \(reduceMotion\) \{/);
+  assert.match(dashboard, /numberOfLines=\{1\}/);
+  assert.match(dashboard, /ellipsizeMode="tail"/);
+  assert.match(dashboard, /accessibilityElementsHidden/);
+  assert.match(dashboard, /importantForAccessibility="no"/);
+  assert.match(dashboard, /greetingWrapper:[\s\S]{0,60}minHeight:\s*22/);
+  assert.match(dashboard, /text=\{`\$\{liveGreeting\}, \$\{requesterName\}!`\}/);
+});
+
+test('Requester My Orders implements Phase 13C empty states and conditional Add Request button', () => {
+  const source = read('app', 'requester', 'r_request.jsx');
+  const emptyState = read('components', 'BlueTapEmptyState.jsx');
+
+  // 1. Active orders empty state
+  assert.match(source, /title="Your next refill starts here!"/);
+  assert.match(source, /description="No active orders yet\. Order your water in just a few taps\."/);
+  assert.match(source, /actionLabel="Order Water Now"/);
+  assert.match(source, /onAction=\{\(\) => router\.replace\('\/requester\/requestform'\)\}/);
+  assert.match(source, /style=\{styles\.ordersEmptyCard\}/);
+
+  // 2. History empty state
+  assert.match(source, /variant="history"/);
+  assert.match(source, /title="Your water journey begins here!"/);
+  assert.match(source, /description="Your completed and past water orders will appear here\."/);
+
+  // 3. Top Add Request button hidden when active orders empty
+  assert.match(source, /isActiveOrdersTab && activeRequests\.length > 0/);
+
+  // 4. Card geometry, styling, and BlueTapEmptyState modern enhancements
+  assert.match(source, /ordersEmptyCard:[\s\S]{0,300}borderRadius:\s*USER_PORTAL_LAYOUT\.cardRadius/);
+  assert.match(source, /ordersEmptyCard:[\s\S]{0,300}borderColor:\s*CARD_BORDER/);
+  assert.match(emptyState, /borderBottomWidth:\s*2/);
+  assert.match(emptyState, /actionStyle/);
+  assert.match(emptyState, /actionTextStyle/);
+  assert.match(emptyState, /dropletGlow/);
+});
+
+test('Phase 13D and 13B.3 empty state spacing, high-contrast CTA buttons, and typewriter blinking cursor', () => {
+  const dashboard = read('app', 'requester', 'r_dashboard.jsx');
+  const emptyState = read('components', 'BlueTapEmptyState.jsx');
+  const orders = read('app', 'requester', 'r_request.jsx');
+
+  // 1. Blinking cursor implementation
+  assert.match(dashboard, /GREETING_CURSOR_BLINK_INTERVAL = 500/);
+  assert.match(dashboard, /const \[cursorVisible, setCursorVisible\] = useState\(true\)/);
+  assert.match(dashboard, /setInterval\(\(\) => \{\s*setCursorVisible\(\(prev\) => !prev\);\s*\}, GREETING_CURSOR_BLINK_INTERVAL\)/);
+  assert.match(dashboard, /startBlinking\(\)/);
+  assert.match(dashboard, /stopBlinking\(\)/);
+  assert.match(dashboard, /greetingCursor:[\s\S]{0,80}fontWeight:\s*'300'/);
+  assert.match(dashboard, /greetingCursorHidden:[\s\S]{0,40}opacity:\s*0/);
+  assert.match(dashboard, /!reduceMotion && \([\s\S]{0,100}greetingCursor/);
+
+  // 2. High-contrast CTA buttons with Pressable
+  assert.match(emptyState, /import \{[^}]*Pressable[^}]*\} from 'react-native'/);
+  assert.match(emptyState, /<Pressable[\s\S]{0,250}styles\.actionButton/);
+  assert.match(emptyState, /actionButton:[\s\S]{0,120}backgroundColor:\s*'#187BCD'/);
+  assert.match(emptyState, /actionButtonDark:[\s\S]{0,80}backgroundColor:\s*'#1D78C1'/);
+  assert.match(emptyState, /actionButtonText:[\s\S]{0,80}color:\s*'#FFFFFF'/);
+  assert.match(emptyState, /minHeight:\s*44/);
+
+  // 3. Empty-state illustration spacing & proportions
+  assert.match(emptyState, /dropletGlowCompact:[\s\S]{0,60}width:\s*70/);
+  assert.match(emptyState, /dropletCompact:[\s\S]{0,60}width:\s*48/);
+  assert.match(orders, /ordersEmptyCard:[\s\S]{0,150}paddingVertical:\s*28/);
 });

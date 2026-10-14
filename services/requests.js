@@ -3,6 +3,7 @@ import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import { db } from '../firebase';
 import {
   isActiveRequesterOrderStatus,
+  isCancellableRequesterOrderStatus,
   normalizeRequesterOrderStatus,
 } from '../constants/requesterOrderStatus';
 import { parseTimestamp } from './notificationTimestamp';
@@ -218,7 +219,7 @@ const upsertLocalRequest = (request) => {
 const removeLocalRequest = (requestId) =>
   saveLocalRequests(getLocalRequests().filter((request) => request.id !== requestId));
 
-const subscribeLocalRequests = (listener) => {
+export const subscribeLocalRequests = (listener) => {
   if (!globalThis.addEventListener) {
     return () => {};
   }
@@ -432,7 +433,7 @@ export const cancelRequest = async (request) => {
 
   const normalizedRequest = normalizeRequest(requestId, typeof request === 'string' ? {} : request);
 
-  if (!['pending', 'outside radius pending approval'].includes(normalizeRequesterOrderStatus(normalizedRequest.status))) {
+  if (!isCancellableRequesterOrderStatus(normalizedRequest.status)) {
     throw new Error('Only pending requests can be canceled.');
   }
 

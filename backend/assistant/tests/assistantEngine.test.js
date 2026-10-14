@@ -102,8 +102,9 @@ test('classifyIntent accurately identifies order tracking and delivery queries',
 });
 
 test('classifyIntent accurately identifies cancellations, station contacts, and how-it-works', () => {
-  assert.equal(classifyIntent('Can I cancel my request?'), ASSISTANT_INTENTS.CANCELLED_ORDER_HELP);
-  assert.equal(classifyIntent('pwede ba nako ma-cancel akong order'), ASSISTANT_INTENTS.CANCELLED_ORDER_HELP);
+  assert.equal(classifyIntent('Can I cancel my request?'), ASSISTANT_INTENTS.CANCEL_ORDER_ELIGIBILITY);
+  assert.equal(classifyIntent('pwede ba nako ma-cancel akong order'), ASSISTANT_INTENTS.CANCEL_ORDER_ELIGIBILITY);
+  assert.equal(classifyIntent('Why was my request cancelled?'), ASSISTANT_INTENTS.CANCELLED_ORDER_HELP);
 
   assert.equal(classifyIntent('How do I contact the station?'), ASSISTANT_INTENTS.CONTACT_STATION);
   assert.equal(classifyIntent('unsaon pag-message sa branch station'), ASSISTANT_INTENTS.CONTACT_STATION);

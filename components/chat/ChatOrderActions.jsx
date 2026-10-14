@@ -106,7 +106,7 @@ export function ManagerOrderChatAction({ order, style, disabled = false }) {
       setBusy(false);
     }
   };
-  return <ActionButton busy={busy} disabled={disabled} colors={colors} label="Message Requester" onPress={open} secondary style={style} />;
+  return <ActionButton busy={busy} disabled={disabled} colors={colors} label="Message" onPress={open} secondary style={style} />;
 }
 
 const styles = StyleSheet.create({

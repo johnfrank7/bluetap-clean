@@ -41,6 +41,7 @@ import {
 } from '../../services/requests';
 import {
   isActiveRequesterOrderStatus,
+  isCancellableRequesterOrderStatus,
   isHistoryRequesterOrderStatus,
 } from '../../constants/requesterOrderStatus';
 
@@ -101,7 +102,7 @@ const formatDateValue = (value, fallback = 'Date not set') => {
 };
 
 const isPendingRequest = (request) =>
-  ['pending', 'outside radius pending approval', 'manager approval pending'].includes(normalizeStatus(request?.status || 'Pending'));
+  isCancellableRequesterOrderStatus(request?.status);
 
 const getRequestId = (request) => request.request_id || request.id || 'Not set';
 
@@ -456,8 +457,11 @@ export default function RequesterRequests() {
   };
 
   const confirmCancelRequest = (request) => {
+    const orderRef = request?.request_id || request?.requestId || (request?.id ? `BT-${String(request.id).slice(-6).toUpperCase()}` : 'Order');
     if (Platform.OS === 'web') {
-      const confirmed = typeof window !== 'undefined' ? window.confirm('Are you sure you want to cancel this pending request?') : true;
+      const confirmed = typeof window !== 'undefined'
+        ? window.confirm(`Cancel Request ${orderRef}?\n\nAre you sure you want to cancel this pending request?\n\nSelect OK to Cancel Request, or Cancel to Keep Order.`)
+        : true;
       if (confirmed) {
         cancelPendingRequest(request);
       }
@@ -465,11 +469,11 @@ export default function RequesterRequests() {
     }
     Alert.alert(
       'Cancel Request',
-      'Are you sure you want to cancel this pending request?',
+      `Are you sure you want to cancel request ${orderRef}?`,
       [
-        { text: 'No', style: 'cancel' },
+        { text: 'Keep Order', style: 'cancel' },
         {
-          text: 'Yes, Cancel',
+          text: 'Cancel Request',
           style: 'destructive',
           onPress: () => cancelPendingRequest(request),
         },
@@ -545,7 +549,7 @@ export default function RequesterRequests() {
                 </Pressable>
               </View>
 
-              {isActiveOrdersTab && (
+              {isActiveOrdersTab && activeRequests.length > 0 && (
                 <Pressable
                   style={({ pressed, hovered }) => [styles.addRequestButton, hovered && styles.addRequestHovered, pressed && styles.addRequestPressed]}
                   onPress={() => router.replace('/requester/requestform')}
@@ -580,14 +584,22 @@ export default function RequesterRequests() {
                   </TouchableOpacity>
                 </View>
               ) : displayedRequests.length === 0 ? (
-                <BlueTapEmptyState
-                  title={isActiveOrdersTab ? 'No Active Orders' : 'No Order History Yet'}
-                  description={
-                    isActiveOrdersTab
-                      ? 'Pending and ongoing water orders will appear here.'
-                      : 'Delivered and cancelled orders will appear here.'
-                  }
-                />
+                isActiveOrdersTab ? (
+                  <BlueTapEmptyState
+                    title="Your next refill starts here!"
+                    description="No active orders yet. Order your water in just a few taps."
+                    actionLabel="Order Water Now"
+                    onAction={() => router.replace('/requester/requestform')}
+                    style={styles.ordersEmptyCard}
+                  />
+                ) : (
+                  <BlueTapEmptyState
+                    variant="history"
+                    title="Your water journey begins here!"
+                    description="Your completed and past water orders will appear here."
+                    style={styles.ordersEmptyCard}
+                  />
+                )
               ) : (
                 displayedRequests.map((entry) => (
                   <AnimatedPresenceItem key={entry.id} phase={entry.phase}>
@@ -659,13 +671,13 @@ const styles = createPortalStyleSheet({
   fixedHeaderArea: {
     paddingHorizontal: USER_PORTAL_LAYOUT.gutter,
     paddingTop: 16,
-    paddingBottom: 12,
+    paddingBottom: 10,
     zIndex: 10,
   },
   scrollContent: {
     flexGrow: 1,
     paddingHorizontal: USER_PORTAL_LAYOUT.gutter,
-    paddingTop: 12,
+    paddingTop: 8,
     paddingBottom: USER_PORTAL_BOTTOM_CONTENT_INSET,
   },
   pageTitle: {
@@ -677,7 +689,7 @@ const styles = createPortalStyleSheet({
     fontSize: 14,
     fontWeight: '600',
     marginTop: 4,
-    marginBottom: 14,
+    marginBottom: 12,
   },
   orderTabs: {
     flexDirection: 'row',
@@ -685,7 +697,7 @@ const styles = createPortalStyleSheet({
     borderRadius: 16,
     padding: 4,
     overflow: 'hidden',
-    marginBottom: 12,
+    marginBottom: 10,
     ...createShadow({
       color: '#0D47A1',
       elevation: 2,
@@ -932,12 +944,30 @@ const styles = createPortalStyleSheet({
     fontSize: 13,
     fontWeight: 'bold',
   },
+  ordersEmptyCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: USER_PORTAL_LAYOUT.cardRadius,
+    paddingVertical: 28,
+    paddingHorizontal: 22,
+    borderWidth: 1,
+    borderColor: CARD_BORDER,
+    marginTop: 4,
+    marginBottom: 16,
+    width: '100%',
+    ...createShadow({
+      color: '#0D47A1',
+      elevation: 6,
+      opacity: 0.12,
+      radius: 10,
+      offset: { width: 0, height: 5 },
+    }),
+  },
   addRequestButton: {
     minHeight: 48,
     borderRadius: 16,
     overflow: 'hidden',
     marginTop: 2,
-    marginBottom: 16,
+    marginBottom: 12,
     ...createShadow({
       color: '#0D47A1',
       elevation: 2,

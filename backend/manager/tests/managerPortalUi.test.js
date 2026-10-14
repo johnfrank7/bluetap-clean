@@ -21,6 +21,7 @@ const notificationHook = read('components/ManagerNotifications.jsx');
 const managerLayout = read('app/manager/_layout.jsx');
 const notificationCard = read('components/NotificationCard.jsx');
 const rules = read('firestore.rules');
+const globalCss = read('global.css');
 const {
   clearManagerNotificationOrigin,
   consumeManagerNotificationOrigin,
@@ -31,8 +32,14 @@ const {
 
 test('Manager operational queues use shared BlueTap visual empty states with contextual copy', () => {
   assert.match(requests, /BlueTapEmptyState/);
-  for (const title of ['No Orders Awaiting Review', 'No Delivery Exceptions', 'No Active Branch Orders', 'No Transfer Requests', 'No Transfer Updates']) {
-    assert.match(requests, new RegExp(title));
+  for (const pattern of [
+    /(?:All caught up!|No Orders Awaiting Review)/i,
+    /(?:No approvals pending|No Delivery Exceptions)/i,
+    /(?:No active branch orders|No Active Branch Orders)/i,
+    /(?:No transfer requests|No Transfer Requests)/i,
+    /(?:No transfer updates|No Transfer Updates)/i,
+  ]) {
+    assert.match(requests, pattern);
   }
   assert.match(distributors, /BlueTapEmptyState/);
   for (const title of ['No Orders Awaiting Assignment', 'No Pending Applications']) {
@@ -141,7 +148,7 @@ test('Requests and Exceptions expose responsive branch-authorized detail maps wi
   assert.match(requests, /notificationTargetCard/);
   assert.match(requests, /contentScrollRef\.current\?\.scrollTo/);
   assert.match(requests, /setTargetHighlighted\(false\), 6000/);
-  assert.match(requests, /width < 430 \? '48%' : 118/);
+  assert.match(requests, /width < 430 \? '48%' : 138/);
 });
 
 test('Manager responsive surfaces stack actions and preserve wide tables with horizontal scrolling', () => {
@@ -190,4 +197,13 @@ test('Manager dispatch uses a compact valid-date selector rather than a long dat
   assert.match(distributors, /allowedDayOffsets/);
   assert.match(distributors, /Today/);
   assert.match(distributors, /Tomorrow/);
+});
+
+test('Manager Products delivery pricing edit button remains high contrast and visible across themes and CSS resets', () => {
+  assert.match(managerProducts, /accessibilityLabel="Edit branch delivery pricing"/);
+  assert.match(managerProducts, /dataSet=\{\{\s*bluetapCta:\s*'true'\s*\}\}/);
+  assert.match(managerProducts, /backgroundColor:\s*isDark\s*\?\s*'#1D78C1'\s*:\s*'#0B67AD'/);
+  assert.match(managerProducts, /color:\s*'#FFFFFF'/);
+  assert.match(globalCss, /button\[aria-label='Edit branch delivery pricing'\]/);
+  assert.match(globalCss, /button\[data-bluetap-cta='true'\]/);
 });
