@@ -120,7 +120,7 @@ function OutsideRadiusApprovalQueue({ orders, loading, styles, colors, isDark, o
             Review delivery requests outside your branch radius or above a product order limit.
           </Text>
         </View>
-        <ManagerPill tone={orders.length ? 'red' : 'blue'}>{orders.length} pending</ManagerPill>
+        <ManagerPill tone="warning">{orders.length} pending</ManagerPill>
       </View>
 
       {!!error && (
@@ -737,7 +737,7 @@ function ReceivedRequestsQueue({ orders, loading, styles, colors, isDark, onShow
           <Text style={styles.cardTitle}>Upcoming & Active Branch Orders ({orders.length})</Text>
           <Text style={styles.helperText}>Accept a branch order for dispatch or reject it with a reason.</Text>
         </View>
-        <ManagerPill>{orders.length} pending</ManagerPill>
+        <ManagerPill tone="warning">{orders.length} pending</ManagerPill>
       </View>
       {!!error && <View accessibilityRole="alert" style={styles.errorBanner}><Text style={styles.errorBannerText}>{error}</Text></View>}
       {loading ? <View style={styles.emptyContainer}><ActivityIndicator color={colors.primary} /></View> : presentedOrders.length === 0 ? (

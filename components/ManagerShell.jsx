@@ -83,12 +83,14 @@ export function ManagerPill({ children, tone = 'blue' }) {
     green: colors.successSoft,
     red: colors.dangerSoft,
     cyan: colors.neutral,
+    warning: colors.warningSoft,
   };
   const toneText = {
     blue: colors.primary,
     green: colors.success,
     red: colors.danger,
     cyan: colors.primaryLight,
+    warning: colors.warningAction,
   };
 
   return (
