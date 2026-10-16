@@ -24,6 +24,7 @@ import AdminIcon from '../../components/AdminIcon';
 import BlueTapEmptyState from '../../components/BlueTapEmptyState';
 import TopToastFeedback from '../../components/TopToastFeedback';
 import ManagerShell, { MANAGER_COLORS, ManagerPill } from '../../components/ManagerShell';
+import { useManagerOngoingRequests } from '../../components/ManagerOngoingRequestsMonitor';
 import { useManagerRealtimeData } from '../../components/ManagerRealtimeData';
 import { parseTimestamp } from '../../services/notificationTimestamp';
 import LocationMap from '../../components/LocationMap';
@@ -180,19 +181,27 @@ function OutsideRadiusApprovalQueue({ orders, loading, styles, colors, isDark, o
                 <View style={styles.orderTotalSummary}>
                   <Text style={styles.totalLabel}>ORDER TOTAL</Text>
                   <Text style={styles.amountText}>{formatAmount(order.totalAtOrder)}</Text>
-                  {!!order.deliveryFeeAtOrder && (
+                  {Boolean(order.deliveryFeeAtOrder) ? (
                     <Text style={styles.deliveryFeeText}>Includes {formatAmount(order.deliveryFeeAtOrder)} delivery</Text>
-                  )}
+                  ) : null}
                 </View>
               </View>
 
-              {(order.productLimitViolations?.length > 0 || order.approvalReasons?.includes('NON_STANDARD_DELIVERY_DAY') || order.requesterUniqueId) && <View style={styles.detailsBlock}>
-                {(order.productLimitViolations || []).map((item) => <Text key={item.productId} style={styles.detailLine}>
-                  {item.productNameSnapshot}: requested {item.requestedQuantity} · limit {item.configuredLimit}. Order exceeds the configured requester product limit.
-                </Text>)}
-                {order.approvalReasons?.includes('NON_STANDARD_DELIVERY_DAY') && <Text style={styles.detailLine}>The requested date falls outside the effective product delivery weekdays and requires Manager review.</Text>}
-                {!!order.requesterUniqueId && <Text style={styles.detailLine}>Requester UID: {order.requesterUniqueId}</Text>}
-              </View>}
+              {Boolean(order.productLimitViolations?.length > 0 || order.approvalReasons?.includes('NON_STANDARD_DELIVERY_DAY') || order.requesterUniqueId) ? (
+                <View style={styles.detailsBlock}>
+                  {(order.productLimitViolations || []).map((item) => (
+                    <Text key={item.productId} style={styles.detailLine}>
+                      {item.productNameSnapshot}: requested {item.requestedQuantity} · limit {item.configuredLimit}. Order exceeds the configured requester product limit.
+                    </Text>
+                  ))}
+                  {Boolean(order.approvalReasons?.includes('NON_STANDARD_DELIVERY_DAY')) ? (
+                    <Text style={styles.detailLine}>The requested date falls outside the effective product delivery weekdays and requires Manager review.</Text>
+                  ) : null}
+                  {Boolean(order.requesterUniqueId) ? (
+                    <Text style={styles.detailLine}>Requester UID: {order.requesterUniqueId}</Text>
+                  ) : null}
+                </View>
+              ) : null}
 
               <View style={[styles.actionRow, styles.requestActionRow]}>
                 <View style={styles.chatActionWrap}><ManagerOrderChatAction order={order} disabled={entry.actionsDisabled} style={styles.managerChatButton} /></View>
@@ -353,13 +362,15 @@ function EditOrderModal({ visible, order, onClose, onSaveSuccess, colors, styles
                   ['Public order ID', order.requestId || order.id],
                   ['Requester', order.requesterName || 'Requester'],
                   ['Requester public ID', order.requesterUniqueId || 'Not available'],
+                  ['Assigned distributor', order.assignedDistributorName || 'Not assigned'],
+                  ['Distributor public ID', order.assignedDistributorUniqueId || order.distributorUniqueId || 'Not available'],
                   ['Container type', order.container || 'Not set'],
                   ['Total', formatAmount(order.totalAtOrder)],
                   ['Requested branch', order.initialBranchName || order.initialBranchNameSnapshot || order.transferFromBranchName || order.currentBranchName || 'Not available'],
                   ['Current branch', order.currentBranchName || order.branchNameSnapshot || 'Not available'],
                   ['Delivery address', order.address || 'Not available'],
                   ['Distance / radius', order.distanceKmSnapshot == null ? 'Not available' : `${Number(order.distanceKmSnapshot).toFixed(1)} km / ${Number(order.serviceRadiusKmSnapshot || 0).toFixed(1)} km`],
-                  ['Schedule', scheduleLabel(order.scheduledAt || order.expectedDeliveryDate) || 'Not scheduled'],
+                  ['Schedule', (order.scheduledDate ? `${order.scheduledDate}${order.scheduledWindow ? ` · ${order.scheduledWindow}` : ''}` : scheduleLabel(order.scheduledAt || order.expectedDeliveryDate)) || 'Not scheduled'],
                   ['Current status', String(order.status || '').replace(/_/g, ' ') || 'Not available'],
                   ['Approval reason', approvalReasonLabel(order)],
                 ].map(([label, value]) => (
@@ -426,7 +437,7 @@ function EditOrderModal({ visible, order, onClose, onSaveSuccess, colors, styles
                 </View>
               ))}
 
-              {isEditable && catalogProducts.length > 0 && (
+              {isEditable && catalogProducts.length > 0 ? (
                 <View style={{ marginTop: 10 }}>
                   <Text style={styles.subLabel}>Add product from branch catalog:</Text>
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 6 }}>
@@ -441,7 +452,7 @@ function EditOrderModal({ visible, order, onClose, onSaveSuccess, colors, styles
                     ))}
                   </ScrollView>
                 </View>
-              )}
+              ) : null}
             </View>
 
             <View style={styles.modalSection}>
@@ -475,11 +486,11 @@ function EditOrderModal({ visible, order, onClose, onSaveSuccess, colors, styles
               )}
             </View>
 
-            {!!editError && (
+            {Boolean(editError) ? (
               <View style={styles.errorBanner}>
                 <Text style={styles.errorBannerText}>{editError}</Text>
               </View>
-            )}
+            ) : null}
           </ScrollView>
 
           <View style={styles.modalFooterRow}>
@@ -487,7 +498,7 @@ function EditOrderModal({ visible, order, onClose, onSaveSuccess, colors, styles
               <Text style={styles.cancelBtnText}>Close</Text>
             </TouchableOpacity>
 
-            {isEditable && (
+            {Boolean(isEditable) ? (
               <TouchableOpacity
                 disabled={saving}
                 onPress={handleSave}
@@ -495,7 +506,7 @@ function EditOrderModal({ visible, order, onClose, onSaveSuccess, colors, styles
               >
                 <Text style={styles.saveBtnText}>{saving ? 'Recalculating & Saving…' : 'Save Order Changes'}</Text>
               </TouchableOpacity>
-            )}
+            ) : null}
           </View>
         </View>
       </View>
@@ -587,16 +598,16 @@ function BranchTransfersQueue({ data, styles, colors, isDark, onShowToast, onOpe
                 <View style={styles.requestProductInfo}>
                   <Text style={[styles.productsSummary, styles.productsSummaryInline]}>{orderProducts(order)}</Text>
                   <View style={styles.requestDeliveryInfo}>
-                    {!!order.address && <Text style={styles.detailLine}>Delivery: {order.address}</Text>}
+                    {Boolean(order.address) ? <Text style={styles.detailLine}>Delivery: {order.address}</Text> : null}
                     <Text style={styles.detailLine}>Distance: {orderDistance(order)}</Text>
-                    {!!order.transferToBranchName && <Text style={styles.detailLine}>Destination: {order.transferToBranchName}</Text>}
+                    {Boolean(order.transferToBranchName) ? <Text style={styles.detailLine}>Destination: {order.transferToBranchName}</Text> : null}
                     <Text style={styles.detailLine}>Transfer note: {order.transferReason || 'No note provided'}</Text>
                   </View>
                 </View>
                 <View style={styles.orderTotalSummary}>
                   <Text style={styles.totalLabel}>ORDER TOTAL</Text>
                   <Text style={styles.amountText}>{formatAmount(order.totalAtOrder)}</Text>
-                  {!!order.deliveryFeeAtOrder && <Text style={styles.deliveryFeeText}>Includes {formatAmount(order.deliveryFeeAtOrder)} delivery</Text>}
+                  {Boolean(order.deliveryFeeAtOrder) ? <Text style={styles.deliveryFeeText}>Includes {formatAmount(order.deliveryFeeAtOrder)} delivery</Text> : null}
                 </View>
               </View>
 
@@ -621,7 +632,7 @@ function BranchTransfersQueue({ data, styles, colors, isDark, onShowToast, onOpe
                 </ManagerActionButton>
               </View>
 
-              {isDeclining && (
+              {Boolean(isDeclining) ? (
                 <View style={styles.declineBox}>
                   <TextInput
                     value={declineReason}
@@ -639,7 +650,7 @@ function BranchTransfersQueue({ data, styles, colors, isDark, onShowToast, onOpe
                     <Text style={styles.confirmDeclineText}>Confirm Decline</Text>
                   </TouchableOpacity>
                 </View>
-              )}
+              ) : null}
             </View>
           );
         })
@@ -649,7 +660,7 @@ function BranchTransfersQueue({ data, styles, colors, isDark, onShowToast, onOpe
       <View style={[styles.decisionsHeader, { marginTop: 18 }]}>
         <Text style={[styles.subSectionTitle, styles.decisionsHeaderTitle]}>Recent Transfer decisions</Text>
         <ManagerPill>{decisions.length}</ManagerPill>
-        {decisions.length > 0 && (
+        {decisions.length > 0 ? (
           <TouchableOpacity
             accessibilityRole="button"
             accessibilityLabel={`${showTransferDecisions ? 'Hide' : 'Show'} recent transfer decisions`}
@@ -659,7 +670,7 @@ function BranchTransfersQueue({ data, styles, colors, isDark, onShowToast, onOpe
           >
             <Text style={styles.decisionsToggleText}>{showTransferDecisions ? 'Hide' : 'Show'}</Text>
           </TouchableOpacity>
-        )}
+        ) : null}
       </View>
       {decisions.length === 0 ? (
         <BlueTapEmptyState
@@ -688,10 +699,10 @@ function BranchTransfersQueue({ data, styles, colors, isDark, onShowToast, onOpe
               <Text style={styles.decisionText}>
                 {event.targetBranchName || 'Target branch'} {accepted ? 'accepted' : 'declined'} the transfer.
               </Text>
-              {!!scheduleLabel(event.decidedAt) && <Text style={styles.detailLine}>{scheduleLabel(event.decidedAt)}</Text>}
-              {!accepted && !!event.declineReason && (
+              {Boolean(scheduleLabel(event.decidedAt)) ? <Text style={styles.detailLine}>{scheduleLabel(event.decidedAt)}</Text> : null}
+              {!accepted && event.declineReason ? (
                 <Text style={styles.declineReasonText}>Reason: {event.declineReason}</Text>
-              )}
+              ) : null}
             </View>
           );
         })
@@ -739,7 +750,7 @@ function ReceivedRequestsQueue({ orders, loading, styles, colors, isDark, onShow
         </View>
         <ManagerPill tone="warning">{orders.length} pending</ManagerPill>
       </View>
-      {!!error && <View accessibilityRole="alert" style={styles.errorBanner}><Text style={styles.errorBannerText}>{error}</Text></View>}
+      {Boolean(error) ? <View accessibilityRole="alert" style={styles.errorBanner}><Text style={styles.errorBannerText}>{error}</Text></View> : null}
       {loading ? <View style={styles.emptyContainer}><ActivityIndicator color={colors.primary} /></View> : presentedOrders.length === 0 ? (
         <BlueTapEmptyState
           compact
@@ -769,15 +780,15 @@ function ReceivedRequestsQueue({ orders, loading, styles, colors, isDark, onShow
                 <Text style={[styles.productsSummary, styles.productsSummaryInline]}>{orderProducts(order)}</Text>
                 <View style={styles.requestDeliveryInfo}>
                   <Text style={styles.detailLine}>Delivery: {order.address || 'Address provided'}</Text>
-                  <Text style={styles.detailLine}>Distance: {orderDistance(order)}</Text>
+                  {order.distanceKmSnapshot != null ? <Text style={styles.detailLine}>Distance: {orderDistance(order)}</Text> : null}
                 </View>
               </View>
               <View style={styles.orderTotalSummary}>
                 <Text style={styles.totalLabel}>ORDER TOTAL</Text>
                 <Text style={styles.amountText}>{formatAmount(order.totalAtOrder)}</Text>
-                {!!order.deliveryFeeAtOrder && (
+                {Boolean(order.deliveryFeeAtOrder) ? (
                   <Text style={styles.deliveryFeeText}>Includes {formatAmount(order.deliveryFeeAtOrder)} delivery</Text>
-                )}
+                ) : null}
               </View>
             </View>
             <View style={[styles.actionRow, styles.requestActionRow]}>
@@ -794,12 +805,14 @@ function ReceivedRequestsQueue({ orders, loading, styles, colors, isDark, onShow
                 <Text style={styles.declineButtonText}>Reject</Text>
                 </ManagerActionButton>
             </View>
-            {rejectingId === entry.id && !entry.actionsDisabled && <View style={styles.declineBox}>
-              <TextInput value={reason} onChangeText={setReason} maxLength={240} multiline placeholder="Reason shown to the requester" placeholderTextColor={colors.placeholder} style={styles.inputField} />
-              <TouchableOpacity disabled={!!updatingId} onPress={() => decide(entry.item, 'reject-order')} style={styles.confirmDeclineBtn}>
-                <Text style={styles.confirmDeclineText}>Confirm Rejection</Text>
-              </TouchableOpacity>
-            </View>}
+            {Boolean(rejectingId === entry.id && !entry.actionsDisabled) ? (
+              <View style={styles.declineBox}>
+                <TextInput value={reason} onChangeText={setReason} maxLength={240} multiline placeholder="Reason shown to the requester" placeholderTextColor={colors.placeholder} style={styles.inputField} />
+                <TouchableOpacity disabled={!!updatingId} onPress={() => decide(entry.item, 'reject-order')} style={styles.confirmDeclineBtn}>
+                  <Text style={styles.confirmDeclineText}>Confirm Rejection</Text>
+                </TouchableOpacity>
+              </View>
+            ) : null}
           </View></AnimatedPresenceItem>;
           })}
         </ScrollView>
@@ -808,21 +821,97 @@ function ReceivedRequestsQueue({ orders, loading, styles, colors, isDark, onShow
   );
 }
 
-function BranchOrdersOverview({ data, loading, styles, colors, isDark, onOpenOrder }) {
+const normalizeOrdersTab = (value) => {
+  const key = String(value || '').trim().toLowerCase();
+  if (key === 'pending' || key === 'ongoing' || key === 'completed' || key === 'all') {
+    return key;
+  }
+  return 'all';
+};
+
+function BranchOrdersOverview({ data, loading, styles, colors, isDark, onOpenOrder, initialFilter = '', viewAllTick = 0 }) {
   const [filter, setFilter] = useState('');
+  const [statusTab, setStatusTab] = useState(() => normalizeOrdersTab(initialFilter));
+
+  useEffect(() => {
+    if (initialFilter) {
+      setStatusTab(normalizeOrdersTab(initialFilter));
+    }
+  }, [initialFilter]);
+
+  useEffect(() => {
+    if (viewAllTick > 0) {
+      setStatusTab('ongoing');
+    }
+  }, [viewAllTick]);
+
+  const activeMergedOrders = useMemo(() => {
+    const map = new Map();
+    (data.ongoing || []).forEach((order) => {
+      if (order?.id) map.set(order.id, order);
+    });
+    (data.orders || []).forEach((order) => {
+      if (order?.id && !map.has(order.id)) map.set(order.id, order);
+    });
+    return Array.from(map.values());
+  }, [data.ongoing, data.orders]);
+
+  const tabCounts = useMemo(
+    () => ({
+      all: activeMergedOrders.length,
+      pending: (data.pendingOrders || []).length,
+      ongoing: (data.ongoing || []).length,
+      completed: (data.completed || []).length,
+    }),
+    [activeMergedOrders.length, data.completed, data.ongoing, data.pendingOrders]
+  );
 
   const orders = useMemo(() => {
-    const all = (data.orders || []).filter((order) => EDITABLE_STATUSES.has(order.status));
-    if (!filter.trim()) return all;
+    let baseList = activeMergedOrders;
+    if (statusTab === 'pending') {
+      baseList = data.pendingOrders || [];
+    } else if (statusTab === 'ongoing') {
+      baseList = data.ongoing || [];
+    } else if (statusTab === 'completed') {
+      baseList = data.completed || [];
+    }
+    if (!filter.trim()) return baseList;
     const term = filter.trim().toLowerCase();
-    return all.filter(
+    return baseList.filter(
       (o) =>
         (o.requesterName && o.requesterName.toLowerCase().includes(term)) ||
         (o.requestId && o.requestId.toLowerCase().includes(term)) ||
-        (o.address && o.address.toLowerCase().includes(term))
+        (o.address && o.address.toLowerCase().includes(term)) ||
+        (o.assignedDistributorName && o.assignedDistributorName.toLowerCase().includes(term)) ||
+        (o.assignedDistributorUniqueId && o.assignedDistributorUniqueId.toLowerCase().includes(term))
     );
-  }, [data.orders, filter]);
+  }, [activeMergedOrders, data.completed, data.ongoing, data.pendingOrders, filter, statusTab]);
   const presentedOrders = useAnimatedPresenceList(orders, (order) => order.id);
+
+  const statusTabs = [
+    { key: 'all', label: `All Active (${tabCounts.all})` },
+    { key: 'pending', label: `Pending (${tabCounts.pending})` },
+    { key: 'ongoing', label: `Ongoing (${tabCounts.ongoing})` },
+    { key: 'completed', label: `Completed (${tabCounts.completed})` },
+  ];
+
+  const emptyTitle =
+    statusTab === 'ongoing'
+      ? 'No ongoing requests'
+      : statusTab === 'pending'
+      ? 'No pending branch orders'
+      : statusTab === 'completed'
+      ? 'No completed branch orders'
+      : 'No active branch orders';
+
+  const emptyDescription =
+    statusTab === 'ongoing'
+      ? 'Assigned deliveries will appear here once they are in progress.'
+      : statusTab === 'pending'
+      ? 'Requests awaiting review or distributor assignment will appear here.'
+      : statusTab === 'completed'
+      ? 'Delivered, cancelled, and declined branch orders will appear here.'
+      : 'Orders eligible for review or adjustment will appear here.';
 
   return (
     <View style={styles.card}>
@@ -831,17 +920,61 @@ function BranchOrdersOverview({ data, loading, styles, colors, isDark, onOpenOrd
           <Text style={styles.eyebrow}>BRANCH MANAGEMENT</Text>
           <Text style={styles.cardTitle}>Branch Orders & Situational Edits</Text>
           <Text style={styles.helperText}>
-            Review active branch orders and make eligible pre-delivery adjustments.
+            Review active branch orders, monitor ongoing deliveries, and make eligible pre-delivery adjustments.
           </Text>
         </View>
-        <ManagerPill>{orders.length} active</ManagerPill>
+        <ManagerPill>
+          {statusTab === 'ongoing'
+            ? `${orders.length} ongoing`
+            : statusTab === 'pending'
+            ? `${orders.length} pending`
+            : statusTab === 'completed'
+            ? `${orders.length} completed`
+            : `${orders.length} active`}
+        </ManagerPill>
+      </View>
+
+      <View style={styles.pillGroup} accessibilityRole="tablist">
+        {statusTabs.map((tab) => {
+          const selected = statusTab === tab.key;
+          return (
+            <TouchableOpacity
+              key={tab.key}
+              accessibilityRole="tab"
+              accessibilityState={{ selected }}
+              accessibilitySelected={selected}
+              aria-selected={selected}
+              accessibilityLabel={`Filter branch orders by ${tab.key}`}
+              onPress={() => setStatusTab(tab.key)}
+              style={[
+                styles.schedulePill,
+                selected && {
+                  backgroundColor: colors.primaryAction,
+                  borderColor: colors.primary,
+                },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.schedulePillText,
+                  selected && {
+                    color: '#FFFFFF',
+                    fontWeight: '800',
+                  },
+                ]}
+              >
+                {tab.label}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
       </View>
 
       <View style={styles.searchBarWrap}>
         <TextInput
           value={filter}
           onChangeText={setFilter}
-          placeholder="Filter orders by requester, ID, address..."
+          placeholder="Filter orders by requester, ID, distributor, address..."
           placeholderTextColor={colors.placeholder}
           style={styles.searchInput}
         />
@@ -851,8 +984,8 @@ function BranchOrdersOverview({ data, loading, styles, colors, isDark, onOpenOrd
         <BlueTapEmptyState
           compact
           variant="management"
-          title="No active branch orders"
-          description="Orders eligible for review or adjustment will appear here."
+          title={emptyTitle}
+          description={emptyDescription}
           themeColors={colors}
           dark={isDark}
           style={styles.visualEmpty}
@@ -862,6 +995,9 @@ function BranchOrdersOverview({ data, loading, styles, colors, isDark, onOpenOrd
         {presentedOrders.map((entry) => {
           const order = entry.item;
           const isEditable = EDITABLE_STATUSES.has(order.status);
+          const scheduleSummary = order.scheduledDate
+            ? `${order.scheduledDate}${order.scheduledWindow ? ` · ${order.scheduledWindow}` : ''}`
+            : scheduleLabel(order.scheduledAt);
           return (
             <AnimatedPresenceItem key={entry.id} phase={entry.phase}>
             <View style={styles.orderItem}>
@@ -879,16 +1015,25 @@ function BranchOrdersOverview({ data, loading, styles, colors, isDark, onOpenOrd
                 <View style={styles.requestProductInfo}>
                   <Text style={[styles.productsSummary, styles.productsSummaryInline]}>{orderProducts(order)}</Text>
                   <View style={styles.requestDeliveryInfo}>
+                    {Boolean(order.assignedDistributorName || order.assignedDistributorUid) ? (
+                      <Text style={styles.detailLine}>
+                        Distributor: {order.assignedDistributorName || 'Assigned Distributor'}
+                        {order.assignedDistributorUniqueId ? ` (${order.assignedDistributorUniqueId})` : ''}
+                      </Text>
+                    ) : null}
+                    {Boolean(scheduleSummary) ? (
+                      <Text style={styles.detailLine}>Schedule: {scheduleSummary}</Text>
+                    ) : null}
                     <Text style={styles.detailLine}>Delivery: {order.address || 'Address provided'}</Text>
-                    {order.distanceKmSnapshot != null && <Text style={styles.detailLine}>Distance: {orderDistance(order)}</Text>}
+                    {order.distanceKmSnapshot != null ? <Text style={styles.detailLine}>Distance: {orderDistance(order)}</Text> : null}
                   </View>
                 </View>
                 <View style={styles.orderTotalSummary}>
                   <Text style={styles.totalLabel}>ORDER TOTAL</Text>
                   <Text style={styles.amountText}>{formatAmount(order.totalAtOrder)}</Text>
-                  {!!order.deliveryFeeAtOrder && (
+                  {Boolean(order.deliveryFeeAtOrder) ? (
                     <Text style={styles.deliveryFeeText}>Includes {formatAmount(order.deliveryFeeAtOrder)} delivery</Text>
-                  )}
+                  ) : null}
                 </View>
               </View>
               <View style={[styles.actionRow, styles.requestActionRow]}>
@@ -910,6 +1055,7 @@ function BranchOrdersOverview({ data, loading, styles, colors, isDark, onOpenOrd
 
 export default function ManagerRequestPage() {
   const params = useLocalSearchParams();
+  const requestedFilter = Array.isArray(params.filter) ? params.filter[0] : params.filter;
   const { colors, resolvedTheme } = useAdminTheme();
   const { width } = useWindowDimensions();
   const styles = createStyles(colors, width);
@@ -921,15 +1067,19 @@ export default function ManagerRequestPage() {
   const openedParamRef = useRef('');
   const contentScrollRef = useRef(null);
   const targetHighlightTimerRef = useRef(null);
+  const { viewAllTick = 0 } = useManagerOngoingRequests();
   const realtime = useManagerRealtimeData();
   const dispatchData = useMemo(() => {
     const queues = getManagerQueues(realtime.requests, realtime.incomingTransfers, realtime.branchId);
     const branchLocation = Number.isFinite(Number(realtime.branch?.latitude)) && Number.isFinite(Number(realtime.branch?.longitude))
       ? { latitude: Number(realtime.branch.latitude), longitude: Number(realtime.branch.longitude) }
       : null;
-    const mapOrder = (order) => ({ ...toManagerOrder(order.id, order, realtime.branch?.name || ''), branchLocation });
+    const mapOrder = (order) => ({ ...toManagerOrder(order.id, order, realtime.branch?.name || '', realtime.users), branchLocation });
     return {
       orders: queues.editable.map(mapOrder),
+      ongoing: queues.ongoing.map(mapOrder),
+      pendingOrders: queues.pendingOrders.map(mapOrder),
+      completed: queues.completed.map(mapOrder),
       review: queues.review.map(mapOrder),
       exceptions: queues.exceptions.map(mapOrder),
       incomingTransfers: queues.incomingTransfers.map(mapOrder),
@@ -946,16 +1096,16 @@ export default function ManagerRequestPage() {
     const branchLocation = Number.isFinite(Number(realtime.branch?.latitude)) && Number.isFinite(Number(realtime.branch?.longitude))
       ? { latitude: Number(realtime.branch.latitude), longitude: Number(realtime.branch.longitude) }
       : null;
-    return live ? { ...toManagerOrder(live.id, live, realtime.branch?.name || ''), branchLocation } : selectedOrderSnapshot;
-  }, [realtime.branch?.name, realtime.requests, selectedOrderSnapshot]);
+    return live ? { ...toManagerOrder(live.id, live, realtime.branch?.name || '', realtime.users), branchLocation } : selectedOrderSnapshot;
+  }, [realtime.branch?. latitude, realtime.branch?.longitude, realtime.branch?.name, realtime.requests, realtime.users, selectedOrderSnapshot]);
   const notificationTarget = useMemo(() => {
     if (!notificationTargetSnapshot) return null;
     const live = [...realtime.requests, ...realtime.incomingTransfers].find((order) => String(order.id || order.requestId) === String(notificationTargetSnapshot.id || notificationTargetSnapshot.requestId));
     const branchLocation = Number.isFinite(Number(realtime.branch?.latitude)) && Number.isFinite(Number(realtime.branch?.longitude))
       ? { latitude: Number(realtime.branch.latitude), longitude: Number(realtime.branch.longitude) }
       : null;
-    return live ? { ...toManagerOrder(live.id, live, realtime.branch?.name || ''), branchLocation } : notificationTargetSnapshot;
-  }, [notificationTargetSnapshot, realtime.branch?.latitude, realtime.branch?.longitude, realtime.branch?.name, realtime.incomingTransfers, realtime.requests]);
+    return live ? { ...toManagerOrder(live.id, live, realtime.branch?.name || '', realtime.users), branchLocation } : notificationTargetSnapshot;
+  }, [notificationTargetSnapshot, realtime.branch?.latitude, realtime.branch?.longitude, realtime.branch?.name, realtime.incomingTransfers, realtime.requests, realtime.users]);
 
   const showToast = (message, type = 'success') => {
     setToast({ visible: true, message, type });
@@ -985,14 +1135,14 @@ export default function ManagerRequestPage() {
         ? { latitude: Number(realtime.branch.latitude), longitude: Number(realtime.branch.longitude) }
         : null;
       openedParamRef.current = String(requestedOrderId);
-      setNotificationTarget({ ...toManagerOrder(authorizedSource.id, authorizedSource, realtime.branch?.name || ''), branchLocation });
+      setNotificationTarget({ ...toManagerOrder(authorizedSource.id, authorizedSource, realtime.branch?.name || '', realtime.users), branchLocation });
       setTargetHighlighted(true);
       setToast({ visible: true, message: 'The order from your notification is highlighted below.', type: 'info' });
       setTimeout(() => contentScrollRef.current?.scrollTo?.({ y: 0, animated: true }), 60);
       if (targetHighlightTimerRef.current) clearTimeout(targetHighlightTimerRef.current);
       targetHighlightTimerRef.current = setTimeout(() => setTargetHighlighted(false), 6000);
     }
-  }, [params.orderId, realtime.branch, realtime.branchId, realtime.incomingTransfers, realtime.requests]);
+  }, [params.orderId, realtime.branch, realtime.branchId, realtime.incomingTransfers, realtime.requests, realtime.users]);
 
   return (
     <ManagerShell
@@ -1007,7 +1157,7 @@ export default function ManagerRequestPage() {
         type={toast.type}
         onDismiss={() => setToast((t) => ({ ...t, visible: false }))}
       />
-      {!!notificationTarget && (
+      {Boolean(notificationTarget) ? (
         <View style={[styles.notificationTargetCard, targetHighlighted && styles.notificationTargetHighlighted]}>
           <View style={styles.notificationTargetHeader}>
             <View style={{ flex: 1, minWidth: 0 }}>
@@ -1023,7 +1173,7 @@ export default function ManagerRequestPage() {
             <Text style={styles.notificationTargetButtonText}>View Target Order</Text>
           </TouchableOpacity>
         </View>
-      )}
+      ) : null}
       {/* 1. Received Requests */}
       <ReceivedRequestsQueue
         orders={dispatchData.review}
@@ -1039,7 +1189,16 @@ export default function ManagerRequestPage() {
       <OutsideRadiusApprovalQueue orders={dispatchData.exceptions} loading={realtime.loading} styles={styles} colors={colors} isDark={resolvedTheme === 'dark'} onShowToast={showToast} onOpenOrder={handleOpenOrder} />
 
       {/* 3. Branch Orders Overview & Situational Order Edit */}
-      <BranchOrdersOverview data={dispatchData} loading={realtime.loading} styles={styles} colors={colors} isDark={resolvedTheme === 'dark'} onOpenOrder={handleOpenOrder} />
+      <BranchOrdersOverview
+        data={dispatchData}
+        loading={realtime.loading}
+        styles={styles}
+        colors={colors}
+        isDark={resolvedTheme === 'dark'}
+        onOpenOrder={handleOpenOrder}
+        initialFilter={requestedFilter}
+        viewAllTick={viewAllTick}
+      />
 
       {/* 4. Branch Transfers Queue */}
       <BranchTransfersQueue data={dispatchData} styles={styles} colors={colors} isDark={resolvedTheme === 'dark'} onShowToast={showToast} onOpenOrder={handleOpenOrder} />

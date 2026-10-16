@@ -17,6 +17,7 @@ import { usePathname } from 'expo-router';
 import { BLUETAP_COLORS } from '../constants/bluetapTheme';
 import { useAdminTheme } from './AdminTheme';
 import AdminIcon from './AdminIcon';
+import SidebarIcon, { MANAGER_SIDEBAR_ICONS } from './SidebarIcon';
 import { getModuleSession, signOutAndClearSessions } from '../services/authSession';
 import { useManagerRealtimeData } from './ManagerRealtimeData';
 import { useManagerNotifications } from './ManagerNotifications';
@@ -43,14 +44,14 @@ export const MANAGER_COLORS = {
 };
 
 const NAV_ITEMS = [
-  { key: 'dashboard', label: 'Dashboard', path: '/manager/dashboard', icon: 'dashboard' },
-  { key: 'requests', label: 'Requests', path: '/manager/request', icon: 'requests' },
-  { key: 'distributors', label: 'Distributors', path: '/manager/distributors', icon: 'distributors' },
-  { key: 'accounts', label: 'Accounts', path: '/manager/accounts', icon: 'accounts' },
-  { key: 'products', label: 'Products', path: '/manager/products', icon: 'products' },
-  { key: 'analytics', label: 'Analytics', path: '/manager/analytics', icon: 'analytics' },
-  { key: 'reports', label: 'Reports & Safety', path: '/manager/reports-safety', icon: 'security' },
-  { key: 'profile', label: 'Profile', path: '/manager/profile', icon: 'theme' },
+  { key: 'dashboard', label: 'Dashboard', path: '/manager/dashboard' },
+  { key: 'requests', label: 'Requests', path: '/manager/request' },
+  { key: 'distributors', label: 'Distributors', path: '/manager/distributors' },
+  { key: 'accounts', label: 'Accounts', path: '/manager/accounts' },
+  { key: 'products', label: 'Products', path: '/manager/products' },
+  { key: 'analytics', label: 'Analytics', path: '/manager/analytics' },
+  { key: 'reports', label: 'Reports & Safety', path: '/manager/reports-safety' },
+  { key: 'profile', label: 'Profile', path: '/manager/profile' },
 ];
 
 const DESKTOP_WIDTH = 244;
@@ -144,7 +145,7 @@ function SidebarLogoutControl({ collapsed, onPress, colors }) {
         onPress={onPress}
         style={[styles.logout, collapsed && styles.logoutCollapsed, { borderTopColor: colors.sidebarBorder }]}
       >
-        <AdminIcon name="logout" size={21} color="#FFD7D7" />
+        <SidebarIcon name="LogOut" size={20} color={colors.onPrimary} />
         {!collapsed && <Text style={styles.logoutText}>Log out</Text>}
       </TouchableOpacity>
     </View>
@@ -324,20 +325,20 @@ export default function ManagerShell({
                   },
                 ]}
               >
-                <AdminIcon name={item.icon} size={20} color={isActive ? '#FFFFFF' : '#CBEAFF'} />
+                <SidebarIcon name={MANAGER_SIDEBAR_ICONS[item.key]} size={20} color={colors.onPrimary} />
                 {!isCollapsed && (
                   <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingRight: 4 }}>
                     <Text numberOfLines={1} style={styles.navText}>
                       {item.label}
                     </Text>
-                    {(isReq || isDispatch || isReports) && (
+                    {Boolean(isReq || isDispatch || isReports) ? (
                       <View style={[styles.badgePill, { backgroundColor: count > 0 ? colors.warning : 'rgba(255,255,255,0.2)' }]}>
                         <Text style={styles.badgePillText}>{count}</Text>
                       </View>
-                    )}
+                    ) : null}
                   </View>
                 )}
-                {isActive && <View style={styles.activeMarker} />}
+                {Boolean(isActive) ? <View style={styles.activeMarker} /> : null}
               </TouchableOpacity>
             </View>
           );
@@ -369,10 +370,10 @@ export default function ManagerShell({
               onPress={toggleNavigation}
               style={[styles.menuButton, { backgroundColor: colors.primarySoft, borderColor: colors.border }]}
             >
-              <AdminIcon
-                name={compact ? (drawerOpen ? 'close' : 'menu') : (collapsed ? 'menu' : 'close')}
+              <SidebarIcon
+                name={compact ? (drawerOpen ? 'X' : 'Menu') : (collapsed ? 'Menu' : 'X')}
                 color={colors.primary}
-                size={23}
+                size={20}
               />
             </TouchableOpacity>
 
@@ -583,9 +584,9 @@ const styles = StyleSheet.create({
   notificationIcon: { width: 22, height: 22 },
   notificationCount: { position: 'absolute', right: 1, top: 1, minWidth: 18, height: 18, paddingHorizontal: 3, borderRadius: 10, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
   notificationCountText: { color: '#FFFFFF', fontSize: 10, fontWeight: '900' },
-  content: { paddingHorizontal: 28, paddingBottom: 32, paddingTop: 14, flexGrow: 1 },
+  content: { paddingHorizontal: 28, paddingBottom: 148, paddingTop: 14, flexGrow: 1 },
   contentEntry: { flexGrow: 1 },
-  compactContent: { paddingHorizontal: 14 },
+  compactContent: { paddingHorizontal: 14, paddingBottom: 156 },
   backdrop: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, zIndex: 3 },
   modalBackdrop: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 20 },
   modal: { width: '100%', maxWidth: 420, borderWidth: 1, borderRadius: 18, padding: 22 },

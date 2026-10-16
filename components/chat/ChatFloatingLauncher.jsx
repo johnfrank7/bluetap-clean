@@ -4,12 +4,14 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { usePathname } from 'expo-router';
 
 import { USER_PORTAL_LAYOUT } from '../../constants/userPortalLayout';
+import { ManagerOngoingRequestsButton, useManagerOngoingRequests } from '../ManagerOngoingRequestsMonitor';
 import BlueTapChatIcon from './BlueTapChatIcon';
 import { useChat } from './ChatContext';
 import ChatPanel from './ChatPanel';
 
 export default function ChatFloatingLauncher() {
   const { colors, openChat, panelOpen, role, totalUnread, totalUnreadLabel } = useChat();
+  const { isOpen: monitorOpen } = useManagerOngoingRequests();
   const pathname = usePathname();
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
@@ -52,8 +54,11 @@ export default function ChatFloatingLauncher() {
     : 24 + insets.bottom;
   return (
     <View pointerEvents="box-none" style={StyleSheet.absoluteFill}>
-      {!panelOpen && !isAssistantRoute && (
+      {!panelOpen && !monitorOpen && !isAssistantRoute && (
         <Animated.View style={[styles.launcherPosition, { right, bottom, transform: [{ translateY: floatOffset }] }]}>
+          {role === 'manager' && (
+            <ManagerOngoingRequestsButton onInteractChange={setInteracting} />
+          )}
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={`Open BlueTap messages${totalUnread ? `, ${totalUnread} unread` : ''}`}
@@ -79,7 +84,7 @@ export default function ChatFloatingLauncher() {
 }
 
 const styles = StyleSheet.create({
-  launcherPosition: { position: 'absolute', zIndex: 90 },
+  launcherPosition: { position: 'absolute', zIndex: 90, alignItems: 'center', gap: 12 },
   launcher: { width: 54, height: 54, borderRadius: 27, borderWidth: 2, alignItems: 'center', justifyContent: 'center', shadowColor: '#07131F', shadowOpacity: 0.22, shadowRadius: 10, shadowOffset: { width: 0, height: 5 }, elevation: 10 },
   hovered: { opacity: 0.94 },
   focused: { borderWidth: 3 },

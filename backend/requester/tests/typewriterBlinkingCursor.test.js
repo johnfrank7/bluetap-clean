@@ -75,3 +75,30 @@ test('Phase 13B.3 stability: clock updates do not restart animation and reduced-
   assert.match(dashboard, /numberOfLines=\{1\}/);
   assert.match(dashboard, /ellipsizeMode="tail"/);
 });
+
+test('Distributor dashboard mirrors the timed typewriter greeting and reduced-motion behavior', () => {
+  const dashboard = read('app', 'distributor', 'd_dashboard.jsx');
+
+  assert.match(dashboard, /const GREETING_TYPING_SPEED = 65;/);
+  assert.match(dashboard, /const GREETING_BACKSPACING_SPEED = 25;/);
+  assert.match(dashboard, /const GREETING_DEFAULT_HOLD = 5000;/);
+  assert.match(dashboard, /const GREETING_PROMO_HOLD = 3000;/);
+  assert.match(dashboard, /const GREETING_ERASE_PAUSE = 250;/);
+  assert.match(dashboard, /const GREETING_CURSOR_BLINK_INTERVAL = 500;/);
+  assert.match(dashboard, /"Ready for today's deliveries\?"/);
+  assert.match(dashboard, /'Keep your deliveries on track\.'/);
+  assert.match(dashboard, /'Stay updated with every request\.'/);
+  assert.match(dashboard, /phraseIndex = \(phraseIndex \+ 1\) % \(GREETING_PROMO_PHRASES\.length \+ 1\)/);
+  assert.match(dashboard, /const textRef = useRef\(text\);/);
+  assert.match(dashboard, /\}, \[reduceMotion\]\);/);
+  assert.match(dashboard, /if \(reduceMotion\) \{\s*setDisplayed\(textRef\.current\);\s*setCursorVisible\(false\);\s*return;/);
+  assert.match(dashboard, /if \(timeoutId\) clearTimeout\(timeoutId\);/);
+  assert.match(dashboard, /if \(blinkIntervalId\) clearInterval\(blinkIntervalId\);/);
+  assert.match(dashboard, /text=\{`\$\{liveGreeting\}, Distributor!`\}/);
+  assert.match(dashboard, /width < 360 && styles\.greetingTextCompact/);
+  assert.match(dashboard, /greetingTextCompact:[\s\S]{0,60}fontSize: 14/);
+  assert.match(dashboard, /multiline=\{width < 480\}/);
+  assert.match(dashboard, /numberOfLines=\{multiline \? 2 : 1\}/);
+  assert.match(dashboard, /greetingWrapperMultiline:[\s\S]{0,80}minHeight: 44,[\s\S]{0,60}justifyContent: 'flex-start'/);
+  assert.doesNotMatch(dashboard, /ellipsizeMode=/);
+});

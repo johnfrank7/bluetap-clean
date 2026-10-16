@@ -1,5 +1,6 @@
 import React from 'react';
-import { Animated, Easing, Platform, StyleSheet, Text, View } from 'react-native';
+import { Animated, Easing, Platform, StyleSheet, View } from 'react-native';
+import SidebarIcon from './SidebarIcon';
 
 export default function ThemeSwitchVisual({ colors, isDark }) {
   const position = React.useRef(new Animated.Value(isDark ? 1 : 0)).current;
@@ -40,10 +41,7 @@ export default function ThemeSwitchVisual({ colors, isDark }) {
             ],
           }}
         >
-          <View style={styles.iconComposition}>
-            <Text style={[styles.icon, { color: isDark ? '#0F172A' : '#F59E0B' }]}>{isDark ? '\u263E' : '\u2600'}</Text>
-            {isDark && <Text style={styles.moonStar}>{'\u2726'}</Text>}
-          </View>
+          <SidebarIcon name={isDark ? 'Moon' : 'Sun'} size={14} color={colors.primaryAction} />
         </Animated.View>
       </Animated.View>
     </View>
@@ -68,7 +66,4 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 1 },
     elevation: 2,
   },
-  icon: { fontSize: 10, textAlign: 'center', lineHeight: 16, fontWeight: '900' },
-  iconComposition: { width: 16, height: 16, alignItems: 'center', justifyContent: 'center', position: 'relative' },
-  moonStar: { position: 'absolute', right: -1, top: -3, color: '#F4B942', fontSize: 6, lineHeight: 8, fontWeight: '900' },
 });

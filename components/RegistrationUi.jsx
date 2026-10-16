@@ -3,6 +3,7 @@ import { ActivityIndicator, Animated, Easing, Image, StyleSheet, Text, Touchable
 
 import { BLUETAP_COLORS } from '../constants/bluetapTheme';
 import { createPortalStyleSheet } from './BlueTapTheme';
+import BlueTapWordmark from './BlueTapWordmark';
 
 const {
   REGISTRATION_STEP_NUMBERS,
@@ -58,7 +59,7 @@ function AnimatedStepCircle({ state, children }) {
 export function RegistrationBrand() {
   return <View style={styles.brand}>
     <Image source={require('../assets/icons/bluetapwhitelogo.png')} style={styles.logo} resizeMode="contain" />
-    <View><Text style={styles.brandName}>BlueTap</Text><Text style={styles.tagline}>Water Within Reach</Text></View>
+    <View><BlueTapWordmark containerStyle={styles.brandWordmark} style={styles.brandName}>BlueTap</BlueTapWordmark><Text style={styles.tagline}>Water Within Reach</Text></View>
   </View>;
 }
 
@@ -169,6 +170,7 @@ export function RegistrationActions({
 
 const styles = createPortalStyleSheet({
   brand: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 18 },
+  brandWordmark: { alignSelf: 'flex-start' },
   logo: { width: 52, height: 52, marginRight: 10 },
   brandName: { color: '#FFF', fontSize: 26, fontWeight: '800', letterSpacing: -0.4 },
   tagline: { color: 'rgba(255,255,255,.88)', fontSize: 13 },

@@ -16,6 +16,8 @@ test('All Products modal provides proper content container spacing and item cont
     /contentContainerStyle=\{styles\.allProductsContentContainer\}/,
     'ScrollView must provide contentContainerStyle for proper item layout and spacing'
   );
+  assert.match(dashboard, /onShow=\{\(\) => allProductsListRef\.current\?\.scrollTo\(\{ y: 0, animated: false \}\)\}/);
+  assert.match(dashboard, /style=\{styles\.allProductsProductCard\}/);
 
   // Verify allProductsContentContainer styles define gap, paddingBottom, and top room
   assert.match(
@@ -40,6 +42,7 @@ test('All Products modal provides proper content container spacing and item cont
     /allProductsItemWrapper:\s*\{[^}]*alignItems:\s*'center'/,
     'allProductsItemWrapper must center the product card'
   );
+  assert.match(dashboard, /allProductsProductCard:\s*\{[^}]*height:\s*380,[^}]*minHeight:\s*380/);
 
   // Verify ProductCard accepts optional custom style
   assert.match(

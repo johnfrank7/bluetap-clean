@@ -4,13 +4,14 @@ import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useProtectedReadSession } from '../services/useProtectedReadSession';
 import { ensureManagerProfile } from '../services/managerProfile';
-const { getManagerQueues, pendingBranchApplications, extractBranchRequesters } = require('../services/managerOperational');
+const { getManagerQueues, pendingBranchApplications, extractBranchRequesters, toManagerOrder } = require('../services/managerOperational');
 
 const emptyState = {
   branch: null,
   profile: null,
   users: [],
   requests: [],
+  ongoingRequests: [],
   incomingTransfers: [],
   applicants: [],
   pendingApplications: [],
@@ -19,6 +20,7 @@ const emptyState = {
   sourceDecisionEvents: [],
   requestsCount: 0,
   dispatchCount: 0,
+  ongoingCount: 0,
   loading: true,
   branchLoading: true,
   profileLoading: true,
@@ -94,17 +96,21 @@ export function ManagerRealtimeDataProvider({ children }) {
     const publish = () => {
       if (!active) return;
       const loading = !(ready.branch && ready.users && ready.requests);
-      const queues = getManagerQueues(current.requests, current.incomingTransfers, branchId);
+      const branchName = current.branch?.name || '';
+      const normalizedOrders = current.requests.map((order) => toManagerOrder(order.id, order, branchName, current.users));
+      const queues = getManagerQueues(normalizedOrders, current.incomingTransfers, branchId);
       const branchRequesters = extractBranchRequesters(current.requests, current.users);
       const next = {
         ...current,
         branchId,
         managerUid,
+        ongoingRequests: queues.ongoing,
         requesters: branchRequesters,
         branchRequestersCount: branchRequesters.length,
         pendingApplications: pendingBranchApplications(current.applicants, branchId),
         requestsCount: queues.requestsCount,
         dispatchCount: queues.dispatchCount,
+        ongoingCount: queues.ongoingCount,
         loading,
         branchLoading: !ready.branch && !current.branch,
         profileLoading: !ready.profile && !current.profile,

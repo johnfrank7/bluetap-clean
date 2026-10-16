@@ -1,8 +1,11 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
+  AccessibilityInfo,
   Animated,
+  Easing,
   Image,
   Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -21,6 +24,7 @@ import {
   BLUETAP_LIGHT_PORTAL_COLORS,
 } from '../constants/bluetapTheme';
 import { useBlueTapTheme } from '../components/BlueTapTheme';
+import BlueTapWordmark from '../components/BlueTapWordmark';
 import ThemeIconButton from '../components/ThemeIconButton';
 import { warmFaceServiceForSignup } from '../services/apiWarmup';
 import { prefetchRegistrationPolicy } from '../services/registrationSession';
@@ -65,42 +69,171 @@ const steps = [
   {
     number: '01',
     title: 'Choose Your Water',
-    text: 'Browse the available products from your water provider.',
+    text: 'Browse available water products from your selected water station.',
   },
   {
     number: '02',
     title: 'Send Your Request',
-    text: 'Choose your quantity, container, and delivery date.',
+    text: 'Select products, quantities, a container option, and your delivery location.',
   },
   {
     number: '03',
-    title: 'Track Your Order',
-    text: 'Stay updated as your order moves from your water provider to your doorstep.',
+    title: 'Track and Connect',
+    text: 'Follow request status and use in-app chat when a conversation is available.',
   },
 ];
 
 const features = [
   {
-    icon: '✓',
-    title: 'Convenient Ordering',
-    text: 'Request water anytime without visiting the station.',
+    icon: '01',
+    title: 'Digital water requests',
+    text: 'Choose branch products and send your request from one place.',
   },
   {
-    icon: '⌂',
-    title: 'Trusted Water Provider',
-    text: 'Order directly from the water business you trust.',
+    icon: '02',
+    title: 'Request tracking',
+    text: 'Review current requests, status updates, and request history.',
   },
   {
-    icon: '≡',
-    title: 'Clear Order Details',
-    text: 'See your products, quantities, costs, and delivery information.',
+    icon: '03',
+    title: 'Location and distance',
+    text: 'Explore provider branches on a map with estimated straight-line distances.',
   },
   {
-    icon: '+',
-    title: 'Built for Communities',
-    text: 'BlueTap helps connect households and local water distributors.',
+    icon: '04',
+    title: 'In-app communication',
+    text: 'Connect with the branch or assigned distributor through order chat.',
+  },
+  {
+    icon: '05',
+    title: 'Registration checks',
+    text: 'Complete the verification steps required by the current registration policy.',
+  },
+  {
+    icon: '06',
+    title: 'Coordinated delivery',
+    text: 'Branches review requests and assign deliveries to distributors.',
   },
 ];
+
+const comparisonRows = [
+  ['Messenger orders mixed with personal chats and calls', 'Centralized digital requests for water station branches'],
+  ['Handwritten request and delivery lists that are hard to update', 'Organized product, quantity, and delivery information'],
+  ['Delivery locations shared through separate conversations', 'Map-based branch locations with estimated straight-line distances'],
+  ['Repeated customer follow-ups to check request status', 'Trackable request statuses and delivery progress updates'],
+  ['Customer order history scattered across records and messages', 'Accessible request history and in-app order conversations'],
+  ['Manual distributor assignments with limited progress visibility', 'Coordinated distributor assignments and delivery scheduling'],
+];
+
+function ScrollReveal({ children, delay = 0, reduceMotion = false, style }) {
+  const viewRef = useRef(null);
+  const progress = useRef(new Animated.Value(1)).current;
+  const revealed = useRef(reduceMotion);
+
+  useLayoutEffect(() => {
+    if (reduceMotion) {
+      revealed.current = true;
+      progress.setValue(1);
+      return undefined;
+    }
+
+    if (revealed.current) return undefined;
+
+    if (Platform.OS !== 'web' || typeof IntersectionObserver === 'undefined') {
+      revealed.current = true;
+      progress.setValue(1);
+      return undefined;
+    }
+
+    const animatedView = viewRef.current;
+    const target = animatedView?.getNode?.() || animatedView;
+    if (!target || typeof target.nodeType !== 'number') {
+      revealed.current = true;
+      progress.setValue(1);
+      return undefined;
+    }
+
+    const bounds = target.getBoundingClientRect();
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+    const viewportWidth = window.innerWidth || document.documentElement.clientWidth;
+    const initiallyVisible = bounds.bottom > 0
+      && bounds.top < viewportHeight
+      && bounds.right > 0
+      && bounds.left < viewportWidth;
+
+    if (initiallyVisible) {
+      revealed.current = true;
+      progress.setValue(1);
+      return undefined;
+    }
+
+    let animation;
+    let observer;
+    try {
+      observer = new IntersectionObserver(([entry]) => {
+        if (!entry?.isIntersecting || revealed.current) return;
+        revealed.current = true;
+        observer.unobserve(target);
+        observer.disconnect();
+        animation = Animated.sequence([
+          Animated.delay(delay),
+          Animated.timing(progress, {
+            toValue: 1,
+            duration: 600,
+            easing: Easing.out(Easing.cubic),
+            useNativeDriver: false,
+          }),
+        ]);
+        animation.start();
+      }, { threshold: 0.15 });
+    } catch {
+      revealed.current = true;
+      progress.setValue(1);
+      return undefined;
+    }
+
+    progress.setValue(0);
+    try {
+      observer.observe(target);
+    } catch {
+      observer.disconnect();
+      revealed.current = true;
+      progress.setValue(1);
+      return undefined;
+    }
+    return () => {
+      observer.disconnect();
+      animation?.stop();
+    };
+  }, [delay, progress, reduceMotion]);
+
+  const offset = progress.interpolate({ inputRange: [0, 1], outputRange: [14, 0] });
+
+  return (
+    <Animated.View ref={viewRef} style={[style, { opacity: progress, transform: [{ translateY: offset }] }]}>
+      {children}
+    </Animated.View>
+  );
+}
+
+function HoverLift({ children, reduceMotion = false, style }) {
+  const [hovered, setHovered] = useState(false);
+  const lift = hovered && !reduceMotion;
+
+  return (
+    <View
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={[
+        style,
+        lift && styles.hoverLiftActive,
+        Platform.OS === 'web' && !reduceMotion && styles.hoverLiftTransition,
+      ]}
+    >
+      {children}
+    </View>
+  );
+}
 
 function ActionButton({
   accessibilityLabel,
@@ -108,8 +241,12 @@ function ActionButton({
   label,
   onPress,
   variant = 'primary',
+  hoverLift = false,
+  reduceMotion = false,
   style,
 }) {
+  const [hovered, setHovered] = useState(false);
+  const lifted = hoverLift && hovered && !reduceMotion;
   const buttonColors =
     variant === 'outline'
       ? isDark
@@ -131,9 +268,14 @@ function ActionButton({
       accessibilityRole="button"
       activeOpacity={0.82}
       onPress={onPress}
+      {...(Platform.OS === 'web' && hoverLift
+        ? { onMouseEnter: () => setHovered(true), onMouseLeave: () => setHovered(false) }
+        : {})}
       style={[
         styles.actionButton,
         style,
+        hoverLift && Platform.OS === 'web' && !reduceMotion && styles.hoverLiftTransition,
+        lifted && styles.actionButtonHover,
         {
           backgroundColor: buttonColors.backgroundColor,
           borderColor: buttonColors.borderColor,
@@ -155,9 +297,9 @@ function Brand({ inverse = false, small = false }) {
         style={[styles.brandLogo, small && styles.brandLogoSmall]}
         resizeMode="contain"
       />
-      <Text style={[styles.brandText, inverse && styles.brandTextInverse, small && styles.brandTextSmall]}>
+      <BlueTapWordmark style={[styles.brandText, inverse && styles.brandTextInverse, small && styles.brandTextSmall]}>
         BlueTap
-      </Text>
+      </BlueTapWordmark>
     </View>
   );
 }
@@ -172,12 +314,129 @@ function SectionHeading({ eyebrow, title, text, theme, align = 'left' }) {
   );
 }
 
-function PhoneMockup({ isDark = false }) {
+function HeaderLink({ label, onPress, theme, isDark, login = false }) {
+  const hoverSurface = isDark
+    ? BLUETAP_DARK_PORTAL_COLORS.surfaceElevated
+    : BLUETAP_COLORS.primarySoft;
+
+  return (
+    <Pressable
+      accessibilityLabel={label}
+      accessibilityRole="button"
+      onPress={onPress}
+      style={({ hovered, focused, pressed }) => [
+        login ? styles.loginLinkButton : styles.navLinkButton,
+        styles.headerLink,
+        {
+          backgroundColor: hovered || focused || pressed ? hoverSurface : 'transparent',
+          borderColor: focused ? theme.accent : 'transparent',
+          opacity: pressed ? 0.8 : 1,
+        },
+      ]}
+    >
+      <Text style={[login ? styles.loginLinkText : styles.navLink, { color: login ? theme.accent : theme.text }]}>
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
+function PhoneMockup({ isDark = false, reduceMotion = false }) {
+  const entranceProgress = useRef(new Animated.Value(reduceMotion ? 1 : 0)).current;
+  const floatProgress = useRef(new Animated.Value(0)).current;
+  const acceptedCardProgress = useRef(new Animated.Value(reduceMotion ? 1 : 0)).current;
+  const deliveryCardProgress = useRef(new Animated.Value(reduceMotion ? 1 : 0)).current;
+
+  useEffect(() => {
+    let isActive = true;
+    const animations = [];
+
+    if (reduceMotion) {
+      entranceProgress.setValue(1);
+      floatProgress.setValue(0);
+      acceptedCardProgress.setValue(1);
+      deliveryCardProgress.setValue(1);
+      return () => { isActive = false; };
+    }
+
+    entranceProgress.setValue(0);
+    floatProgress.setValue(0);
+    acceptedCardProgress.setValue(0);
+    deliveryCardProgress.setValue(0);
+
+    const entrance = Animated.timing(entranceProgress, {
+      toValue: 1,
+      duration: 800,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: Platform.OS !== 'web',
+    });
+    const acceptedCardEntrance = Animated.sequence([
+      Animated.delay(820),
+      Animated.timing(acceptedCardProgress, {
+        toValue: 1,
+        duration: 420,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: Platform.OS !== 'web',
+      }),
+    ]);
+    const deliveryCardEntrance = Animated.sequence([
+      Animated.delay(940),
+      Animated.timing(deliveryCardProgress, {
+        toValue: 1,
+        duration: 420,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: Platform.OS !== 'web',
+      }),
+    ]);
+    const float = Animated.loop(Animated.sequence([
+      Animated.timing(floatProgress, {
+        toValue: 1,
+        duration: 2500,
+        easing: Easing.inOut(Easing.ease),
+        useNativeDriver: Platform.OS !== 'web',
+      }),
+      Animated.timing(floatProgress, {
+        toValue: 0,
+        duration: 2500,
+        easing: Easing.inOut(Easing.ease),
+        useNativeDriver: Platform.OS !== 'web',
+      }),
+    ]));
+
+    animations.push(acceptedCardEntrance, deliveryCardEntrance, entrance);
+    acceptedCardEntrance.start();
+    deliveryCardEntrance.start();
+    entrance.start(({ finished }) => {
+      if (finished && isActive) {
+        animations.push(float);
+        float.start();
+      }
+    });
+
+    return () => {
+      isActive = false;
+      animations.forEach((animation) => animation.stop());
+    };
+  }, [acceptedCardProgress, deliveryCardProgress, entranceProgress, floatProgress, reduceMotion]);
+
+  const entranceStyle = {
+    opacity: entranceProgress,
+    transform: [
+      { translateY: entranceProgress.interpolate({ inputRange: [0, 1], outputRange: [18, 0] }) },
+      { scale: entranceProgress.interpolate({ inputRange: [0, 1], outputRange: [0.97, 1] }) },
+    ],
+  };
+  const floatStyle = {
+    transform: [{ translateY: floatProgress.interpolate({ inputRange: [0, 1], outputRange: [0, -7] }) }],
+  };
+
   return (
     <View style={styles.mockupArea}>
       <View pointerEvents="none" style={[styles.heroOrbLarge, isDark && styles.heroOrbLargeDark]} />
       <View pointerEvents="none" style={[styles.heroOrbSmall, isDark && styles.heroOrbSmallDark]} />
 
+      <Animated.View style={[styles.mockupScene, entranceStyle]}>
+        <Animated.View style={[styles.mockupFloatLayer, floatStyle]}>
       <View style={[styles.phoneMockup, isDark && styles.phoneMockupDark]}>
         <View style={styles.phoneTopbar}>
           <View style={styles.phoneBrandMark} />
@@ -190,6 +449,7 @@ function PhoneMockup({ isDark = false }) {
 
         <Text style={[styles.phoneGreeting, isDark && styles.phoneGreetingDark]}>Good morning</Text>
         <Text style={[styles.phoneSubheading, isDark && styles.phoneSubheadingDark]}>Your water, within reach.</Text>
+        <Text style={[styles.previewLabel, { color: isDark ? DARK_THEME.muted : LIGHT_THEME.muted }]}>Illustrative request preview</Text>
 
         <View style={[styles.phoneProductCard, isDark && styles.phoneProductCardDark]}>
           <View style={styles.waterBottle}>
@@ -198,7 +458,7 @@ function PhoneMockup({ isDark = false }) {
           </View>
           <View style={styles.phoneProductCopy}>
             <Text style={[styles.phoneProductTitle, isDark && styles.phoneProductTitleDark]}>Purified Water</Text>
-            <Text style={styles.phoneProductMeta}>5 gallons · ₱30.00</Text>
+            <Text style={[styles.phoneProductMeta, isDark && styles.phoneProductMetaDark]}>Available at your station</Text>
             <View style={styles.phoneOrderButton}>
               <Text style={styles.phoneOrderButtonText}>Order now</Text>
             </View>
@@ -216,57 +476,75 @@ function PhoneMockup({ isDark = false }) {
           <View style={styles.deliveryProgress}>
             <View style={styles.deliveryProgressActive} />
           </View>
-          <Text style={[styles.deliveryText, isDark && styles.deliveryTextDark]}>Your order is being prepared.</Text>
+          <Text style={[styles.deliveryText, isDark && styles.deliveryTextDark]}>Follow updates in your requests.</Text>
         </View>
       </View>
 
-      <View style={[styles.floatingStatus, styles.floatingStatusTop, isDark && styles.floatingStatusDark]}>
+      <Animated.View style={[
+        styles.floatingStatus,
+        styles.floatingStatusTop,
+        isDark && styles.floatingStatusDark,
+        {
+          opacity: acceptedCardProgress,
+          transform: [{ translateY: acceptedCardProgress.interpolate({ inputRange: [0, 1], outputRange: [-8, 0] }) }],
+        },
+      ]}>
         <View style={[styles.floatingIcon, styles.floatingIconBlue]}>
           <Text style={styles.floatingIconText}>✓</Text>
         </View>
         <View>
           <Text style={[styles.floatingStatusTitle, isDark && styles.floatingStatusTitleDark]}>Request accepted</Text>
-          <Text style={[styles.floatingStatusText, isDark && styles.floatingStatusTextDark]}>Your water provider was notified</Text>
+          <Text style={[styles.floatingStatusText, isDark && styles.floatingStatusTextDark]}>Status updated in your requests</Text>
         </View>
-      </View>
+      </Animated.View>
 
-      <View style={[styles.floatingStatus, styles.floatingStatusBottom, isDark && styles.floatingStatusDark]}>
+      <Animated.View style={[
+        styles.floatingStatus,
+        styles.floatingStatusBottom,
+        isDark && styles.floatingStatusDark,
+        {
+          opacity: deliveryCardProgress,
+          transform: [{ translateY: deliveryCardProgress.interpolate({ inputRange: [0, 1], outputRange: [8, 0] }) }],
+        },
+      ]}>
         <View style={[styles.floatingIcon, styles.floatingIconGreen]}>
           <Text style={styles.floatingIconText}>→</Text>
         </View>
         <View>
           <Text style={[styles.floatingStatusTitle, isDark && styles.floatingStatusTitleDark]}>On the way</Text>
-          <Text style={[styles.floatingStatusText, isDark && styles.floatingStatusTextDark]}>Delivery update received</Text>
+          <Text style={[styles.floatingStatusText, isDark && styles.floatingStatusTextDark]}>View the latest delivery status</Text>
         </View>
-      </View>
+      </Animated.View>
+        </Animated.View>
+      </Animated.View>
     </View>
   );
 }
 
-function DistributorMockup({ isDark = false }) {
+function DistributorMockup({ isDark = false, isNarrow = false }) {
   return (
-    <View style={[styles.distributorMockup, isDark && styles.distributorMockupDark]}>
-      <View style={styles.distributorTopbar}>
+    <View style={[styles.distributorMockup, isDark && styles.distributorMockupDark, isNarrow && styles.distributorMockupNarrow]}>
+      <View style={[styles.distributorTopbar, isNarrow && styles.distributorTopbarNarrow]}>
         <View>
-          <Text style={styles.distributorKicker}>BLUE TAP WATER</Text>
-          <Text style={[styles.distributorTitle, isDark && styles.distributorTitleDark]}>Today’s requests</Text>
+          <Text style={[styles.distributorKicker, isDark && styles.distributorKickerDark]}>DISTRIBUTOR VIEW · ILLUSTRATIVE</Text>
+          <Text style={[styles.distributorTitle, isDark && styles.distributorTitleDark]}>Assigned deliveries</Text>
         </View>
-        <View style={styles.distributorBadge}>
-          <Text style={styles.distributorBadgeText}>8 new</Text>
+        <View style={[styles.distributorBadge, isNarrow && styles.distributorBadgeNarrow]}>
+          <Text style={styles.distributorBadgeText}>Sample view</Text>
         </View>
       </View>
 
       <View style={[styles.distributorStatsRow, isDark && styles.distributorStatsRowDark]}>
         <View style={styles.distributorStat}>
-          <Text style={styles.distributorStatValue}>12</Text>
-          <Text style={[styles.distributorStatLabel, isDark && styles.distributorStatLabelDark]}>Requests</Text>
+          <Text style={[styles.distributorWorkflowValue, isDark && styles.distributorWorkflowValueDark]}>01</Text>
+          <Text style={[styles.distributorStatLabel, isDark && styles.distributorStatLabelDark]}>Assigned</Text>
         </View>
         <View style={styles.distributorStat}>
-          <Text style={styles.distributorStatValue}>6</Text>
+          <Text style={[styles.distributorWorkflowValue, isDark && styles.distributorWorkflowValueDark]}>02</Text>
           <Text style={[styles.distributorStatLabel, isDark && styles.distributorStatLabelDark]}>Scheduled</Text>
         </View>
         <View style={styles.distributorStat}>
-          <Text style={styles.distributorStatValue}>4</Text>
+          <Text style={[styles.distributorWorkflowValue, isDark && styles.distributorWorkflowValueDark]}>03</Text>
           <Text style={[styles.distributorStatLabel, isDark && styles.distributorStatLabelDark]}>Delivered</Text>
         </View>
       </View>
@@ -276,11 +554,11 @@ function DistributorMockup({ isDark = false }) {
           <Text style={styles.distributorRequestIconText}>BT</Text>
         </View>
         <View style={styles.distributorRequestCopy}>
-          <Text style={styles.distributorRequestTitle}>6 gallons · New container</Text>
-          <Text style={styles.distributorRequestMeta}>Requested for today</Text>
+          <Text style={[styles.distributorRequestTitle, isDark && styles.distributorRequestTitleDark]}>Assigned water request</Text>
+          <Text style={[styles.distributorRequestMeta, isDark && styles.distributorRequestMetaDark]}>Review delivery details</Text>
         </View>
         <View style={styles.distributorRequestPill}>
-          <Text style={styles.distributorRequestPillText}>Pending</Text>
+          <Text style={styles.distributorRequestPillText}>Assigned</Text>
         </View>
       </View>
 
@@ -289,8 +567,8 @@ function DistributorMockup({ isDark = false }) {
           <Text style={[styles.distributorRequestIconText, styles.distributorRequestIconTextBlue]}>BT</Text>
         </View>
         <View style={styles.distributorRequestCopy}>
-          <Text style={styles.distributorRequestTitle}>4 gallons · Refill</Text>
-          <Text style={styles.distributorRequestMeta}>Scheduled tomorrow</Text>
+          <Text style={[styles.distributorRequestTitle, isDark && styles.distributorRequestTitleDark]}>Scheduled delivery</Text>
+          <Text style={[styles.distributorRequestMeta, isDark && styles.distributorRequestMetaDark]}>Delivery time confirmed</Text>
         </View>
         <View style={[styles.distributorRequestPill, styles.distributorRequestPillBlue]}>
           <Text style={styles.distributorRequestPillTextBlue}>Scheduled</Text>
@@ -304,6 +582,9 @@ function WebLanding({ router, width }) {
   const scrollRef = useRef(null);
   const sectionOffsets = useRef({});
   const { isDark } = useBlueTapTheme();
+  const [reduceMotion, setReduceMotion] = useState(() =>
+    typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true
+  );
   const themeProgress = useRef(new Animated.Value(isDark ? 1 : 0)).current;
   const isDesktop = width >= DESKTOP_BREAKPOINT;
   const isTablet = width >= TABLET_BREAKPOINT && !isDesktop;
@@ -316,12 +597,22 @@ function WebLanding({ router, width }) {
   };
 
   useEffect(() => {
+    AccessibilityInfo.isReduceMotionEnabled().then(setReduceMotion).catch(() => {});
+    const subscription = AccessibilityInfo.addEventListener('reduceMotionChanged', setReduceMotion);
+    return () => subscription?.remove();
+  }, []);
+
+  useEffect(() => {
+    if (reduceMotion) {
+      themeProgress.setValue(isDark ? 1 : 0);
+      return;
+    }
     Animated.timing(themeProgress, {
       toValue: isDark ? 1 : 0,
       duration: 260,
       useNativeDriver: false,
     }).start();
-  }, [isDark, themeProgress]);
+  }, [isDark, reduceMotion, themeProgress]);
 
   const transitionColor = useCallback(
     (light, dark) =>
@@ -341,8 +632,8 @@ function WebLanding({ router, width }) {
 
   const scrollToSection = useCallback((section) => {
     const offset = sectionOffsets.current[section] || 0;
-    scrollRef.current?.scrollTo({ y: Math.max(offset - 12, 0), animated: true });
-  }, []);
+    scrollRef.current?.scrollTo({ y: Math.max(offset - 12, 0), animated: !reduceMotion });
+  }, [reduceMotion]);
 
   const webContentStyle = [
     styles.webContent,
@@ -360,49 +651,54 @@ function WebLanding({ router, width }) {
       >
         <Animated.View style={[styles.navbar, { paddingHorizontal: contentPadding, backgroundColor: transitionColor(LIGHT_THEME.surface, DARK_THEME.surface), borderBottomColor: transitionColor('#E7EFF6', DARK_THEME.border) }]}>
           <View style={styles.navbarContent}>
-            <TouchableOpacity
+            <Pressable
               accessibilityLabel="BlueTap home"
-              activeOpacity={0.8}
+              accessibilityRole="button"
               onPress={() => scrollToSection('home')}
+              style={({ hovered, focused, pressed }) => [
+                styles.brandButton,
+                { opacity: hovered || pressed ? 0.76 : 1, borderColor: focused ? theme.accent : 'transparent' },
+              ]}
             >
               <Brand small={!isDesktop} />
-            </TouchableOpacity>
+            </Pressable>
 
             {isDesktop && (
               <View style={styles.navLinks}>
-                <TouchableOpacity onPress={() => scrollToSection('home')} style={styles.navLinkButton}>
-                  <Text style={[styles.navLink, { color: theme.text }]}>Home</Text>
-                </TouchableOpacity>
-                <TouchableOpacity onPress={() => scrollToSection('how')} style={styles.navLinkButton}>
-                  <Text style={[styles.navLink, { color: theme.text }]}>How It Works</Text>
-                </TouchableOpacity>
-                <TouchableOpacity onPress={() => scrollToSection('distributors')} style={styles.navLinkButton}>
-                  <Text style={[styles.navLink, { color: theme.text }]}>For Distributors</Text>
-                </TouchableOpacity>
-                <TouchableOpacity onPress={() => scrollToSection('about')} style={styles.navLinkButton}>
-                  <Text style={[styles.navLink, { color: theme.text }]}>About</Text>
-                </TouchableOpacity>
+                <HeaderLink label="Home" onPress={() => scrollToSection('home')} theme={theme} isDark={isDark} />
+                <HeaderLink label="How It Works" onPress={() => scrollToSection('how')} theme={theme} isDark={isDark} />
+                <HeaderLink label="For Distributors" onPress={() => scrollToSection('distributors')} theme={theme} isDark={isDark} />
+                <HeaderLink label="About" onPress={() => scrollToSection('about')} theme={theme} isDark={isDark} />
               </View>
             )}
 
             <View style={styles.navbarActions}>
               <ThemeIconButton style={styles.themeToggleSpacing} />
               {!isNarrow && (
-                <TouchableOpacity
-                accessibilityLabel="Log in"
-                activeOpacity={0.8}
-                onPress={() => router.push('/login')}
-                style={styles.loginLinkButton}
-              >
-                  <Text style={[styles.loginLinkText, { color: theme.accent }]}>Log in</Text>
-              </TouchableOpacity>
+                <HeaderLink label="Log in" onPress={() => router.push('/login')} theme={theme} isDark={isDark} login />
               )}
-              <ActionButton
-                label="Get Started"
+              <Pressable
+                accessibilityLabel="Get Started"
+                accessibilityRole="button"
                 onPress={() => openSignup()}
-                isDark={isDark}
-                style={[styles.navGetStarted, !isDesktop && styles.navGetStartedCompact]}
-              />
+                style={({ hovered, focused, pressed }) => [
+                  styles.actionButton,
+                  styles.navGetStarted,
+                  !isDesktop && styles.navGetStartedCompact,
+                  {
+                    backgroundColor: hovered || pressed
+                      ? BLUETAP_COLORS.primaryHover
+                      : isDark ? BLUETAP_DARK_PORTAL_COLORS.primary : BLUE,
+                    borderColor: focused ? BLUETAP_COLORS.primaryLight : hovered || pressed
+                      ? BLUETAP_COLORS.primaryHover
+                      : isDark ? BLUETAP_DARK_PORTAL_COLORS.primary : BLUE,
+                    borderWidth: focused ? 2 : 1,
+                    opacity: pressed ? 0.9 : 1,
+                  },
+                ]}
+              >
+                <Text style={[styles.actionButtonText, { color: BLUETAP_COLORS.onPrimary }]}>Get Started</Text>
+              </Pressable>
             </View>
           </View>
         </Animated.View>
@@ -421,8 +717,8 @@ function WebLanding({ router, width }) {
               </Text>
 
               <Text style={[styles.heroDescription, { color: theme.muted }, !isDesktop && styles.heroDescriptionCompact]}>
-                Order purified water directly from your water provider and have it
-                delivered straight to your home.
+                Request purified water from local water stations, manage your delivery details,
+                and stay updated on your requests—all in one convenient platform.
               </Text>
 
               <View style={[styles.heroActions, !isDesktop && styles.heroActionsCompact]}>
@@ -442,12 +738,12 @@ function WebLanding({ router, width }) {
               </View>
 
               <Text style={[styles.heroTrust, { color: theme.muted }]}>
-                Simple ordering · Your water provider · Convenient delivery
+                Local stations · Clear request details · Delivery coordination
               </Text>
             </View>
 
             <View style={[styles.heroVisual, !isDesktop && styles.heroVisualCompact]}>
-              <PhoneMockup isDark={isDark} />
+              <PhoneMockup isDark={isDark} reduceMotion={reduceMotion} />
             </View>
           </View>
         </Animated.View>
@@ -456,15 +752,17 @@ function WebLanding({ router, width }) {
           <View style={webContentStyle}>
             <SectionHeading
               eyebrow="HOW IT WORKS"
-              title="Water ordering made simple"
-              text="Get your water in just a few steps."
+              title="Water requesting made simple"
+              text="Choose a station, send your request, and follow its progress."
               theme={theme}
               align="center"
             />
             <View style={[styles.stepGrid, !isDesktop && styles.stepGridCompact]}>
-              {steps.map((step) => (
-                <View
+              {steps.map((step, index) => (
+                <ScrollReveal
                   key={step.number}
+                  delay={index * 100}
+                  reduceMotion={reduceMotion}
                   style={[
                     styles.stepCard,
                     { backgroundColor: theme.card, borderColor: theme.border },
@@ -477,7 +775,7 @@ function WebLanding({ router, width }) {
                   </View>
                   <Text style={[styles.stepTitle, { color: theme.text }]}>{step.title}</Text>
                   <Text style={[styles.stepText, { color: theme.muted }]}>{step.text}</Text>
-                </View>
+                </ScrollReveal>
               ))}
             </View>
           </View>
@@ -488,95 +786,154 @@ function WebLanding({ router, width }) {
             <SectionHeading
               eyebrow="WHY BLUETAP"
               title="Why choose BlueTap?"
-              text="A clearer, more convenient way for households and water businesses to connect."
+              text="Useful tools for requesting water and coordinating local delivery."
               theme={theme}
               align="center"
             />
             <View style={[styles.featureGrid, !isDesktop && styles.featureGridCompact]}>
-              {features.map((feature) => (
-                <View
+              {features.map((feature, index) => (
+                <ScrollReveal
                   key={feature.title}
+                  delay={index * 80}
+                  reduceMotion={reduceMotion}
                   style={[styles.featureCard, !isDesktop && styles.featureCardCompact]}
                 >
                   <View style={[styles.featureIcon, isDark && styles.featureIconDark]}>
-                    <Text style={styles.featureIconText}>{feature.icon}</Text>
+                    <Text style={[styles.featureIconText, isDark && styles.featureIconTextDark]}>{feature.icon}</Text>
                   </View>
                   <View style={styles.featureCopy}>
                     <Text style={[styles.featureTitle, { color: theme.text }]}>{feature.title}</Text>
                     <Text style={[styles.featureText, { color: theme.muted }]}>{feature.text}</Text>
                   </View>
-                </View>
+                </ScrollReveal>
               ))}
+            </View>
+          </View>
+        </Animated.View>
+
+        <Animated.View style={[styles.section, styles.comparisonSection, { backgroundColor: transitionColor(LIGHT_THEME.surface, DARK_THEME.surface) }]}>
+          <View style={webContentStyle}>
+            <SectionHeading
+              eyebrow="BETTER WATER REQUESTS"
+              title="From Manual Requests to Smarter Water Delivery"
+              text="See how BlueTap brings water requests, customer communication, and delivery coordination into one organized platform."
+              theme={theme}
+              align="center"
+            />
+            <View style={[styles.comparisonGrid, !isDesktop && styles.comparisonGridCompact]}>
+              <HoverLift reduceMotion={reduceMotion} style={isDesktop ? styles.comparisonHoverDesktop : styles.comparisonHoverCompact}>
+                <ScrollReveal reduceMotion={reduceMotion} style={styles.comparisonReveal}>
+                  <View style={[styles.comparisonCard, isDesktop ? styles.comparisonCardDesktop : styles.comparisonCardCompact, { backgroundColor: theme.card, borderColor: theme.border }]}>
+                    <Text style={[styles.comparisonCardTitle, { color: theme.text }]}>Manual Station Operations</Text>
+                    {comparisonRows.map(([manual], index) => (
+                      <ScrollReveal key={manual} delay={index * 65} reduceMotion={reduceMotion} style={styles.comparisonRow}>
+                        <View style={[styles.comparisonIcon, { backgroundColor: isDark ? BLUETAP_DARK_PORTAL_COLORS.dangerSoft : BLUETAP_COLORS.dangerSoft }]}>
+                          <Text style={[styles.comparisonIconText, { color: isDark ? BLUETAP_DARK_PORTAL_COLORS.danger : BLUETAP_COLORS.danger }]}>×</Text>
+                        </View>
+                        <Text style={[styles.comparisonRowText, { color: theme.text }]}>{manual}</Text>
+                      </ScrollReveal>
+                    ))}
+                  </View>
+                </ScrollReveal>
+              </HoverLift>
+              <HoverLift reduceMotion={reduceMotion} style={isDesktop ? styles.comparisonHoverDesktop : styles.comparisonHoverCompact}>
+                <ScrollReveal reduceMotion={reduceMotion} style={styles.comparisonReveal}>
+                  <LinearGradient
+                    colors={[BLUE_DARK, BLUE]}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={[styles.comparisonCard, styles.bluetapCard, isDesktop ? styles.comparisonCardDesktop : styles.comparisonCardCompact]}
+                  >
+                    <Text style={[styles.comparisonCardTitle, styles.comparisonCardTitleInverse]}>With BlueTap</Text>
+                    {comparisonRows.map(([, digital], index) => (
+                      <ScrollReveal key={digital} delay={index * 65} reduceMotion={reduceMotion} style={styles.comparisonRow}>
+                        <View style={[styles.comparisonIcon, styles.comparisonIconPositive]}>
+                          <Text style={styles.comparisonIconPositiveText}>✓</Text>
+                        </View>
+                        <Text style={[styles.comparisonRowText, styles.comparisonRowTextInverse]}>{digital}</Text>
+                      </ScrollReveal>
+                    ))}
+                  </LinearGradient>
+                </ScrollReveal>
+              </HoverLift>
             </View>
           </View>
         </Animated.View>
 
         <Animated.View onLayout={saveSectionOffset('distributors')} style={[styles.section, { backgroundColor: transitionColor(LIGHT_THEME.surface, DARK_THEME.surface) }]}>
           <View style={[webContentStyle, styles.distributorSection, !isDesktop && styles.distributorSectionCompact]}>
-            <View style={[styles.distributorVisual, !isDesktop && styles.distributorVisualCompact]}>
-              <DistributorMockup isDark={isDark} />
-            </View>
-            <View style={[styles.distributorCopy, !isDesktop && styles.distributorCopyCompact]}>
+            <ScrollReveal reduceMotion={reduceMotion} style={[styles.distributorVisual, !isDesktop && styles.distributorVisualCompact]}>
+              <DistributorMockup isDark={isDark} isNarrow={isNarrow} />
+            </ScrollReveal>
+            <ScrollReveal reduceMotion={reduceMotion} style={[styles.distributorCopy, !isDesktop && styles.distributorCopyCompact]}>
               <SectionHeading
                 eyebrow="FOR WATER DISTRIBUTORS"
-                title="Grow your water business with BlueTap"
-                text="Receive customer requests digitally and manage your water delivery workflow through one convenient platform."
+                title="Keep assigned deliveries organized"
+                text="Review branch assignments, schedule deliveries, and update their progress from your distributor workspace."
                 theme={theme}
               />
               <View style={styles.checkList}>
                 {[
-                  'Receive customer requests',
-                  'Organize scheduled deliveries',
-                  'Maintain request history',
-                ].map((item) => (
-                  <View key={item} style={styles.checkItem}>
+                  'Review and accept branch assignments',
+                  'Schedule and update deliveries',
+                  'View delivery history and order chat',
+                ].map((item, index) => (
+                  <ScrollReveal key={item} delay={index * 100} reduceMotion={reduceMotion} style={styles.checkItem}>
                     <View style={styles.checkIcon}>
                       <Text style={styles.checkIconText}>✓</Text>
                     </View>
                     <Text style={[styles.checkText, { color: theme.text }]}>{item}</Text>
-                  </View>
+                  </ScrollReveal>
                 ))}
               </View>
               <ActionButton
                 label="Apply as Distributor"
-                onPress={() => openSignup()}
+                onPress={() => openSignup('distributor')}
                 isDark={isDark}
+                hoverLift
+                reduceMotion={reduceMotion}
                 style={styles.distributorAction}
               />
-            </View>
+            </ScrollReveal>
           </View>
         </Animated.View>
 
         <Animated.View style={[styles.ctaSection, { paddingHorizontal: contentPadding, backgroundColor: transitionColor(LIGHT_THEME.surface, DARK_THEME.surface) }]}>
-          <LinearGradient
-            colors={[BLUE_DARK, '#2B9CE5']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={[styles.ctaBanner, !isDesktop && styles.ctaBannerCompact]}
-          >
-            <View style={styles.ctaCopy}>
-              <Text style={[styles.ctaTitle, !isDesktop && styles.ctaTitleCompact]}>
-                Ready to make water ordering easier?
-              </Text>
-              <Text style={styles.ctaText}>
-                Join BlueTap for simpler water ordering and delivery.
-              </Text>
-            </View>
-            <View style={[styles.ctaActions, !isDesktop && styles.ctaActionsCompact]}>
-              <ActionButton
-                label="Get Started"
-                onPress={() => openSignup()}
-                variant="light"
-                style={!isDesktop && styles.ctaActionCompact}
-              />
-              <ActionButton
-                label="Log In"
-                onPress={() => router.push('/login')}
-                variant="inverseOutline"
-                style={!isDesktop && styles.ctaActionCompact}
-              />
-            </View>
-          </LinearGradient>
+          <ScrollReveal reduceMotion={reduceMotion} style={styles.ctaReveal}>
+            <LinearGradient
+              colors={[BLUE_DARK, '#2B9CE5']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={[styles.ctaBanner, !isDesktop && styles.ctaBannerCompact]}
+            >
+              <View style={styles.ctaCopy}>
+                <Text style={[styles.ctaTitle, !isDesktop && styles.ctaTitleCompact]}>
+                  Ready to make water ordering easier?
+                </Text>
+                <Text style={styles.ctaText}>
+                  Join BlueTap for simpler water ordering and delivery.
+                </Text>
+              </View>
+              <View style={[styles.ctaActions, !isDesktop && styles.ctaActionsCompact]}>
+                <ActionButton
+                  label="Get Started"
+                  onPress={() => openSignup()}
+                  variant="light"
+                  hoverLift
+                  reduceMotion={reduceMotion}
+                  style={!isDesktop && styles.ctaActionCompact}
+                />
+                <ActionButton
+                  label="Log In"
+                  onPress={() => router.push('/login')}
+                  variant="inverseOutline"
+                  hoverLift
+                  reduceMotion={reduceMotion}
+                  style={!isDesktop && styles.ctaActionCompact}
+                />
+              </View>
+            </LinearGradient>
+          </ScrollReveal>
         </Animated.View>
 
         <Animated.View style={[styles.footer, { paddingHorizontal: contentPadding, backgroundColor: transitionColor(LIGHT_THEME.surface, DARK_THEME.surface) }]}>
@@ -706,17 +1063,19 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   brand: { flexDirection: 'row', alignItems: 'center' },
+  brandButton: { minHeight: 44, justifyContent: 'center', borderWidth: 1, borderRadius: 10 },
   brandLogo: { width: 38, height: 38, marginRight: 9 },
   brandLogoSmall: { width: 31, height: 31, marginRight: 7 },
   brandText: { color: BLUE, fontSize: 24, fontWeight: '800', letterSpacing: -0.4 },
   brandTextSmall: { fontSize: 20 },
   brandTextInverse: { color: '#FFFFFF' },
   navLinks: { flexDirection: 'row', alignItems: 'center', marginLeft: 40, marginRight: 22 },
-  navLinkButton: { paddingHorizontal: 12, paddingVertical: 10 },
+  navLinkButton: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 12, paddingVertical: 10 },
   navLink: { color: '#41566D', fontSize: 14, fontWeight: '700' },
   navbarActions: { flexDirection: 'row', alignItems: 'center' },
   loginLinkButton: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 14 },
   loginLinkText: { color: BLUE_DARK, fontSize: 14, fontWeight: '800' },
+  headerLink: { borderWidth: 1, borderRadius: 10 },
   actionButton: {
     minHeight: 48,
     borderRadius: 13,
@@ -725,6 +1084,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderWidth: 1,
   },
+  actionButtonHover: { transform: [{ translateY: -2 }], shadowColor: '#12304A', shadowOffset: { width: 0, height: 7 }, shadowOpacity: 0.16, shadowRadius: 12, elevation: 4 },
+  hoverLiftActive: { transform: [{ translateY: -3 }], shadowColor: '#12304A', shadowOffset: { width: 0, height: 11 }, shadowOpacity: 0.14, shadowRadius: 24, elevation: 5 },
+  hoverLiftTransition: { transitionProperty: 'transform, box-shadow', transitionDuration: '180ms', transitionTimingFunction: 'ease-out' },
   actionButtonPrimary: { backgroundColor: BLUE, borderColor: BLUE },
   actionButtonPrimaryDark: { backgroundColor: '#2196DB', borderColor: '#2196DB' },
   actionButtonOutline: { backgroundColor: '#FFFFFF', borderColor: '#B7DDF7' },
@@ -780,6 +1142,8 @@ const styles = StyleSheet.create({
   heroVisual: { flex: 1, minWidth: 0, alignItems: 'flex-end', justifyContent: 'center' },
   heroVisualCompact: { width: '100%', alignItems: 'center', marginTop: 34 },
   mockupArea: { width: '100%', maxWidth: 510, height: 456, position: 'relative', alignItems: 'center', justifyContent: 'center' },
+  mockupScene: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, alignItems: 'center', justifyContent: 'center' },
+  mockupFloatLayer: { width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center' },
   heroOrbLarge: { position: 'absolute', width: 388, height: 388, borderRadius: 194, backgroundColor: '#DDF3FF', right: 24, top: 28 },
   heroOrbSmall: { position: 'absolute', width: 90, height: 90, borderRadius: 45, backgroundColor: '#9DDBFA', left: 12, bottom: 36 },
   heroOrbLargeDark: { backgroundColor: '#0E2235', borderWidth: 1, borderColor: '#1C3C55' },
@@ -794,6 +1158,7 @@ const styles = StyleSheet.create({
   phoneAvatar: { width: 25, height: 25, borderRadius: 13, backgroundColor: '#BDE5FA' },
   phoneGreeting: { color: '#6C8499', fontSize: 10, fontWeight: '700' },
   phoneSubheading: { color: TEXT_DARK, fontSize: 15, fontWeight: '800', marginTop: 3 },
+  previewLabel: { fontSize: 9, fontWeight: '700', marginTop: 5 },
   phoneProductCard: { flexDirection: 'row', backgroundColor: '#F0F9FF', borderRadius: 16, padding: 12, marginTop: 14 },
   phoneGreetingDark: { color: '#9FB4C8' },
   phoneSubheadingDark: { color: '#F5FAFF' },
@@ -805,6 +1170,7 @@ const styles = StyleSheet.create({
   phoneProductTitle: { color: TEXT_DARK, fontSize: 12, fontWeight: '800' },
   phoneProductTitleDark: { color: '#F5FAFF' },
   phoneProductMeta: { color: TEXT_MUTED, fontSize: 9, fontWeight: '700', marginTop: 4 },
+  phoneProductMetaDark: { color: BLUETAP_DARK_PORTAL_COLORS.textSecondary },
   phoneOrderButton: { backgroundColor: BLUE, borderRadius: 8, marginTop: 8, paddingVertical: 6, alignItems: 'center' },
   phoneOrderButtonText: { color: '#FFFFFF', fontSize: 9, fontWeight: '800' },
   phoneOrderCard: { borderWidth: 1, borderColor: '#E0EEF7', borderRadius: 15, padding: 12, marginTop: 13 },
@@ -831,7 +1197,7 @@ const styles = StyleSheet.create({
   floatingStatusText: { color: TEXT_MUTED, fontSize: 8, fontWeight: '600', marginTop: 3 },
   floatingStatusTitleDark: { color: '#F5FAFF' },
   floatingStatusTextDark: { color: '#9FB4C8' },
-  section: { width: '100%', paddingTop: 88, paddingBottom: 88 },
+  section: { width: '100%', paddingTop: 80, paddingBottom: 80 },
   howSection: { backgroundColor: '#FFFFFF' },
   featureSection: { backgroundColor: BLUE_LIGHT },
   sectionHeading: { maxWidth: 630, marginBottom: 38 },
@@ -856,9 +1222,29 @@ const styles = StyleSheet.create({
   featureIcon: { width: 46, height: 46, borderRadius: 15, alignItems: 'center', justifyContent: 'center', backgroundColor: '#DDF2FF', marginRight: 15 },
   featureIconDark: { backgroundColor: '#163B59' },
   featureIconText: { color: BLUE_DARK, fontSize: 22, fontWeight: '900' },
+  featureIconTextDark: { color: BLUETAP_DARK_PORTAL_COLORS.primaryLight },
   featureCopy: { flex: 1, paddingRight: 16 },
   featureTitle: { color: TEXT_DARK, fontSize: 17, fontWeight: '800' },
   featureText: { color: TEXT_MUTED, fontSize: 14, lineHeight: 21, marginTop: 6 },
+  comparisonSection: { paddingTop: 82, paddingBottom: 88 },
+  comparisonGrid: { flexDirection: 'row', alignItems: 'stretch', gap: 20 },
+  comparisonGridCompact: { flexDirection: 'column', gap: 16 },
+  comparisonHoverDesktop: { flex: 1, minWidth: 0 },
+  comparisonHoverCompact: { width: '100%' },
+  comparisonReveal: { width: '100%', flex: 1 },
+  comparisonCard: { minWidth: 0, borderRadius: 20, padding: 30, borderWidth: 1, shadowColor: '#12304A', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.08, shadowRadius: 20, elevation: 3 },
+  comparisonCardDesktop: { flex: 1 },
+  comparisonCardCompact: { width: '100%', padding: 22 },
+  bluetapCard: { borderColor: BLUE_DARK },
+  comparisonCardTitle: { fontSize: 20, lineHeight: 27, fontWeight: '800', marginBottom: 17, flexShrink: 1 },
+  comparisonCardTitleInverse: { color: BLUETAP_COLORS.onPrimary },
+  comparisonRow: { minHeight: 52, flexDirection: 'row', alignItems: 'flex-start', paddingVertical: 9 },
+  comparisonIcon: { width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center', marginRight: 12, flexShrink: 0 },
+  comparisonIconText: { fontSize: 20, lineHeight: 24, fontWeight: '700' },
+  comparisonIconPositive: { backgroundColor: '#E3F7EC' },
+  comparisonIconPositiveText: { color: BLUETAP_COLORS.success, fontSize: 15, fontWeight: '900' },
+  comparisonRowText: { flex: 1, minWidth: 0, flexShrink: 1, fontSize: 14, lineHeight: 22, fontWeight: '600' },
+  comparisonRowTextInverse: { color: BLUETAP_COLORS.onPrimary },
   distributorSection: { flexDirection: 'row', alignItems: 'center' },
   distributorSectionCompact: { flexDirection: 'column' },
   distributorVisual: { flex: 1, paddingRight: 64 },
@@ -866,17 +1252,22 @@ const styles = StyleSheet.create({
   distributorCopy: { flex: 1, maxWidth: 510 },
   distributorCopyCompact: { width: '100%', maxWidth: 620 },
   distributorMockup: { width: '100%', maxWidth: 480, alignSelf: 'center', backgroundColor: '#FFFFFF', borderRadius: 22, borderWidth: 1, borderColor: '#DCECF7', padding: 22, shadowColor: '#286A95', shadowOffset: { width: 0, height: 12 }, shadowOpacity: 0.12, shadowRadius: 22, elevation: 6 },
+  distributorMockupNarrow: { padding: 16 },
   distributorMockupDark: { backgroundColor: '#0E2235', borderColor: '#1C3C55', shadowColor: '#000000', shadowOpacity: 0.28 },
   distributorTopbar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  distributorTopbarNarrow: { flexDirection: 'column', alignItems: 'flex-start' },
   distributorKicker: { color: BLUE, fontSize: 9, fontWeight: '900', letterSpacing: 0.9 },
+  distributorKickerDark: { color: BLUETAP_DARK_PORTAL_COLORS.primaryLight },
   distributorTitle: { color: TEXT_DARK, fontSize: 20, fontWeight: '800', marginTop: 5 },
   distributorTitleDark: { color: '#F5FAFF' },
   distributorBadge: { backgroundColor: '#E8F8EE', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6 },
-  distributorBadgeText: { color: '#17894B', fontSize: 11, fontWeight: '800' },
+  distributorBadgeNarrow: { marginTop: 10 },
+  distributorBadgeText: { color: BLUETAP_COLORS.success, fontSize: 11, fontWeight: '800' },
   distributorStatsRow: { flexDirection: 'row', justifyContent: 'space-between', backgroundColor: '#F2FAFF', borderRadius: 14, paddingVertical: 15, paddingHorizontal: 10, marginTop: 22 },
   distributorStatsRowDark: { backgroundColor: '#112A40' },
   distributorStat: { flex: 1, alignItems: 'center' },
-  distributorStatValue: { color: BLUE_DARK, fontSize: 21, fontWeight: '900' },
+  distributorWorkflowValue: { color: BLUE_DARK, fontSize: 18, fontWeight: '900' },
+  distributorWorkflowValueDark: { color: BLUETAP_DARK_PORTAL_COLORS.primaryLight },
   distributorStatLabel: { color: TEXT_MUTED, fontSize: 10, fontWeight: '700', marginTop: 4 },
   distributorStatLabelDark: { color: '#9FB4C8' },
   distributorRequest: { flexDirection: 'row', alignItems: 'center', paddingVertical: 15, borderBottomWidth: 1, borderBottomColor: '#E9F0F5' },
@@ -886,10 +1277,12 @@ const styles = StyleSheet.create({
   distributorRequestIconTextBlue: { color: BLUE_DARK },
   distributorRequestCopy: { flex: 1, minWidth: 0 },
   distributorRequestTitle: { color: TEXT_DARK, fontSize: 12, fontWeight: '800' },
+  distributorRequestTitleDark: { color: BLUETAP_DARK_PORTAL_COLORS.textPrimary },
   distributorRequestMeta: { color: TEXT_MUTED, fontSize: 10, fontWeight: '600', marginTop: 4 },
+  distributorRequestMetaDark: { color: BLUETAP_DARK_PORTAL_COLORS.textSecondary },
   distributorRequestPill: { backgroundColor: '#FFF5D9', borderRadius: 999, paddingHorizontal: 8, paddingVertical: 5, marginLeft: 8 },
   distributorRequestPillBlue: { backgroundColor: '#E4F4FF' },
-  distributorRequestPillText: { color: '#B77900', fontSize: 9, fontWeight: '800' },
+  distributorRequestPillText: { color: BLUETAP_COLORS.warningAction, fontSize: 9, fontWeight: '800' },
   distributorRequestPillTextBlue: { color: BLUE_DARK, fontSize: 9, fontWeight: '800' },
   checkList: { marginTop: 4, marginBottom: 25 },
   checkItem: { flexDirection: 'row', alignItems: 'center', marginTop: 13 },
@@ -898,6 +1291,7 @@ const styles = StyleSheet.create({
   checkText: { color: '#425A70', fontSize: 15, fontWeight: '700' },
   distributorAction: { alignSelf: 'flex-start' },
   ctaSection: { width: '100%', backgroundColor: '#FFFFFF', paddingTop: 4, paddingBottom: 88 },
+  ctaReveal: { width: '100%' },
   ctaBanner: { width: '100%', maxWidth: CONTENT_MAX_WIDTH, alignSelf: 'center', minHeight: 220, borderRadius: 24, paddingHorizontal: 54, paddingVertical: 43, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', overflow: 'hidden' },
   ctaBannerCompact: { minHeight: 0, paddingHorizontal: 25, paddingVertical: 31, flexDirection: 'column', alignItems: 'stretch' },
   ctaCopy: { flex: 1, maxWidth: 610 },

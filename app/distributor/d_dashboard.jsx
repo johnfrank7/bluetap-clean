@@ -67,6 +67,139 @@ const normalizeStatus = (status) =>
 const getStatusActionLabel = (status) =>
   STATUS_ACTIONS[normalizeStatus(status)] || 'Update Request';
 
+const GREETING_TYPING_SPEED = 65;
+const GREETING_BACKSPACING_SPEED = 25;
+const GREETING_DEFAULT_HOLD = 5000;
+const GREETING_PROMO_HOLD = 3000;
+const GREETING_ERASE_PAUSE = 250;
+const GREETING_CURSOR_BLINK_INTERVAL = 500;
+
+const GREETING_PROMO_PHRASES = [
+  "Ready for today's deliveries?",
+  'Keep your deliveries on track.',
+  'Stay updated with every request.',
+];
+
+function TypewriterGreeting({ text, style, multiline = false }) {
+  const reduceMotion = useReducedMotionPreference();
+  const textRef = useRef(text);
+  textRef.current = text;
+
+  const [displayed, setDisplayed] = useState(() => (reduceMotion ? text : ''));
+  const [cursorVisible, setCursorVisible] = useState(true);
+
+  useEffect(() => {
+    if (reduceMotion) {
+      setDisplayed(textRef.current);
+      setCursorVisible(false);
+      return;
+    }
+
+    let isMounted = true;
+    let timeoutId = null;
+    let blinkIntervalId = null;
+    let phraseIndex = 0;
+    let charIndex = 0;
+    let isDeleting = false;
+
+    const stopBlinking = () => {
+      if (blinkIntervalId) {
+        clearInterval(blinkIntervalId);
+        blinkIntervalId = null;
+      }
+      if (isMounted) setCursorVisible(true);
+    };
+
+    const startBlinking = () => {
+      stopBlinking();
+      blinkIntervalId = setInterval(() => {
+        setCursorVisible((previous) => !previous);
+      }, GREETING_CURSOR_BLINK_INTERVAL);
+    };
+
+    const getPhrase = (index) => {
+      if (index === 0) return textRef.current || 'Good Morning!';
+      return GREETING_PROMO_PHRASES[index - 1] || textRef.current || 'Good Morning!';
+    };
+
+    const schedule = (callback, delay) => {
+      if (isMounted) timeoutId = setTimeout(callback, delay);
+    };
+
+    const tick = () => {
+      if (!isMounted) return;
+
+      const currentPhrase = getPhrase(phraseIndex);
+      if (!isDeleting) {
+        charIndex++;
+        setDisplayed(currentPhrase.slice(0, charIndex));
+
+        if (charIndex >= currentPhrase.length) {
+          isDeleting = true;
+          startBlinking();
+          schedule(tick, phraseIndex === 0 ? GREETING_DEFAULT_HOLD : GREETING_PROMO_HOLD);
+          return;
+        }
+
+        schedule(tick, GREETING_TYPING_SPEED);
+        return;
+      }
+
+      if (blinkIntervalId) stopBlinking();
+      charIndex--;
+      setDisplayed(currentPhrase.slice(0, Math.max(0, charIndex)));
+
+      if (charIndex <= 0) {
+        isDeleting = false;
+        charIndex = 0;
+        phraseIndex = (phraseIndex + 1) % (GREETING_PROMO_PHRASES.length + 1);
+        schedule(tick, GREETING_ERASE_PAUSE);
+        return;
+      }
+
+      schedule(tick, GREETING_BACKSPACING_SPEED);
+    };
+
+    stopBlinking();
+    schedule(tick, 150);
+
+    return () => {
+      isMounted = false;
+      if (timeoutId) clearTimeout(timeoutId);
+      if (blinkIntervalId) clearInterval(blinkIntervalId);
+    };
+  }, [reduceMotion]);
+
+  useEffect(() => {
+    if (reduceMotion) {
+      setDisplayed(text);
+      setCursorVisible(false);
+    }
+  }, [reduceMotion, text]);
+
+  return (
+    <View
+      style={[styles.greetingWrapper, multiline && styles.greetingWrapperMultiline]}
+      accessible
+      accessibilityLabel={text}
+    >
+      <Text
+        numberOfLines={multiline ? 2 : 1}
+        accessibilityElementsHidden
+        importantForAccessibility="no"
+        style={style}
+      >
+        {reduceMotion ? text : displayed}
+        {!reduceMotion && (
+          <Text style={[styles.greetingCursor, !cursorVisible && styles.greetingCursorHidden]}>
+            |
+          </Text>
+        )}
+      </Text>
+    </View>
+  );
+}
+
 const getCarouselEventOffset = (event, fallback = 0) => {
   const offset = Number(event?.nativeEvent?.contentOffset?.x);
   return Number.isFinite(offset) ? offset : Number(fallback || 0);
@@ -216,7 +349,7 @@ class DistributorErrorBoundary extends React.Component {
 }
 
 function DistributorDashboardContent() {
-  const { colors } = useBlueTapTheme();
+  const { colors, isDark } = useBlueTapTheme();
   const { width } = useWindowDimensions();
   const { navigateOnce, replaceOnce } = useSingleFlightNavigation();
   const liveGreeting = useLiveGreeting();
@@ -265,7 +398,6 @@ function DistributorDashboardContent() {
   const currentRequestPeek = activeRequestEntries.length > 1 ? Math.min(24, Math.max(16, currentRequestViewportWidth * 0.075)) : 0;
   const currentRequestCardWidth = Math.max(1, currentRequestViewportWidth - currentRequestPeek - (currentRequestPeek > 0 ? 12 : 0));
   const currentRequestSnap = currentRequestCardWidth + 12;
-  const stackMetrics = width < 360;
   const showCarouselArrows = width >= 600 && activeRequestEntries.length > 1;
   const clearCarouselSettleTimer = () => {
     if (!carouselSettleTimerRef.current) return;
@@ -374,6 +506,7 @@ function DistributorDashboardContent() {
       value: String(dashboardCounts.pending),
       route: '/distributor/d_requests',
       accent: colors.warning,
+      labelAccent: isDark ? colors.iconWarning : colors.warning,
       tint: colors.warningSoft,
     },
     {
@@ -381,6 +514,7 @@ function DistributorDashboardContent() {
       value: String(dashboardCounts.scheduledToday),
       route: '/distributor/d_scheduled_requests',
       accent: colors.primary,
+      labelAccent: isDark ? colors.primaryLight : colors.primary,
       tint: colors.primarySoft,
     },
     {
@@ -388,9 +522,10 @@ function DistributorDashboardContent() {
       value: String(dashboardCounts.deliveredToday),
       route: '/distributor/d_history',
       accent: colors.success,
+      labelAccent: isDark ? colors.iconSuccess : colors.success,
       tint: colors.successSoft,
     },
-  ], [colors, dashboardCounts]);
+  ], [colors, dashboardCounts, isDark]);
   const detailsRequestData = activeRequest
     ? {
         requestId: activeRequest.requestId,
@@ -471,9 +606,11 @@ function DistributorDashboardContent() {
             <View style={styles.welcomeRow}>
               <View style={styles.welcomeSection}>
                 <Text style={styles.welcomeText}>WELCOME!</Text>
-                <Text style={styles.greetingText}>
-                  {liveGreeting}, Distributor
-                </Text>
+                <TypewriterGreeting
+                  text={`${liveGreeting}, Distributor!`}
+                  multiline={width < 480}
+                  style={[styles.greetingText, width < 360 && styles.greetingTextCompact]}
+                />
               </View>
               <LocalTimeCard compact={width < 430} onBrand />
             </View>
@@ -481,23 +618,21 @@ function DistributorDashboardContent() {
 
             <View style={styles.summarySection}>
               <Text style={[styles.summaryHeading, { color: colors.primary }]}>Delivery overview</Text>
-              <View style={[styles.summaryRow, stackMetrics && styles.summaryRowStacked]}>
+              <View style={styles.summaryRow}>
                 {dashboardSummary.map((item) => (
-                <TouchableOpacity
-                  key={item.label}
-                  style={[styles.summaryCard, stackMetrics && styles.summaryCardStacked, { backgroundColor: colors.surface, borderColor: item.accent }]}
-                  activeOpacity={0.75}
-                  onPress={() => item.route && replaceOnce(item.route)}
-                  accessibilityRole="button"
-                  accessibilityLabel={`${item.label}: ${item.value}`}
-                >
-                  <View style={[styles.summaryMetricHeader, { backgroundColor: item.tint, borderBottomColor: item.accent }]}>
-                    <Text style={[styles.summaryLabel, { color: item.accent }]}>{item.label}</Text>
-                  </View>
-                  <View style={styles.summaryMetricBody}>
-                    <Text style={[styles.summaryValue, { color: item.accent }]}>{item.value}</Text>
-                  </View>
-                </TouchableOpacity>
+                  <TouchableOpacity
+                    key={item.label}
+                    style={styles.summaryItem}
+                    activeOpacity={0.75}
+                    onPress={() => item.route && replaceOnce(item.route)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${item.label}: ${item.value}`}
+                  >
+                    <View style={[styles.summaryCard, { backgroundColor: item.tint, borderColor: item.accent }]}>
+                      <Text style={[styles.summaryValue, { color: item.accent }]}>{item.value}</Text>
+                    </View>
+                    <Text style={[styles.summaryLabel, { color: item.labelAccent }]}>{item.label}</Text>
+                  </TouchableOpacity>
                 ))}
               </View>
             </View>
@@ -615,7 +750,7 @@ const styles = createPortalStyleSheet({
   },
   welcomeRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 },
   welcomeSection: {
-    marginTop: 12,
+    marginTop: 0,
     flex: 1,
     minWidth: 0,
   },
@@ -629,7 +764,29 @@ const styles = createPortalStyleSheet({
     color: BLUETAP_COLORS.white,
     fontSize: 16,
     fontWeight: '700',
+    lineHeight: 22,
+  },
+  greetingTextCompact: {
+    fontSize: 14,
+    lineHeight: 22,
+  },
+  greetingWrapper: {
+    minHeight: 22,
+    justifyContent: 'center',
     marginTop: 4,
+  },
+  greetingWrapperMultiline: {
+    minHeight: 44,
+    justifyContent: 'flex-start',
+  },
+  greetingCursor: {
+    color: BLUETAP_COLORS.white,
+    fontWeight: '300',
+    marginLeft: 2,
+    opacity: 1,
+  },
+  greetingCursorHidden: {
+    opacity: 0,
   },
   summarySection: {
     marginTop: 20,
@@ -645,18 +802,22 @@ const styles = createPortalStyleSheet({
     flexDirection: 'row',
     gap: 8,
   },
-  summaryRowStacked: { flexWrap: 'wrap' },
+  summaryItem: {
+    flex: 1,
+    minWidth: 0,
+    alignItems: 'center',
+  },
   summaryCard: {
-    flexGrow: 1,
-    flexShrink: 1,
-    flexBasis: 0,
-    minHeight: 86,
+    width: '100%',
+    minHeight: 58,
     backgroundColor: BLUETAP_COLORS.surface,
     borderWidth: 1,
     borderColor: CARD_BORDER,
     borderRadius: 16,
-    padding: 0,
-    overflow: 'hidden',
+    paddingHorizontal: 4,
+    paddingVertical: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
     ...createShadow({
       color: '#0D47A1',
       elevation: 2,
@@ -665,20 +826,20 @@ const styles = createPortalStyleSheet({
       offset: { width: 0, height: 2 },
     }),
   },
-  summaryCardStacked: { flexBasis: '100%', minHeight: 76 },
-  summaryMetricHeader: { minHeight: 40, paddingHorizontal: 7, paddingVertical: 7, alignItems: 'center', justifyContent: 'center', borderBottomWidth: 1 },
-  summaryMetricBody: { flex: 1, minHeight: 54, alignItems: 'center', justifyContent: 'center', paddingVertical: 8 },
   summaryValue: {
     color: BLUE,
     fontSize: 24,
+    lineHeight: 30,
     fontWeight: 'bold',
     textAlign: 'center',
   },
   summaryLabel: {
-    fontSize: 10,
-    lineHeight: 13,
+    fontSize: 11,
+    lineHeight: 14,
     fontWeight: '800',
     textAlign: 'center',
+    marginTop: 6,
+    paddingHorizontal: 2,
   },
   currentRequestSection: {
     marginTop: 24,
@@ -896,7 +1057,7 @@ const styles = createPortalStyleSheet({
   quickActionButton: {
     flex: 1,
     minHeight: 50,
-    backgroundColor: BLUE,
+    backgroundColor: BLUETAP_COLORS.primaryAction,
     borderRadius: 13,
     alignItems: 'center',
     justifyContent: 'center',
@@ -905,7 +1066,7 @@ const styles = createPortalStyleSheet({
   quickActionSecondary: {
     backgroundColor: BLUETAP_COLORS.surface,
     borderWidth: 1.5,
-    borderColor: BLUE,
+    borderColor: BLUETAP_COLORS.primaryAction,
   },
   quickActionText: {
     color: '#FFFFFF',
@@ -915,7 +1076,7 @@ const styles = createPortalStyleSheet({
     textAlign: 'center',
   },
   quickActionSecondaryText: {
-    color: BLUE,
+    color: BLUETAP_COLORS.primaryAction,
   },
   modalBackdrop: {
     flex: 1,

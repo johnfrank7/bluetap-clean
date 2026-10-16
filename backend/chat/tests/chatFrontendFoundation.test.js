@@ -36,6 +36,18 @@ test('receipt semantics move from pending to sent to seen', () => {
   assert.equal(model.receiptFor(message, conversation, 'requester', 'requester-a', ''), 'seen');
 });
 
+test('all Distributor order chat actions share the centralized Message button label', () => {
+  const actions = read('components/chat/ChatOrderActions.jsx');
+  const dashboard = read('app/distributor/d_dashboard.jsx');
+  const scheduledRequests = read('app/distributor/d_scheduled_requests.jsx');
+
+  assert.match(actions, /const DISTRIBUTOR_CHAT_ACTION_LABEL = 'Message';/);
+  assert.match(actions, /label=\{DISTRIBUTOR_CHAT_ACTION_LABEL\} onPress=\{open\} softPrimary/);
+  assert.doesNotMatch(actions, /label="Message Requester"/);
+  assert.match(dashboard, /<DistributorOrderChatAction/);
+  assert.match(scheduledRequests, /<DistributorOrderChatAction/);
+});
+
 test('optimistic reconciliation deduplicates the committed mutation', () => {
   const optimistic = { clientMutationId: 'same-id', senderUid: 'requester-a', body: 'Hello', pending: true };
   const committed = { id: 'message-a', seq: 2, clientMutationId: 'same-id', senderUid: 'requester-a', body: 'Hello' };

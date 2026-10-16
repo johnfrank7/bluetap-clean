@@ -207,3 +207,109 @@ test('Manager Products delivery pricing edit button remains high contrast and vi
   assert.match(globalCss, /button\[aria-label='Edit branch delivery pricing'\]/);
   assert.match(globalCss, /button\[data-bluetap-cta='true'\]/);
 });
+
+test('Manager Ongoing Requests floating button is stacked above the chat button exclusively on the Manager portal', () => {
+  const chatLauncher = read('components/chat/ChatFloatingLauncher.jsx');
+  const ongoingMonitor = read('components/ManagerOngoingRequestsMonitor.jsx');
+
+  assert.match(chatLauncher, /role === 'manager' && \(\s*<ManagerOngoingRequestsButton/);
+  assert.match(chatLauncher, /gap:\s*12/);
+  const ongoingIndex = chatLauncher.indexOf('<ManagerOngoingRequestsButton');
+  const chatButtonIndex = chatLauncher.indexOf('Open BlueTap messages');
+  assert.ok(ongoingIndex > -1 && chatButtonIndex > ongoingIndex);
+
+  assert.match(ongoingMonitor, /import \{ createShadow \} from '\.\/shadowStyles';/);
+  assert.doesNotMatch(ongoingMonitor, /elevationShadow/);
+  assert.match(ongoingMonitor, /<SidebarIcon name="ClipboardList" size=\{24\} tintColor="#FFFFFF" \/>/);
+  assert.match(ongoingMonitor, /const showBadge = !hasError && ongoingCount > 0;/);
+  assert.match(managerLayout, /<ManagerOngoingRequestsProvider>/);
+  assert.match(managerLayout, /<ManagerOngoingRequestsPanel \/>/);
+});
+
+test('Ongoing Requests Panel is read-only, responsive, uses single-flight navigateOnce, and integrates with RequestDetailsModal and Requests filter tabs', () => {
+  const ongoingMonitor = read('components/ManagerOngoingRequestsMonitor.jsx');
+
+  assert.match(ongoingMonitor, /Ongoing Requests/);
+  assert.match(ongoingMonitor, /Monitor active water deliveries\./);
+  assert.match(ongoingMonitor, /title="No ongoing requests"/);
+  assert.match(ongoingMonitor, /description="Assigned deliveries will appear here once they are in progress\."/);
+  assert.match(ongoingMonitor, /Unable to load ongoing requests/);
+  assert.match(ongoingMonitor, /View Details/);
+  assert.match(ongoingMonitor, /View All Requests/);
+  assert.match(ongoingMonitor, /const \{ navigateOnce \} = useSingleFlightNavigation\(\);/);
+  assert.match(ongoingMonitor, /navigateOnce\('\/manager\/request\?filter=ongoing'\);/);
+  assert.doesNotMatch(ongoingMonitor, /navigation\.push\(/);
+  assert.match(ongoingMonitor, /<View style=\{styles\.bodyViewport\}>/);
+  assert.match(ongoingMonitor, /paddingBottom:\s*32/);
+  assert.match(ongoingMonitor, /styles\.closeIconGlyph/);
+  assert.match(ongoingMonitor, /<RequestDetailsModal/);
+  assert.match(ongoingMonitor, /const isDesktopDrawer = width >= 720;/);
+
+  // Ensure panel remains strictly read-only without approval, assignment, or delivery mutation calls
+  assert.doesNotMatch(
+    ongoingMonitor,
+    /dispatchManagerOrder|decideOutsideRadiusOrder|approveManagerDistributor|rejectManagerDistributor|markDelivered/
+  );
+
+  // Requests page integrates Ongoing, Pending, and Completed tabs using shared queue logic
+  assert.match(requests, /Pending \(\$\{tabCounts\.pending\}\)/);
+  assert.match(requests, /Ongoing \(\$\{tabCounts\.ongoing\}\)/);
+  assert.match(requests, /Completed \(\$\{tabCounts\.completed\}\)/);
+  assert.match(requests, /ongoing: queues\.ongoing\.map\(mapOrder\)/);
+  assert.match(requests, /pendingOrders: queues\.pendingOrders\.map\(mapOrder\)/);
+  assert.match(requests, /completed: queues\.completed\.map\(mapOrder\)/);
+});
+
+test('ManagerOngoingRequestsMonitor initializes cleanly against the actual shadowStyles module without runtime errors', () => {
+  const babel = require('@babel/core');
+  const evalModule = (relPath, customMocks = {}) => {
+    const fullPath = resolve(root, relPath);
+    const transformed = babel.transformSync(readFileSync(fullPath, 'utf8'), {
+      presets: ['babel-preset-expo'],
+      filename: fullPath,
+    }).code;
+    const mod = { exports: {} };
+    const fn = new Function('require', 'module', 'exports', transformed);
+    fn((id) => {
+      if (customMocks[id]) return customMocks[id];
+      if (id === 'react') return require('react');
+      if (id === 'react/jsx-runtime') return require('react/jsx-runtime');
+      if (id === 'react-native') {
+        return {
+          AccessibilityInfo: { isReduceMotionEnabled: () => Promise.resolve(false), addEventListener: () => ({ remove: () => {} }) },
+          ActivityIndicator: 'ActivityIndicator',
+          Animated: { Value: function Value() {}, timing: () => ({ start: () => {} }), View: 'Animated.View' },
+          Easing: { out: (v) => v, cubic: {} },
+          Modal: 'Modal',
+          Platform: { OS: 'web', select: (obj) => obj.web || obj.default || {} },
+          Pressable: 'Pressable',
+          ScrollView: 'ScrollView',
+          StyleSheet: { create: (s) => s, absoluteFill: {}, hairlineWidth: 1 },
+          Text: 'Text',
+          TouchableOpacity: 'TouchableOpacity',
+          useWindowDimensions: () => ({ width: 1280, height: 800 }),
+          View: 'View',
+        };
+      }
+      if (id === 'expo-router') return { usePathname: () => '/manager/dashboard' };
+      if (id === 'react-native-safe-area-context') return { useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) };
+      if (id === '../constants/bluetapTheme') return { BLUETAP_COLORS: { primary: '#187BCD', primaryDark: '#0D5FA8', danger: '#EF4444', success: '#10B981' } };
+      if (id === '../services/managerOperational') return require('../../../services/managerOperational');
+      if (id === '../constants/deliveryFailureReasons') return require('../../../constants/deliveryFailureReasons');
+      if (!id.startsWith('.')) return require(id);
+      return {};
+    }, mod, mod.exports);
+    return mod.exports;
+  };
+
+  const realShadowStyles = evalModule('components/shadowStyles.js');
+  assert.equal(typeof realShadowStyles.createShadow, 'function');
+
+  const monitorMod = evalModule('components/ManagerOngoingRequestsMonitor.jsx', {
+    './shadowStyles': realShadowStyles,
+  });
+  assert.equal(typeof monitorMod.ManagerOngoingRequestsProvider, 'function');
+  assert.equal(typeof monitorMod.ManagerOngoingRequestsButton, 'function');
+  assert.equal(typeof monitorMod.ManagerOngoingRequestsPanel, 'function');
+  assert.equal(typeof monitorMod.useManagerOngoingRequests, 'function');
+});

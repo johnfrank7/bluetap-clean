@@ -16,10 +16,11 @@ test('shared input motion is theme-safe, error-aware, disabled-safe, and reduced
   assert.match(css, /box-shadow 170ms ease-out/);
 });
 
-test('theme switch and clock night marks each pair the moon with one subtle star', () => {
+test('sidebar theme switch uses Lucide while the clock retains its night indicator', () => {
   const switchVisual = read('components/ThemeSwitchVisual.jsx');
   const clock = read('components/LocalTimeCard.jsx');
-  assert.match(switchVisual, /isDark && <Text style=\{styles\.moonStar\}>/);
+  assert.match(switchVisual, /<SidebarIcon name=\{isDark \? 'Moon' : 'Sun'\}/);
+  assert.doesNotMatch(switchVisual, /<Text|moonStar/);
   assert.match(clock, /!daytime && <BlueTapIcon name="star"/);
 });
 

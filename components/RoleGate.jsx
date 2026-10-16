@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { doc, onSnapshot } from 'firebase/firestore';
@@ -15,6 +15,7 @@ import {
 import SessionSecurityGuard from './SessionSecurityGuard';
 import { logDevelopmentTiming } from '../services/performanceLog';
 import AccountAccessState from './AccountAccessState';
+import BlueTapLiquidLoader from './BlueTapLiquidLoader';
 
 export default function RoleGate({ role, allowedRoles, children, bypass = false, loadingFallback = null }) {
   const router = useRouter();
@@ -157,14 +158,11 @@ export default function RoleGate({ role, allowedRoles, children, bypass = false,
     }
 
     if (isChecking && loadingFallback) return loadingFallback;
+    if (isChecking) return <BlueTapLiquidLoader role={sessionRole} />;
 
     return (
       <View style={styles.gate}>
-        {isChecking ? (
-          <ActivityIndicator size="large" color="#187BCD" />
-        ) : (
-          <Text style={styles.message}>{gateState.message}</Text>
-        )}
+        <Text style={styles.message}>{gateState.message}</Text>
       </View>
     );
   }

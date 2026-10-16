@@ -7,6 +7,7 @@ import { useChat } from './ChatContext';
 
 const clean = (value) => String(value || '').trim();
 const normalizedStatus = (value) => clean(value).toLowerCase().replace(/[_-]+/g, ' ');
+const DISTRIBUTOR_CHAT_ACTION_LABEL = 'Message';
 const TERMINAL = new Set(['delivered', 'completed', 'cancelled', 'canceled', 'rejected', 'declined', 'declined outside service area']);
 import { mapResolveError, orderIdOf } from './chatModel';
 
@@ -69,7 +70,7 @@ export function RequesterOrderChatActions({ order, compact = false, disabled = f
   return (
     <View style={[styles.wrap, compact && styles.compact]}>
       <ActionButton busy={busy === 'branch'} disabled={disabled || Boolean(busy)} colors={colors} label="Follow Up" onPress={() => open('branch')} secondary />
-      {hasDistributor && <ActionButton busy={busy === 'distributor'} disabled={disabled || Boolean(busy)} colors={colors} label="Message Distributor" onPress={() => open('distributor')} />}
+      {Boolean(hasDistributor) ? <ActionButton busy={busy === 'distributor'} disabled={disabled || Boolean(busy)} colors={colors} label="Message Distributor" onPress={() => open('distributor')} /> : null}
       {!!error && <Text accessibilityRole="alert" style={[styles.error, { color: colors.danger }]}>{error}</Text>}
     </View>
   );
@@ -89,7 +90,7 @@ export function DistributorOrderChatAction({ order, style, disabled = false }) {
       setBusy(false);
     }
   };
-  return <ActionButton busy={busy} disabled={disabled} colors={colors} label="Message Requester" onPress={open} softPrimary style={style} />;
+  return <ActionButton busy={busy} disabled={disabled} colors={colors} label={DISTRIBUTOR_CHAT_ACTION_LABEL} onPress={open} softPrimary style={style} />;
 }
 
 export function ManagerOrderChatAction({ order, style, disabled = false }) {

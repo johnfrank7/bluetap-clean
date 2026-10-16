@@ -7,6 +7,7 @@ import { UserPortalFrame } from './UserPortalFrame';
 import { useBlueTapTheme } from './BlueTapTheme';
 import ThemeIconButton from './ThemeIconButton';
 import BlueTapBrandMark from './BlueTapBrandMark';
+import BlueTapWordmark from './BlueTapWordmark';
 import BlueTapIcon from './BlueTapIcon';
 import useSingleFlightNavigation from './useSingleFlightNavigation';
 import { useRoleNotifications } from './RoleNotifications';
@@ -43,7 +44,7 @@ const BlueTapHeader = memo(function BlueTapHeader({
             style={styles.brandButton}
           >
             <BlueTapBrandMark inverse color={colors.iconOnPrimary} size={24} style={styles.brandLogo} />
-            <Text style={styles.appName}>BlueTap</Text>
+            <BlueTapWordmark style={styles.appName}>BlueTap</BlueTapWordmark>
           </TouchableOpacity>
 
           <View style={styles.headerActions}>

@@ -38,6 +38,7 @@ import PasswordVisibilityButton from '../components/PasswordVisibilityButton';
 import PageEnterTransition from '../components/PageEnterTransition';
 import AdminEntryTransition from '../components/AdminEntryTransition';
 import BlueTapBrandMark from '../components/BlueTapBrandMark';
+import BlueTapWordmark from '../components/BlueTapWordmark';
 
 const { createHiddenAdminEntryTracker } = require('../services/hiddenAdminEntry');
 const { getPublicLoginErrorMessage } = require('../services/publicLoginErrors');
@@ -107,6 +108,7 @@ export default function LoginPage() {
   const focusScrollTimeoutRef = React.useRef(null);
 
   const [email, setEmail] = React.useState('');
+  const [hoveredLoginField, setHoveredLoginField] = React.useState('');
   const [password, setPassword] = React.useState('');
   const [showPassword, setShowPassword] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
@@ -132,6 +134,7 @@ export default function LoginPage() {
   const [notification, setNotification] = React.useState(null);
   const [keyboardBottomInset, setKeyboardBottomInset] = React.useState(0);
   const [adminEntryActive, setAdminEntryActive] = React.useState(false);
+  const isWebLogin = Platform.OS === 'web';
   const isLoginSuccessVisible = notification?.title === 'Successfully logged in';
   const adminEntryTracker = React.useMemo(() => createHiddenAdminEntryTracker({
     onTrigger: () => {
@@ -533,6 +536,134 @@ export default function LoginPage() {
     finally { setResetLoading(false); }
   };
 
+  const renderHiddenLogo = (size, inverse, pressableStyle, markStyle) => (
+    <Pressable
+      onPress={() => adminEntryTracker.tap()}
+      accessibilityRole="image"
+      accessibilityLabel="BlueTap logo"
+      style={pressableStyle}
+    >
+      <BlueTapBrandMark
+        inverse={inverse}
+        color={inverse ? colors.iconOnPrimary || '#FFFFFF' : undefined}
+        size={size}
+        style={markStyle}
+      />
+    </Pressable>
+  );
+
+  const backHomeControl = (
+    <TouchableOpacity
+      style={styles.backButton}
+      onPress={() => router.replace('/')}
+      accessibilityRole="button"
+      accessibilityLabel="Back to landing page"
+    >
+      <Text style={styles.backButtonIcon}>
+        {'‹'}
+      </Text>
+      <Text style={styles.backButtonText}>Back to home</Text>
+    </TouchableOpacity>
+  );
+
+  const authenticationFields = (
+    <>
+      <View style={styles.formContainer}>
+        <View style={styles.inputContainer}>
+          <Text style={styles.inputLabel}>Username or email</Text>
+          <TextInput
+            ref={emailInputRef}
+            style={[
+              styles.input,
+              isWebLogin && hoveredLoginField === 'username' && styles.loginFieldHovered,
+            ]}
+            placeholder="Enter username or email"
+            placeholderTextColor="#FFFFFF"
+            accessibilityLabel="Username or email"
+            keyboardType="default"
+            autoCapitalize="none"
+            value={email}
+            onChangeText={setEmail}
+            onFocus={() => handleInputFocus('email')}
+            onMouseEnter={isWebLogin ? () => setHoveredLoginField('username') : undefined}
+            onMouseLeave={isWebLogin ? () => setHoveredLoginField('') : undefined}
+            returnKeyType="next"
+            onSubmitEditing={() => passwordInputRef.current?.focus()}
+          />
+          <Text style={styles.inputLabel}>Password</Text>
+          <View
+            style={[
+              styles.passwordField,
+              isWebLogin && hoveredLoginField === 'password' && styles.loginFieldHovered,
+            ]}
+            onMouseEnter={isWebLogin ? () => setHoveredLoginField('password') : undefined}
+            onMouseLeave={isWebLogin ? () => setHoveredLoginField('') : undefined}
+          >
+            <TextInput
+              ref={passwordInputRef}
+              style={styles.passwordFieldInput}
+              placeholder="Enter password"
+              placeholderTextColor="#FFFFFF"
+              accessibilityLabel="Password"
+              secureTextEntry={!showPassword}
+              value={password}
+              onChangeText={setPassword}
+              onFocus={() => handleInputFocus('password')}
+              returnKeyType="done"
+              onSubmitEditing={handleLogin}
+            />
+            <PasswordVisibilityButton
+              visible={showPassword}
+              onPress={() => setShowPassword((visible) => !visible)}
+              style={[
+                styles.passwordVisibility,
+                isWebLogin && hoveredLoginField === 'password' && styles.passwordVisibilityHovered,
+              ]}
+              color="#FFFFFF"
+            />
+          </View>
+        </View>
+      </View>
+
+      <View style={styles.buttonContainer}>
+        <Pressable
+          style={({ pressed, hovered }) => [
+            styles.loginButton,
+            { backgroundColor: pressed ? '#D7ECFF' : hovered ? '#EAF6FF' : '#FFFFFF', borderColor: '#D7ECFF' },
+            hovered && !loading && styles.loginButtonHovered,
+            pressed && !loading && styles.loginButtonPressed,
+            loading && styles.buttonDisabled,
+          ]}
+          onPress={handleLogin}
+          disabled={loading}
+          accessibilityRole="button"
+        >
+          <Text style={[styles.loginButtonText, { color: colors.primaryDark || colors.primary }]}>
+            {isLoginSuccessVisible ? 'SUCCESSFULLY LOGGED IN' : loading ? 'PLEASE WAIT...' : 'LOG IN'}
+          </Text>
+        </Pressable>
+      </View>
+    </>
+  );
+
+  const loginLinks = (
+    <>
+      <TouchableOpacity
+        style={styles.forgotPasswordContainer}
+        onPress={openForgotPassword}
+        disabled={loading}
+      >
+        <Text style={styles.forgotPasswordText}>Forgot Password?</Text>
+      </TouchableOpacity>
+      <View style={styles.signupContainer}>
+        <Text style={styles.signupText}>
+          Need an account?{' '}
+          <Text style={styles.signupLink} onPress={openSignupOptions}>Sign up.</Text>
+        </Text>
+      </View>
+    </>
+  );
+
   return (
     <LinearGradient
       colors={isDark ? [colors.background, colors.header] : [colors.primary, colors.primaryLight]}
@@ -540,7 +671,20 @@ export default function LoginPage() {
       start={{ x: 0, y: 0 }}
       end={{ x: 0, y: 1 }}
     >
-      <SafeAreaView style={styles.container}>
+      {isWebLogin && (
+        <svg
+          aria-hidden="true"
+          focusable="false"
+          viewBox="0 0 1440 900"
+          preserveAspectRatio="none"
+          style={styles.waterSvg}
+        >
+          <path d="M0 758 C155 724 280 775 445 738 C625 698 760 720 930 684 C1115 644 1275 666 1440 624 L1440 900 L0 900 Z" fill={colors.primaryDark} opacity="0.24" />
+          <path d="M0 812 C180 780 315 823 500 787 C680 752 835 764 1010 730 C1175 699 1315 716 1440 680 L1440 900 L0 900 Z" fill={colors.primaryDeep || colors.primaryDark} opacity="0.34" />
+          <path d="M0 862 C170 838 320 870 490 842 C670 812 835 818 1000 790 C1165 762 1315 777 1440 744 L1440 900 L0 900 Z" fill={colors.primaryDark} opacity="0.42" />
+        </svg>
+      )}
+      <SafeAreaView style={[styles.container, isWebLogin && styles.containerAboveWater]}>
         <StatusBar style="light" />
         <PageEnterTransition style={styles.phoneWrapper} resetKey="login">
           <ScrollView
@@ -560,107 +704,24 @@ export default function LoginPage() {
             }}
           >
             <View style={styles.authCardFrame}>
-              <View style={styles.authCard}>
-                <TouchableOpacity
-                  style={styles.backButton}
-                  onPress={() => router.replace('/')}
-                  accessibilityRole="button"
-                  accessibilityLabel="Back to landing page"
-                >
-                  <Text style={styles.backButtonIcon}>‹</Text>
-                  <Text style={styles.backButtonText}>Back to home</Text>
-                </TouchableOpacity>
-
+              <View
+                style={[
+                  styles.authCard,
+                  {
+                    backgroundColor: isDark ? colors.surface : colors.primaryDark,
+                    borderColor: isDark ? colors.border : colors.primaryLight,
+                    shadowColor: colors.primaryDark,
+                  },
+                ]}
+              >
+                {backHomeControl}
                 <View style={styles.logoSection}>
-                  <Pressable
-                    onPress={() => adminEntryTracker.tap()}
-                    accessibilityRole="image"
-                    accessibilityLabel="BlueTap logo"
-                  >
-                    <BlueTapBrandMark inverse color={colors.iconOnPrimary || '#FFFFFF'} size={100} style={styles.logo} />
-                  </Pressable>
-                  <Text style={styles.appName}>BlueTap</Text>
+                  {renderHiddenLogo(100, true, undefined, styles.logo)}
+                  <BlueTapWordmark style={styles.appName}>BlueTap</BlueTapWordmark>
                   <Text style={styles.tagline}>Water Within Reach</Text>
                 </View>
-
-                <View style={styles.formContainer}>
-                  <View style={styles.inputContainer}>
-                    <Text style={styles.inputLabel}>Username or email</Text>
-                    <TextInput
-                      ref={emailInputRef}
-                      style={styles.input}
-                      placeholder="Enter username or email"
-                      placeholderTextColor="#FFFFFF"
-                      keyboardType="default"
-                      autoCapitalize="none"
-                      value={email}
-                      onChangeText={setEmail}
-                      onFocus={() => handleInputFocus('email')}
-                      returnKeyType="next"
-                      onSubmitEditing={() => passwordInputRef.current?.focus()}
-                    />
-                    <Text style={styles.inputLabel}>Password</Text>
-                    <View style={styles.passwordField}>
-                      <TextInput
-                        ref={passwordInputRef}
-                        style={styles.passwordFieldInput}
-                        placeholder="Enter password"
-                        placeholderTextColor="#FFFFFF"
-                        secureTextEntry={!showPassword}
-                        value={password}
-                        onChangeText={setPassword}
-                        onFocus={() => handleInputFocus('password')}
-                        returnKeyType="done"
-                        onSubmitEditing={handleLogin}
-                      />
-                      <PasswordVisibilityButton
-                        visible={showPassword}
-                        onPress={() => setShowPassword((visible) => !visible)}
-                        style={styles.passwordVisibility}
-                        color="#FFFFFF"
-                      />
-                    </View>
-                  </View>
-                </View>
-
-                <View style={styles.buttonContainer}>
-                  <Pressable
-                    style={({ pressed, hovered }) => [
-                      styles.loginButton,
-                      { backgroundColor: pressed ? '#D7ECFF' : hovered ? '#EAF6FF' : '#FFFFFF', borderColor: '#D7ECFF' },
-                      hovered && !loading && styles.loginButtonHovered,
-                      pressed && !loading && styles.loginButtonPressed,
-                      loading && styles.buttonDisabled,
-                    ]}
-                    onPress={handleLogin}
-                    disabled={loading}
-                  >
-                    <Text style={[styles.loginButtonText, { color: colors.primaryDark || colors.primary }]}>
-                      {isLoginSuccessVisible
-                        ? 'SUCCESSFULLY LOGGED IN'
-                        : loading
-                          ? 'PLEASE WAIT...'
-                          : 'LOG IN'}
-                    </Text>
-                  </Pressable>
-                </View>
-
-                <TouchableOpacity
-                  style={styles.forgotPasswordContainer}
-                  onPress={openForgotPassword}
-                  disabled={loading}
-                >
-                  <Text style={styles.forgotPasswordText}>Forgot Password?</Text>
-                </TouchableOpacity>
-
-                <View style={styles.signupContainer}>
-                  <Text style={styles.signupText}>
-                    Need an account?{' '}
-                    <Text style={styles.signupLink} onPress={openSignupOptions}>
-                      Sign up.
-                    </Text>
-                  </Text>
-                </View>
+                {authenticationFields}
+                {loginLinks}
               </View>
             </View>
           </ScrollView>
@@ -754,6 +815,8 @@ const styles = createPortalStyleSheet({
     alignSelf: 'center',
     flex: 1,
   },
+  waterSvg: { ...StyleSheet.absoluteFillObject, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 0 },
+  containerAboveWater: { position: 'relative', zIndex: 1 },
   scrollContent: {
     flexGrow: 1,
     justifyContent: 'center',
@@ -793,16 +856,13 @@ const styles = createPortalStyleSheet({
     width: '100%',
     maxWidth: 432,
     alignSelf: 'center',
-    backgroundColor: 'rgba(9, 70, 122, 0.22)',
     borderRadius: 22,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.34)',
     padding: 20,
-    shadowColor: '#07518E',
-    shadowOpacity: 0.22,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 5,
+    shadowOpacity: 0.3,
+    shadowRadius: 22,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 8,
   },
   backButton: {
     alignSelf: 'flex-start',
@@ -846,6 +906,10 @@ const styles = createPortalStyleSheet({
     marginBottom: 12,
     color: '#FFFFFF',
   },
+  loginFieldHovered: {
+    backgroundColor: 'rgba(255, 255, 255, 0.16)',
+    borderColor: 'rgba(255, 255, 255, 0.9)',
+  },
   passwordField: {
     minHeight: 45,
     flexDirection: 'row',
@@ -870,6 +934,10 @@ const styles = createPortalStyleSheet({
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 10,
+  },
+  passwordVisibilityHovered: {
+    backgroundColor: 'rgba(255, 255, 255, 0.12)',
+    borderRadius: 8,
   },
   buttonContainer: {
     width: '100%',

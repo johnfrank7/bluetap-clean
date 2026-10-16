@@ -76,16 +76,25 @@ test('Assistant, notifications, chat, Login, and empty states use durable visual
   assert.match(login, /backgroundColor: pressed \? '#D7ECFF' : hovered \? '#EAF6FF' : '#FFFFFF'/);
 });
 
-test('Manager sidebar glyphs are deterministic unicode escapes with explicit dimensions', () => {
-  const adminIcon = read('components', 'AdminIcon.jsx');
+test('privileged sidebars share Lucide assets with explicit dimensions and foreground', () => {
+  const icon = read('components', 'SidebarIcon.jsx');
   const manager = read('components', 'ManagerShell.jsx');
-  for (const name of ['dashboard', 'requests', 'distributors', 'products', 'analytics', 'security', 'profile', 'logout', 'theme']) {
-    if (name === 'profile') assert.match(manager, /key: 'profile'/);
-    else assert.match(`${adminIcon}\n${manager}`, new RegExp(name));
+  const admin = read('components', 'AdminShell.jsx');
+  assert.match(manager, /MANAGER_SIDEBAR_ICONS\[item.key\]/);
+  assert.match(admin, /ADMIN_SIDEBAR_ICONS\[icon\]/);
+  assert.match(icon, /width: size, height: size/);
+  assert.match(icon, /flexShrink: 0/);
+  assert.match(icon, /tintColor=\{color\}/);
+  assert.doesNotMatch(icon, /<Text|\\u[0-9A-Fa-f]{4}/);
+  const assets = [...icon.matchAll(/require\('\.\.\/assets\/icons\/sidebar\/([^']+\.svg)'\)/g)];
+  assert.equal(assets.length, 18);
+  for (const [, filename] of assets) {
+    const svg = read('assets', 'icons', 'sidebar', filename);
+    assert.match(svg, /viewBox="0 0 24 24"/);
+    assert.match(svg, /stroke="#FFFFFF"/);
+    assert.match(svg, /stroke-width="2"/);
+    assert.doesNotMatch(svg, /<script|<image|href=/);
   }
-  assert.match(adminIcon, /minHeight: size/);
-  assert.match(adminIcon, /minWidth: size/);
-  assert.doesNotMatch(adminIcon, /â|ðŸ/);
 });
 
 test('chat launcher motion is subtle and fully reduced-motion aware', () => {

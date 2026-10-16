@@ -443,7 +443,20 @@ export default function SignupPage() {
 
   return (
     <LinearGradient colors={isDark ? [colors.background, colors.header] : [colors.primary, colors.primaryLight]} style={styles.screen}>
-      <SafeAreaView style={styles.safe}>
+      {Platform.OS === 'web' && (
+        <svg
+          aria-hidden="true"
+          focusable="false"
+          viewBox="0 0 1440 900"
+          preserveAspectRatio="none"
+          style={styles.waterSvg}
+        >
+          <path d="M0 758 C155 724 280 775 445 738 C625 698 760 720 930 684 C1115 644 1275 666 1440 624 L1440 900 L0 900 Z" fill={colors.primaryDark} opacity="0.24" />
+          <path d="M0 812 C180 780 315 823 500 787 C680 752 835 764 1010 730 C1175 699 1315 716 1440 680 L1440 900 L0 900 Z" fill={colors.primaryDeep || colors.primaryDark} opacity="0.34" />
+          <path d="M0 862 C170 838 320 870 490 842 C670 812 835 818 1000 790 C1165 762 1315 777 1440 744 L1440 900 L0 900 Z" fill={colors.primaryDark} opacity="0.42" />
+        </svg>
+      )}
+      <SafeAreaView style={[styles.safe, styles.contentAboveWater]}>
         <StatusBar style="light" />
         <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
           <Animated.View style={[
@@ -556,7 +569,9 @@ const styles = createPortalStyleSheet({
   verifyPreview: { borderWidth: 1, borderColor: '#D8E5EF', backgroundColor: '#F7FAFC', borderRadius: 12, padding: 18 },
   verifyPreviewText: { color: '#526E84', fontSize: 14, lineHeight: 21, textAlign: 'center' },
   screen: { flex: 1 }, safe: { flex: 1 }, scroll: { flexGrow: 1, alignItems: 'center', justifyContent: 'center', padding: 20 }, shell: { width: '100%' },
-  card: { backgroundColor: '#FFF', borderRadius: 24, padding: 26, shadowColor: '#07518E', shadowOpacity: .24, shadowRadius: 18, shadowOffset: { width: 0, height: 10 }, elevation: 8 },
+  waterSvg: { ...StyleSheet.absoluteFillObject, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 0 },
+  contentAboveWater: { position: 'relative', zIndex: 1 },
+  card: { backgroundColor: '#FFF', borderRadius: 24, padding: 26, shadowColor: BLUETAP_COLORS.primaryDark, shadowOpacity: .3, shadowRadius: 22, shadowOffset: { width: 0, height: 12 }, elevation: 8 },
   policyStatus: { minHeight: 32, marginTop: -12, marginBottom: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 }, policyStatusText: { color: BLUETAP_COLORS.muted, fontSize: 12, fontWeight: '600' },
   stepText: { color: BLUETAP_COLORS.primary, fontSize: 12, fontWeight: '700', textAlign: 'center', marginTop: -12, marginBottom: 12 },
   roleList: { gap: 12 }, roleCard: { flexDirection: 'row', alignItems: 'center', minHeight: 94, padding: 16, borderRadius: 14, borderWidth: 1.5, borderColor: '#D8E5EF', backgroundColor: '#FAFCFE' }, roleCardSelected: { borderColor: BLUETAP_COLORS.primary, backgroundColor: '#EDF7FF' }, roleIcon: { fontSize: 28, marginRight: 14 }, roleCopy: { flex: 1 }, roleTitle: { color: '#17324D', fontSize: 16, fontWeight: '800' }, roleDescription: { color: '#607A90', fontSize: 13, lineHeight: 18, marginTop: 3 }, radio: { width: 18, height: 18, borderRadius: 9, borderWidth: 2, borderColor: '#A8BCCB' }, radioSelected: { borderWidth: 5, borderColor: BLUETAP_COLORS.primary },

@@ -236,42 +236,43 @@ function BottomNav({ items, floating = true }) {
         const badgeCount = item.key === 'requests' ? attentionCounts.requests : item.key === 'schedule' ? attentionCounts.schedule : 0;
 
         return (
-          <Pressable
-            key={item.key}
-            accessibilityRole="button"
-            accessibilityState={{ selected: isActive }}
-            accessibilityLabel={badgeCount > 0 ? `${item.label}, ${badgeCount} items require attention` : item.label}
-            onPress={() => replaceOnce(item.route)}
-            style={({ hovered, pressed }) => [
-              styles.navButton,
-              isPrimaryAction && styles.primaryNavButton,
-              isPrimaryAction && {
-                backgroundColor: isActive || pressed ? (colors.primaryDark || colors.primary) : (colors.primaryAction || colors.primary),
-                borderColor: isActive || pressed ? colors.primaryLight : colors.primary,
-              },
-              isActive && !isPrimaryAction && {
-                backgroundColor: colors.primarySoft,
-                borderColor: colors.primary,
-                borderWidth: 1,
-              },
-              hovered && styles.navButtonHovered,
-              pressed && styles.navButtonPressed,
-            ]}
-          >
-            <View style={styles.navIconWrap}>
-              <NavIcon
-                activeIcon={item.activeIcon}
-                icon={item.icon}
-                inactiveScale={item.inactiveScale}
-                isActive={isActive}
-                keepIconFixed={item.keepIconFixed}
-                reduceMotion={reduceMotion}
-                tintColor={isPrimaryAction ? (colors.iconOnPrimary || colors.onPrimary) : (isActive ? colors.iconPrimary : navIconColor)}
-                primaryAction={isPrimaryAction}
-              />
-              {badgeCount > 0 && <View style={[styles.navBadge, { borderColor: navSurface }]}><Text style={styles.navBadgeText}>{formatNotificationBadge(badgeCount)}</Text></View>}
-            </View>
-          </Pressable>
+          <View key={item.key} style={styles.navSlot}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityState={{ selected: isActive }}
+              accessibilityLabel={badgeCount > 0 ? `${item.label}, ${badgeCount} items require attention` : item.label}
+              onPress={() => replaceOnce(item.route)}
+              style={({ hovered, pressed }) => [
+                styles.navButton,
+                isPrimaryAction && styles.primaryNavButton,
+                isPrimaryAction && {
+                  backgroundColor: isActive || pressed ? (colors.primaryDark || colors.primary) : (colors.primaryAction || colors.primary),
+                  borderColor: isActive || pressed ? colors.primaryLight : colors.primary,
+                },
+                isActive && !isPrimaryAction && {
+                  backgroundColor: colors.primarySoft,
+                  borderColor: colors.primary,
+                  borderWidth: 1,
+                },
+                hovered && styles.navButtonHovered,
+                pressed && styles.navButtonPressed,
+              ]}
+            >
+              <View style={styles.navIconWrap}>
+                <NavIcon
+                  activeIcon={item.activeIcon}
+                  icon={item.icon}
+                  inactiveScale={item.inactiveScale}
+                  isActive={isActive}
+                  keepIconFixed={item.keepIconFixed}
+                  reduceMotion={reduceMotion}
+                  tintColor={isPrimaryAction ? (colors.iconOnPrimary || colors.onPrimary) : (isActive ? colors.iconPrimary : navIconColor)}
+                  primaryAction={isPrimaryAction}
+                />
+                {badgeCount > 0 && <View style={[styles.navBadge, { borderColor: navSurface }]}><Text style={styles.navBadgeText}>{formatNotificationBadge(badgeCount)}</Text></View>}
+              </View>
+            </Pressable>
+          </View>
         );
       })}
     </View>
@@ -311,6 +312,12 @@ const styles = StyleSheet.create({
     minHeight: USER_PORTAL_LAYOUT.navHeight,
     minWidth: 0,
   },
+  navSlot: {
+    flex: 1,
+    minWidth: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   navButton: {
     width: 44,
     height: 44,
@@ -324,12 +331,10 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 24,
-    marginTop: -16,
     backgroundColor: BLUE,
     borderWidth: 3,
     borderColor: BLUETAP_COLORS.surface,
-    alignSelf: 'center',
-    ...createShadow({ color: BLUE, elevation: 6, opacity: 0.28, radius: 8, offset: { width: 0, height: 4 } }),
+    ...createShadow({ color: BLUE, elevation: 4, opacity: 0.2, radius: 6, offset: { width: 0, height: 3 } }),
   },
   iconFrame: {
     width: ICON_SIZE,

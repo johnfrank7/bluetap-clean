@@ -124,22 +124,45 @@ test('distributor dashboard keeps a manual one-card snap carousel and equal acti
   assert.match(source, /carouselPosition/);
   assert.match(source, /minHeight: 352/);
   assert.doesNotMatch(source, /minHeight: 430/);
+  assert.match(source, /welcomeSection:[\s\S]{0,60}marginTop: 0,[\s\S]{0,80}flex: 1/);
   assert.match(source, /cardActionsGrid/);
   assert.match(source, /flexBasis: '48%'/);
-  assert.match(source, /summaryMetricHeader/);
-  assert.match(source, /backgroundColor: colors\.surface, borderColor: item\.accent/);
-  assert.doesNotMatch(source, /autoplay|autoPlay|setInterval/);
+  assert.match(source, /summaryItem:[\s\S]{0,120}flex: 1,[\s\S]{0,80}alignItems: 'center'/);
+  assert.match(source, /backgroundColor: item\.tint, borderColor: item\.accent/);
+  assert.match(source, /summaryValue:[\s\S]{0,120}textAlign: 'center'/);
+  assert.match(source, /summaryLabel:[\s\S]{0,160}textAlign: 'center',[\s\S]{0,80}marginTop: 6/);
+  assert.match(source, /quickActionButton:[\s\S]{0,140}backgroundColor: BLUETAP_COLORS\.primaryAction/);
+  assert.match(source, /quickActionSecondary:[\s\S]{0,120}borderColor: BLUETAP_COLORS\.primaryAction/);
+  assert.match(source, /quickActionSecondaryText:[\s\S]{0,60}color: BLUETAP_COLORS\.primaryAction/);
+  assert.doesNotMatch(source, /summaryMetricHeader|summaryMetricBody|summaryRowStacked|summaryCardStacked/);
+  assert.doesNotMatch(source, /autoplay|autoPlay/);
 });
 
-test('floating portal navigation stays compact without shrinking touch targets', () => {
+test('portal navigation uses aligned equal slots without a center notch', () => {
   const nav = read('components', 'AppBottomNav.jsx');
   const assistant = read('components', 'assistant', 'AssistantScreen.jsx');
   assert.match(nav, /paddingVertical: 8/);
+  assert.match(nav, /navSlot:[\s\S]{0,120}flex: 1,[\s\S]{0,120}alignItems: 'center',[\s\S]{0,60}justifyContent: 'center'/);
   assert.match(nav, /navButton:[\s\S]{0,100}width: 44,[\s\S]{0,60}height: 44/);
-  assert.match(nav, /marginTop: -16/);
+  assert.match(nav, /primaryNavButton:[\s\S]{0,120}width: 48,[\s\S]{0,60}height: 48,[\s\S]{0,60}borderRadius: 24/);
+  assert.doesNotMatch(nav, /getNotchedNavPath|NOTCH_|notchedNav|notchedSurface|<svg/);
+  assert.doesNotMatch(nav, /primaryNavButton:[\s\S]{0,180}(top: -8|marginTop: -32)/);
   assert.match(nav, /minHeight: USER_PORTAL_LAYOUT\.navHeight/);
   assert.match(assistant, /USER_PORTAL_LAYOUT\.navHeight \+/);
   assert.match(assistant, /USER_PORTAL_LAYOUT\.navBottomOffset \+/);
+});
+
+test('Requester order form uses readable theme text colors for its dark heading copy', () => {
+  const source = read('app', 'requester', 'requestform.jsx');
+  assert.match(source, /styles\.eyebrow, isDark && \{ color: colors\.primaryLight \}/);
+  assert.match(source, /styles\.subtitle, isDark && \{ color: colors\.textSecondary \}/);
+});
+
+test('Requester order review has a cancel action that uses the unsaved-change guard', () => {
+  const source = read('app', 'requester', 'requestform.jsx');
+  assert.match(source, /const leaveRequestForm = \(\) => confirmLeave\(/);
+  assert.match(source, /accessibilityLabel="Cancel request"[\s\S]{0,180}onPress=\{leaveRequestForm\}/);
+  assert.match(source, /Cancel Request/);
 });
 
 test('ProductCard reflects Phase 13A typography, description rendering, and high-contrast dark theme surfaces', () => {

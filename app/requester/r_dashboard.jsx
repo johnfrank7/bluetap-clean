@@ -420,6 +420,7 @@ export default function RequesterDashboard() {
   const [productsError, setProductsError] = useState('');
   const [activeProductIndex, setActiveProductIndex] = useState(0);
   const [viewAllModalVisible, setViewAllModalVisible] = useState(false);
+  const allProductsListRef = useRef(null);
   const [currentRequests, setCurrentRequests] = useState([]);
   const [currentRequestsLoading, setCurrentRequestsLoading] = useState(true);
   const [currentRequestsError, setCurrentRequestsError] = useState('');
@@ -954,6 +955,7 @@ export default function RequesterDashboard() {
           visible={viewAllModalVisible}
           transparent
           animationType="fade"
+          onShow={() => allProductsListRef.current?.scrollTo({ y: 0, animated: false })}
           onRequestClose={() => setViewAllModalVisible(false)}
         >
           <View style={styles.allProductsModalBackdrop}>
@@ -974,6 +976,7 @@ export default function RequesterDashboard() {
               </View>
 
               <ScrollView
+                ref={allProductsListRef}
                 style={styles.allProductsList}
                 contentContainerStyle={styles.allProductsContentContainer}
                 showsVerticalScrollIndicator={false}
@@ -983,6 +986,7 @@ export default function RequesterDashboard() {
                     <ProductCard
                       product={item}
                       compact={false}
+                      style={styles.allProductsProductCard}
                       onOrder={(prod) => {
                         setViewAllModalVisible(false);
                         router.push({
@@ -1513,10 +1517,14 @@ const styles = createPortalStyleSheet({
     flexGrow: 1,
   },
   allProductsContentContainer: {
-    paddingTop: 6,
+    paddingTop: 10,
     paddingBottom: 24,
     paddingHorizontal: 4,
     gap: 18,
+  },
+  allProductsProductCard: {
+    height: 380,
+    minHeight: 380,
   },
   allProductsItemWrapper: {
     width: '100%',
