@@ -3,6 +3,7 @@ import React from 'react';
 import {
   View,
   Text,
+  ActivityIndicator,
   StyleSheet,
   TouchableOpacity,
   TextInput,
@@ -112,6 +113,7 @@ export default function LoginPage() {
   const [password, setPassword] = React.useState('');
   const [showPassword, setShowPassword] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
+  const [loginConnecting, setLoginConnecting] = React.useState(false);
   const loginInFlight = React.useRef(false);
   const loginRequestId = React.useRef(0);
   const loginSucceeded = React.useRef(false);
@@ -369,7 +371,10 @@ export default function LoginPage() {
 
       // Both identifiers use password verification and public-role checks on
       // the backend before establishing the matching Firebase client session.
-      const loginResult = await loginWithUsernameResult(loginIdentifier, enteredPassword, { portal: 'public' });
+      const loginResult = await loginWithUsernameResult(loginIdentifier, enteredPassword, {
+        portal: 'public',
+        onConnectionWait: setLoginConnecting,
+      });
       const userCredential = await signInWithCustomToken(auth, loginResult.customToken);
 
       const user = userCredential.user;
@@ -438,6 +443,10 @@ export default function LoginPage() {
       const accountState = error?.code === 'ACCOUNT_SUSPENDED' || error?.code === 'username/account-suspended' ? 'suspended' : error?.code === 'ACCOUNT_TERMINATED' || error?.code === 'username/account-terminated' ? 'terminated' : '';
       if (accountState) { router.replace({ pathname: '/account-access-status', params: { state: accountState } }); return; }
       const privileged = error?.code === 'PRIVILEGED_LOGIN_REQUIRED' || error?.code === 'username/privileged-login-required';
+      if (error?.code === 'username/connection-unavailable') {
+        showNotification('Connection unavailable', 'Unable to connect to BlueTap. Please try again.', handleLogin, 'Try again');
+        return;
+      }
       showNotification('Login failed', getPublicLoginErrorMessage(error), privileged ? () => router.replace('/admin/login') : undefined, privileged ? 'Go to Admin Login' : '');
     } finally {
       if (requestId === requestSequence.current) {
@@ -639,9 +648,18 @@ export default function LoginPage() {
           accessibilityRole="button"
         >
           <Text style={[styles.loginButtonText, { color: colors.primaryDark || colors.primary }]}>
-            {isLoginSuccessVisible ? 'SUCCESSFULLY LOGGED IN' : loading ? 'PLEASE WAIT...' : 'LOG IN'}
+            {isLoginSuccessVisible ? 'SUCCESSFULLY LOGGED IN' : loginConnecting ? 'CONNECTING...' : loading ? 'PLEASE WAIT...' : 'LOG IN'}
           </Text>
         </Pressable>
+        {loginConnecting ? (
+          <View style={styles.connectionStatus} accessibilityLiveRegion="polite">
+            <ActivityIndicator size="small" color="#FFFFFF" />
+            <View>
+              <Text style={styles.connectionTitle}>Connecting to BlueTap service...</Text>
+              <Text style={styles.connectionMessage}>Our server is starting up. Please wait a moment.</Text>
+            </View>
+          </View>
+        ) : null}
       </View>
     </>
   );
@@ -943,6 +961,9 @@ const styles = createPortalStyleSheet({
     width: '100%',
     marginBottom: 16,
   },
+  connectionStatus: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, marginTop: 12 },
+  connectionTitle: { color: '#FFFFFF', fontSize: 13, fontWeight: '700' },
+  connectionMessage: { color: 'rgba(255, 255, 255, 0.82)', fontSize: 12, marginTop: 2 },
   loginButton: {
     borderRadius: 10,
     borderWidth: 1,

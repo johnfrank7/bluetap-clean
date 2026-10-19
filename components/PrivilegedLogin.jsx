@@ -48,6 +48,7 @@ const safeAccessMessage = (code) => {
 
 const safeSignInMessage = (code, error) => {
   if (code === 'auth/user-disabled' || error?.code === 'ACCOUNT_DISABLED') return 'This account is disabled. Please contact support.';
+  if (error?.code === 'username/connection-unavailable') return 'Unable to connect to BlueTap. Please try again.';
   if (code === 'auth/network-request-failed' || error?.code === 'NETWORK_ERROR') return 'Unable to reach the sign-in service. Check your connection and try again.';
   if (code === 'auth/too-many-requests' || code === 'LOGIN_RATE_LIMITED' || code === 'username/LOGIN_RATE_LIMITED' || error?.code === 'LOGIN_RATE_LIMITED' || error?.reason === 'too-many-attempts') {
     if (error?.retryAfterSeconds) {
@@ -81,6 +82,8 @@ export default function PrivilegedLogin() {
   const [password, setPassword] = React.useState('');
   const [showPassword, setShowPassword] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
+  const [loginConnecting, setLoginConnecting] = React.useState(false);
+  const [connectionUnavailable, setConnectionUnavailable] = React.useState(false);
   const [error, setError] = React.useState('');
   const submitting = React.useRef(false);
   const navigationCompletedRef = React.useRef(false);
@@ -173,6 +176,7 @@ export default function PrivilegedLogin() {
     clearAllAuthSessions();
     try { await signOut(auth); } catch { /* already signed out */ }
     const code = String(loginError?.code || '');
+    setConnectionUnavailable(code === 'username/connection-unavailable');
     if (/^(ADMIN|MANAGER)_/.test(code)) {
       console.warn('[privileged-login]', {
         stage: 'ACCESS_VALIDATION_FAILED',
@@ -220,7 +224,7 @@ export default function PrivilegedLogin() {
     if (!identifier.trim() || !password) return setError('Enter your username or email and password.');
     submitting.current = true;
     resetPrivilegedLoginValidation(role);
-    setLoading(true); setError('');
+    setLoading(true); setError(''); setConnectionUnavailable(false);
     try {
       const normalized = identifier.trim().toLowerCase();
       logPrivilegedStage('SIGNIN_STARTED');
@@ -241,7 +245,10 @@ export default function PrivilegedLogin() {
 
       const credential = normalized.includes('@')
         ? await signInWithEmailAndPassword(auth, normalized, password)
-        : await signInWithCustomToken(auth, await loginWithUsername(normalized, password, { portal: role }));
+        : await signInWithCustomToken(auth, await loginWithUsername(normalized, password, {
+          portal: role,
+          onConnectionWait: setLoginConnecting,
+        }));
       logPrivilegedStage('SIGNIN_SUCCESS');
       logPrivilegedStage('VALIDATION_CALLED_FROM_LOGIN');
       await runPrivilegedLoginValidation(role, credential.user, () => finishAuthenticatedLogin(credential.user));
@@ -280,7 +287,8 @@ export default function PrivilegedLogin() {
             </View>
             {params.passwordChanged === 'true' && !error && <Text style={[styles.success, { color: palette.success, backgroundColor: palette.successSoft }]}>Password changed successfully. Sign in with your new password.</Text>}
             {!!error && <Text accessibilityRole="alert" style={[styles.error, { color: palette.danger, backgroundColor: palette.dangerSoft }]}>{error}</Text>}
-            <TouchableOpacity disabled={loading || (!!pendingDestination && !error)} onPress={pendingDestination ? retryNavigation : submit} style={[styles.button, { backgroundColor: palette.action }, loading && styles.disabled]}>{loading || (pendingDestination && !error) ? <View style={styles.loadingContent}><ActivityIndicator color="#FFF" size="small" /><Text style={styles.buttonText}>{pendingDestination ? 'Opening dashboard...' : 'Verifying administrator access...'}</Text></View> : <Text style={styles.buttonText}>{pendingDestination ? 'Open dashboard' : 'Sign in as Administrator'}</Text>}</TouchableOpacity>
+            {loginConnecting && <View style={styles.connectionStatus} accessibilityLiveRegion="polite"><ActivityIndicator color={palette.primary} size="small" /><View><Text style={[styles.connectionTitle, { color: palette.text }]}>Connecting to BlueTap service...</Text><Text style={[styles.connectionMessage, { color: palette.secondary }]}>Our server is starting up. Please wait a moment.</Text></View></View>}
+            <TouchableOpacity disabled={loading || (!!pendingDestination && !error)} onPress={pendingDestination ? retryNavigation : submit} style={[styles.button, { backgroundColor: palette.action }, loading && styles.disabled]}>{loading || (pendingDestination && !error) ? <View style={styles.loadingContent}><ActivityIndicator color="#FFF" size="small" /><Text style={styles.buttonText}>{pendingDestination ? 'Opening dashboard...' : loginConnecting ? 'Connecting...' : 'Verifying administrator access...'}</Text></View> : <Text style={styles.buttonText}>{pendingDestination ? 'Open dashboard' : connectionUnavailable ? 'Try again' : 'Sign in as Administrator'}</Text>}</TouchableOpacity>
             <TouchableOpacity disabled={loading} onPress={() => router.replace('/login')} style={styles.back}><Text style={[styles.backText, { color: palette.primary }]}>Back to public login</Text></TouchableOpacity>
           </View>
         </PageEnterTransition>
@@ -308,6 +316,9 @@ const styles = StyleSheet.create({
   error: { borderRadius: 8, padding: 10, marginTop: 14, textAlign: 'center' },
   button: { minHeight: 50, borderRadius: 10, alignItems: 'center', justifyContent: 'center', marginTop: 20 },
   loadingContent: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 9 },
+  connectionStatus: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 14 },
+  connectionTitle: { fontSize: 13, fontWeight: '800' },
+  connectionMessage: { fontSize: 12, marginTop: 2 },
   buttonText: { color: '#FFF', fontSize: 15, fontWeight: '800' }, disabled: { opacity: .65 },
   back: { minHeight: 44, alignItems: 'center', justifyContent: 'center', marginTop: 8 }, backText: { fontWeight: '700' },
 });

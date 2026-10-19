@@ -159,7 +159,7 @@ async function checkLoginRateLimits({ db, ip, normalized, hashSecret, now = Date
   await checkAccountRateLimit({ db, targetId: normalized, hashSecret, now });
 }
 
-async function recordLoginFailure({ db, targetId, hashSecret, now = Date.now }) {
+async function recordLoginFailure({ db, targetId, hashSecret, attemptFingerprint, now = Date.now }) {
   if (!hashSecret || !targetId) return null;
   const currentTime = now();
   const accountId = getRateLimitDocId(hashSecret, 'account-login', targetId);
@@ -168,6 +168,18 @@ async function recordLoginFailure({ db, targetId, hashSecret, now = Date.now }) 
   return await db.runTransaction(async (tx) => {
     const accountSnap = await tx.get(accountRef);
     const accountData = accountSnap.data() || {};
+    const recentAttempts = Array.isArray(accountData.recentAttempts) ? accountData.recentAttempts : [];
+    const duplicateIndex = attemptFingerprint
+      ? recentAttempts.findIndex((attempt) => attempt?.fingerprint === attemptFingerprint)
+      : -1;
+    const duplicateAttempt = duplicateIndex >= 0 ? recentAttempts[duplicateIndex] : null;
+    if (duplicateAttempt && Number(duplicateAttempt.seen || 1) < 2) {
+      const nextAttempts = recentAttempts.slice();
+      nextAttempts[duplicateIndex] = { ...duplicateAttempt, seen: 2 };
+      tx.set(accountRef, { ...accountData, recentAttempts: nextAttempts });
+      const retryAfterSeconds = Math.max(0, Math.ceil((millis(accountData.blockedUntil) - currentTime) / 1000));
+      return { rateLimited: retryAfterSeconds > 0, retryAfterSeconds, duplicate: true };
+    }
 
     const resetAt = millis(accountData.resetAt);
     const active = resetAt > currentTime;
@@ -181,10 +193,17 @@ async function recordLoginFailure({ db, targetId, hashSecret, now = Date.now }) 
       blockedUntil = new Date(currentTime + retryAfterSeconds * 1000);
     }
 
+    const nextAttempts = attemptFingerprint
+      ? duplicateAttempt
+        ? recentAttempts.map((attempt, index) => index === duplicateIndex ? { ...attempt, seen: Number(attempt.seen || 1) + 1 } : attempt)
+        : [...recentAttempts, { fingerprint: attemptFingerprint, seen: 1 }]
+      : recentAttempts;
+
     tx.set(accountRef, {
       count: newFailures,
       blockedUntil,
       resetAt: new Date(active ? resetAt : currentTime + ACCOUNT_RESET_MS),
+      recentAttempts: nextAttempts.slice(-100),
       type: 'account',
     });
 
@@ -201,7 +220,7 @@ async function recordLoginSuccess({ db, targetId, hashSecret }) {
   const accountRef = db.collection('authRateLimits').doc(accountId);
   try {
     await db.runTransaction(async (tx) => {
-      tx.set(accountRef, { count: 0, blockedUntil: null, resetAt: new Date(0), type: 'account' });
+      tx.set(accountRef, { count: 0, blockedUntil: null, resetAt: new Date(0), recentAttempts: [], type: 'account' });
     });
   } catch (err) {
     console.warn('[public-login]', { stage: 'LOGIN_RATE_LIMIT_RESET_FAILED', error: err.message });
@@ -236,6 +255,9 @@ function createUsernameHandler(action, getAdmin = getFirebaseAdmin, { now = Date
           typeof body.password !== 'string' || !body.password || body.password.length > 128) {
         throw new OtpError(400, 'invalid-request', 'Enter your username or email and password.');
       }
+      const attemptId = typeof body.attemptId === 'string' && /^[A-Za-z0-9_-]{16,80}$/.test(body.attemptId)
+        ? body.attemptId
+        : undefined;
       let normalized;
       const isEmail = body.username.includes('@');
       if (isEmail) {
@@ -275,6 +297,11 @@ function createUsernameHandler(action, getAdmin = getFirebaseAdmin, { now = Date
 
       // Canonical account identifier: Firebase UID for existing accounts, normalized identifier fallback for unknown accounts
       const canonicalAccountId = expectedUid || normalized;
+      const attemptFingerprint = attemptId
+        ? createHmac('sha256', process.env.EMAIL_OTP_HASH_SECRET || '')
+          .update(JSON.stringify([attemptId, canonicalAccountId, normalized, portal, body.password]))
+          .digest('hex')
+        : undefined;
 
       // 3. Primary Account Cooldown Check (shared across username & email for the same real account)
       await checkAccountRateLimit({
@@ -290,6 +317,7 @@ function createUsernameHandler(action, getAdmin = getFirebaseAdmin, { now = Date
           db,
           targetId: canonicalAccountId,
           hashSecret: process.env.EMAIL_OTP_HASH_SECRET,
+          attemptFingerprint,
           now,
         });
         if (failResult?.rateLimited) {
@@ -326,6 +354,7 @@ function createUsernameHandler(action, getAdmin = getFirebaseAdmin, { now = Date
             db,
             targetId: canonicalAccountId,
             hashSecret: process.env.EMAIL_OTP_HASH_SECRET,
+            attemptFingerprint,
             now,
           });
           if (failResult?.rateLimited) {

@@ -113,6 +113,54 @@ test('unknown username and wrong password return identical generic errors', asyn
   }
 });
 
+test('a retried login attempt idempotently records one failed credential attempt', async (t) => {
+  const originalSecret = process.env.EMAIL_OTP_HASH_SECRET;
+  const originalKey = process.env.FIREBASE_WEB_API_KEY;
+  process.env.EMAIL_OTP_HASH_SECRET = 'idempotent-login-secret';
+  process.env.FIREBASE_WEB_API_KEY = require('../../../firebase-web-config.json').apiKey;
+  const f = fixture();
+  t.mock.method(global, 'fetch', async () => ({ ok: false, json: async () => ({ error: { message: 'INVALID_LOGIN_CREDENTIALS' } }) }));
+  try {
+    const handler = createUsernameHandler('login', () => f);
+    const request = (attemptId, password = 'wrong') => ({
+      method: 'POST', headers: {}, socket: { remoteAddress: 'idempotent-test-ip' },
+      body: { username: 'johnbluetap', password, attemptId },
+    });
+    const first = response();
+    const retry = response();
+    await handler(request('attempt_00000000000001'), first);
+    await handler(request('attempt_00000000000001'), retry);
+    assert.equal(first.statusCode, 401);
+    assert.equal(retry.statusCode, 401);
+    const readAccountRecord = () => [...f.records.entries()].find(([key, value]) => key.startsWith('authRateLimits/') && value.type === 'account')[1];
+    assert.equal(readAccountRecord().count, 1);
+
+    const replay = response();
+    await handler(request('attempt_00000000000001'), replay);
+    assert.equal(replay.statusCode, 401);
+    assert.equal(readAccountRecord().count, 2, 'reusing the same client attempt only gets one deduplicated retry');
+
+    const differentPassword = response();
+    await handler(request('attempt_00000000000001', 'another-wrong-password'), differentPassword);
+    assert.equal(differentPassword.statusCode, 401);
+    assert.equal(readAccountRecord().count, 3, 'a changed password is a distinct credential guess');
+
+    for (const attemptId of ['attempt_00000000000002']) {
+      const next = response();
+      await handler(request(attemptId), next);
+      assert.equal(next.statusCode, 401);
+    }
+    const limited = response();
+    await handler(request('attempt_00000000000003'), limited);
+    assert.equal(limited.statusCode, 429);
+    const ipRecord = [...f.records.entries()].find(([key, value]) => key.startsWith('authRateLimits/') && value.type === 'ip');
+    assert.equal(ipRecord[1].count, 6, 'every received retry remains subject to the IP request limiter');
+  } finally {
+    if (originalSecret === undefined) delete process.env.EMAIL_OTP_HASH_SECRET; else process.env.EMAIL_OTP_HASH_SECRET = originalSecret;
+    if (originalKey === undefined) delete process.env.FIREBASE_WEB_API_KEY; else process.env.FIREBASE_WEB_API_KEY = originalKey;
+  }
+});
+
 test('availability endpoint hides registry data and honors active reservations', async () => {
   const f = fixture({ known: false });
   let res = response();

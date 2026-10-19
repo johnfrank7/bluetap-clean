@@ -94,6 +94,8 @@ test('privileged login replaces stale shared Auth state before authenticating su
   assert.ok(staleSessionIndex > submitIndex);
   assert.ok(staleSignOutIndex > staleSessionIndex);
   assert.ok(emailSignInIndex > staleSignOutIndex);
+  assert.match(login, /normalized\.includes\('@'\)[\s\S]*?loginWithUsername\(normalized, password, \{[\s\S]*?portal: role/);
+  assert.match(login, /onConnectionWait: setLoginConnecting/);
   assert.ok(submittedUserIndex > emailSignInIndex);
 });
 
