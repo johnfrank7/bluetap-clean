@@ -2,6 +2,7 @@ import React from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { DELIVERY_FAILURE_REASONS } from '../constants/deliveryFailureReasons';
+import DropdownChevron from './DropdownChevron';
 import { useBlueTapTheme } from './BlueTapTheme';
 import ResponsiveActionDialog from './ResponsiveActionDialog';
 
@@ -48,7 +49,7 @@ export default function DeliveryActionDialog({ action, orderReference, visible, 
             style={({ pressed }) => [styles.select, { backgroundColor: colors.input || colors.surfaceAlt, borderColor: colors.border }, pressed && styles.pressed]}
           >
             <Text style={[styles.selectText, { color: selected ? colors.textPrimary : colors.textSecondary }]}>{selected?.label || 'Select a reason'}</Text>
-            <Text style={[styles.chevron, { color: colors.primary }]}>{selectorOpen ? '⌃' : '⌄'}</Text>
+            <DropdownChevron expanded={selectorOpen} size={16} color={colors.iconSecondary || colors.primary} />
           </Pressable>
           {selectorOpen && (
             <View style={[styles.options, { backgroundColor: colors.surfaceAlt, borderColor: colors.border }]}>
@@ -91,7 +92,6 @@ const styles = StyleSheet.create({
   label: { fontSize: 12, fontWeight: '800', marginTop: 5 },
   select: { minHeight: 46, borderWidth: 1, borderRadius: 12, paddingHorizontal: 13, flexDirection: 'row', alignItems: 'center', gap: 10 },
   selectText: { flex: 1, minWidth: 0, fontSize: 13, fontWeight: '700' },
-  chevron: { fontSize: 18, fontWeight: '900' },
   options: { borderWidth: 1, borderRadius: 12, overflow: 'hidden' },
   option: { minHeight: 42, paddingHorizontal: 13, justifyContent: 'center', borderBottomWidth: StyleSheet.hairlineWidth },
   optionText: { fontSize: 13, fontWeight: '700' },

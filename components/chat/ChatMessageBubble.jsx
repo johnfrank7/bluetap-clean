@@ -56,7 +56,7 @@ export default function ChatMessageBubble({ message, own, receipt, colors, onRet
   const finePointer = useFinePointer();
   const useActionSheet = Platform.OS !== 'web' || !finePointer;
   const deleted = Boolean(message.deletedAt);
-  const withinWindow = Boolean(message.id) && !deleted && Date.now() - timeOf(message.createdAt) <= 15 * 60 * 1000;
+  const withinWindow = Boolean(message.id && onEdit && onDelete) && !deleted && Date.now() - timeOf(message.createdAt) <= 15 * 60 * 1000;
   const reportable = !own && Boolean(message.id && onReport && !deleted);
   const replyable = Boolean(onReply && message.id && !deleted);
   const actions = chatModel.messageActionNames({ own, withinWindow, reportable, replyable });

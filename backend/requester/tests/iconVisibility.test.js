@@ -87,7 +87,8 @@ test('privileged sidebars share Lucide assets with explicit dimensions and foreg
   assert.match(icon, /tintColor=\{color\}/);
   assert.doesNotMatch(icon, /<Text|\\u[0-9A-Fa-f]{4}/);
   const assets = [...icon.matchAll(/require\('\.\.\/assets\/icons\/sidebar\/([^']+\.svg)'\)/g)];
-  assert.equal(assets.length, 18);
+  assert.equal(assets.length, 19);
+  assert.match(icon, /CircleDollarSign: require\('\.\.\/assets\/icons\/sidebar\/circle-dollar-sign\.svg'\)/);
   for (const [, filename] of assets) {
     const svg = read('assets', 'icons', 'sidebar', filename);
     assert.match(svg, /viewBox="0 0 24 24"/);

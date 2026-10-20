@@ -1,12 +1,56 @@
 {
   "indexes": [
     {
+      "collectionGroup": "chatOrderHistory",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "participantUserUids", "arrayConfig": "CONTAINS" },
+        { "fieldPath": "archivedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "chatOrderHistory",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "participantBranchIds", "arrayConfig": "CONTAINS" },
+        { "fieldPath": "archivedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "messages",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "orderId", "order": "ASCENDING" },
+        { "fieldPath": "seq", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "chatConversations",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "participantUserUids", "arrayConfig": "CONTAINS" },
+        { "fieldPath": "updatedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "chatConversations",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "participantBranchIds", "arrayConfig": "CONTAINS" },
+        { "fieldPath": "updatedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "chatConversations",
       "queryScope": "COLLECTION",
       "fields": [
         {
           "fieldPath": "participantUserUids",
           "arrayConfig": "CONTAINS"
+        },
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
         },
         {
           "fieldPath": "updatedAt",
@@ -21,6 +65,10 @@
         {
           "fieldPath": "participantBranchIds",
           "arrayConfig": "CONTAINS"
+        },
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
         },
         {
           "fieldPath": "updatedAt",

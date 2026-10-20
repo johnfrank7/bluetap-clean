@@ -8,6 +8,7 @@ const read = (path) => readFileSync(resolve(root, path), 'utf8');
 
 const dashboardCode = read('app/manager/dashboard.jsx');
 const analyticsCode = read('app/manager/analytics.jsx');
+const analyticsCardCode = read('components/AnalyticsMetricCard.jsx');
 const accountsCode = read('app/manager/accounts.jsx');
 const profileCode = read('app/manager/profile.jsx');
 const realtimeCode = read('components/ManagerRealtimeData.jsx');
@@ -91,8 +92,10 @@ test('Manager Dashboard calculates registeredUsers as sum of distributors and br
 });
 
 test('Manager Analytics UI has uniform KPI cards, responsive layout, and accurate branch people count', () => {
-  assert.match(analyticsCode, /minHeight:\s*126/);
-  assert.match(analyticsCode, /padding:\s*16/);
+  assert.match(analyticsCode, /AnalyticsMetricCard/);
+  assert.match(analyticsCode, /metricCardOneColumn/);
+  assert.match(analyticsCardCode, /minHeight:\s*150/);
+  assert.match(analyticsCardCode, /padding:\s*16/);
   assert.match(analyticsCode, /Ordered from this branch/);
   assert.match(analyticsCode, /Assigned to branch/);
   assert.match(analyticsCode, /extractBranchRequesters/);

@@ -22,6 +22,15 @@
   --bluetap-input-error-ring: rgba(181, 47, 47, 0.16);
   --bluetap-radius: 16px;
   --bluetap-shadow: 0 5px 14px rgba(18, 48, 74, 0.07);
+  --bluetap-pagination-selected: #0b67ad;
+  --bluetap-pagination-on-selected: #ffffff;
+  --bluetap-pagination-surface: #f8fcff;
+  --bluetap-pagination-text: #12304a;
+  --bluetap-pagination-border: #d7ecff;
+  --bluetap-pagination-hover: #eaf6ff;
+  --bluetap-pagination-hover-border: #187bcd;
+  --bluetap-pagination-disabled: #eef3f7;
+  --bluetap-pagination-disabled-text: #526579;
 }
 
 [data-bluetap-theme='dark'] {
@@ -29,6 +38,60 @@
   --bluetap-input-focus-ring: rgba(112, 189, 242, 0.22);
   --bluetap-input-error: #ff8a91;
   --bluetap-input-error-ring: rgba(255, 138, 145, 0.2);
+  --bluetap-pagination-selected: #1565c0;
+  --bluetap-pagination-surface: #112a40;
+  --bluetap-pagination-text: #f5faff;
+  --bluetap-pagination-border: #1c3c55;
+  --bluetap-pagination-hover: #163b59;
+  --bluetap-pagination-hover-border: #70bdf2;
+  --bluetap-pagination-disabled: #112a40;
+  --bluetap-pagination-disabled-text: #9fb4c8;
+}
+
+/* Theme-safe pagination colors across Admin and Manager web pages. */
+button[data-bluetap-pagination-state='idle'],
+button[aria-label^='Go to page '],
+button[aria-label='Previous page']:not(:disabled),
+button[aria-label='Next page']:not(:disabled) {
+  background-color: var(--bluetap-pagination-surface) !important;
+  border-color: var(--bluetap-pagination-border) !important;
+}
+
+button[data-bluetap-pagination-state='idle'] > div,
+button[aria-label^='Go to page '] > div,
+button[aria-label='Previous page']:not(:disabled) > div,
+button[aria-label='Next page']:not(:disabled) > div {
+  color: var(--bluetap-pagination-text) !important;
+}
+
+button[data-bluetap-pagination-state='idle']:hover,
+button[aria-label^='Go to page ']:hover,
+button[aria-label='Previous page']:not(:disabled):hover,
+button[aria-label='Next page']:not(:disabled):hover {
+  background-color: var(--bluetap-pagination-hover) !important;
+  border-color: var(--bluetap-pagination-hover-border) !important;
+}
+
+button[data-bluetap-pagination-state='selected'],
+button[aria-label^='Current page, page'] {
+  background-color: var(--bluetap-pagination-selected) !important;
+  border-color: var(--bluetap-pagination-selected) !important;
+}
+
+button[data-bluetap-pagination-state='selected'] > div,
+button[aria-label^='Current page, page'] > div {
+  color: var(--bluetap-pagination-on-selected) !important;
+}
+
+button[aria-label='Previous page']:disabled,
+button[aria-label='Next page']:disabled {
+  background-color: var(--bluetap-pagination-disabled) !important;
+  opacity: 1 !important;
+}
+
+button[aria-label='Previous page']:disabled > div,
+button[aria-label='Next page']:disabled > div {
+  color: var(--bluetap-pagination-disabled-text) !important;
 }
 
 *:focus-visible {

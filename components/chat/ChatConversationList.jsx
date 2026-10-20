@@ -2,11 +2,12 @@ import React from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import BlueTapChatIcon from './BlueTapChatIcon';
+import ChatTabIcon from './ChatTabIcon';
 import RoleBadge from '../RoleBadge';
 import SoftStatusBadge from '../SoftStatusBadge';
 import { useChat } from './ChatContext';
 const { timeOf } = require('./chatModel');
-const { avatarForConversation, buildRequesterConversationGroups, counterpartRoleLabel } = require('./chatPresentation');
+const { avatarForConversation, buildRequesterConversationGroups, counterpartRoleLabel, meaningfulName } = require('./chatPresentation');
 
 const formatTimestamp = (value) => {
   const date = timeOf(value) ? new Date(timeOf(value)) : null;
@@ -31,7 +32,8 @@ function ConversationRow({ colors, conversation, onPress, role }) {
     && conversation.type === 'requester_branch'
     && !conversation.orderReference;
   const showContext = Boolean(conversation.orderReference)
-    || ['distributor_branch', 'branch_coordination'].includes(conversation.type);
+    || Boolean(conversation.historyId)
+    || ['requester_branch', 'distributor_branch', 'branch_coordination'].includes(conversation.type);
   return (
     <Pressable
       accessibilityRole="button"
@@ -52,10 +54,14 @@ function ConversationRow({ colors, conversation, onPress, role }) {
           </View>
           <View style={styles.rowMeta}>
             {conversation.unreadCount > 0 && <View style={[styles.badge, { backgroundColor: colors.danger }]}><Text style={styles.badgeText}>{conversation.unreadLabel}</Text></View>}
-            <Text style={[styles.timestamp, { color: colors.textSecondary }]}>{formatTimestamp(conversation.lastMessageAt || conversation.updatedAt)}</Text>
+            <Text style={[styles.timestamp, { color: colors.textSecondary }]}>{formatTimestamp(conversation.archivedAt || conversation.lastMessageAt || conversation.updatedAt)}</Text>
           </View>
         </View>
-        {showContext && !!conversation.contextLabel && <Text style={[styles.context, { color: colors.textSecondary }]} numberOfLines={1}>{conversation.contextLabel}</Text>}
+        {showContext && !!conversation.contextLabel && <View style={styles.contextRow}>
+          <Text style={[styles.context, { color: colors.textSecondary }]} numberOfLines={1}>{conversation.contextLabel}</Text>
+          {!!roleLabel && !!conversation.orderStatus && <SoftStatusBadge status={conversation.orderStatus} compact numberOfLines={1} style={styles.contextStatusBadge} />}
+        </View>}
+        {!!conversation.historyId && <Text style={[styles.context, { color: colors.textSecondary }]} numberOfLines={1}>Archived {formatTimestamp(conversation.archivedAt)} · Read-only</Text>}
         <View style={styles.previewRow}><Text style={[styles.preview, { color: conversation.unreadCount ? colors.textPrimary : colors.textSecondary }]} numberOfLines={1}>{conversation.lastMessagePreview || conversation.emptyPreview || 'Start the conversation'}</Text></View>
       </View>
     </Pressable>
@@ -85,9 +91,26 @@ function ConversationSection({ colors, label, rows, openConversation, resolveAnd
 }
 
 export default function ChatConversationList() {
-  const { colors, conversations, branchDistributors = [], distributorOrders = [], error, loading, openConversation, requesterBranches = [], resolveAndOpen, resolveError, resolvingConversation, retrySummaries, role, stationName } = useChat();
+  const { colors, conversations, branchDistributors = [], distributorOrders = [], error, loading, openConversation, requesterBranches = [], resolveAndOpen, resolveError, resolvingConversation, retrySummaries, role, stationName, chatListTab: tab, setChatListTab: setTab, history, historyLoaded, historyCursor, historyLoading, historyLoadingMore, historyError, refreshHistory, loadMoreHistory } = useChat();
   const [search, setSearch] = React.useState('');
+  const historyScrollRef = React.useRef(null);
+  const historyScrollOffsetRef = React.useRef(0);
   const needle = search.trim().toLowerCase();
+  const historyRows = history.map((conversation) => {
+    const order = conversation.orderContext || {};
+    const displayName = role === 'manager'
+      ? (meaningfulName(conversation.requesterDisplayName, order.requesterName) || 'Requester')
+      : role === 'distributor'
+        ? (meaningfulName(conversation.requesterDisplayName, order.requesterName) || 'Requester')
+        : conversation.type === 'requester_distributor'
+          ? (meaningfulName(conversation.distributorDisplayName, order.assignedDistributorName) || 'Assigned Distributor')
+          : (conversation.branchNameSnapshot || order.currentBranchName || 'BlueTap Station');
+    const orderReference = conversation.orderReference || order.requestId || '';
+    return { ...conversation, key: conversation.historyId, displayName,
+      contextLabel: orderReference ? `Order ${orderReference}` : 'Order history', orderReference, orderStatus: order.status === 'completed' ? 'delivered' : order.status,
+      orderContextLocal: order, unreadCount: 0, unreadLabel: '0',
+      lastMessagePreview: conversation.lastMessagePreview, emptyPreview: 'No messages for this order' };
+  }).filter((row) => matchesSearch(row, needle));
   const filtered = conversations.filter((conversation) => matchesSearch(conversation, needle));
   const managerDistributorRows = role === 'manager' ? branchDistributors.map((user) => {
     const distributorId = user.uid || user.id;
@@ -95,7 +118,7 @@ export default function ChatConversationList() {
     return {
       ...(existing || {}),
       key: existing?.id || `pinned-${distributorId}`,
-      displayName: user.fullName || existing?.displayName || 'Branch Distributor',
+      displayName: meaningfulName(user.fullName, `${user.firstName || ''} ${user.lastName || ''}`, user.displayName, existing?.distributorDisplayName, existing?.displayName) || 'Branch Distributor',
       contextLabel: existing?.contextLabel || 'Distributor · Your branch',
       emptyPreview: 'Message this Distributor',
       ...(existing ? {} : { resolveIntent: { type: 'distributor_branch', distributorId }, unreadCount: 0 }),
@@ -193,6 +216,29 @@ export default function ChatConversationList() {
           style={[styles.search, { color: colors.textPrimary }]}
         />
       </View>
+      <View accessibilityRole="tablist" style={[styles.tabs, { backgroundColor: colors.surfaceAlt, borderColor: colors.border }]}>
+        {['active', 'history'].map((name) => {
+          const selected = tab === name;
+          const label = name === 'active' ? 'Active' : 'History';
+          const color = selected ? colors.primary : colors.textSecondary;
+          return <Pressable key={name} accessibilityRole="tab" accessibilityLabel={`${label} chats`} accessibilityState={{ selected }} onPress={() => setTab(name)} style={[styles.tab, selected && { backgroundColor: colors.surface, borderColor: colors.border }]}><ChatTabIcon name={name} color={color} /><Text style={[styles.tabLabel, { color }]}>{label}</Text></Pressable>;
+        })}
+      </View>
+      {tab === 'history' ? (
+        <View style={styles.historyRoot}>
+          {!historyLoaded && !historyError ? <View style={styles.center}><ActivityIndicator color={colors.primary} /><Text style={[styles.helper, { color: colors.textSecondary }]}>Loading history...</Text></View>
+            : historyRows.length === 0 ? <View style={styles.center}><ChatTabIcon name="history" color={colors.primary} size={28} /><Text style={[styles.emptyTitle, { color: colors.textPrimary }]}>{historyError ? 'History unavailable' : historyCursor ? 'More history may be available' : needle ? 'No matching history' : 'No completed deliveries in history'}</Text><Text style={[styles.helper, { color: colors.textSecondary }]}>{historyError ? 'Try again to load completed deliveries.' : historyCursor ? 'Load more history to continue searching.' : needle ? 'Try another name or order reference.' : 'Completed delivery conversations will appear here during their read access window.'}</Text></View>
+              : <ScrollView ref={historyScrollRef} style={styles.historyScroll} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.list}
+                  onScroll={(event) => { historyScrollOffsetRef.current = event.nativeEvent.contentOffset.y; }} scrollEventThrottle={32}
+                  onContentSizeChange={() => historyScrollRef.current?.scrollTo?.({ y: historyScrollOffsetRef.current, animated: false })}>
+                  <ConversationSection colors={colors} label="COMPLETED DELIVERIES" rows={historyRows} openConversation={openConversation} resolveAndOpen={resolveAndOpen} role={role} />
+                </ScrollView>}
+          {historyLoading && historyLoaded && <Text style={[styles.helper, { color: colors.textSecondary }]}>Updating history...</Text>}
+          {!!historyError && <Text accessibilityRole="alert" style={[styles.inlineError, { color: colors.danger, backgroundColor: colors.dangerSoft }]}>{historyError}</Text>}
+          {!!historyError && <Pressable accessibilityRole="button" accessibilityLabel="Retry history" onPress={refreshHistory} style={styles.loadMore}><Text style={{ color: colors.primary, fontWeight: '800' }}>Try again</Text></Pressable>}
+          {!!historyCursor && <Pressable accessibilityRole="button" accessibilityLabel="Load more history" disabled={historyLoading || historyLoadingMore} onPress={loadMoreHistory} style={styles.loadMore}><Text style={{ color: colors.primary, fontWeight: '800' }}>{historyLoadingMore ? 'Loading...' : 'Load more history'}</Text></Pressable>}
+        </View>
+      ) : <>
       {!!resolveError && <Text accessibilityRole="alert" style={[styles.inlineError, { color: colors.danger, backgroundColor: colors.dangerSoft }]}>{resolveError}</Text>}
       {resolvingConversation && <View style={styles.resolving}><ActivityIndicator size="small" color={colors.primary} /><Text style={[styles.helper, { color: colors.textSecondary }]}>Opening conversation...</Text></View>}
       {loading && conversations.length === 0 ? (
@@ -218,6 +264,7 @@ export default function ChatConversationList() {
           </>}
         </ScrollView>
       )}
+      </>}
     </View>
   );
 }
@@ -226,6 +273,12 @@ const styles = StyleSheet.create({
   root: { flex: 1 },
   searchWrap: { marginHorizontal: 12, marginTop: 12, marginBottom: 5, minHeight: 42, borderRadius: 13, borderWidth: 1, justifyContent: 'center' },
   search: { paddingHorizontal: 12, paddingVertical: 9, fontSize: 14 },
+  tabs: { flexDirection: 'row', marginHorizontal: 12, marginTop: 8, padding: 3, borderWidth: 1, borderRadius: 12 },
+  tab: { flex: 1, minHeight: 42, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, borderWidth: 1, borderColor: 'transparent', borderRadius: 9 },
+  tabLabel: { fontSize: 12, fontWeight: '900' },
+  historyRoot: { flex: 1, minHeight: 0 },
+  historyScroll: { flex: 1, minHeight: 0 },
+  loadMore: { minHeight: 44, alignItems: 'center', justifyContent: 'center' },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 30 },
   emptyTitle: { fontSize: 15, fontWeight: '900', textAlign: 'center', marginTop: 12 },
   helper: { fontSize: 12, lineHeight: 18, textAlign: 'center', marginTop: 6 },
@@ -246,7 +299,9 @@ const styles = StyleSheet.create({
   unreadName: { fontWeight: '950' },
   rowMeta: { flexShrink: 0, flexDirection: 'row', alignItems: 'center', gap: 5 },
   timestamp: { flexShrink: 0, fontSize: 10, fontWeight: '600' },
-  context: { fontSize: 11, marginTop: 2 },
+  contextRow: { flexDirection: 'row', alignItems: 'center', gap: 6, minWidth: 0 },
+  context: { flexShrink: 1, fontSize: 11, marginTop: 2 },
+  contextStatusBadge: { maxWidth: '55%', flexShrink: 1 },
   statusBadge: { maxWidth: '52%', flexShrink: 1 },
   roleBadge: { maxWidth: '42%', flexShrink: 1 },
   previewRow: { flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 3 },

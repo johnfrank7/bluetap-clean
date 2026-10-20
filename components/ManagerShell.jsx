@@ -57,6 +57,7 @@ const NAV_ITEMS = [
 const DESKTOP_WIDTH = 244;
 const COLLAPSED_WIDTH = 76;
 const DRAWER_WIDTH = 286;
+let cachedManagerSidebarCollapsed = false;
 
 export function ManagerWaterDrop({ color, size = 18, outline = false }) {
   const { colors } = useAdminTheme();
@@ -171,7 +172,7 @@ export default function ManagerShell({
   const { requestsCount, dispatchCount, profile: realtimeProfile } = realtime;
   const { unreadCount } = useManagerNotifications();
   const moderationCount = useModerationActivityBadge('manager');
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(() => cachedManagerSidebarCollapsed);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [confirmLogout, setConfirmLogout] = useState(false);
 
@@ -197,7 +198,7 @@ export default function ManagerShell({
     return managerDisplayName.slice(0, 2).toUpperCase();
   }, [managerDisplayName]);
 
-  const sidebarWidth = useRef(new Animated.Value(DESKTOP_WIDTH)).current;
+  const sidebarWidth = useRef(new Animated.Value(collapsed ? COLLAPSED_WIDTH : DESKTOP_WIDTH)).current;
   const drawerProgress = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -235,7 +236,9 @@ export default function ManagerShell({
     if (compact) {
       setDrawerOpen((open) => !open);
     } else {
-      setCollapsed((value) => !value);
+      const next = !collapsed;
+      cachedManagerSidebarCollapsed = next;
+      setCollapsed(next);
     }
   };
 

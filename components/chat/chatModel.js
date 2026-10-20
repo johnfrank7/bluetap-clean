@@ -253,6 +253,10 @@ function mapResolveError(error) {
   return 'Unable to open conversation. Please try again.';
 }
 
+function shouldNotifyIncomingSummary(previouslySeen, previousSeq, incomingSeq, visible) {
+  return previouslySeen && incomingSeq > previousSeq && !visible;
+}
+
 module.exports = {
   conversationAvailability,
   conversationLifecycleNotice,
@@ -270,6 +274,7 @@ module.exports = {
   principalStateFor,
   receiptFor,
   sendContextOrderId,
+  shouldNotifyIncomingSummary,
   timeOf,
   totalUnread,
   unreadForConversation,

@@ -35,7 +35,7 @@ function fixture() {
   const snapshot = (path) => ({ id: path.split('/').pop(), exists: records.has(path), data: () => records.get(path) });
   const collection = (name) => ({
     doc(id) { const path = `${name}/${id}`; return { id, path, get: async () => snapshot(path), set: async (data) => records.set(path, data), update: async (data) => records.set(path, { ...records.get(path), ...data }), delete: async () => records.delete(path) }; },
-    where(field, operator, value) { return { async get() { return { docs: [...records.entries()].filter(([path, data]) => path.startsWith(`${name}/`) && data[field] === value).map(([path]) => snapshot(path)) }; } }; },
+    where(field, operator, value) { const docs = () => [...records.entries()].filter(([path, data]) => path.startsWith(`${name}/`) && data[field] === value).map(([path]) => snapshot(path)); return { async get() { return { docs: docs() }; }, limit(count) { return { async get() { return { docs: docs().slice(0, count) }; } }; } }; },
     async get() { return { docs: [...records.keys()].filter((path) => path.startsWith(`${name}/`)).map(snapshot) }; },
   });
   const db = { collection, async runTransaction(run) { return run({ get: async (ref) => ref.get(), set(ref, data) { records.set(ref.path, data); }, update(ref, data) { records.set(ref.path, { ...records.get(ref.path), ...data }); }, delete(ref) { records.delete(ref.path); } }); } };

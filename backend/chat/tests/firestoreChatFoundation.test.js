@@ -18,7 +18,7 @@ test('conversation summaries are scoped to the caller UID or current Manager bra
   assert.match(rules, /function isCanonicalConversationBranch\(conversation\)[\s\S]*conversation\.type == 'branch_coordination'/);
   assert.match(rules, /function conversationAccessIsCurrent\(conversation\)[\s\S]*conversation\.accessEndsAt > request\.time/);
   assert.match(rules, /function canReadConversation\(conversation\)[\s\S]*isRequester\(\) \|\| isDistributor\(\)[\s\S]*isManager\(\)/);
-  assert.match(conversationBlock, /allow get, list:\s*if canReadConversation\(resource\.data\);/);
+  assert.match(conversationBlock, /allow get, list:\s*if resource\.data\.type != 'requester_branch'\s*&& canReadConversation\(resource\.data\);/);
   assert.doesNotMatch(conversationBlock, /allow (?:get|read|list):\s*if isAdmin\(\)/);
 });
 
@@ -31,6 +31,7 @@ test('all authoritative chat, message, report, moderation, and restriction clien
   for (const collection of ['chatAuthorityRegistry', 'chatMutationIds', 'chatRateLimits']) {
     assert.match(rules, new RegExp(`match \/${collection}\/\\{document=\\*\\*\\} \\{ allow read, write: if false; \\}`));
   }
+  assert.match(rules, /match \/chatOrderHistory\/\{document=\*\*\} \{ allow read, write: if false; \}/);
 });
 
 test('moderation activity exposes only content-free exact documents and remains server-owned', () => {
@@ -43,25 +44,35 @@ test('moderation activity exposes only content-free exact documents and remains 
 
 test('direct message reads require the current server-maintained parent lifecycle projection', () => {
   const messageBlock = rules.slice(rules.indexOf('match /messages/{messageId}'), rules.indexOf('match /requests/{requestId}'));
-  assert.match(messageBlock, /allow read:\s*if canReadConversation\(/);
+  assert.match(messageBlock, /allow read:\s*if get\([\s\S]*\.data\.type != 'requester_branch'[\s\S]*&& canReadConversation\(/);
   assert.match(messageBlock, /get\(\/databases\/\$\(database\)\/documents\/chatConversations\/\$\(conversationId\)\)\.data/);
   assert.match(messageBlock, /allow create, update, delete:\s*if false;/);
 });
 
-test('Firebase config keeps the two approved conversation summary indexes alongside moderation indexes', () => {
+test('Firebase config keeps old and new conversation indexes ready for a staged Chat History rollout', () => {
   assert.equal(firebase.firestore.rules, 'firestore.rules');
   assert.equal(firebase.firestore.indexes, 'firestore.indexes.json');
-  const normalized = indexes.indexes.filter((index) => index.collectionGroup === 'chatConversations').map((index) => ({
-    collectionGroup: index.collectionGroup,
-    queryScope: index.queryScope,
-    arrayField: index.fields[0].fieldPath,
-    arrayConfig: index.fields[0].arrayConfig,
-    orderField: index.fields[1].fieldPath,
-    order: index.fields[1].order,
-  }));
-  assert.deepEqual(normalized, [
-    { collectionGroup: 'chatConversations', queryScope: 'COLLECTION', arrayField: 'participantUserUids', arrayConfig: 'CONTAINS', orderField: 'updatedAt', order: 'DESCENDING' },
-    { collectionGroup: 'chatConversations', queryScope: 'COLLECTION', arrayField: 'participantBranchIds', arrayConfig: 'CONTAINS', orderField: 'updatedAt', order: 'DESCENDING' },
-  ]);
+  const hasIndex = (group, fields) => indexes.indexes.some((index) =>
+    index.collectionGroup === group && index.queryScope === 'COLLECTION' &&
+    JSON.stringify(index.fields) === JSON.stringify(fields));
+  for (const participant of ['participantUserUids', 'participantBranchIds']) {
+    assert.ok(hasIndex('chatConversations', [
+      { fieldPath: participant, arrayConfig: 'CONTAINS' },
+      { fieldPath: 'updatedAt', order: 'DESCENDING' },
+    ]), `old Active index for ${participant} must remain available for rollback`);
+    assert.ok(hasIndex('chatConversations', [
+      { fieldPath: participant, arrayConfig: 'CONTAINS' },
+      { fieldPath: 'status', order: 'ASCENDING' },
+      { fieldPath: 'updatedAt', order: 'DESCENDING' },
+    ]), `new Active index for ${participant} is required`);
+    assert.ok(hasIndex('chatOrderHistory', [
+      { fieldPath: participant, arrayConfig: 'CONTAINS' },
+      { fieldPath: 'archivedAt', order: 'DESCENDING' },
+    ]), `History index for ${participant} is required`);
+  }
+  assert.ok(hasIndex('messages', [
+    { fieldPath: 'orderId', order: 'ASCENDING' },
+    { fieldPath: 'seq', order: 'DESCENDING' },
+  ]));
   assert.deepEqual(indexes.fieldOverrides, []);
 });

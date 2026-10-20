@@ -187,7 +187,7 @@ test('Manager Products separates read-only catalog data, pricing, and branch-sco
 
 test('Manager Analytics uses only shared branch realtime data and contains no demo station series', () => {
   assert.match(managerAnalytics, /useManagerRealtimeData/);
-  assert.match(managerAnalytics, /Snapshot revenue/);
+  assert.match(managerAnalytics, /label="SNAPSHOT REVENUE"/);
   assert.match(managerAnalytics, /Order status distribution/);
   assert.doesNotMatch(managerAnalytics, /Station A|Station B|Aquabea|DEFAULT_STATIONS/);
 });

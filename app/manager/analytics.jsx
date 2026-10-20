@@ -3,6 +3,7 @@ import { ActivityIndicator, StyleSheet, Text, View, useWindowDimensions } from '
 import { useAdminTheme } from '../../components/AdminTheme';
 import BlueTapEmptyState from '../../components/BlueTapEmptyState';
 import ManagerShell from '../../components/ManagerShell';
+import AnalyticsMetricCard from '../../components/AnalyticsMetricCard';
 import { extractBranchRequesters, useManagerRealtimeData } from '../../components/ManagerRealtimeData';
 import { getLocalRequests, subscribeLocalRequests } from '../../services/requests';
 import { getManagerOrderAnalytics, mergeManagerBranchRequests } from '../../services/managerAnalytics';
@@ -37,6 +38,11 @@ export default function ManagerAnalyticsPage() {
   const requesterCount = branchRequesters.length;
   const distributorCount = users.filter((user) => String(user.role || '').toLowerCase() === 'distributor').length;
   const maxStatus = Math.max(metrics.delivered, metrics.ongoing, metrics.issues, 1);
+  const metricCardResponsiveStyle = width >= 1180
+    ? styles.metricCardThreeColumn
+    : width >= 680
+      ? styles.metricCardTwoColumn
+      : styles.metricCardOneColumn;
 
   return (
     <ManagerShell active="analytics" title="Analytics" subtitle={`Authoritative performance for ${branch?.name || 'your assigned branch'}`}>
@@ -56,13 +62,17 @@ export default function ManagerAnalyticsPage() {
         <BlueTapEmptyState compact variant="analytics" title="Analytics unavailable" description={error} themeColors={colors} dark={isDark} />
       ) : (
         <>
+          <View style={styles.sectionHeading}>
+            <Text style={styles.sectionTitle}>Summary Metrics</Text>
+            <Text style={styles.sectionMeta}>{metrics.total} orders analyzed · {metrics.delivered} delivered</Text>
+          </View>
           <View style={styles.metrics}>
-            <Metric styles={styles} label="Snapshot revenue" value={money(metrics.revenue)} detail={`${metrics.delivered} delivered orders`} tone="primary" />
-            <Metric styles={styles} label="Units sold" value={metrics.units.toLocaleString()} detail="Delivered items only" tone="primary" />
-            <Metric styles={styles} label="Total orders" value={metrics.total.toLocaleString()} detail="Current branch records" tone="primary" />
-            <Metric styles={styles} label="Delivered" value={metrics.delivered.toLocaleString()} detail="Completed fulfillment" tone="success" />
-            <Metric styles={styles} label="Ongoing" value={metrics.ongoing.toLocaleString()} detail="Non-terminal orders" tone="warning" />
-            <Metric styles={styles} label="Issues & cancelled" value={metrics.issues.toLocaleString()} detail="Failed, declined, or cancelled" danger />
+            <AnalyticsMetricCard label="SNAPSHOT REVENUE" value={money(metrics.revenue)} valueColor={colors.success} detail={`${metrics.delivered} delivered orders`} icon="CircleDollarSign" accent={colors.success} iconBackground={colors.successSoft} colors={colors} style={metricCardResponsiveStyle} />
+            <AnalyticsMetricCard label="UNITS SOLD" value={metrics.units.toLocaleString()} detail="Delivered items only" icon="Package" accent={colors.primary} iconBackground={colors.primarySoft} colors={colors} style={metricCardResponsiveStyle} />
+            <AnalyticsMetricCard label="TOTAL ORDERS" value={metrics.total.toLocaleString()} detail="Current branch records" icon="ClipboardList" accent={colors.textSecondary} iconBackground={colors.neutral} colors={colors} style={metricCardResponsiveStyle} />
+            <AnalyticsMetricCard label="DELIVERED" value={metrics.delivered.toLocaleString()} detail="Completed fulfillment" icon="ShieldCheck" accent={colors.success} iconBackground={colors.successSoft} colors={colors} style={metricCardResponsiveStyle} />
+            <AnalyticsMetricCard label="ONGOING DELIVERIES" value={metrics.ongoing.toLocaleString()} detail="Non-terminal orders" icon="Truck" accent={colors.warning} iconBackground={colors.warningSoft} colors={colors} style={metricCardResponsiveStyle} />
+            <AnalyticsMetricCard label="ISSUES & CANCELLED" value={metrics.issues.toLocaleString()} detail="Failed, declined, or cancelled" icon="ShieldAlert" accent={colors.danger} iconBackground={colors.dangerSoft} colors={colors} style={metricCardResponsiveStyle} />
           </View>
           {metrics.total === 0 ? (
             <BlueTapEmptyState compact variant="analytics" title="Insufficient analytics data" description="Real branch metrics will appear after orders are created." themeColors={colors} dark={isDark} />
@@ -89,8 +99,8 @@ export default function ManagerAnalyticsPage() {
               <View style={styles.panel}>
                 <Text style={styles.panelTitle}>Branch people</Text>
                 <View style={styles.peopleRow}>
-                  <Metric styles={styles} label="Requesters" value={requesterCount.toLocaleString()} detail="Ordered from this branch" compact />
-                  <Metric styles={styles} label="Distributors" value={distributorCount.toLocaleString()} detail="Assigned to branch" compact />
+                  <AnalyticsMetricCard label="REQUESTERS" value={requesterCount.toLocaleString()} detail="Ordered from this branch" icon="UsersRound" accent={colors.primary} iconBackground={colors.primarySoft} colors={colors} compact style={styles.peopleMetric} />
+                  <AnalyticsMetricCard label="DISTRIBUTORS" value={distributorCount.toLocaleString()} detail="Assigned to branch" icon="Truck" accent={colors.primary} iconBackground={colors.primarySoft} colors={colors} compact style={styles.peopleMetric} />
                 </View>
               </View>
               <View style={[styles.panel, styles.productPanel]}>
@@ -123,20 +133,8 @@ export default function ManagerAnalyticsPage() {
   );
 }
 
-function Metric({ styles, label, value, detail, danger, compact, tone }) {
-  const toneStyle = danger ? styles.metricDanger : styles[`metric${tone?.[0]?.toUpperCase()}${tone?.slice(1)}`];
-  return (
-    <View style={[styles.metric, compact && styles.metricCompact, toneStyle]}>
-      <Text style={styles.metricLabel}>{label}</Text>
-      <Text style={styles.metricValue}>{value}</Text>
-      <Text style={styles.metricDetail}>{detail}</Text>
-    </View>
-  );
-}
-
 const createStyles = (colors, width) => {
   const isMobile = width < 640;
-  const isTablet = width >= 640 && width < 1024;
   return StyleSheet.create({
     scope: { backgroundColor: colors.primaryAction, borderRadius: 18, padding: 20, marginBottom: 18 },
     scopeEyebrow: { color: '#CBEAFF', fontSize: 10, fontWeight: '900', letterSpacing: 1 },
@@ -144,26 +142,13 @@ const createStyles = (colors, width) => {
     scopeText: { color: '#E3F2FD', fontSize: 12, lineHeight: 18, marginTop: 5, maxWidth: 720 },
     state: { minHeight: 220, alignItems: 'center', justifyContent: 'center', gap: 10 },
     secondary: { color: colors.textSecondary, fontSize: 12, lineHeight: 18, marginTop: 8 },
+    sectionHeading: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, marginBottom: 12 },
+    sectionTitle: { color: colors.textPrimary, fontSize: 17, fontWeight: '900' },
+    sectionMeta: { color: colors.textSecondary, fontSize: 12, fontWeight: '700' },
     metrics: { flexDirection: 'row', flexWrap: 'wrap', gap: 14, marginBottom: 18 },
-    metric: {
-      flexGrow: 1,
-      flexBasis: isMobile ? '100%' : isTablet ? '45%' : '30%',
-      minHeight: 126,
-      backgroundColor: colors.surface,
-      borderWidth: 1,
-      borderColor: colors.border,
-      borderRadius: 14,
-      padding: 16,
-      justifyContent: 'space-between',
-    },
-    metricCompact: { minHeight: 105, flexBasis: isMobile ? '100%' : '45%', flexGrow: 1 },
-    metricPrimary: { borderTopWidth: 4, borderTopColor: colors.primaryAction },
-    metricSuccess: { borderTopWidth: 4, borderTopColor: colors.success },
-    metricWarning: { borderTopWidth: 4, borderTopColor: colors.warning },
-    metricDanger: { borderTopWidth: 4, borderTopColor: colors.danger },
-    metricLabel: { color: colors.textSecondary, fontSize: 11, fontWeight: '900', textTransform: 'uppercase', letterSpacing: 0.5 },
-    metricValue: { color: colors.textPrimary, fontSize: 24, fontWeight: '900', marginVertical: 6 },
-    metricDetail: { color: colors.textSecondary, fontSize: 12, lineHeight: 16 },
+    metricCardThreeColumn: { flexBasis: '30%', minWidth: 230 },
+    metricCardTwoColumn: { flexBasis: '46%', minWidth: 250 },
+    metricCardOneColumn: { flexBasis: '100%', maxWidth: '100%' },
     grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 14 },
     panel: { flexGrow: 1, flexBasis: isMobile ? '100%' : 340, minWidth: 0, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: 14, padding: 18 },
     productPanel: { flexBasis: '100%' },
@@ -175,6 +160,7 @@ const createStyles = (colors, width) => {
     track: { height: 10, borderRadius: 6, backgroundColor: colors.surfaceAlt, overflow: 'hidden', marginTop: 6 },
     fill: { height: '100%', borderRadius: 6 },
     peopleRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
+    peopleMetric: { flexBasis: isMobile ? '100%' : '45%' },
     productRow: {
       flexDirection: isMobile ? 'column' : 'row',
       alignItems: isMobile ? 'stretch' : 'center',

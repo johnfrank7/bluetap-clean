@@ -229,6 +229,7 @@ service cloud.firestore {
     // Render Node exclusively owns conversation uniqueness, idempotency, and
     // persistent message-rate state.
     match /chatAuthorityRegistry/{document=**} { allow read, write: if false; }
+    match /chatOrderHistory/{document=**} { allow read, write: if false; }
     match /chatMutationIds/{document=**} { allow read, write: if false; }
     match /chatRateLimits/{document=**} { allow read, write: if false; }
     match /chatMessageRevisions/{document=**} { allow read, write: if false; }
@@ -298,9 +299,10 @@ service cloud.firestore {
     }
 
     match /chatConversations/{conversationId} {
-      // Render creates membership and lifecycle metadata. Clients may query
-      // only their UID or current authoritative Manager branch.
-      allow get, list: if canReadConversation(resource.data);
+      // Reusable Requester/Branch documents can retain an old order preview.
+      // Render filters those summaries by current order authority.
+      allow get, list: if resource.data.type != 'requester_branch'
+        && canReadConversation(resource.data);
       allow create, update, delete: if false;
 
       // Render transactionally maintains the parent lifecycle/access
@@ -308,9 +310,10 @@ service cloud.firestore {
       // readable to the caller's current logical principal. Every message
       // write remains server-only.
       match /messages/{messageId} {
-        allow read: if canReadConversation(
-          get(/databases/$(database)/documents/chatConversations/$(conversationId)).data
-        );
+        // Reusable Requester/Branch threads can include expired order segments.
+        // Render filters those messages per trusted order status and access window.
+        allow read: if get(/databases/$(database)/documents/chatConversations/$(conversationId)).data.type != 'requester_branch'
+          && canReadConversation(get(/databases/$(database)/documents/chatConversations/$(conversationId)).data);
         allow create, update, delete: if false;
       }
     }

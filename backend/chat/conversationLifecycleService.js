@@ -1,10 +1,12 @@
 const { OtpError } = require('../utils/otpError');
 const { publishChatActivity } = require('./chatActivity');
+const { historyId, historyRecord } = require('./chatHistory');
 const { getBranchMembershipVersion } = require('../utils/relationshipEpochs');
 const {
   CONVERSATION_TYPES,
   failedDeliveryChatEndsAt,
   normalizedStatus,
+  orderAssignmentVersion,
   orderRequesterUid,
   owningBranchId,
 } = require('./chatAuthorization');
@@ -88,7 +90,19 @@ async function loadExistingConversation(tx, db, type, authority) {
   const hash = authorityKeyHash(type, authority);
   const registryRef = db.collection('chatAuthorityRegistry').doc(hash);
   const registrySnapshot = await tx.get(registryRef);
-  if (!registrySnapshot.exists) return null;
+  if (!registrySnapshot.exists) {
+    // Older canonical conversations can predate the authority registry. Match
+    // only the exact server-derived authority and fail closed on duplicates.
+    const matches = await tx.get(db.collection('chatConversations').where('authorityKeyHash', '==', hash).limit(2));
+    if (!(matches.docs || []).length) return null;
+    if (matches.docs.length !== 1) throw new OtpError(409, 'CHAT_STATE_INVALID', 'Duplicate conversation authority requires repair.');
+    const snapshot = matches.docs[0];
+    const conversation = { id: snapshot.id, ...(snapshot.data() || {}) };
+    if (conversation.authorityKeyHash !== hash || conversation.type !== type) {
+      throw new OtpError(409, 'CHAT_STATE_INVALID', 'Conversation authority does not match its registry.');
+    }
+    return { hash, ref: db.collection('chatConversations').doc(conversation.id), conversation };
+  }
   const conversationId = clean(registrySnapshot.data()?.conversationId);
   if (!conversationId) throw new OtpError(409, 'CHAT_STATE_INVALID', 'Conversation authority registry is invalid.');
   const ref = db.collection('chatConversations').doc(conversationId);
@@ -151,7 +165,16 @@ function applyTransition(conversation, transition, after, now) {
     return conversation;
   }
   const active = hasActiveAuthorityReason(authorityReasons, timeOf(now));
-  const accessEndsAt = active ? reasonDeadline(authorityReasons, now) : now;
+  const accessEndsAt = reasonDeadline(authorityReasons, now);
+  // A fully archived branch thread may later be reused for a new inquiry.
+  // Exclude its old unread activity without advancing the real read cursor.
+  const archivedParticipantState = !active && ['delivered', 'completed'].includes(normalizedStatus(after.status))
+    ? (conversation.participantState || []).map((state) => ({
+      ...state,
+      archivedIncomingCount: Math.max(Number(state.archivedIncomingCount || 0), Number(state.incomingCount || 0)),
+      unreadCount: 0,
+    }))
+    : conversation.participantState;
   return {
     ...conversation,
     authorityReasons,
@@ -159,7 +182,7 @@ function applyTransition(conversation, transition, after, now) {
     accessEndsAt,
     readAccessEndsAt: accessEndsAt,
     lifecycleReason: reason,
-    ...participantAccessProjection(conversation, active ? 'active' : 'read_only'),
+    ...participantAccessProjection({ ...conversation, participantState: archivedParticipantState }, active ? 'active' : 'read_only'),
     updatedAt: now,
   };
 }
@@ -181,6 +204,21 @@ async function reconcileOrderLifecycleInTransaction({ tx, db, before = {}, after
     const hash = authorityKeyHash(type, transition.authority);
     if (!loaded.has(hash)) loaded.set(hash, await loadExistingConversation(tx, db, type, transition.authority));
   }
+  const archivedOrderId = orderIdOf(after);
+  const historyEntries = [];
+  if (['delivered', 'completed'].includes(afterStatus) && archivedOrderId) {
+    for (const entry of loaded.values()) {
+      if (!entry || ![CONVERSATION_TYPES.REQUESTER_BRANCH, CONVERSATION_TYPES.REQUESTER_DISTRIBUTOR].includes(entry.conversation.type)) continue;
+      if (entry.conversation.type === CONVERSATION_TYPES.REQUESTER_BRANCH &&
+        clean(entry.conversation.branchIds?.[0]) !== owningBranchId(after)) continue;
+      if (entry.conversation.type === CONVERSATION_TYPES.REQUESTER_DISTRIBUTOR &&
+        (clean(entry.conversation.distributorUid) !== clean(after.assignedDistributorUid || after.distributor_id) ||
+          entry.conversation.assignmentVersion !== orderAssignmentVersion(after))) continue;
+      const ref = db.collection('chatOrderHistory').doc(historyId(entry.conversation.id, archivedOrderId));
+      const snapshot = await tx.get(ref);
+      if (!snapshot.exists) historyEntries.push({ ref, conversation: entry.conversation });
+    }
+  }
   let reconciled = 0;
   for (const transition of plan.transitions) {
     const type = transition.authority?.type;
@@ -197,6 +235,9 @@ async function reconcileOrderLifecycleInTransaction({ tx, db, before = {}, after
     tx.update(entry.ref, update);
     publishChatActivity(tx, db, update, timestamp);
     reconciled += 1;
+  }
+  for (const entry of historyEntries) {
+    tx.create(entry.ref, historyRecord(entry.conversation, after, timestamp, accessEndsAt));
   }
   return { ...plan, accessEndsAt, reconciled };
 }

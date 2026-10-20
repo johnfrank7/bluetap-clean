@@ -16,6 +16,7 @@ import { getModuleSession } from '../../services/authSession';
 import { dispatchManagerOrder, getManagerDispatch } from '../../services/managerOrderApprovals';
 import { haversineDistanceKm } from '../../services/location';
 import { useAdminTheme } from '../../components/AdminTheme';
+import DropdownChevron from '../../components/DropdownChevron';
 import BlueTapEmptyState from '../../components/BlueTapEmptyState';
 import TopToastFeedback from '../../components/TopToastFeedback';
 import ManagerShell, { MANAGER_COLORS, ManagerPill } from '../../components/ManagerShell';
@@ -373,7 +374,7 @@ function DistributorDispatchQueue({ styles, colors, isDark, onShowToast }) {
                     <View style={styles.dateSelectorWrap}>
                       <TouchableOpacity accessibilityRole="combobox" accessibilityState={{ expanded: dateSelectorOpen }} onPress={() => setDateSelectorOpen((open) => !open)} style={styles.dateSelector}>
                         <Text style={styles.dateSelectorText}>{selectedDayOffset === 0 ? 'Today' : selectedDayOffset === 1 ? 'Tomorrow' : buildScheduleDate(selectedDayOffset, TIME_SLOT_OPTIONS[0]).toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })}</Text>
-                        <Text style={styles.dateSelectorChevron}>{dateSelectorOpen ? '▲' : '▼'}</Text>
+                        <DropdownChevron expanded={dateSelectorOpen} size={16} color={colors.iconSecondary || colors.primary} />
                       </TouchableOpacity>
                       {dateSelectorOpen && <ScrollView nestedScrollEnabled style={styles.dateOptions}>
                       {allowedDayOffsets(order).map((index) => {
@@ -1131,7 +1132,6 @@ const createStyles = (colors, width = 1200, resolvedTheme = 'light') =>
     dateSelectorWrap: { flexGrow: 1, flexShrink: 1, flexBasis: 'auto', width: width < 550 ? '100%' : undefined, minWidth: 0, maxWidth: 420, position: 'relative' },
     dateSelector: { minHeight: 42, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, borderWidth: 1, borderColor: colors.inputBorder, backgroundColor: colors.input, borderRadius: 9, paddingHorizontal: 12 },
     dateSelectorText: { flex: 1, minWidth: 0, color: colors.textPrimary, fontSize: 12, fontWeight: '800' },
-    dateSelectorChevron: { color: colors.primary, fontSize: 11, fontWeight: '900' },
     dateOptions: { maxHeight: 190, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, borderRadius: 9, marginTop: 5 },
     dateOption: { minHeight: 40, justifyContent: 'center', paddingHorizontal: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
     dateOptionActive: { backgroundColor: colors.primaryAction },

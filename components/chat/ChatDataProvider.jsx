@@ -3,7 +3,7 @@ import { onAuthStateChanged } from 'firebase/auth';
 import { Platform, StyleSheet, View } from 'react-native';
 
 import { auth } from '../../firebase';
-import { deleteMessage as deleteChatMessage, editMessage as editChatMessage, loadMessageHistory, markRead, resolveConversation, sendMessage } from '../../services/chatApi';
+import { deleteMessage as deleteChatMessage, editMessage as editChatMessage, loadConversationHistory, loadMessageHistory, markRead, resolveConversation, sendMessage } from '../../services/chatApi';
 import { subscribeConversationSummaries, subscribeOpenConversationMessages } from '../../services/chatRealtime';
 import { useAdminTheme } from '../AdminTheme';
 import { useBlueTapTheme } from '../BlueTapTheme';
@@ -15,9 +15,10 @@ import { useModerationNotices } from '../ModerationNotices';
 import { playIncomingMessageSound } from '../../services/uiSound';
 
 const chatModel = require('./chatModel');
+const historyCache = require('./chatHistoryCache');
 const { chatAccessReadiness } = require('./chatAccessReadiness');
-const { avatarForConversation, conversationAllowedForRole } = require('./chatPresentation');
-const { createClientMutationId, formatBadge, isOwnMessage, mapResolveError, mergeMessages, principalStateFor, receiptFor, sendContextOrderId, totalUnread, unreadForConversation } = chatModel;
+const { avatarForConversation, conversationAllowedForRole, meaningfulName } = require('./chatPresentation');
+const { createClientMutationId, formatBadge, isOwnMessage, mapResolveError, mergeMessages, principalStateFor, receiptFor, sendContextOrderId, shouldNotifyIncomingSummary, totalUnread, unreadForConversation } = chatModel;
 
 const clean = (value) => String(value || '').trim();
 
@@ -33,10 +34,15 @@ const orderIdsForConversation = (conversation = {}) => {
 export function presentationFor(conversation, role, roleData) {
   const orders = roleData.orders || [];
   const orderIds = new Set(orderIdsForConversation(conversation));
-  const order = orders.find((candidate) => orderIds.has(orderIdOf(candidate)) || orderIds.has(orderReferenceOf(candidate)))
-    || conversation.orderContextLocal
-    || conversation.orderContext
-    || null;
+  const serverOrderId = orderIdOf(conversation.orderContext);
+  const activeBranchOrder = conversation.type === 'requester_branch' && !conversation.historyId;
+  const matchingOrder = orders.find((candidate) => orderIds.has(orderIdOf(candidate)) || orderIds.has(orderReferenceOf(candidate)));
+  const order = conversation.historyId
+    ? (conversation.orderContext || null)
+    : activeBranchOrder
+      ? (serverOrderId ? { ...(orders.find((candidate) => orderIdOf(candidate) === serverOrderId) || {}), ...conversation.orderContext } : null)
+      : (conversation.orderContext ? { ...(matchingOrder || {}), ...conversation.orderContext } :
+        (matchingOrder || conversation.orderContextLocal || null));
   const users = roleData.users || [];
   const userById = (uid) => users.find((user) => clean(user.uid || user.id) === clean(uid));
   let displayName = 'BlueTap conversation';
@@ -45,17 +51,17 @@ export function presentationFor(conversation, role, roleData) {
   if (conversation.type === 'requester_branch') {
     const requesterBranchOrderReference = orderReferenceOf(order);
     displayName = role === 'manager'
-      ? clean(conversation.requesterDisplayName || order?.requesterNameSnapshot || order?.requesterName || userById(conversation.requesterUid)?.fullName) || 'Requester'
+      ? meaningfulName(conversation.requesterDisplayName, userById(conversation.requesterUid)?.fullName, order?.requesterNameSnapshot, order?.requesterName) || 'Requester'
       : clean(conversation.branchNameSnapshot || order?.currentBranchName || order?.currentBranchNameSnapshot || order?.branchNameSnapshot || order?.branchDisplayName || order?.water_station) || 'BlueTap Station';
     contextLabel = requesterBranchOrderReference ? `Order ${requesterBranchOrderReference}` : 'General inquiry';
   } else if (conversation.type === 'requester_distributor') {
     displayName = role === 'distributor'
-      ? clean(conversation.requesterDisplayName || order?.requesterNameSnapshot || order?.requesterName || order?.customerName) || 'Requester'
-      : clean(conversation.distributorDisplayName || order?.assignedDistributorNameSnapshot || order?.assignedDistributorName || order?.distributorName) || 'Assigned Distributor';
+      ? meaningfulName(conversation.requesterDisplayName, order?.requesterNameSnapshot, order?.requesterName, order?.customerName) || 'Requester'
+      : meaningfulName(conversation.distributorDisplayName, order?.assignedDistributorNameSnapshot, order?.assignedDistributorName, order?.distributorName) || 'Assigned Distributor';
     contextLabel = orderReferenceOf(order) ? `Order ${orderReferenceOf(order)}` : 'Assigned order';
   } else if (conversation.type === 'distributor_branch') {
     displayName = role === 'manager'
-      ? clean(userById(conversation.distributorUid)?.fullName) || 'Branch Distributor'
+      ? meaningfulName(conversation.distributorDisplayName, userById(conversation.distributorUid)?.fullName, userById(conversation.distributorUid)?.displayName) || 'Branch Distributor'
       : clean(roleData.profile?.branchName || roleData.branch?.name) || 'Your BlueTap Station';
     contextLabel = role === 'manager' ? 'Distributor · Your branch' : 'Branch operations';
   } else if (conversation.type === 'branch_coordination') {
@@ -89,6 +95,7 @@ export default function ChatDataProvider({ children, role }) {
   const [error, setError] = React.useState('');
   const [retryVersion, setRetryVersion] = React.useState(0);
   const [panelOpen, setPanelOpen] = React.useState(false);
+  const [chatListTab, setChatListTab] = React.useState('active');
   const [selectedSeed, setSelectedSeed] = React.useState(null);
   const [liveMessages, setLiveMessages] = React.useState([]);
   const [olderMessages, setOlderMessages] = React.useState([]);
@@ -102,6 +109,11 @@ export default function ChatDataProvider({ children, role }) {
   const [resolveError, setResolveError] = React.useState('');
   const requesterBranches = role === 'requester' ? requesterData.branches || [] : [];
   const [threadVersion, setThreadVersion] = React.useState(0);
+  const [summaryVersion, setSummaryVersion] = React.useState(0);
+  const [historyState, setHistoryState] = React.useState({ scope: '', items: [], cursor: null, loaded: false, loading: false, loadingMore: false, error: '', refreshedAt: 0, summaryVersion: 0 });
+  const historyInFlightRef = React.useRef(null);
+  const [historyClock, setHistoryClock] = React.useState(Date.now);
+  const [backendBeforeSeq, setBackendBeforeSeq] = React.useState(null);
   const [clock, setClock] = React.useState(Date.now);
   const summaryUnsubscribeRef = React.useRef(null);
   const threadUnsubscribeRef = React.useRef(null);
@@ -124,9 +136,66 @@ export default function ChatDataProvider({ children, role }) {
     readCursorRef.current.clear();
     hydratedSummariesRef.current = false;
     summaryIncomingSeqsRef.current.clear();
-  }, [uid, branchId]);
+  }, [uid, branchId, role]);
 
   const accessReadiness = chatAccessReadiness({ authReady, branchId, role, roleData, uid });
+  const historyBranchId = role === 'distributor' ? clean(distributorData.profile?.branchId || distributorData.branch?.id) : branchId;
+  const historyScope = accessReadiness === 'ready' ? JSON.stringify([role, uid, historyBranchId]) : '';
+  const historyScopeRef = React.useRef(historyScope);
+  historyScopeRef.current = historyScope;
+  React.useEffect(() => {
+    historyInFlightRef.current = null;
+    setHistoryState({ scope: historyScope, items: [], cursor: null, loaded: false, loading: false, loadingMore: false, error: '', refreshedAt: 0, summaryVersion: 0 });
+  }, [historyScope]);
+
+  const refreshHistory = React.useCallback(() => {
+    if (!historyScope) return Promise.resolve();
+    if (historyInFlightRef.current?.scope === historyScope) return historyInFlightRef.current.promise;
+    setHistoryState((previous) => ({ ...(previous.scope === historyScope ? previous : { scope: historyScope, items: [], cursor: null, loaded: false }), loading: true, error: '' }));
+    return historyCache.runScopedHistoryRequest(historyInFlightRef, historyScope, () => loadConversationHistory().then((page) => {
+      if (historyScopeRef.current !== historyScope) return;
+      const verifiedPage = historyCache.verifiedHistoryPage(page);
+      setHistoryState((previous) => previous.scope === historyScope ? {
+        ...previous, items: verifiedPage.conversations, cursor: verifiedPage.nextCursor || null,
+        loaded: true, loading: false, error: '', refreshedAt: Date.now(), summaryVersion,
+      } : previous);
+    }).catch((loadError) => {
+      if (historyScopeRef.current === historyScope) setHistoryState((previous) => previous.scope === historyScope ? { ...previous, loading: false, summaryVersion, error: loadError?.message || 'History could not be loaded.' } : previous);
+    }));
+  }, [historyScope, summaryVersion]);
+
+  const loadMoreHistory = React.useCallback(() => {
+    if (!historyScope || historyState.scope !== historyScope || !historyState.cursor) return Promise.resolve();
+    if (historyInFlightRef.current?.scope === historyScope) return historyInFlightRef.current.promise;
+    const cursor = historyState.cursor;
+    setHistoryState((previous) => previous.scope === historyScope ? { ...previous, loadingMore: true, error: '' } : previous);
+    return historyCache.runScopedHistoryRequest(historyInFlightRef, historyScope, () => loadConversationHistory({ cursor }).then((page) => {
+      if (historyScopeRef.current !== historyScope) return;
+      const verifiedPage = historyCache.verifiedHistoryPage(page);
+      setHistoryState((previous) => {
+        if (previous.scope !== historyScope || previous.cursor !== cursor) return previous;
+        return { ...previous, items: historyCache.appendHistoryPage(previous.items, verifiedPage.conversations), cursor: verifiedPage.nextCursor || null, loadingMore: false, error: '' };
+      });
+    }).catch((loadError) => {
+      if (historyScopeRef.current === historyScope) setHistoryState((previous) => previous.scope === historyScope ? { ...previous, loadingMore: false, error: loadError?.message || 'More history could not be loaded.' } : previous);
+    }));
+  }, [historyScope, historyState.cursor, historyState.scope]);
+
+  React.useEffect(() => {
+    if (chatListTab !== 'history' || !historyScope || historyState.scope !== historyScope) return;
+    if (historyCache.shouldRefreshHistory(historyState, summaryVersion)) refreshHistory();
+  }, [chatListTab, historyScope, historyState, refreshHistory, summaryVersion]);
+
+  React.useEffect(() => {
+    if (historyState.scope !== historyScope) return undefined;
+    const deadlines = historyState.items.map((item) => historyCache.timeOf(item.readAccessEndsAt || item.accessEndsAt)).filter((deadline) => deadline > Date.now());
+    if (!deadlines.length) return undefined;
+    const timer = setTimeout(() => setHistoryClock(Date.now()), Math.min(2147483647, Math.min(...deadlines) - Date.now() + 25));
+    return () => clearTimeout(timer);
+  }, [historyScope, historyState, historyClock]);
+  const history = historyState.scope === historyScope && historyScope
+    ? historyCache.visibleHistory(historyState.items, Math.max(historyClock, Date.now()))
+    : [];
 
   React.useEffect(() => {
     summaryUnsubscribeRef.current?.();
@@ -160,10 +229,12 @@ export default function ChatDataProvider({ children, role }) {
           (items || []).forEach((c) => {
             const pState = principalStateFor(c, role, uid, branchId);
             const incomingSeq = Number(pState?.lastIncomingSeq || 0);
+            const previouslySeen = summaryIncomingSeqsRef.current.has(c.id);
             const previous = summaryIncomingSeqsRef.current.get(c.id) || 0;
+            if (!previouslySeen) summaryIncomingSeqsRef.current.set(c.id, incomingSeq);
             if (incomingSeq > previous) {
               summaryIncomingSeqsRef.current.set(c.id, incomingSeq);
-              if (!panelOpen || currentConversation?.id !== c.id) {
+              if (shouldNotifyIncomingSummary(previouslySeen, previous, incomingSeq, panelOpen && currentConversation?.id === c.id)) {
                 hasNewIncoming = true;
               }
             }
@@ -173,6 +244,7 @@ export default function ChatDataProvider({ children, role }) {
           }
         }
         setSummaries(items);
+        setSummaryVersion((version) => version + 1);
         setLoading(false);
         setError('');
       },
@@ -197,14 +269,25 @@ export default function ChatDataProvider({ children, role }) {
     return { ...presented, unreadCount, unreadLabel: formatBadge(unreadCount), notificationEpoch };
   }), [branchId, role, roleData, summaries, uid]);
 
+  React.useEffect(() => {
+    if (!panelOpen || !selectedSeed?.id || selectedSeed.historyId || loading || accessReadiness !== 'ready') return;
+    if (conversations.some((conversation) => conversation.id === selectedSeed.id)) return;
+    setSelectedSeed(null);
+    setChatListTab('history');
+  }, [accessReadiness, conversations, loading, panelOpen, selectedSeed]);
+
   const currentConversation = React.useMemo(() => {
     if (!selectedSeed?.id) return null;
+    if (selectedSeed.historyId && selectedSeed.historyScope !== historyScope) return null;
+    if (selectedSeed.historyId) return presentationFor(selectedSeed, role, roleData);
     const live = conversations.find((conversation) => conversation.id === selectedSeed.id);
-    return presentationFor({ ...selectedSeed, ...(live || {}), orderContextLocal: selectedSeed.orderContextLocal || live?.orderContextLocal }, role, roleData);
-  }, [conversations, role, roleData, selectedSeed]);
+    return presentationFor({ ...selectedSeed, ...(live || {}), orderContextLocal: live?.orderContextLocal || selectedSeed.orderContextLocal }, role, roleData);
+  }, [conversations, historyScope, role, roleData, selectedSeed]);
 
   const availability = chatModel.conversationAvailability(currentConversation, role, uid, branchId, clock);
-  const conversationNotice = chatModel.conversationLifecycleNotice(currentConversation, clock);
+  const conversationNotice = currentConversation?.historyId
+    ? { state: 'closed', title: 'Completed delivery', body: 'Read-only history for this order. Messaging for this delivery has ended.' }
+    : chatModel.conversationLifecycleNotice(currentConversation, clock);
   const chatRestriction = role === 'manager' ? null : moderation.activeRestrictions.find((notice) => {
     if (notice.scope === 'platform_chat') return true;
     if (notice.scope !== 'branch_chat') return false;
@@ -227,11 +310,12 @@ export default function ChatDataProvider({ children, role }) {
     setLiveMessages([]);
     setOlderMessages([]);
     setLocalMessages([]);
+    setBackendBeforeSeq(null);
     setThreadError('');
     setMessageActionError('');
     hydratedOpenThreadRef.current = false;
     lastOpenThreadSeqRef.current = 0;
-    if (!panelOpen || !currentConversation?.id || accessReadiness !== 'ready' || !availability.readable) return undefined;
+    if (!panelOpen || !currentConversation?.id || accessReadiness !== 'ready' || !availability.readable || currentConversation.historyId || currentConversation.type === 'requester_branch') return undefined;
     const unsubscribe = subscribeOpenConversationMessages({
       conversationId: currentConversation.id,
       onData: (items) => {
@@ -264,12 +348,30 @@ export default function ChatDataProvider({ children, role }) {
       if (threadUnsubscribeRef.current === unsubscribe) threadUnsubscribeRef.current = null;
       unsubscribe?.();
     };
-  }, [accessReadiness, availability.readable, currentConversation?.id, panelOpen, threadVersion]);
+  }, [accessReadiness, availability.readable, currentConversation?.id, currentConversation?.historyId, currentConversation?.type, panelOpen, threadVersion]);
+
+  React.useEffect(() => {
+    if (!panelOpen || !currentConversation?.id || accessReadiness !== 'ready' || !availability.readable ||
+      (!currentConversation.historyId && currentConversation.type !== 'requester_branch')) return undefined;
+    let cancelled = false;
+    loadMessageHistory({ conversationId: currentConversation.id, historyId: currentConversation.historyId, limit: 40 })
+      .then((page) => {
+        if (cancelled) return;
+        setLiveMessages(page.messages || []);
+        setBackendBeforeSeq(page.nextBeforeSeq || null);
+        setHasEarlierMessages(Boolean(page.nextBeforeSeq));
+        setThreadError('');
+      })
+      .catch((loadError) => {
+        if (!cancelled) setThreadError(loadError?.message || 'Messages could not be loaded.');
+      });
+    return () => { cancelled = true; };
+  }, [accessReadiness, availability.readable, currentConversation?.id, currentConversation?.historyId, currentConversation?.type, panelOpen, summaryVersion, threadVersion]);
 
   const messages = React.useMemo(() => mergeMessages(olderMessages, liveMessages, localMessages), [liveMessages, localMessages, olderMessages]);
 
   React.useEffect(() => {
-    if (!panelOpen || !currentConversation?.id || messages.length === 0 || accessReadiness !== 'ready' || !availability.readable) return undefined;
+    if (!panelOpen || !currentConversation?.id || currentConversation.historyId || messages.length === 0 || accessReadiness !== 'ready' || !availability.readable) return undefined;
     const incoming = messages.filter((message) => Number.isSafeInteger(Number(message.seq)) && !isOwnMessage(message, role, uid, branchId));
     const newestIncomingSeq = incoming.reduce((maximum, message) => Math.max(maximum, Number(message.seq)), 0);
     const existingRead = Number(principalStateFor(currentConversation, role, uid, branchId)?.lastReadSeq || 0);
@@ -292,10 +394,10 @@ export default function ChatDataProvider({ children, role }) {
   const openConversation = React.useCallback((conversation) => {
     setResolveError('');
     setThreadError('');
-    setSelectedSeed(conversation);
+    setSelectedSeed(conversation.historyId ? { ...conversation, historyScope } : conversation);
     setThreadVersion((version) => version + 1);
     setPanelOpen(true);
-  }, []);
+  }, [historyScope]);
   const resolveAndOpen = React.useCallback((rawIntent, orderContextLocal = null) => {
     if (resolveInFlightRef.current) return resolveInFlightRef.current;
     const intent = chatModel.normalizeChatIntent(rawIntent);
@@ -420,19 +522,21 @@ export default function ChatDataProvider({ children, role }) {
   const loadEarlierMessages = React.useCallback(async () => {
     if (!currentConversation?.id || loadingEarlier) return;
     const committed = messages.filter((message) => Number.isSafeInteger(Number(message.seq)));
-    const beforeSeq = committed.reduce((minimum, message) => Math.min(minimum, Number(message.seq)), Number.MAX_SAFE_INTEGER);
+    const backendThread = Boolean(currentConversation.historyId || currentConversation.type === 'requester_branch');
+    const beforeSeq = backendThread ? backendBeforeSeq : committed.reduce((minimum, message) => Math.min(minimum, Number(message.seq)), Number.MAX_SAFE_INTEGER);
     if (!Number.isFinite(beforeSeq)) return;
     setLoadingEarlier(true);
     try {
-      const page = await loadMessageHistory({ conversationId: currentConversation.id, beforeSeq, limit: 40 });
+      const page = await loadMessageHistory({ conversationId: currentConversation.id, historyId: currentConversation.historyId, beforeSeq, limit: 40 });
       setOlderMessages((items) => mergeMessages(items, page.messages || []));
       setHasEarlierMessages(Boolean(page.nextBeforeSeq));
+      if (backendThread) setBackendBeforeSeq(page.nextBeforeSeq || null);
     } catch (historyError) {
       setThreadError(historyError.message || 'Earlier messages could not be loaded.');
     } finally {
       setLoadingEarlier(false);
     }
-  }, [currentConversation?.id, loadingEarlier, messages]);
+  }, [backendBeforeSeq, currentConversation?.id, currentConversation?.historyId, currentConversation?.type, loadingEarlier, messages]);
 
   const openChat = React.useCallback(() => {
     if (Platform.OS === 'web' && typeof document !== 'undefined' && document.activeElement?.blur) {
@@ -464,8 +568,11 @@ export default function ChatDataProvider({ children, role }) {
     distributorOrders: role === 'distributor' ? (roleData.orders || []) : [],
     stationName: clean(roleData.branch?.name || roleData.profile?.branchName || roleData.profile?.branchNameSnapshot) || 'Your BlueTap Station',
     requesterBranches,
-    role, colors, isDark, conversations, loading, error, panelOpen, currentConversation, messages,
-    canSend: availability.sendable && accessReadiness === 'ready' && !threadError && !chatRestriction,
+    role, colors, isDark, conversations, loading, error, summaryVersion, panelOpen, chatListTab, setChatListTab, currentConversation, messages,
+    history, historyLoaded: historyState.scope === historyScope && historyState.loaded, historyCursor: historyState.scope === historyScope ? historyState.cursor : null,
+    historyLoading: historyState.scope === historyScope && historyState.loading, historyLoadingMore: historyState.scope === historyScope && historyState.loadingMore,
+    historyError: historyState.scope === historyScope ? historyState.error : '', refreshHistory, loadMoreHistory,
+    canSend: !currentConversation?.historyId && availability.sendable && accessReadiness === 'ready' && !threadError && !chatRestriction,
     sendUnavailableReason: chatRestriction
       ? `${chatRestriction.title}${chatRestriction.branchName ? ` for ${chatRestriction.branchName}` : ''}.`
       : conversationNotice?.state === 'closed'
@@ -490,7 +597,7 @@ export default function ChatDataProvider({ children, role }) {
     loadEarlierMessages,
     isOwnMessage: (message) => isOwnMessage(message, role, uid, branchId),
     receiptForMessage: (message) => receiptFor(message, currentConversation, role, uid, branchId),
-  }), [accessReadiness, roleData.users, roleData.orders, branchId, chatRestriction, colors, isDark, conversationNotice, conversations, currentConversation, deleteCurrentMessage, editCurrentMessage, error, hasEarlierMessages, loading, loadingEarlier, messageActionError, messages, openChat, closeChat, openStationChat, openConversation, openBlueTapConversation, panelOpen, requesterBranches, resolveAndOpen, resolveError, resolvingConversation, retryMessage, role, sendCurrentMessage, threadError, uid, loadEarlierMessages]);
+  }), [accessReadiness, roleData.users, roleData.orders, branchId, chatRestriction, chatListTab, colors, isDark, conversationNotice, conversations, currentConversation, deleteCurrentMessage, editCurrentMessage, error, hasEarlierMessages, history, historyState, historyScope, loading, loadingEarlier, loadMoreHistory, messageActionError, messages, openChat, closeChat, openStationChat, openConversation, openBlueTapConversation, panelOpen, refreshHistory, requesterBranches, resolveAndOpen, resolveError, resolvingConversation, retryMessage, role, sendCurrentMessage, summaryVersion, threadError, uid, loadEarlierMessages]);
 
   return (
     <ChatContext.Provider value={value}>

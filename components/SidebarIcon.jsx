@@ -10,6 +10,7 @@ const icons = Object.freeze({
   UsersRound: require('../assets/icons/sidebar/users-round.svg'),
   Package: require('../assets/icons/sidebar/package.svg'),
   BarChart3: require('../assets/icons/sidebar/chart-column.svg'),
+  CircleDollarSign: require('../assets/icons/sidebar/circle-dollar-sign.svg'),
   ShieldCheck: require('../assets/icons/sidebar/shield-check.svg'),
   UserCircle2: require('../assets/icons/sidebar/circle-user-round.svg'),
   Building2: require('../assets/icons/sidebar/building-2.svg'),

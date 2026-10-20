@@ -24,6 +24,15 @@ test('user and Manager branch unread totals use logical principal state', () => 
   assert.equal(model.formatBadge(100), '99+');
 });
 
+test('an archived conversation reappearing does not replay its old notification', () => {
+  const provider = read('components/chat/ChatDataProvider.jsx');
+  assert.match(provider, /if \(!previouslySeen\) summaryIncomingSeqsRef\.current\.set\(c\.id, incomingSeq\)/);
+  assert.equal(model.shouldNotifyIncomingSummary(false, 0, 8, false), false);
+  assert.equal(model.shouldNotifyIncomingSummary(true, 8, 8, false), false);
+  assert.equal(model.shouldNotifyIncomingSummary(true, 8, 9, true), false);
+  assert.equal(model.shouldNotifyIncomingSummary(true, 8, 9, false), true);
+});
+
 test('receipt semantics move from pending to sent to seen', () => {
   const conversation = { participantState: [
     { principalType: 'user', principalId: 'requester-a', lastReadSeq: 8 },
@@ -91,7 +100,8 @@ test('one visible open thread listener is bounded to forty and cleaned up on cha
   assert.match(realtime, /CHAT_REALTIME_MESSAGE_LIMIT = 40/);
   assert.match(realtime, /orderBy\('seq', 'desc'\)[\s\S]*limit\(CHAT_REALTIME_MESSAGE_LIMIT\)/);
   assert.match(provider, /threadUnsubscribeRef\.current\?\.\(\)/);
-  assert.match(provider, /if \(!panelOpen \|\| !currentConversation\?\.id \|\| accessReadiness !== 'ready' \|\| !availability.readable\) return undefined/);
+  assert.match(provider, /if \(!panelOpen \|\| !currentConversation\?\.id \|\| accessReadiness !== 'ready' \|\| !availability.readable \|\| currentConversation.historyId \|\| currentConversation.type === 'requester_branch'\) return undefined/);
+  assert.match(provider, /loadMessageHistory\(\{ conversationId: currentConversation.id, historyId: currentConversation.historyId, limit: 40 \}\)/);
   assert.match(provider, /threadVersion/);
 });
 
@@ -151,7 +161,7 @@ test('conversation resolution clears stale thread state and localizes resolve er
 
 test('read state advances only after a visible thread presents incoming messages', () => {
   const provider = read('components/chat/ChatDataProvider.jsx');
-  assert.match(provider, /if \(!panelOpen \|\| !currentConversation\?\.id \|\| messages\.length === 0 \|\| accessReadiness !== 'ready' \|\| !availability\.readable\)/);
+  assert.match(provider, /if \(!panelOpen \|\| !currentConversation\?\.id \|\| currentConversation.historyId \|\| messages\.length === 0 \|\| accessReadiness !== 'ready' \|\| !availability\.readable\)/);
   assert.match(provider, /incoming = messages\.filter/);
   assert.match(provider, /markRead\(\{ conversationId: currentConversation\.id, lastReadSeq: newestIncomingSeq \}\)/);
 });
@@ -316,7 +326,7 @@ test('desktop and mobile messenger presentations remain overlay based', () => {
 test('older history uses one bounded API page and merges without duplicate realtime listeners', () => {
   const provider = read('components/chat/ChatDataProvider.jsx');
   const api = read('services/chatApi.js');
-  assert.match(provider, /loadMessageHistory\(\{ conversationId: currentConversation\.id, beforeSeq, limit: 40 \}\)/);
+  assert.match(provider, /loadMessageHistory\(\{ conversationId: currentConversation\.id, historyId: currentConversation.historyId, beforeSeq, limit: 40 \}\)/);
   assert.match(provider, /setOlderMessages\(\(items\) => mergeMessages\(items, page\.messages \|\| \[\]\)\)/);
   assert.match(api, /beforeSeq/);
 });

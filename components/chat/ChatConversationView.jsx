@@ -45,7 +45,7 @@ export default function ChatConversationView() {
     isNearBottomRef.current = true;
     const timer = setTimeout(() => scrollRef.current?.scrollToEnd?.({ animated: false }), 40);
     return () => clearTimeout(timer);
-  }, [currentConversation?.id]);
+  }, [currentConversation?.id, currentConversation?.historyId]);
 
   React.useEffect(() => {
     const prevLen = prevMessagesLengthRef.current;
@@ -121,8 +121,8 @@ export default function ChatConversationView() {
             colors={colors}
             onRetry={retryMessage}
             onReport={reportingAllowed ? (item) => setReportTarget({ type: 'message', message: item }) : undefined}
-            onEdit={(item) => { setEditTarget(item); setEditBody(item.body || ''); }}
-            onDelete={setDeleteTarget}
+            onEdit={currentConversation.historyId ? undefined : (item) => { setEditTarget(item); setEditBody(item.body || ''); }}
+            onDelete={currentConversation.historyId ? undefined : setDeleteTarget}
             onReply={canSend ? (item) => setReplyTarget(item) : undefined}
           />
         ))}

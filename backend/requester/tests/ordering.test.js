@@ -27,14 +27,15 @@ function fixture(overrides = {}) {
     },
     async get() { return { docs: [...records.keys()].filter((path) => path.startsWith(`${name}/`)).map(snapshot) }; },
     where(field, operator, value) {
-      return { async get() { return { docs: [...records.entries()].filter(([path, data]) => path.startsWith(`${name}/`) && data[field] === value).map(([path]) => snapshot(path)) }; } };
+      const docs = () => [...records.entries()].filter(([path, data]) => path.startsWith(`${name}/`) && data[field] === value).map(([path]) => snapshot(path));
+      return { async get() { return { docs: docs() }; }, limit(count) { return { async get() { return { docs: docs().slice(0, count) }; } }; } };
     },
   });
   const db = {
     collection,
     async runTransaction(run) {
       return run({
-        async get(ref) { return snapshot(ref.path); },
+        async get(ref) { return ref.get(); },
         create(ref, data) { assert.equal(records.has(ref.path), false); records.set(ref.path, data); },
         update(ref, data) { records.set(ref.path, { ...records.get(ref.path), ...data }); },
         set(ref, data) { records.set(ref.path, data); },
