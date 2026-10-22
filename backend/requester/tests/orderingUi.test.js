@@ -91,7 +91,7 @@ test('product card uses a prominent contain image and a placeholder', () => {
   assert.match(productCard, /resizeMode="contain"/); assert.match(productCard, /placeholder/i); assert.match(productCard, /imageSurface:\{height:142/);
 });
 test('Requester floating navigation reserves shared content space instead of covering controls', () => {
-  assert.match(layout, /UserPortalShell/); assert.match(distributorLayout, /UserPortalShell/); assert.match(portalShell, /backgroundColor: 'transparent'/); assert.match(portalShell, /navOverlay/); assert.match(portalLayout, /maxWidth: 480/); assert.match(portalLayout, /USER_PORTAL_BOTTOM_CONTENT_INSET/); assert.match(nav, /useSafeAreaInsets/); assert.match(nav, /primaryNavButton/); assert.match(nav, /label: 'Add Request'/); assert.doesNotMatch(nav, /floating=\{false\}/);
+  assert.match(layout, /UserPortalShell/); assert.match(distributorLayout, /UserPortalShell/); assert.match(portalShell, /backgroundColor: 'transparent'/); assert.match(portalShell, /navOverlay/); assert.match(portalLayout, /maxWidth: 480/); assert.match(portalLayout, /USER_PORTAL_BOTTOM_CONTENT_INSET/); assert.match(nav, /useSafeAreaInsets/); assert.match(nav, /styles\.navButton/); assert.match(nav, /label: 'Add Request'/); assert.doesNotMatch(nav, /floating=\{false\}/);
 });
 test('Requester form uses keyboard avoidance and safe bottom content space', () => {
   assert.match(form, /KeyboardAvoidingView/); assert.match(form, /USER_PORTAL_LAYOUT\.maxWidth/); assert.match(form, /USER_PORTAL_BOTTOM_CONTENT_INSET/); assert.match(form, /minWidth:0/); assert.match(form, /maxWidth:'100%'/);
@@ -204,17 +204,17 @@ test('shared theme toggle is accessible and follows the landing moon and sun pat
 });
 test('floating portal navigation uses theme tokens while its positioning wrapper stays transparent', () => {
   assert.match(nav, /colors\.navSurface/);
-  assert.match(nav, /colors\.navIcon/);
+  assert.match(nav, /colors\.navIconMuted/);
   assert.match(portalShell, /backgroundColor: 'transparent'/);
   assert.doesNotMatch(nav, /useColorScheme/);
 });
 test('Requester Add Request control remains visibly rendered before and after its route is active', () => {
-  assert.match(nav, /primaryAction=\{isPrimaryAction\}/);
-  assert.match(nav, /primaryActionIcon/);
-  assert.match(nav, /return <Text style=\{\[styles\.primaryActionIcon, \{ color: tintColor \}\]\}>\+<\/Text>/);
-  assert.match(nav, /colors\.primaryAction \|\| colors\.primary/);
-  assert.match(nav, /borderColor: isActive \|\| pressed \? colors\.primaryLight : colors\.primary/);
-  assert.match(nav, /colors\.iconOnPrimary \|\| colors\.onPrimary/);
+  assert.match(nav, /icon: PORTAL_NAV_ICONS\.plus/);
+  assert.match(nav, /<NavIcon\s+source=\{item\.icon\}/);
+  assert.match(nav, /color=\{isActive \? colors\.iconPrimary : navIconColor\}/);
+  assert.match(nav, /isActive && \{\s*backgroundColor: colors\.primarySoft,\s*borderColor: colors\.navSelectedBorder/);
+  assert.match(nav, /backgroundColor: 'transparent'/);
+  assert.doesNotMatch(nav, /primaryNavButton|VectorPlusIcon|activeIcon/);
 });
 
 test('Distributor pages retain their distinct committed layouts while using the scoped assignment API', () => {

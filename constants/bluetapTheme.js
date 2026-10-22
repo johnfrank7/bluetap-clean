@@ -78,6 +78,8 @@ export const BLUETAP_LIGHT_PORTAL_COLORS = Object.freeze({
   input: BLUETAP_COLORS.surfaceAlt,
   navSurface: BLUETAP_COLORS.surface,
   navIcon: BLUETAP_COLORS.primary,
+  navIconMuted: '#526579',
+  navSelectedBorder: '#B9D8F0',
   navActive: BLUETAP_COLORS.primary,
 });
 
@@ -85,5 +87,7 @@ export const BLUETAP_DARK_PORTAL_COLORS = Object.freeze({
   ...BLUETAP_DARK_COLORS,
   navSurface: BLUETAP_DARK_COLORS.surface,
   navIcon: BLUETAP_DARK_COLORS.primaryLight,
+  navIconMuted: '#B0C2D3',
+  navSelectedBorder: '#345B7A',
   navActive: BLUETAP_DARK_COLORS.primary,
 });

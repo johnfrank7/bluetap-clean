@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import { Image as ExpoImage } from 'expo-image';
 import useSingleFlightNavigation from '../../components/useSingleFlightNavigation';
 import useUnsavedChangesGuard from '../../components/useUnsavedChangesGuard';
 
@@ -40,6 +41,8 @@ const CARD_BORDER = BLUETAP_COLORS.border;
 const TEXT_MUTED = BLUETAP_COLORS.textSecondary;
 const TEXT_DARK = BLUETAP_COLORS.textPrimary;
 const USE_NATIVE_DRIVER = Platform.OS !== 'web';
+
+const LOGOUT_ICON = require('../../assets/icons/sidebar/log-out.svg');
 
 const getProfileObject = (profile) => profile || {};
 
@@ -648,7 +651,14 @@ export default function DistributorProfilePage() {
               onPress={() => confirmLeave(handleLogout)}
               disabled={savingProfile}
             >
-              <Text style={styles.logoutIcon}>{'\u21AA'}</Text>
+              <ExpoImage
+                source={LOGOUT_ICON}
+                contentFit="contain"
+                tintColor={colors.onPrimary || '#FFFFFF'}
+                transition={0}
+                accessible={false}
+                style={styles.logoutIcon}
+              />
               <Text style={styles.logoutText}>Logout</Text>
             </TouchableOpacity>
           </View>
@@ -890,9 +900,8 @@ const styles = createPortalStyleSheet({
     flexDirection: 'row',
   },
   logoutIcon: {
-    color: '#FFFFFF',
-    fontSize: 15,
-    fontWeight: 'bold',
+    width: 16,
+    height: 16,
     marginRight: 8,
   },
   logoutText: {

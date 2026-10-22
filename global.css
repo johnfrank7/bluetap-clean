@@ -166,6 +166,26 @@ button:disabled,
   transform: none !important;
 }
 
+/* Portal tabs keep fixed geometry and one keyboard-focus outline. */
+[data-bluetap-bottom-nav='true'] {
+  transform: none !important;
+}
+
+[data-bluetap-bottom-nav='true']:focus:not(:focus-visible) {
+  outline: none;
+}
+
+[data-bluetap-bottom-nav='true']:focus-visible {
+  outline: 2px solid var(--bluetap-primary);
+  outline-offset: 2px;
+  /* The focus ring replaces only the decorative selection border. */
+  border-color: transparent !important;
+}
+
+[data-bluetap-theme='dark'] [data-bluetap-bottom-nav='true']:focus-visible {
+  outline-color: var(--bluetap-primary-light);
+}
+
 input:disabled,
 textarea:disabled,
 select:disabled,
