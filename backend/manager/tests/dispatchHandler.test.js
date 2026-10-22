@@ -5,6 +5,8 @@ const { createDistributorAssignedOrdersHandler } = require('../../distributor/as
 const { createManagerDispatchHandler } = require('../dispatchHandler');
 const { manilaScheduleDate, scheduledWeekday } = require('../../../services/productOrderPolicy');
 const { DELIVERY_FAILURE_REASONS } = require('../../../constants/deliveryFailureReasons');
+const { CONVERSATION_TYPES } = require('../../chat/chatAuthorization');
+const { authorityKeyHash, buildConversationFoundation } = require('../../chat/conversationService');
 
 function fixture() {
   const records = new Map([
@@ -38,7 +40,36 @@ function fixture() {
     where(field, operator, value) { const docs = () => [...records.entries()].filter(([path, data]) => path.startsWith(`${name}/`) && data[field] === value).map(([path]) => snapshot(path)); return { async get() { return { docs: docs() }; }, limit(count) { return { async get() { return { docs: docs().slice(0, count) }; } }; } }; },
     async get() { return { docs: [...records.keys()].filter((path) => path.startsWith(`${name}/`)).map(snapshot) }; },
   });
-  const db = { collection, async runTransaction(run) { return run({ get: async (ref) => ref.get(), set(ref, data) { records.set(ref.path, data); }, update(ref, data) { records.set(ref.path, { ...records.get(ref.path), ...data }); }, delete(ref) { records.delete(ref.path); } }); } };
+  let transactionQueue = Promise.resolve();
+  const db = { collection, async runTransaction(run) {
+    const previous = transactionQueue;
+    let release;
+    transactionQueue = new Promise((resolve) => { release = resolve; });
+    await previous;
+    try {
+      const writes = [];
+      const stage = (method, ref, data) => writes.push({ method, ref, data });
+      const result = await run({
+        get: async (ref) => {
+          if (writes.length) throw new Error('Firestore transactions require all reads to be executed before all writes.');
+          return ref.get();
+        },
+        set(ref, data) { stage('set', ref, data); },
+        update(ref, data) { stage('update', ref, data); },
+        create(ref, data) { stage('create', ref, data); },
+        delete(ref) { stage('delete', ref); },
+      });
+      for (const { method, ref } of writes) {
+        if (method === 'create' && records.has(ref.path)) throw new Error('Document already exists.');
+      }
+      for (const { method, ref, data } of writes) {
+        if (method === 'delete') records.delete(ref.path);
+        else if (method === 'update') records.set(ref.path, { ...records.get(ref.path), ...data });
+        else records.set(ref.path, data);
+      }
+      return result;
+    } finally { release(); }
+  } };
   const auth = {
     async verifyIdToken(token) {
       const mapping = { 'manager-a-token': 'manager-a', 'manager-b-token': 'manager-b', 'manager-c-token': 'manager-c', 'distributor-a-token': 'distributor-a', 'distributor-a2-token': 'distributor-a2', 'distributor-b-token': 'distributor-b' };
@@ -406,6 +437,82 @@ test('delivery failure codes are allowlisted and OTHER requires a short explanat
   const otherWithoutNote = await call(invalidHandler, 'PATCH', 'distributor-a-token', { orderId: 'order-a', action: 'fail-delivery', failureReasonCode: 'OTHER' });
   assert.equal(otherWithoutNote.statusCode, 400);
   assert.equal(otherWithoutNote.body.error.reason, 'FAILURE_REASON_NOTE_REQUIRED');
+});
+
+test('attributable failure commits moderation, chat grace, and one closed attempt without a read after write', async () => {
+  const f = fixture();
+  const handler = createDistributorAssignedOrdersHandler(f.getAdmin);
+  f.records.set('requests/order-a', { ...f.records.get('requests/order-a'), assignedDistributorUid: 'distributor-a', assignmentVersion: 1, status: 'accepted' });
+  const authority = { type: CONVERSATION_TYPES.REQUESTER_DISTRIBUTOR, orderId: 'order-a', requesterUid: 'requester-1', distributorUid: 'distributor-a', assignmentVersion: 1 };
+  const hash = authorityKeyHash(authority.type, authority);
+  f.records.set(`chatAuthorityRegistry/${hash}`, { authorityKeyHash: hash, conversationId: 'conversation-a', type: authority.type });
+  f.records.set('chatConversations/conversation-a', buildConversationFoundation({ type: authority.type, authority, createdBy: { uid: 'manager-a', role: 'manager' }, now: new Date() }));
+
+  assert.equal((await call(handler, 'PATCH', 'distributor-a-token', { orderId: 'order-a', action: 'start-delivery' })).statusCode, 200);
+  const activeId = f.records.get('requests/order-a').activeDeliveryAttemptId;
+  assert.equal(f.records.get(`deliveryAttempts/${activeId}`).outcome, 'in_progress');
+  const failed = await call(handler, 'PATCH', 'distributor-a-token', { orderId: 'order-a', action: 'fail-delivery', failureReasonCode: 'NO_RESPONSE', failureReasonNote: 'Called twice.' });
+  assert.equal(failed.statusCode, 200);
+  assert.equal(f.records.get('requests/order-a').activeDeliveryAttemptId, null);
+  assert.equal(f.records.get(`deliveryAttempts/${activeId}`).outcome, 'failed');
+  assert.equal(f.records.get(`deliveryAttempts/${activeId}`).responsibility, 'undetermined');
+  assert.equal(f.records.get(`deliveryAttempts/${activeId}`).reviewState, 'reported');
+  assert.equal(f.records.get(`deliveryAttemptEvents/${activeId}_outcome`).kind, 'ATTEMPT_FAILED');
+  assert.equal([...f.records.values()].filter((value) => value?.incidents?.[0]?.orderId === 'order-a').length, 1);
+  assert.equal(f.records.get('chatConversations/conversation-a').lifecycleReason, 'delivery_failed_grace');
+  assert.equal(f.records.get('chatConversations/conversation-a').status, 'active');
+  assert.equal((await call(handler, 'PATCH', 'distributor-a-token', { orderId: 'order-a', action: 'fail-delivery', failureReasonCode: 'NO_RESPONSE' })).statusCode, 409);
+  assert.equal([...f.records.keys()].filter((path) => path.startsWith('deliveryAttempts/')).length, 1);
+
+  assert.equal((await call(handler, 'PATCH', 'distributor-a-token', { orderId: 'order-a', action: 'reschedule-delivery', scheduledAt: defaultSchedule })).statusCode, 200);
+  assert.equal((await call(handler, 'PATCH', 'distributor-a-token', { orderId: 'order-a', action: 'start-delivery' })).statusCode, 200);
+  const secondId = f.records.get('requests/order-a').activeDeliveryAttemptId;
+  assert.notEqual(secondId, activeId);
+  assert.equal((await call(handler, 'PATCH', 'distributor-a-token', { orderId: 'order-a', action: 'fail-delivery', failureReasonCode: 'WEATHER_OR_ROAD' })).statusCode, 200);
+  assert.equal(f.records.get(`deliveryAttempts/${secondId}`).outcome, 'failed');
+  assert.equal((await call(handler, 'PATCH', 'distributor-a-token', { orderId: 'order-a', action: 'reschedule-delivery', scheduledAt: defaultSchedule })).statusCode, 200);
+  assert.equal((await call(handler, 'PATCH', 'distributor-a-token', { orderId: 'order-a', action: 'start-delivery' })).statusCode, 200);
+  const thirdId = f.records.get('requests/order-a').activeDeliveryAttemptId;
+  assert.equal((await call(handler, 'PATCH', 'distributor-a-token', { orderId: 'order-a', action: 'mark-delivered' })).statusCode, 200);
+  assert.equal(f.records.get('requests/order-a').deliveryAttemptSeq, 3);
+  assert.equal(f.records.get(`deliveryAttempts/${thirdId}`).outcome, 'delivered');
+  assert.equal(f.records.get(`deliveryAttempts/${secondId}`).outcome, 'failed');
+  assert.equal(f.records.get(`deliveryAttempts/${activeId}`).outcome, 'failed');
+});
+
+test('legacy active delivery closes with unknown start time and no verified responsibility', async () => {
+  const f = fixture();
+  f.records.set('requests/order-a', { ...f.records.get('requests/order-a'), assignedDistributorUid: 'distributor-a', status: 'out_for_delivery' });
+  const handler = createDistributorAssignedOrdersHandler(f.getAdmin);
+  const result = await call(handler, 'PATCH', 'distributor-a-token', { orderId: 'order-a', action: 'fail-delivery', failureReasonCode: 'WEATHER_OR_ROAD' });
+  assert.equal(result.statusCode, 200);
+  const order = f.records.get('requests/order-a');
+  const attempt = [...f.records.entries()].find(([path]) => path.startsWith('deliveryAttempts/'))[1];
+  assert.equal(order.deliveryAttemptSeq, 1);
+  assert.equal(attempt.startTimeKnown, false);
+  assert.equal(attempt.startedAt, null);
+  assert.equal(attempt.outcome, 'failed');
+  assert.equal(attempt.responsibility, 'undetermined');
+  assert.equal([...f.records.keys()].filter((path) => path.startsWith('orderAbuseReviews/')).length, 0);
+  assert.equal([...f.records.keys()].filter((path) => path.startsWith('deliveryAttemptEvents/')).length, 2);
+});
+
+test('concurrent starts create only one attempt and a wrong assignee cannot close it', async () => {
+  const f = fixture();
+  f.records.set('requests/order-a', { ...f.records.get('requests/order-a'), assignedDistributorUid: 'distributor-a', assignmentVersion: 1, status: 'accepted' });
+  const handler = createDistributorAssignedOrdersHandler(f.getAdmin);
+  const starts = await Promise.all([
+    call(handler, 'PATCH', 'distributor-a-token', { orderId: 'order-a', action: 'start-delivery' }),
+    call(handler, 'PATCH', 'distributor-a-token', { orderId: 'order-a', action: 'start-delivery' }),
+  ]);
+  assert.deepEqual(starts.map((item) => item.statusCode).sort(), [200, 409]);
+  assert.equal(f.records.get('requests/order-a').deliveryAttemptSeq, 1);
+  assert.equal([...f.records.keys()].filter((path) => path.startsWith('deliveryAttempts/')).length, 1);
+  assert.equal((await call(handler, 'PATCH', 'distributor-b-token', { orderId: 'order-a', action: 'mark-delivered' })).statusCode, 404);
+  assert.equal(f.records.get('requests/order-a').status, 'out_for_delivery');
+  assert.equal((await call(handler, 'PATCH', 'distributor-a-token', { orderId: 'order-a', action: 'mark-delivered' })).statusCode, 200);
+  assert.equal((await call(handler, 'PATCH', 'distributor-a-token', { orderId: 'order-a', action: 'mark-delivered' })).statusCode, 409);
+  assert.equal([...f.records.keys()].filter((path) => path.startsWith('deliveryAttempts/')).length, 1);
 });
 
 test('Distributor profile completeness blocks mutation actions with 409 PROFILE_INCOMPLETE while GET is allowed', async () => {

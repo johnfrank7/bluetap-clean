@@ -180,6 +180,8 @@ test('Firestore authorization enforces canonical chat relationships', { skip: !h
         'moderationMutationIds/mutation',
         'moderationNotices/r1/items/notice',
         'orderAbuseReviews/review',
+        'deliveryAttempts/attempt',
+        'deliveryAttemptEvents/event',
         'chatMessageRevisions/revision',
         'chatRestrictions/r1',
         'orderingRestrictions/r1',
@@ -195,11 +197,12 @@ test('Firestore authorization enforces canonical chat relationships', { skip: !h
       }
     });
 
-    await t.test('valid requester_branch is allowed and cross-branch access is denied', async () => {
+    await t.test('requester_branch direct reads are denied to participants and other branches', async () => {
       await seedConversation('requester-branch-valid', requesterBranch());
-      assert.equal((await getDoc(doc(r1, 'chatConversations/requester-branch-valid'))).exists(), true);
-      assert.equal((await getDoc(doc(m1, 'chatConversations/requester-branch-valid'))).exists(), true);
-      assert.equal((await getDocs(collection(r1, 'chatConversations/requester-branch-valid/messages'))).size, 1);
+      await denied(getDoc(doc(r1, 'chatConversations/requester-branch-valid')));
+      await denied(getDocs(collection(r1, 'chatConversations/requester-branch-valid/messages')));
+      await denied(getDoc(doc(m1, 'chatConversations/requester-branch-valid')));
+      await denied(getDocs(collection(m1, 'chatConversations/requester-branch-valid/messages')));
       await denied(getDoc(doc(m2, 'chatConversations/requester-branch-valid')));
       await denied(getDocs(collection(d1, 'chatConversations/requester-branch-valid/messages')));
     });

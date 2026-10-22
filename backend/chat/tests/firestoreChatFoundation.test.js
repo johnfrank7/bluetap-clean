@@ -25,7 +25,7 @@ test('conversation summaries are scoped to the caller UID or current Manager bra
 test('all authoritative chat, message, report, moderation, and restriction client writes are denied', () => {
   assert.match(rules, /match \/chatConversations\/\{conversationId\}[\s\S]*allow create, update, delete:\s*if false;/);
   assert.match(rules, /match \/messages\/\{messageId\}[\s\S]*allow create, update, delete:\s*if false;/);
-  for (const collection of ['chatReports', 'chatModerationActions', 'moderationActions', 'moderationMutationIds', 'moderationNotices', 'orderAbuseReviews', 'chatRestrictions', 'orderingRestrictions', 'chatReportRateLimits', 'chatReportDuplicates', 'chatMessageRevisions']) {
+  for (const collection of ['chatReports', 'chatModerationActions', 'moderationActions', 'moderationMutationIds', 'moderationNotices', 'orderAbuseReviews', 'deliveryAttempts', 'deliveryAttemptEvents', 'chatRestrictions', 'orderingRestrictions', 'chatReportRateLimits', 'chatReportDuplicates', 'chatMessageRevisions']) {
     assert.match(rules, new RegExp(`match \/${collection}\/\\{document=\\*\\*\\} \\{ allow read, write: if false; \\}`));
   }
   for (const collection of ['chatAuthorityRegistry', 'chatMutationIds', 'chatRateLimits']) {

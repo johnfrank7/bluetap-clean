@@ -129,16 +129,16 @@ function cancellationConcern(stage) {
   return 'low';
 }
 
-async function recordOrderAbuseIncidentInTransaction({ tx, db, orderId, order = {}, incidentType, category, stage, now = new Date() }) {
+async function prepareOrderAbuseIncidentInTransaction({ tx, db, orderId, order = {}, incidentType, category, stage, now = new Date() }) {
   const requesterUid = clean(order.requesterUid || order.requester_id, 128);
   const branchId = clean(order.currentBranchId || order.branchId, 128);
-  if (!requesterUid || !branchId) return { recorded: false, reason: 'missing-authority' };
+  if (!requesterUid || !branchId) return { result: { recorded: false, reason: 'missing-authority' }, write: null };
   const normalizedCategory = clean(category, 80).toUpperCase();
   if (incidentType === 'delivery_failure' && !requesterAttributableFailure(normalizedCategory)) {
-    return { recorded: false, reason: NON_ATTRIBUTABLE_FAILURE_CODES.has(normalizedCategory) ? 'non-attributable' : 'unclassified' };
+    return { result: { recorded: false, reason: NON_ATTRIBUTABLE_FAILURE_CODES.has(normalizedCategory) ? 'non-attributable' : 'unclassified' }, write: null };
   }
   const concern = incidentType === 'cancellation' ? cancellationConcern(stage) : 'moderate';
-  if (incidentType === 'cancellation' && concern === 'low') return { recorded: false, reason: 'low-concern-cancellation' };
+  if (incidentType === 'cancellation' && concern === 'low') return { result: { recorded: false, reason: 'low-concern-cancellation' }, write: null };
 
   const ref = db.collection('orderAbuseReviews').doc(hashId(branchId, requesterUid));
   const snapshot = await tx.get(ref);
@@ -160,7 +160,7 @@ async function recordOrderAbuseIncidentInTransaction({ tx, db, orderId, order = 
   });
   const incidentCount = incidents.length;
   const severity = incidentCount >= ABUSE_STRONG_THRESHOLD ? 'strong_review' : incidentCount >= ABUSE_REVIEW_THRESHOLD ? 'review' : 'monitor';
-  tx.set(ref, {
+  const data = {
     schemaVersion: 1,
     requesterUid,
     requesterPublicUidSnapshot: clean(order.requesterPublicUidSnapshot || order.requesterUniqueId || order.requester_unique_id, 80),
@@ -177,8 +177,14 @@ async function recordOrderAbuseIncidentInTransaction({ tx, db, orderId, order = 
     status: current.status || 'open',
     reviewedAt: current.reviewedAt || null,
     actionTaken: current.actionTaken || null,
-  }, { merge: true });
-  return { recorded: true, incidentCount, severity };
+  };
+  return { result: { recorded: true, incidentCount, severity }, write: { ref, data } };
+}
+
+async function recordOrderAbuseIncidentInTransaction(args) {
+  const prepared = await prepareOrderAbuseIncidentInTransaction(args);
+  if (prepared.write) args.tx.set(prepared.write.ref, prepared.write.data, { merge: true });
+  return prepared.result;
 }
 
 function noticeForAction({ actionId, action, scope, category, branchId, branchName, startsAt, endsAt, createdAt }) {
@@ -249,6 +255,7 @@ module.exports = {
   nextRestrictionProjection,
   noticeForAction,
   publicUidOf,
+  prepareOrderAbuseIncidentInTransaction,
   recordOrderAbuseIncidentInTransaction,
   requesterAttributableFailure,
   restrictionBranch,

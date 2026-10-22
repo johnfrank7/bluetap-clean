@@ -7,7 +7,8 @@ const { assignmentVersionForTransition } = require('../utils/relationshipEpochs'
 const { FAILED_DELIVERY_CHAT_GRACE_MS } = require('../chat/chatAuthorization');
 const { postOrderAccessEndsAt, reconcileOrderLifecycleInTransaction } = require('../chat/conversationLifecycleService');
 const { deliveryFailureReasonForCode } = require('../../constants/deliveryFailureReasons');
-const { recordOrderAbuseIncidentInTransaction } = require('../moderation/moderationService');
+const { prepareOrderAbuseIncidentInTransaction } = require('../moderation/moderationService');
+const { prepareDeliveryAttemptTransition, stageDeliveryAttemptWrites } = require('../delivery/deliveryAttemptService');
 
 const clean = (value, max = 128) => String(value || '').trim().slice(0, max);
 const history = (value) => Array.isArray(value) ? value : [];
@@ -26,7 +27,7 @@ async function updateOrder(db, orderId, prepare) {
       const snapshot = await tx.get(ref);
       if (!snapshot.exists) throw new OtpError(404, 'ORDER_NOT_FOUND', 'The assigned delivery was not found.');
       const current = snapshot.data() || {};
-      const update = await prepare(current, tx);
+      const { update, moderationWrite, attemptWrites } = await prepare(current, tx);
       let activeOrderGuard = null;
       if (statusOf(update) === 'delivered') {
         const requesterUid = clean(current.requesterUid || current.requester_id, 128);
@@ -44,6 +45,8 @@ async function updateOrder(db, orderId, prepare) {
         event: update.distributorDeliveryHistory?.[update.distributorDeliveryHistory.length - 1]?.event || 'ORDER_UPDATED',
         now: update.updatedAt || new Date(),
       });
+      if (moderationWrite) tx.set(moderationWrite.ref, moderationWrite.data, { merge: true });
+      stageDeliveryAttemptWrites(tx, attemptWrites);
       tx.update(ref, update);
       if (activeOrderGuard) tx.delete(activeOrderGuard);
       return { ...current, ...update };
@@ -235,8 +238,16 @@ function createDistributorAssignedOrdersHandler(getAdmin = getFirebaseAdmin) {
           updatedAt: now,
           updated_at: now,
         };
+        const attempt = await prepareDeliveryAttemptTransition({
+          tx, db, orderId, order: current, action,
+          distributorUid: distributor.decoded.uid, branchId: distributor.branch.id, now,
+          failureReasonCode, failureReasonLabel, failureReasonNote,
+          clientMutationId: body.clientMutationId,
+        });
+        Object.assign(result, attempt.orderUpdate);
+        let moderationWrite = null;
         if (event === 'DELIVERY_FAILED') {
-          await recordOrderAbuseIncidentInTransaction({
+          const moderation = await prepareOrderAbuseIncidentInTransaction({
             tx,
             db,
             orderId,
@@ -246,8 +257,9 @@ function createDistributorAssignedOrdersHandler(getAdmin = getFirebaseAdmin) {
             stage: 'out_for_delivery',
             now,
           });
+          moderationWrite = moderation.write;
         }
-        return result;
+        return { update: result, moderationWrite, attemptWrites: attempt.writes };
       });
       return res.status(200).json({ order: safeOrder(orderId, saved) });
     } catch (error) { return responseError(res, error); }
