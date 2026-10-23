@@ -92,9 +92,11 @@ test('all notification pages share one-time list motion and explicit-button exit
   assert.match(hook, /NOTIFICATION_EXIT_DURATION_MS = 160/);
   assert.match(hook, /useReducedMotionPreference/);
   assert.doesNotMatch(hook, /BackHandler|popstate|beforeunload/);
-  for (const page of pages) {
+  for (const [index, page] of pages.entries()) {
     assert.match(page, /useNotificationPageMotion/);
-    assert.match(page, /useAnimatedPresenceList\(events, \(event\) => event\.id/);
+    assert.match(page, index === 0
+      ? /useAnimatedPresenceList\(allEvents, \(event\) => event\.id/
+      : /useAnimatedPresenceList\(events, \(event\) => event\.id/);
     assert.match(page, /NotificationBackButton[\s\S]*onPress=\{pageMotion\.goBack\}/);
     assert.match(page, /AnimatedPresenceItem/);
   }

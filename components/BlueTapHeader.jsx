@@ -19,7 +19,7 @@ const BlueTapHeader = memo(function BlueTapHeader({
 }) {
   const { navigateOnce, replaceOnce } = useSingleFlightNavigation();
   const { colors, isDark } = useBlueTapTheme();
-  const { unseenCount } = useRoleNotifications();
+  const { unseenCount, unseenCountScope } = useRoleNotifications();
 
   const openHome = useCallback(() => {
     replaceOnce(notificationPath?.startsWith('/distributor') ? '/distributor/d_dashboard' : '/requester/r_dashboard');
@@ -53,7 +53,7 @@ const BlueTapHeader = memo(function BlueTapHeader({
             <ThemeIconButton inverse={!isDark} />
 
             <TouchableOpacity
-              accessibilityLabel={unseenCount > 0 ? `Open notifications, ${unseenCount} unseen` : 'Open notifications'}
+              accessibilityLabel={unseenCount > 0 ? `Open notifications, ${unseenCount} ${unseenCountScope === 'loaded' ? 'loaded unseen' : 'unseen'}` : 'Open notifications'}
               accessibilityRole="button"
               activeOpacity={0.85}
               hitSlop={8}

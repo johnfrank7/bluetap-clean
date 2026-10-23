@@ -80,6 +80,7 @@ const DARK_NOTIFICATION_SEVERITIES = Object.freeze({
 const notificationSeverity = (status, dark = false) => {
   const normalized = normalizeNotificationStatus(status);
   const palette = dark ? DARK_NOTIFICATION_SEVERITIES : NOTIFICATION_SEVERITIES;
+  if (normalized === 'delivery_report') return palette.info;
   if (SUCCESS_STATUSES.has(normalized)) return palette.success;
   if (DELIVERY_STATUSES.has(normalized)) return palette.delivery;
   if (RESTRICTED_STATUSES.has(normalized)) return palette.restricted;
@@ -90,6 +91,7 @@ const notificationSeverity = (status, dark = false) => {
 
 const compactNotificationStatus = (status) => {
   const normalized = normalizeNotificationStatus(status);
+  if (normalized === 'delivery_report') return 'Delivery report';
   if (normalized === 'restored') return 'Restored';
   if (SUCCESS_STATUSES.has(normalized)) return 'Delivered';
   if (DELIVERY_STATUSES.has(normalized)) return 'In transit';

@@ -50,18 +50,19 @@ export default function RequesterNotification() {
   const { navigateOnce } = useSingleFlightNavigation();
   const params = useLocalSearchParams();
   const { orders, branches, loading, error: orderError, uid, readiness } = useRequesterData();
-  const { events, markAllSeen, markSeen } = useRoleNotifications();
+  const { events, allEvents, markSeen, ready, reportFeed, refreshReports, loadOlderReports } = useRoleNotifications();
   const { openNotice } = useModerationNotices();
   const [retryError, setRetryError] = useState('');
   const error = orderError || retryError;
   const [selectedOrderId, setSelectedOrderId] = useState(null);
   const openedParamRef = useRef('');
   const pageMotion = useNotificationPageMotion(() => router.back());
-  const notificationEntries = useAnimatedPresenceList(events, (event) => event.id, NOTIFICATION_LIST_MOTION_DURATION_MS);
+  const notificationEntries = useAnimatedPresenceList(allEvents, (event) => event.id, NOTIFICATION_LIST_MOTION_DURATION_MS);
 
   const retry = async () => {
     if (!uid || readiness !== 'READY') return;
     setRetryError('');
+    refreshReports({ force: true });
     try {
       await refreshRequesterRequests(uid);
     } catch (nextError) {
@@ -69,7 +70,9 @@ export default function RequesterNotification() {
     }
   };
 
-  useEffect(() => { if (events.length) markAllSeen(); }, [events, markAllSeen]);
+  useEffect(() => {
+    if (ready) markSeen(events.filter((event) => event.kind !== 'delivery_report').map((event) => event.id));
+  }, [events, markSeen, ready]);
   useEffect(() => {
     const orderId = Array.isArray(params.orderId) ? params.orderId[0] : params.orderId;
     if (!orderId || openedParamRef.current === orderId) return;
@@ -100,14 +103,14 @@ export default function RequesterNotification() {
           </View>
           <NotificationBackButton colors={colors} inverse onPress={pageMotion.goBack} />
         </View>
-        <Text style={styles.subtitle}>Updates generated from your real BlueTap orders.</Text>
+        <Text style={styles.subtitle}>Order updates and loaded delivery reports. Older reports may be available. Seen status is saved on this device.</Text>
 
-        {loading ? (
+        {loading || (readiness === 'READY' && !reportFeed.loaded && reportFeed.loading && !allEvents.length) ? (
           <View style={styles.state}>
             <ActivityIndicator color={BLUETAP_COLORS.primary} />
             <Text style={styles.stateText}>Loading updates…</Text>
           </View>
-        ) : error ? (
+        ) : error && !allEvents.length ? (
           <View style={styles.state}>
             <Text style={styles.error}>Notifications unavailable</Text>
             <Text style={styles.stateText}>{error}</Text>
@@ -115,10 +118,23 @@ export default function RequesterNotification() {
               <Text style={styles.buttonText}>Retry</Text>
             </TouchableOpacity>
           </View>
-        ) : events.length === 0 ? (
+        ) : allEvents.length === 0 && reportFeed.error ? (
+          <View style={[styles.state, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <Text style={[styles.error, { color: colors.danger }]}>Delivery reports unavailable</Text>
+            <Text style={[styles.stateText, { color: colors.textSecondary }]}>{reportFeed.error}</Text>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Retry loading delivery reports" onPress={() => refreshReports({ force: true })} style={[styles.button, { backgroundColor: colors.primary }]}>
+              <Text style={styles.buttonText}>Retry</Text>
+            </TouchableOpacity>
+          </View>
+        ) : allEvents.length === 0 && readiness === 'READY' && !reportFeed.loaded ? (
+          <View style={styles.state}>
+            <ActivityIndicator color={colors.primary} />
+            <Text style={[styles.stateText, { color: colors.textSecondary }]}>Loading delivery reports…</Text>
+          </View>
+        ) : allEvents.length === 0 ? (
           <BlueTapEmptyState
             title="No Notifications Yet"
-            description="Order status updates will appear here."
+            description="Order updates and delivery reports will appear here."
             actionLabel="Place an Order"
             onAction={() => navigateOnce('/requester/requestform')}
           />
@@ -127,14 +143,18 @@ export default function RequesterNotification() {
             {notificationEntries.map((entry, index) => (
               <AnimatedPresenceItem key={entry.id} phase={entry.phase} delay={Math.min(index * 30, 120)}>
               <NotificationCard
-                accessibilityLabel={entry.item.message}
+                accessibilityLabel={entry.item.kind === 'delivery_report'
+                  ? `Delivery report. ${entry.item.message} ${entry.item.reviewLabel || ''}. Tap to mark seen. Open your order to review details.`
+                  : entry.item.message}
                 colors={colors}
                 dark={isDark}
                 status={entry.item.status}
                 time={formatNotificationTime(entry.item.at)}
                 message={entry.item.message}
+                metadata={entry.item.kind === 'delivery_report' ? `${entry.item.reviewLabel || 'Delivery report'} · Tap to mark seen` : undefined}
                 onPress={() => {
                   markSeen([entry.item.id]);
+                  if (entry.item.kind === 'delivery_report') return;
                   if (entry.item.noticeId) { openNotice(entry.item.noticeId); return; }
                   if (entry.item.orderId) {
                     setSelectedOrderId(entry.item.orderId);
@@ -146,6 +166,23 @@ export default function RequesterNotification() {
               />
               </AnimatedPresenceItem>
             ))}
+          </View>
+        )}
+        {allEvents.length > 0 && !!reportFeed.error && (
+          <View style={[styles.reportMessage, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <Text style={{ color: colors.textSecondary }}>Delivery reports could not refresh: {reportFeed.error}</Text>
+          </View>
+        )}
+        {readiness === 'READY' && (
+          <View style={styles.reportActions}>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Refresh delivery reports" disabled={reportFeed.loading || reportFeed.loadingMore} onPress={() => refreshReports({ force: true })} style={[styles.reportAction, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+              <Text style={{ color: colors.primary, fontWeight: '700' }}>{reportFeed.loading ? 'Refreshing…' : 'Refresh reports'}</Text>
+            </TouchableOpacity>
+            {reportFeed.hasMore && (
+              <TouchableOpacity accessibilityRole="button" accessibilityLabel="Load older delivery reports" disabled={reportFeed.loading || reportFeed.loadingMore} onPress={loadOlderReports} style={[styles.reportAction, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                <Text style={{ color: colors.primary, fontWeight: '700' }}>{reportFeed.loadingMore ? 'Loading…' : 'Load older reports'}</Text>
+              </TouchableOpacity>
+            )}
           </View>
         )}
         </ScrollView>
@@ -237,4 +274,7 @@ const styles = createPortalStyleSheet({
     color: '#FFF',
     fontWeight: '900',
   },
+  reportMessage: { borderWidth: 1, borderRadius: 10, padding: 12, marginTop: 12 },
+  reportActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 14 },
+  reportAction: { minHeight: 44, borderWidth: 1, borderRadius: 10, paddingHorizontal: 14, justifyContent: 'center' },
 });
