@@ -14,11 +14,12 @@ import { onAuthStateChanged } from 'firebase/auth';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams, usePathname, useRouter } from 'expo-router';
 
 import { auth } from '../../firebase';
 import { findLocalUserForAuthRole } from '../../localUsers';
 import RequestDetailsModal from '../../components/RequestDetailsModal';
+import RequesterDeliveryReportDialog from '../../components/RequesterDeliveryReportDialog';
 import { useRequesterData } from '../../components/RoleDataProviders';
 import RequesterEditOrderModal from '../../components/RequesterEditOrderModal';
 import SoftStatusBadge, { normalizeStatus } from '../../components/SoftStatusBadge';
@@ -33,6 +34,7 @@ import { useAnimatedPresenceList } from '../../components/useAnimatedPresenceLis
 import { canBuyAgain as isBuyAgainEligible } from '../../services/buyAgain';
 import { USER_PORTAL_BOTTOM_CONTENT_INSET, USER_PORTAL_LAYOUT } from '../../constants/userPortalLayout';
 import { BLUETAP_COLORS } from '../../constants/bluetapTheme';
+import { fetchRequesterDeliveryReport, fetchRequesterDeliveryReports, submitRequesterDeliveryResponse } from '../../services/requesterDeliveryReports';
 import {
   cancelRequest,
   refreshRequesterRequests,
@@ -44,6 +46,13 @@ import {
   isCancellableRequesterOrderStatus,
   isHistoryRequesterOrderStatus,
 } from '../../constants/requesterOrderStatus';
+
+const { createReportModalHandoff, createRequesterResponseRegistry } = require('../../services/requesterDeliveryReportFlow');
+// Keep unresolved retries for this app process even if the Requests screen remounts.
+const requesterResponseRegistry = createRequesterResponseRegistry({
+  send: submitRequesterDeliveryResponse,
+  readReport: async (orderId, attemptId) => (await fetchRequesterDeliveryReport(attemptId, orderId)).report,
+});
 
 const BLUE = BLUETAP_COLORS.primary;
 const BLUE_LIGHT = BLUETAP_COLORS.primarySoft;
@@ -355,10 +364,17 @@ const RequestCard = ({
 export default function RequesterRequests() {
   const { colors, isDark } = useBlueTapTheme();
   const router = useRouter();
+  const pathname = usePathname();
   const params = useLocalSearchParams();
   const openedParamRef = React.useRef('');
   const [requests, setRequests] = useState([]);
   const [selectedRequest, setSelectedRequest] = useState(null);
+  const [reportOrderId, setReportOrderId] = useState('');
+  const [reportPreview, setReportPreview] = useState({ orderId: '', loading: false, hasReports: false, error: '' });
+  const reportPreviewRef = React.useRef(0);
+  const reportHandoffRef = React.useRef(null);
+  if (!reportHandoffRef.current) reportHandoffRef.current = createReportModalHandoff(Platform.OS);
+  const [handoffRevision, setHandoffRevision] = useState(0);
   const [editingRequest, setEditingRequest] = useState(null);
   const [activeTab, setActiveTab] = useState(ACTIVE_TAB);
   const [cancellingRequestId, setCancellingRequestId] = useState('');
@@ -410,6 +426,60 @@ export default function RequesterRequests() {
     ? requests.find((request) => request.id === selectedRequest.id) || null
     : null;
   const selectedDetailsRequest = getDetailsRequestData(liveSelectedRequest);
+
+  const checkReportAvailability = React.useCallback(async (orderId) => {
+    const sequence = ++reportPreviewRef.current;
+    setReportPreview({ orderId, loading: true, hasReports: false, error: '' });
+    try {
+      const result = await fetchRequesterDeliveryReports(orderId, { limit: 1 });
+      if (reportPreviewRef.current === sequence) {
+        setReportPreview({ orderId, loading: false, hasReports: (result.reports || []).length > 0, error: '' });
+      }
+    } catch (error) {
+      if (reportPreviewRef.current === sequence) {
+        setReportPreview({ orderId, loading: false, hasReports: false, error: error.message || 'Reports unavailable.' });
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    const orderId = selectedRequest?.id;
+    if (orderId) checkReportAvailability(orderId);
+    return () => { reportPreviewRef.current += 1; };
+  }, [selectedRequest?.id, checkReportAvailability]);
+
+  useEffect(() => {
+    if (reportHandoffRef.current.pendingRoute() && reportHandoffRef.current.pendingRoute() !== pathname) {
+      reportHandoffRef.current.cancel();
+    }
+  }, [pathname]);
+
+  useEffect(() => {
+    if (selectedRequest?.id && reportHandoffRef.current.pendingOrderId()) reportHandoffRef.current.cancel();
+  }, [selectedRequest?.id]);
+
+  useEffect(() => () => { reportHandoffRef.current.cancel(); }, []);
+
+  useEffect(() => {
+    // Android removes a hidden native Modal in the committed render; it has no onDismiss callback.
+    if (Platform.OS !== 'android' || selectedRequest || reportOrderId) return;
+    const orderId = reportHandoffRef.current.visibilityCommitted(pathname);
+    if (orderId) setReportOrderId(orderId);
+  }, [handoffRevision, selectedRequest, reportOrderId, pathname]);
+
+  const finishReportHandoff = () => {
+    if (selectedRequest || reportOrderId) return;
+    const orderId = reportHandoffRef.current.dismissed(pathname);
+    if (orderId) setReportOrderId(orderId);
+  };
+
+  const openDeliveryReports = () => {
+    const orderId = liveSelectedRequest?.id;
+    if (!orderId || !reportPreview.hasReports || reportOrderId
+      || !reportHandoffRef.current.begin(orderId, pathname)) return;
+    setSelectedRequest(null);
+    setHandoffRevision((current) => current + 1);
+  };
 
   const retryOrders = () => {
     const requesterId = auth.currentUser?.uid;
@@ -610,7 +680,10 @@ export default function RequesterRequests() {
                     isCancelling={cancellingRequestId === entry.id}
                     onCancel={confirmCancelRequest}
                     onEdit={setEditingRequest}
-                    onViewDetails={setSelectedRequest}
+                    onViewDetails={(request) => {
+                      reportHandoffRef.current.cancel();
+                      setSelectedRequest(request);
+                    }}
                     onBuyAgain={(order) => router.push({ pathname: '/requester/requestform', params: { buyAgainOrderId: order.id } })}
                   />
                   </AnimatedPresenceItem>
@@ -620,19 +693,34 @@ export default function RequesterRequests() {
 
             <RequestDetailsModal
               visible={!!selectedRequest}
-              onClose={() => setSelectedRequest(null)}
+              onClose={() => { reportHandoffRef.current.cancel(); setSelectedRequest(null); }}
+              onDismiss={finishReportHandoff}
               request={selectedDetailsRequest}
               branches={requesterData.branches}
+              hasDeliveryReports={reportPreview.orderId === liveSelectedRequest?.id && reportPreview.hasReports}
+              reportsLoading={reportPreview.orderId === liveSelectedRequest?.id && reportPreview.loading}
+              reportsError={reportPreview.orderId === liveSelectedRequest?.id ? reportPreview.error : ''}
+              onRetryDeliveryReports={() => liveSelectedRequest?.id && checkReportAvailability(liveSelectedRequest.id)}
+              onViewDeliveryReports={openDeliveryReports}
               onEdit={liveSelectedRequest && isPendingRequest(liveSelectedRequest) ? () => {
                 const reqToEdit = liveSelectedRequest;
+                reportHandoffRef.current.cancel();
                 setSelectedRequest(null);
                 setEditingRequest(reqToEdit);
               } : undefined}
               onCancel={liveSelectedRequest && isPendingRequest(liveSelectedRequest) ? () => {
                 const reqToCancel = liveSelectedRequest;
+                reportHandoffRef.current.cancel();
                 setSelectedRequest(null);
                 confirmCancelRequest(reqToCancel);
               } : undefined}
+            />
+
+            <RequesterDeliveryReportDialog
+              visible={!!reportOrderId}
+              orderId={reportOrderId}
+              onClose={() => setReportOrderId('')}
+              responseRegistry={requesterResponseRegistry}
             />
 
             <RequesterEditOrderModal

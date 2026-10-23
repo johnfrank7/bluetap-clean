@@ -43,12 +43,19 @@ const normalizeProduct = (item = {}, index) => ({
 export default function RequestDetailsModal({
   visible,
   onClose,
+  onDismiss,
   request,
   branches = [],
   onCancel,
   onEdit,
+  hasDeliveryReports = false,
+  reportsLoading = false,
+  reportsError = '',
+  onRetryDeliveryReports,
+  onViewDeliveryReports,
 }) {
-  const { colors } = useBlueTapTheme();
+  const { colors, isDark } = useBlueTapTheme();
+  const reportActionColor = isDark ? colors.primaryLight : colors.primaryAction;
   const { height, width } = useWindowDimensions();
   const compact = width < 600;
   const modalMaxHeight = Math.max(1, height - (compact ? 24 : 40));
@@ -104,6 +111,7 @@ export default function RequestDetailsModal({
       transparent
       animationType="fade"
       onRequestClose={onClose}
+      onDismiss={onDismiss}
     >
       <View style={[styles.backdrop, compact ? styles.compactBackdrop : styles.desktopBackdrop, { backgroundColor: colors.overlay }]}>
         <View accessibilityViewIsModal style={[styles.modal, compact ? styles.compactModal : styles.desktopModal, { maxHeight: modalMaxHeight }]}>
@@ -200,6 +208,24 @@ export default function RequestDetailsModal({
                   <Text style={styles.summaryLabel}>Failure reason</Text>
                   <Text style={styles.failureValue}>{failureReason}</Text>
                 </View>
+              </View>
+            )}
+
+            {typeof onViewDeliveryReports === 'function' && (reportsLoading || !!reportsError || hasDeliveryReports) && (
+              <View style={styles.section}>
+                {reportsLoading ? (
+                  <Text style={[styles.summaryLabel, { color: colors.textSecondary }]}>Checking delivery reports…</Text>
+                ) : reportsError ? (
+                  <TouchableOpacity accessibilityRole="button" accessibilityLabel="Retry checking delivery reports"
+                    onPress={onRetryDeliveryReports} style={[styles.reportsAction, { backgroundColor: colors.surfaceAlt, borderColor: colors.border }]}>
+                    <Text style={[styles.reportsActionText, { color: reportActionColor }]}>Retry checking delivery reports</Text>
+                  </TouchableOpacity>
+                ) : hasDeliveryReports ? (
+                  <TouchableOpacity accessibilityRole="button" accessibilityLabel="View delivery reports"
+                    onPress={onViewDeliveryReports} style={[styles.reportsAction, { backgroundColor: colors.primarySoft, borderColor: colors.border }]}>
+                    <Text style={[styles.reportsActionText, { color: reportActionColor }]}>View delivery reports</Text>
+                  </TouchableOpacity>
+                ) : null}
               </View>
             )}
 
@@ -679,4 +705,13 @@ const styles = createPortalStyleSheet({
     lineHeight: 19,
     fontWeight: '800',
   },
+  reportsAction: {
+    minHeight: 44,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  reportsActionText: { fontSize: 13, fontWeight: '800' },
 });
