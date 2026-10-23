@@ -150,7 +150,7 @@ test('seen IDs persist on device across relogin, stay role and UID isolated, and
   assert.equal((await relogin.read(relogin.keyFor('distributor', 'r1'))).size, 0);
 });
 
-test('report styling is neutral in both themes and Requester UI does not navigate from report cards', () => {
+test('report styling is neutral in both themes and Requester UI navigates only with the exact report target', () => {
   assert.equal(notificationSeverity('delivery_report').kind, 'info');
   assert.equal(notificationSeverity('delivery_report', true).kind, 'info');
   assert.equal(compactNotificationStatus('delivery_report'), 'Delivery report');
@@ -160,7 +160,8 @@ test('report styling is neutral in both themes and Requester UI does not navigat
   assert.match(provider, /role === 'requester' && roleData\.readiness === 'READY'/);
   assert.match(provider, /fetchRequesterDeliveryReports\(undefined, options\)/);
   assert.match(provider, /AppState\.addEventListener/);
-  assert.match(screen, /entry\.item\.kind === 'delivery_report'\) return;/);
+  assert.match(screen, /reportNotificationTarget\(entry\.item\)/);
+  assert.match(screen, /reportOrderId: target\.orderId, reportAttemptId: target\.attemptId/);
   assert.match(screen, /Load older reports/);
   assert.match(screen, /Seen status is saved on this device/);
   assert.match(header, /loaded unseen/);

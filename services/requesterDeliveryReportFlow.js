@@ -33,6 +33,39 @@ function reportViewModel(report) {
   };
 }
 
+const ATTEMPT_ID = /^[a-f0-9]{64}$/;
+const validReportOrderId = (value) => typeof value === 'string' && value.trim() === value
+  && value.length > 0 && value.length <= 128 && value !== '.' && value !== '..' && !value.includes('/');
+const validReportAttemptId = (value) => typeof value === 'string' && ATTEMPT_ID.test(value);
+
+function reportNotificationTarget(event) {
+  if (event?.kind !== 'delivery_report' || event.status !== 'delivery_report'
+    || !validReportOrderId(event.orderId) || !validReportAttemptId(event.attemptId)
+    || event.id !== `delivery-report:${event.attemptId}`) return null;
+  return { orderId: event.orderId, attemptId: event.attemptId };
+}
+
+function reportRouteTarget(params) {
+  const orderId = params?.reportOrderId;
+  const attemptId = params?.reportAttemptId;
+  if (orderId === undefined && attemptId === undefined) return null;
+  if (!validReportOrderId(orderId) || !validReportAttemptId(attemptId)) return { invalid: true };
+  return { orderId, attemptId };
+}
+
+function exactReportViewModel(report, target) {
+  if (!target || report?.orderId !== target.orderId || report?.attemptId !== target.attemptId
+    || report?.reportedStatus !== 'reported_by_distributor') return null;
+  return reportViewModel(report);
+}
+
+async function loadExactReport(target, fetchDetail, isCurrent) {
+  if (!validReportOrderId(target?.orderId) || !validReportAttemptId(target?.attemptId)) return null;
+  const result = await fetchDetail(target.attemptId, target.orderId);
+  if (!isCurrent()) return null;
+  return exactReportViewModel(result?.report, target);
+}
+
 function canSubmitResponse(report) {
   return report?.reviewState === 'awaiting_review' && report?.requesterResponseStatus === 'not_submitted';
 }
@@ -178,4 +211,4 @@ function createRequesterResponseRegistry({ send, readReport, makeId = createMuta
   };
 }
 
-module.exports = { canSubmitResponse, createMutationId, createReportModalHandoff, createRequesterResponseFlow, createRequesterResponseRegistry, explanationError, normalizeExplanation, reportDisplayState, reportViewModel };
+module.exports = { canSubmitResponse, createMutationId, createReportModalHandoff, createRequesterResponseFlow, createRequesterResponseRegistry, exactReportViewModel, explanationError, loadExactReport, normalizeExplanation, reportDisplayState, reportNotificationTarget, reportRouteTarget, reportViewModel };

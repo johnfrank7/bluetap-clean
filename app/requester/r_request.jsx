@@ -47,7 +47,7 @@ import {
   isHistoryRequesterOrderStatus,
 } from '../../constants/requesterOrderStatus';
 
-const { createReportModalHandoff, createRequesterResponseRegistry } = require('../../services/requesterDeliveryReportFlow');
+const { createReportModalHandoff, createRequesterResponseRegistry, reportRouteTarget } = require('../../services/requesterDeliveryReportFlow');
 // Keep unresolved retries for this app process even if the Requests screen remounts.
 const requesterResponseRegistry = createRequesterResponseRegistry({
   send: submitRequesterDeliveryResponse,
@@ -367,9 +367,13 @@ export default function RequesterRequests() {
   const pathname = usePathname();
   const params = useLocalSearchParams();
   const openedParamRef = React.useRef('');
+  const openedReportTargetRef = React.useRef('');
+  const reportTargetAttemptRef = React.useRef('');
   const [requests, setRequests] = useState([]);
   const [selectedRequest, setSelectedRequest] = useState(null);
   const [reportOrderId, setReportOrderId] = useState('');
+  const [reportTargetAttemptId, setReportTargetAttemptId] = useState('');
+  const [reportNavigationError, setReportNavigationError] = useState('');
   const [reportPreview, setReportPreview] = useState({ orderId: '', loading: false, hasReports: false, error: '' });
   const reportPreviewRef = React.useRef(0);
   const reportHandoffRef = React.useRef(null);
@@ -382,6 +386,8 @@ export default function RequesterRequests() {
   const [ordersLoading, setOrdersLoading] = useState(true);
   const [ordersError, setOrdersError] = useState('');
   const requesterData = useRequesterData();
+  const reportOwnerUid = requesterData.readiness === 'READY' && auth.currentUser?.uid === requesterData.uid
+    ? requesterData.uid : '';
   const isActiveOrdersTab = activeTab === ACTIVE_TAB;
 
   useEffect(() => {
@@ -391,6 +397,7 @@ export default function RequesterRequests() {
   }, [requesterData.orders, requesterData.loading, requesterData.error]);
 
   useEffect(() => {
+    if (params.reportOrderId !== undefined || params.reportAttemptId !== undefined) return;
     const rawTarget = params.orderId || params.requestId || params.id;
     const targetId = Array.isArray(rawTarget) ? rawTarget[0] : rawTarget;
     if (!targetId || openedParamRef.current === String(targetId)) return;
@@ -409,7 +416,46 @@ export default function RequesterRequests() {
       }
       setSelectedRequest(matched);
     }
-  }, [requests, params.orderId, params.requestId, params.id]);
+  }, [requests, params.orderId, params.requestId, params.id, params.reportOrderId, params.reportAttemptId]);
+
+  useEffect(() => {
+    if (pathname !== '/requester/r_request') return;
+    const target = reportRouteTarget(params);
+    if (!target) return;
+    if (target.invalid) {
+      setReportNavigationError('This delivery report link is invalid. You can continue using your orders.');
+      return;
+    }
+    if (!reportOwnerUid) return;
+    const key = JSON.stringify([reportOwnerUid, target.orderId, target.attemptId]);
+    if (openedReportTargetRef.current === key) return;
+    openedReportTargetRef.current = key;
+    if (reportOrderId) {
+      setReportNavigationError('Close the open report, then select the notification again.');
+      return;
+    }
+    setReportNavigationError('');
+    reportHandoffRef.current.cancel();
+    if (selectedRequest) {
+      reportTargetAttemptRef.current = target.attemptId;
+      reportHandoffRef.current.begin(target.orderId, pathname);
+      setSelectedRequest(null);
+      setHandoffRevision((current) => current + 1);
+    } else {
+      setReportTargetAttemptId(target.attemptId);
+      setReportOrderId(target.orderId);
+    }
+  }, [params.reportOrderId, params.reportAttemptId, pathname, reportOwnerUid, reportOrderId, selectedRequest]);
+
+  useEffect(() => {
+    if (pathname === '/requester/r_request' && reportOwnerUid) return;
+    reportHandoffRef.current.cancel();
+    reportTargetAttemptRef.current = '';
+    openedReportTargetRef.current = '';
+    setReportOrderId('');
+    setReportTargetAttemptId('');
+    setReportNavigationError('');
+  }, [pathname, reportOwnerUid]);
 
   const activeRequests = useMemo(
     () => sortRequesterOrders(requests.filter((request) => isActiveRequesterOrderStatus(request.status))),
@@ -464,19 +510,28 @@ export default function RequesterRequests() {
     // Android removes a hidden native Modal in the committed render; it has no onDismiss callback.
     if (Platform.OS !== 'android' || selectedRequest || reportOrderId) return;
     const orderId = reportHandoffRef.current.visibilityCommitted(pathname);
-    if (orderId) setReportOrderId(orderId);
+    if (orderId) {
+      setReportTargetAttemptId(reportTargetAttemptRef.current);
+      reportTargetAttemptRef.current = '';
+      setReportOrderId(orderId);
+    }
   }, [handoffRevision, selectedRequest, reportOrderId, pathname]);
 
   const finishReportHandoff = () => {
     if (selectedRequest || reportOrderId) return;
     const orderId = reportHandoffRef.current.dismissed(pathname);
-    if (orderId) setReportOrderId(orderId);
+    if (orderId) {
+      setReportTargetAttemptId(reportTargetAttemptRef.current);
+      reportTargetAttemptRef.current = '';
+      setReportOrderId(orderId);
+    }
   };
 
   const openDeliveryReports = () => {
     const orderId = liveSelectedRequest?.id;
     if (!orderId || !reportPreview.hasReports || reportOrderId
       || !reportHandoffRef.current.begin(orderId, pathname)) return;
+    reportTargetAttemptRef.current = '';
     setSelectedRequest(null);
     setHandoffRevision((current) => current + 1);
   };
@@ -640,6 +695,12 @@ export default function RequesterRequests() {
               contentContainerStyle={styles.scrollContent}
               showsVerticalScrollIndicator={false}
             >
+              {!!reportNavigationError && <View style={[styles.emptyRequestCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                <Text accessibilityRole="alert" style={[styles.emptyRequestText, { color: colors.textPrimary }]}>{reportNavigationError}</Text>
+                <TouchableOpacity accessibilityRole="button" accessibilityLabel="Dismiss delivery report link error" style={styles.retryOrdersButton} onPress={() => setReportNavigationError('')}>
+                  <Text style={styles.retryOrdersText}>Back to orders</Text>
+                </TouchableOpacity>
+              </View>}
               {ordersLoading ? (
                 <View style={styles.emptyRequestCard}>
                   <ActivityIndicator color={BLUE} />
@@ -717,9 +778,11 @@ export default function RequesterRequests() {
             />
 
             <RequesterDeliveryReportDialog
-              visible={!!reportOrderId}
+              visible={!!reportOrderId && !!reportOwnerUid}
               orderId={reportOrderId}
-              onClose={() => setReportOrderId('')}
+              targetAttemptId={reportTargetAttemptId}
+              ownerUid={reportOwnerUid}
+              onClose={() => { setReportOrderId(''); setReportTargetAttemptId(''); }}
               responseRegistry={requesterResponseRegistry}
             />
 

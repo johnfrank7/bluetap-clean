@@ -15,6 +15,7 @@ const {
   normalizeExplanation,
   reportDisplayState,
   reportViewModel,
+  loadExactReport,
 } = require('../services/requesterDeliveryReportFlow');
 
 const displayTime = (value) => {
@@ -23,7 +24,7 @@ const displayTime = (value) => {
     ? date.toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' }) : 'Time unavailable';
 };
 
-export default function RequesterDeliveryReportDialog({ visible, orderId, onClose, responseRegistry }) {
+export default function RequesterDeliveryReportDialog({ visible, orderId, targetAttemptId = '', ownerUid = '', onClose, responseRegistry }) {
   const { colors, isDark } = useBlueTapTheme();
   const accent = isDark ? colors.primaryLight : colors.primaryAction;
   const [reports, setReports] = React.useState([]);
@@ -48,17 +49,31 @@ export default function RequesterDeliveryReportDialog({ visible, orderId, onClos
   const loadFirstPage = React.useCallback(async () => {
     if (!orderId || listBusyRef.current) return;
     const epoch = requestEpochRef.current;
+    const requestOwnerUid = auth.currentUser?.uid;
     listBusyRef.current = true;
     setLoading(true);
     setLoadError('');
     try {
+      if (!requestOwnerUid || ownerUid && requestOwnerUid !== ownerUid) throw new Error('Session unavailable');
+      if (targetAttemptId) {
+        const exact = await loadExactReport({ orderId, attemptId: targetAttemptId },
+          fetchRequesterDeliveryReport,
+          () => activeRef.current && requestEpochRef.current === epoch && auth.currentUser?.uid === requestOwnerUid);
+        if (!activeRef.current || requestEpochRef.current !== epoch || auth.currentUser?.uid !== requestOwnerUid) return;
+        if (!exact) throw new Error('Report mismatch');
+        setReports([exact]);
+        selectedIdRef.current = exact.attemptId;
+        setSelectedId(exact.attemptId);
+        setNextCursor(null);
+        return;
+      }
       const result = await fetchRequesterDeliveryReports(orderId);
-      if (!activeRef.current || requestEpochRef.current !== epoch) return;
+      if (!activeRef.current || requestEpochRef.current !== epoch || auth.currentUser?.uid !== requestOwnerUid) return;
       const next = (result.reports || []).map(reportViewModel).filter(Boolean);
       const pendingId = responseRegistry.pendingAttemptId(auth.currentUser?.uid, orderId);
       if (pendingId && !next.some((item) => item.attemptId === pendingId)) {
         const pendingResult = await fetchRequesterDeliveryReport(pendingId, orderId);
-        if (!activeRef.current || requestEpochRef.current !== epoch) return;
+        if (!activeRef.current || requestEpochRef.current !== epoch || auth.currentUser?.uid !== requestOwnerUid) return;
         const pendingReport = reportViewModel(pendingResult.report);
         if (pendingReport) next.unshift(pendingReport);
       }
@@ -68,14 +83,18 @@ export default function RequesterDeliveryReportDialog({ visible, orderId, onClos
       setSelectedId(nextSelectedId);
       setNextCursor(result.nextCursor || null);
     } catch (error) {
-      if (activeRef.current && requestEpochRef.current === epoch) setLoadError(error.message || 'Delivery reports could not be loaded.');
+      if (activeRef.current && requestEpochRef.current === epoch && auth.currentUser?.uid === requestOwnerUid) {
+        setLoadError(targetAttemptId
+          ? 'This delivery report is unavailable or could not be loaded. Please retry or close to return to Orders.'
+          : error.message || 'Delivery reports could not be loaded.');
+      }
     } finally {
       if (requestEpochRef.current === epoch) {
         listBusyRef.current = false;
         if (activeRef.current) setLoading(false);
       }
     }
-  }, [orderId, responseRegistry]);
+  }, [orderId, ownerUid, responseRegistry, targetAttemptId]);
 
   React.useEffect(() => {
     if (!visible || !orderId) return undefined;
@@ -94,11 +113,12 @@ export default function RequesterDeliveryReportDialog({ visible, orderId, onClos
     setFlowRevision((current) => current + 1);
     loadFirstPage();
     return () => { activeRef.current = false; requestEpochRef.current += 1; selectionRef.current += 1; };
-  }, [visible, orderId, loadFirstPage]);
+  }, [visible, orderId, ownerUid, targetAttemptId, loadFirstPage]);
 
   const selected = reports.find((report) => report.attemptId === selectedId) || null;
   const displayState = reportDisplayState({ loading, error: loadError, reports });
-  const flow = responseRegistry.get(auth.currentUser?.uid, orderId, selectedId);
+  const flow = visible && ownerUid && auth.currentUser?.uid === ownerUid
+    ? responseRegistry.get(ownerUid, orderId, selectedId) : null;
   const currentFlowState = flow?.getState();
   const pending = Boolean(currentFlowState?.pending);
   const inFlight = Boolean(currentFlowState?.inFlight);
@@ -253,10 +273,11 @@ export default function RequesterDeliveryReportDialog({ visible, orderId, onClos
             </ScrollView>
           )}
           {selected && <View style={[styles.reportCard, { backgroundColor: colors.surfaceAlt, borderColor: colors.border }]}>
+            <Text style={[styles.muted, { color: colors.textSecondary }]}>Order reference: {selected.orderId}</Text>
             <Text style={[styles.eyebrow, { color: accent }]}>REPORTED BY DISTRIBUTOR · ATTEMPT {selected.attemptNumber}</Text>
             <Text style={[styles.reason, { color: colors.textPrimary }]}>{selected.reportedReasonLabel}</Text>
             <Text style={[styles.muted, { color: colors.textSecondary }]}>Report received: {displayTime(selected.reportReceivedAt)}</Text>
-            <Text style={[styles.status, { color: selected.reviewState === 'awaiting_review' ? colors.warning : colors.textSecondary }]}>
+            <Text style={[styles.status, { color: selected.reviewState === 'awaiting_review' ? colors.primary : colors.textSecondary }]}>
               {selected.reviewState === 'awaiting_review' ? 'Awaiting review' : 'Review status unavailable'}
             </Text>
             {selected.contactAttempts.length > 0 && <View style={styles.contacts}>

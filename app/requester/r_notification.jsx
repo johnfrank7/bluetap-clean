@@ -21,6 +21,7 @@ import { useAnimatedPresenceList } from '../../components/useAnimatedPresenceLis
 import useNotificationPageMotion, { NOTIFICATION_LIST_MOTION_DURATION_MS } from '../../components/useNotificationPageMotion';
 import useSingleFlightNavigation from '../../components/useSingleFlightNavigation';
 import { resolveOrderFromList } from '../../services/orderNormalizer';
+const { reportNotificationTarget } = require('../../services/requesterDeliveryReportFlow');
 
 const NOTIFICATION_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -144,17 +145,25 @@ export default function RequesterNotification() {
               <AnimatedPresenceItem key={entry.id} phase={entry.phase} delay={Math.min(index * 30, 120)}>
               <NotificationCard
                 accessibilityLabel={entry.item.kind === 'delivery_report'
-                  ? `Delivery report. ${entry.item.message} ${entry.item.reviewLabel || ''}. Tap to mark seen. Open your order to review details.`
+                  ? `Delivery report. ${entry.item.message} ${entry.item.reviewLabel || ''}. Tap to review this report.`
                   : entry.item.message}
                 colors={colors}
                 dark={isDark}
                 status={entry.item.status}
                 time={formatNotificationTime(entry.item.at)}
                 message={entry.item.message}
-                metadata={entry.item.kind === 'delivery_report' ? `${entry.item.reviewLabel || 'Delivery report'} · Tap to mark seen` : undefined}
+                metadata={entry.item.kind === 'delivery_report' ? `${entry.item.reviewLabel || 'Delivery report'} · Tap to review` : undefined}
                 onPress={() => {
+                  if (entry.item.kind === 'delivery_report') {
+                    const target = reportNotificationTarget(entry.item);
+                    if (!target) return;
+                    markSeen([entry.item.id]);
+                    navigateOnce({ pathname: '/requester/r_request', params: {
+                      reportOrderId: target.orderId, reportAttemptId: target.attemptId,
+                    } });
+                    return;
+                  }
                   markSeen([entry.item.id]);
-                  if (entry.item.kind === 'delivery_report') return;
                   if (entry.item.noticeId) { openNotice(entry.item.noticeId); return; }
                   if (entry.item.orderId) {
                     setSelectedOrderId(entry.item.orderId);

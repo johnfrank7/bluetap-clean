@@ -282,5 +282,5 @@ test('dialog wiring preserves order actions, uses a stable owner, and has no han
   assert.doesNotMatch(dialog, /createRequesterResponseFlow\(/);
   assert.match(dialog, /canSubmitResponse\(selected\) \|\| pending/);
   assert.match(dialog, /busy=\{false\}/);
-  assert.match(requests, /visible=\{!!reportOrderId\}/);
+  assert.match(requests, /visible=\{!!reportOrderId && !!reportOwnerUid\}/);
 });
