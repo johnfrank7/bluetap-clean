@@ -3,6 +3,13 @@ const { requireRequester } = require('../auth/authorization');
 const { applyCors } = require('../utils/cors');
 const { OtpError } = require('../utils/otpError');
 const { pageSize, reportDetail, reportList } = require('../delivery/requesterDeliveryReportService');
+const { submitInitialResponse } = require('../delivery/requesterDeliveryResponseService');
+
+function bodyOf(req) {
+  if (req.body && typeof req.body === 'object') return req.body;
+  try { return JSON.parse(String(req.body || '{}')); }
+  catch { throw new OtpError(400, 'DELIVERY_RESPONSE_INVALID', 'The response payload is invalid.'); }
+}
 
 function queryOptions(req) {
   const params = new URL(req.url || '/api/requester/delivery-reports', 'http://localhost').searchParams;
@@ -30,10 +37,11 @@ function createRequesterDeliveryReportsHandler(getAdmin = getFirebaseAdmin) {
     res.setHeader('Cache-Control', 'no-store');
     if (!applyCors(req, res)) return;
     if (req.method === 'OPTIONS') return res.status(204).end();
-    if (req.method !== 'GET') return res.status(405).json({ error: { reason: 'method-not-allowed', message: 'Use GET.' } });
+    if (!['GET', 'POST'].includes(req.method)) return res.status(405).json({ error: { reason: 'method-not-allowed', message: 'Use GET or POST.' } });
     try {
       const { auth, db } = getAdmin();
       const { decoded } = await requireRequester(req, auth, db);
+      if (req.method === 'POST') return res.status(200).json(await submitInitialResponse(db, decoded.uid, bodyOf(req)));
       const { attemptId, orderId, cursor, limit } = queryOptions(req);
       const result = attemptId
         ? await reportDetail(db, attemptId, decoded.uid, orderId)

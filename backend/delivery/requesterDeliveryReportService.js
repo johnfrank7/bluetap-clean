@@ -76,6 +76,9 @@ function safeContactAttempts(attempt, code) {
 
 function safeReport(id, attempt) {
   const reason = deliveryFailureReasonForCode(attempt.reportedReasonCode);
+  const response = attempt.requesterResponse;
+  const ownResponse = response?.status === 'submitted' && response.requesterUid === attempt.requesterUid
+    && typeof response.explanation === 'string' && isoTime(response.submittedAt);
   return {
     attemptId: id,
     orderId: attempt.orderId,
@@ -86,7 +89,10 @@ function safeReport(id, attempt) {
     reportReceivedAt: isoTime(attempt.reportReceivedAt) || isoTime(attempt.endedAt),
     contactAttempts: safeContactAttempts(attempt, reason?.code),
     reviewState: attempt.reviewState === 'reported' ? 'awaiting_review' : 'status_unavailable',
-    requesterResponseStatus: attempt.requesterResponse?.submittedAt ? 'submitted' : 'not_submitted',
+    requesterResponseStatus: ownResponse ? 'submitted' : 'not_submitted',
+    requesterResponse: ownResponse
+      ? { explanation: response.explanation, submittedAt: isoTime(response.submittedAt) }
+      : null,
   };
 }
 
@@ -128,4 +134,4 @@ async function reportList(db, { requesterUid, orderId = '', limit = DEFAULT_PAGE
   return { reports, nextCursor: (snapshot.docs || []).length > limit ? docs[docs.length - 1].id : null };
 }
 
-module.exports = { MAX_PAGE_SIZE, pageSize, reportDetail, reportList, safeReport };
+module.exports = { MAX_PAGE_SIZE, orderOwner, pageSize, reportDetail, reportList, safeReport, validAttemptId };

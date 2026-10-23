@@ -13,6 +13,8 @@ function fixture() {
     ['users/r1', { role: 'requester', accountStatus: 'active' }],
     ['users/r2', { role: 'requester', accountStatus: 'active' }],
     ['users/m1', { role: 'manager', accountStatus: 'active' }],
+    ['users/d1', { role: 'distributor', accountStatus: 'active' }],
+    ['users/a1', { role: 'admin', accountStatus: 'active' }],
     ['users/inactive', { role: 'requester', accountStatus: 'inactive' }],
     ['requests/order-one', { requesterUid: 'r1', requester_id: 'r1', status: 'scheduled', deliveryAttemptSeq: 3 }],
     ['requests/order-two', { requesterUid: 'r2', requester_id: 'r2', status: 'delivery_failed' }],
@@ -62,19 +64,30 @@ function fixture() {
     },
   });
   const db = { collection(name) { return {
-    doc(id) { return { get: async () => snapshot(`${name}/${id}`) }; },
+    doc(id) { const path = `${name}/${id}`; return { id, path, get: async () => snapshot(path) }; },
     ...makeQuery(name),
-  }; } };
-  const identities = { r1: { uid: 'r1' }, r2: { uid: 'r2' }, manager: { uid: 'm1', role: 'manager' }, inactive: { uid: 'inactive' } };
+  }; }, async runTransaction(run) {
+    const writes = [];
+    const result = await run({
+      get: async (ref) => snapshot(ref.path),
+      update(ref, data) { writes.push(['update', ref.path, data]); },
+      create(ref, data) { writes.push(['create', ref.path, data]); },
+    });
+    for (const [method, path] of writes) if (method === 'create' && records.has(path)) throw new Error('already exists');
+    for (const [method, path, data] of writes) records.set(path, method === 'update' ? { ...records.get(path), ...data } : data);
+    return result;
+  } };
+  const identities = { r1: { uid: 'r1' }, r2: { uid: 'r2' }, manager: { uid: 'm1', role: 'manager' },
+    distributor: { uid: 'd1', role: 'distributor' }, admin: { uid: 'a1', role: 'admin' }, inactive: { uid: 'inactive' } };
   const auth = { async verifyIdToken(token, checkRevoked) {
     assert.equal(checkRevoked, true);
     if (!identities[token]) throw new Error('invalid token');
     return identities[token];
   } };
   const handler = createRequesterDeliveryReportsHandler(() => ({ auth, db }));
-  async function call(url, token = 'r1', method = 'GET') {
+  async function call(url, token = 'r1', method = 'GET', body) {
     const res = { statusCode: 200, body: null, headers: {}, setHeader(key, value) { this.headers[key] = value; }, getHeader() {}, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; }, end() { return this; } };
-    await handler({ url, method, headers: token ? { authorization: `Bearer ${token}` } : {} }, res);
+    await handler({ url, method, body, headers: token ? { authorization: `Bearer ${token}` } : {} }, res);
     return res;
   }
   return { records, call, addAttempt, ids: { first, second, third, other }, get queryCalls() { return queryCalls; } };
@@ -127,7 +140,7 @@ test('unverified, inactive, and non-requester callers cannot read reports', asyn
   assert.equal((await f.call('/api/requester/delivery-reports', 'inactive')).statusCode, 403);
   assert.equal((await f.call('/api/requester/delivery-reports', 'r2')).body.reports.length, 1);
   assert.equal((await f.call('/api/requester/delivery-reports', 'r2')).body.reports[0].attemptId, f.ids.other);
-  assert.equal((await f.call('/api/requester/delivery-reports', 'r2', 'POST')).statusCode, 405);
+  assert.equal((await f.call('/api/requester/delivery-reports', 'r2', 'PUT')).statusCode, 405);
 });
 
 test('cross-user, missing parent, conflicting parent owner, and attempt/order mismatch fail closed', async () => {
@@ -172,18 +185,24 @@ test('DTO redacts refusal interaction, raw legacy notes, private identity, mutat
   const raw = f.records.get(`deliveryAttempts/${f.ids.first}`);
   raw.reportedReasonCode = 'RECIPIENT_REFUSED';
   raw.reportEvidence = { interactionNote: 'Sensitive interaction notes and phone number' };
-  raw.requesterResponse = { submittedAt: date(22), text: 'private requester response' };
+  raw.requesterResponse = { status: 'submitted', requesterUid: 'r1', submittedAt: date(22), explanation: 'my own factual response', clientMutationId: 'private-response-mutation' };
   const detail = await f.call(`/api/requester/delivery-reports?attemptId=${f.ids.first}`);
   const encoded = JSON.stringify(detail.body);
-  for (const secret of ['Sensitive interaction', 'private requester response', 'raw private failure note', 'private-staff', 'private-mutation', 'moderationIncident', 'assignmentVersion']) {
+  for (const secret of ['Sensitive interaction', 'raw private failure note', 'private-staff', 'private-mutation', 'private-response-mutation', 'moderationIncident', 'assignmentVersion']) {
     assert.ok(!encoded.includes(secret), secret);
   }
   assert.equal(detail.body.report.requesterResponseStatus, 'submitted');
+  assert.deepEqual(detail.body.report.requesterResponse, { explanation: 'my own factual response', submittedAt: date(22).toISOString() });
   assert.deepEqual(detail.body.report.contactAttempts, []);
   assert.deepEqual(Object.keys(detail.body.report).sort(), [
     'attemptId', 'contactAttempts', 'orderId', 'attemptNumber', 'reportReceivedAt',
-    'reportedReasonCode', 'reportedReasonLabel', 'reportedStatus', 'requesterResponseStatus', 'reviewState',
+    'reportedReasonCode', 'reportedReasonLabel', 'reportedStatus', 'requesterResponse', 'requesterResponseStatus', 'reviewState',
   ].sort());
+  raw.requesterResponse.requesterUid = 'r2';
+  const mismatchedResponse = await f.call(`/api/requester/delivery-reports?attemptId=${f.ids.first}`);
+  assert.equal(mismatchedResponse.body.report.requesterResponse, null);
+  assert.equal(mismatchedResponse.body.report.requesterResponseStatus, 'not_submitted');
+  assert.ok(!JSON.stringify(mismatchedResponse.body).includes('my own factual response'));
 });
 
 test('structured contact summaries use allowlisted labels and mark claimed time unverified', async () => {
@@ -211,4 +230,111 @@ test('rules still deny direct attempt and event access; indexes match the two sc
         { fieldPath: 'endedAt', order: 'DESCENDING' },
       ])));
   }
+});
+
+const responseBody = (attemptId, overrides = {}) => ({
+  attemptId, explanation: 'I was at the delivery address and did not receive a call.',
+  clientMutationId: 'requester_response_001', ...overrides,
+});
+const post = (fixtureValue, body, token = 'r1') => fixtureValue.call('/api/requester/delivery-reports', token, 'POST', body);
+
+test('Requester submits one factual response after rescheduling with one immutable event and no unrelated writes', async () => {
+  const f = fixture();
+  f.records.get(`deliveryAttempts/${f.ids.first}`).responsibility = 'undetermined';
+  const orderBefore = JSON.stringify(f.records.get('requests/order-one'));
+  const userBefore = JSON.stringify(f.records.get('users/r1'));
+  const before = Date.now();
+  const result = await post(f, responseBody(f.ids.first, { explanation: '  I was at the address   and received no call.  ' }));
+  assert.equal(result.statusCode, 200, JSON.stringify(result.body));
+  assert.equal(result.body.report.requesterResponseStatus, 'submitted');
+  assert.equal(result.body.report.requesterResponse.explanation, 'I was at the address and received no call.');
+  assert.ok(Date.parse(result.body.report.requesterResponse.submittedAt) >= before);
+  const attempt = f.records.get(`deliveryAttempts/${f.ids.first}`);
+  assert.equal(attempt.reviewState, 'reported');
+  assert.equal(attempt.responsibility, 'undetermined');
+  assert.equal(attempt.requesterResponse.requesterUid, 'r1');
+  const event = f.records.get(`deliveryAttemptEvents/${f.ids.first}_requester_response_v1`);
+  assert.equal(event.kind, 'REQUESTER_INITIAL_RESPONSE_SUBMITTED');
+  assert.equal(event.createdAt, attempt.requesterResponse.submittedAt);
+  assert.equal(JSON.stringify(f.records.get('requests/order-one')), orderBefore);
+  assert.equal(JSON.stringify(f.records.get('users/r1')), userBefore);
+  assert.equal([...f.records.keys()].filter((key) => key.startsWith('deliveryAttemptEvents/')).length, 1);
+  assert.equal([...f.records.keys()].some((key) => /chat|moderation|restriction|warning|strike/i.test(key)), false);
+  const get = await f.call(`/api/requester/delivery-reports?attemptId=${f.ids.first}`);
+  assert.deepEqual(get.body, result.body);
+  assert.ok(!JSON.stringify(result.body).includes('requester_response_001'));
+});
+
+test('exact replay is read-only; changed explanation, mutation ID, and second response conflict', async () => {
+  const f = fixture();
+  f.records.get(`deliveryAttempts/${f.ids.first}`).responsibility = 'undetermined';
+  const body = responseBody(f.ids.first);
+  const first = await post(f, body);
+  assert.equal(first.statusCode, 200);
+  const attemptBefore = f.records.get(`deliveryAttempts/${f.ids.first}`);
+  const eventBefore = f.records.get(`deliveryAttemptEvents/${f.ids.first}_requester_response_v1`);
+  const replay = await post(f, responseBody(f.ids.first, { explanation: `  ${body.explanation}  ` }));
+  assert.equal(replay.statusCode, 200);
+  assert.deepEqual(replay.body, first.body);
+  assert.equal(f.records.get(`deliveryAttempts/${f.ids.first}`), attemptBefore);
+  assert.equal(f.records.get(`deliveryAttemptEvents/${f.ids.first}_requester_response_v1`), eventBefore);
+  assert.equal((await post(f, responseBody(f.ids.first, { explanation: 'I waited outside the address for a long time.' }))).statusCode, 409);
+  assert.equal((await post(f, responseBody(f.ids.first, { clientMutationId: 'requester_response_002' }))).statusCode, 409);
+  assert.equal([...f.records.keys()].filter((key) => key.startsWith('deliveryAttemptEvents/')).length, 1);
+});
+
+test('POST validates authentication, role, ownership, attempt identity, and review eligibility', async () => {
+  const f = fixture();
+  f.records.get(`deliveryAttempts/${f.ids.first}`).responsibility = 'undetermined';
+  const body = responseBody(f.ids.first);
+  for (const [token, expected] of [['', 401], ['invalid-token', 401], ['manager', 403],
+    ['distributor', 403], ['admin', 403], ['inactive', 403], ['r2', 404]]) {
+    assert.equal((await post(f, body, token)).statusCode, expected);
+  }
+  assert.equal((await post(f, responseBody(f.ids.other))).statusCode, 404);
+  assert.equal((await post(f, responseBody('a'.repeat(64)))).statusCode, 404);
+  const attempt = f.records.get(`deliveryAttempts/${f.ids.first}`);
+  attempt.outcome = 'delivered';
+  assert.equal((await post(f, body)).statusCode, 404);
+  attempt.outcome = 'failed';
+  attempt.reviewState = 'reviewed';
+  assert.equal((await post(f, body)).statusCode, 409);
+  attempt.reviewState = 'reported';
+  attempt.orderId = 'order-two';
+  assert.equal((await post(f, body)).statusCode, 404);
+  attempt.orderId = 'order-one';
+  f.records.set('requests/order-one', { requesterUid: 'r1', requester_id: 'r2' });
+  assert.equal((await post(f, body)).statusCode, 404);
+  f.records.delete('requests/order-one');
+  assert.equal((await post(f, body)).statusCode, 404);
+  assert.equal([...f.records.keys()].filter((key) => key.endsWith('_requester_response_v1')).length, 0);
+});
+
+test('POST rejects blank, short, oversized, malformed, and unexpected payloads without writes', async () => {
+  const f = fixture();
+  f.records.get(`deliveryAttempts/${f.ids.first}`).responsibility = 'undetermined';
+  const invalid = [
+    responseBody(f.ids.first, { explanation: '   ' }),
+    responseBody(f.ids.first, { explanation: 'too short' }),
+    responseBody(f.ids.first, { explanation: 'a'.repeat(501) }),
+    responseBody(f.ids.first, { explanation: '!!!!!!!!!!!!' }),
+    responseBody(f.ids.first, { clientMutationId: 'short' }),
+    responseBody(f.ids.first, { attemptId: 'bad-id' }),
+    responseBody(f.ids.first, { requesterUid: 'r2' }),
+    responseBody(f.ids.first, { submittedAt: new Date().toISOString() }),
+    { ...responseBody(f.ids.first), explanation: null },
+    {},
+  ];
+  const before = JSON.stringify([...f.records]);
+  for (const value of invalid) assert.equal((await post(f, value)).statusCode, 400);
+  assert.equal(JSON.stringify([...f.records]), before);
+});
+
+test('existing response event without response state blocks a partial or duplicate submission', async () => {
+  const f = fixture();
+  f.records.get(`deliveryAttempts/${f.ids.first}`).responsibility = 'undetermined';
+  f.records.set(`deliveryAttemptEvents/${f.ids.first}_requester_response_v1`, { kind: 'REQUESTER_INITIAL_RESPONSE_SUBMITTED' });
+  const before = JSON.stringify([...f.records]);
+  assert.equal((await post(f, responseBody(f.ids.first))).statusCode, 409);
+  assert.equal(JSON.stringify([...f.records]), before);
 });
