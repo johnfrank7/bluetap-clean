@@ -128,6 +128,16 @@
       ]
     },
     {
+      "collectionGroup": "deliveryAttempts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "branchId", "order": "ASCENDING" },
+        { "fieldPath": "outcome", "order": "ASCENDING" },
+        { "fieldPath": "reviewState", "order": "ASCENDING" },
+        { "fieldPath": "endedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "orderAbuseReviews",
       "queryScope": "COLLECTION",
       "fields": [

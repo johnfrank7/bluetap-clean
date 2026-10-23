@@ -40,6 +40,7 @@ const EXPECTED_ROUTES = [
   '/api/chat/reports',
   '/api/distributor/orders',
   '/api/manager/context',
+  '/api/manager/delivery-reviews',
   '/api/manager/dispatch-orders',
   '/api/manager/moderation',
   '/api/manager/outside-radius-orders',
