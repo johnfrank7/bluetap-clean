@@ -25,18 +25,31 @@ export async function getAssignedDistributorOrders() {
 export async function updateAssignedDistributorOrder(orderId, action, payload = {}) {
   const token = await auth.currentUser?.getIdToken();
   if (!token) throw new Error('Distributor authentication is required.');
-  const response = await fetch(getApiUrl('/api/distributor/orders'), {
-    method: 'PATCH',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ orderId, action, ...payload }),
-  });
+  let response;
+  try {
+    response = await fetch(getApiUrl('/api/distributor/orders'), {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ orderId, action, ...payload }),
+    });
+  } catch (cause) {
+    const error = new Error(cause?.message || 'The delivery connection was interrupted.');
+    error.uncertain = true;
+    throw error;
+  }
   const result = await response.json().catch(() => null);
   if (!response.ok) {
     const error = new Error(result?.error?.message || 'The delivery could not be updated.');
     error.code = result?.error?.reason || 'service-unavailable';
+    error.uncertain = response.status >= 500;
     throw error;
   }
   const order = result?.order || null;
+  if (!order && action === 'fail-delivery') {
+    const error = new Error('The report result could not be confirmed. Retry to check its status.');
+    error.uncertain = true;
+    throw error;
+  }
   if (order) primeAssignedDistributorOrder(auth.currentUser?.uid, order);
   return order;
 }
@@ -47,6 +60,8 @@ export const startAssignedDelivery = (orderId) => updateAssignedDistributorOrder
 export const failAssignedDelivery = (orderId, reason = {}) => updateAssignedDistributorOrder(orderId, 'fail-delivery', {
   failureReasonCode: reason.failureReasonCode,
   failureReasonNote: reason.failureReasonNote || '',
+  ...(reason.reportFormat ? { reportFormat: reason.reportFormat, reportEvidence: reason.reportEvidence } : {}),
+  ...(reason.clientMutationId ? { clientMutationId: reason.clientMutationId } : {}),
 });
 export const rescheduleAssignedDelivery = (orderId, scheduledAt) => updateAssignedDistributorOrder(orderId, 'reschedule-delivery', { scheduledAt });
 export const completeAssignedDelivery = (orderId) => updateAssignedDistributorOrder(orderId, 'mark-delivered');

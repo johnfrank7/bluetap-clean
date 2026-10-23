@@ -515,6 +515,108 @@ test('concurrent starts create only one attempt and a wrong assignee cannot clos
   assert.equal([...f.records.keys()].filter((path) => path.startsWith('deliveryAttempts/')).length, 1);
 });
 
+test('structured contact report is private, server-timed, and exact retries make no new writes', async () => {
+  const f = fixture();
+  f.records.set('requests/order-a', { ...f.records.get('requests/order-a'), assignedDistributorUid: 'distributor-a', assignmentVersion: 1, status: 'accepted' });
+  const handler = createDistributorAssignedOrdersHandler(f.getAdmin);
+  assert.equal((await call(handler, 'PATCH', 'distributor-a-token', { orderId: 'order-a', action: 'start-delivery' })).statusCode, 200);
+  const attemptId = f.records.get('requests/order-a').activeDeliveryAttemptId;
+  const payload = {
+    orderId: 'order-a', action: 'fail-delivery', failureReasonCode: 'NO_RESPONSE', failureReasonNote: '',
+    clientMutationId: 'report-mutation-001', reportFormat: 'structured-v1',
+    reportEvidence: { contactAttempts: [{ method: 'PHONE_CALL', outcome: 'NO_ANSWER' }] },
+  };
+  const first = await call(handler, 'PATCH', 'distributor-a-token', payload);
+  assert.equal(first.statusCode, 200);
+  assert.equal(first.body.order.status, 'delivery_failed');
+  assert.equal(first.body.order.reportEvidence, undefined);
+  const order = f.records.get('requests/order-a');
+  const attempt = f.records.get(`deliveryAttempts/${attemptId}`);
+  const event = f.records.get(`deliveryAttemptEvents/${attemptId}_outcome`);
+  assert.equal(order.reportEvidence, undefined);
+  assert.equal(order.distributorDeliveryHistory.at(-1).reportEvidence, undefined);
+  assert.deepEqual(attempt.reportEvidence, payload.reportEvidence);
+  assert.deepEqual(event.reportEvidence, payload.reportEvidence);
+  assert.equal(attempt.reportFormat, 'structured-v1');
+  assert.equal(attempt.outcomeMutationId, payload.clientMutationId);
+  assert.equal(attempt.reportReceivedAt.getTime(), order.deliveryFailedAt.getTime());
+  assert.equal(event.reportReceivedAt.getTime(), order.deliveryFailedAt.getTime());
+  assert.equal(attempt.responsibility, 'undetermined');
+  assert.equal(attempt.reviewState, 'reported');
+  assert.equal([...f.records.keys()].filter((key) => key.startsWith('orderingRestrictions/') || key.startsWith('moderationNotices/')).length, 0);
+  const count = f.records.size;
+  const replay = await call(handler, 'PATCH', 'distributor-a-token', payload);
+  assert.equal(replay.statusCode, 200);
+  assert.deepEqual(replay.body, first.body);
+  assert.equal(f.records.size, count);
+  assert.equal(f.records.get('requests/order-a'), order);
+  assert.equal(f.records.get(`deliveryAttemptEvents/${attemptId}_outcome`), event);
+  assert.equal([...f.records.values()].filter((value) => value?.incidents?.[0]?.orderId === 'order-a').length, 1);
+  assert.equal((await call(handler, 'PATCH', 'distributor-a-token', { ...payload, reportEvidence: { contactAttempts: [{ method: 'SMS', outcome: 'SENT_NO_REPLY' }] } })).statusCode, 409);
+  assert.equal((await call(handler, 'PATCH', 'distributor-a-token', { ...payload, clientMutationId: 'report-mutation-002' })).statusCode, 409);
+  f.records.set('requests/order-a', { ...order, assignedDistributorUid: 'distributor-a2' });
+  assert.equal((await call(handler, 'PATCH', 'distributor-a-token', payload)).statusCode, 404);
+  f.records.set('requests/order-a', { ...order, assignmentVersion: 2 });
+  assert.equal((await call(handler, 'PATCH', 'distributor-a-token', payload)).statusCode, 409);
+  f.records.set('requests/order-a', order);
+  assert.equal((await call(handler, 'PATCH', 'distributor-a-token', { orderId: 'order-a', action: 'reschedule-delivery', scheduledAt: defaultSchedule })).statusCode, 200);
+  assert.equal((await call(handler, 'PATCH', 'distributor-a-token', payload)).statusCode, 409);
+});
+
+test('structured failure evidence rejects missing, invalid, oversized, and irrelevant fields while legacy reasons still work', async () => {
+  const base = { orderId: 'order-a', action: 'fail-delivery', failureReasonCode: 'NO_RESPONSE', clientMutationId: 'report-mutation-003', reportFormat: 'structured-v1' };
+  const valid = { contactAttempts: [{ method: 'PHONE_CALL', outcome: 'NO_ANSWER' }] };
+  const cases = [
+    [{ ...base, reportEvidence: {} }, 'REPORT_CONTACT_REQUIRED'],
+    [{ ...base, reportEvidence: { contactAttempts: [{ method: 'PHONE_CALL', outcome: 'SENT_NO_REPLY' }] } }, 'REPORT_CONTACT_INVALID'],
+    [{ ...base, reportEvidence: { contactAttempts: [{ method: 'constructor', outcome: 'NO_ANSWER' }] } }, 'REPORT_CONTACT_INVALID'],
+    [{ ...base, reportEvidence: { contactAttempts: Array(4).fill(valid.contactAttempts[0]) } }, 'REPORT_CONTACT_REQUIRED'],
+    [{ ...base, reportEvidence: { contactAttempts: [{ ...valid.contactAttempts[0], phoneNumber: '09123456789' }] } }, 'REPORT_CONTACT_INVALID'],
+    [{ ...base, reportEvidence: { ...valid, screenshot: 'private' } }, 'REPORT_EVIDENCE_INVALID'],
+    [{ ...base, reportEvidence: valid, failureReasonNote: 'x'.repeat(241) }, 'REPORT_NOTE_TOO_LONG'],
+    [{ ...base, reportEvidence: valid, failureReasonNote: 'Private phone details' }, 'REPORT_NOTE_IRRELEVANT'],
+    [{ ...base, reportEvidence: { contactAttempts: [{ ...valid.contactAttempts[0], claimedAt: 'not-a-time' }] } }, 'REPORT_TIME_INVALID'],
+    [{ ...base, reportEvidence: { contactAttempts: [{ ...valid.contactAttempts[0], claimedAt: new Date(Date.now() + 3600000).toISOString() }] } }, 'REPORT_TIME_IMPLAUSIBLE'],
+    [{ ...base, reportEvidence: { contactAttempts: [{ ...valid.contactAttempts[0], claimedAt: new Date(Date.now() - 48 * 3600000).toISOString() }] } }, 'REPORT_TIME_IMPLAUSIBLE'],
+    [{ ...base, reportEvidence: valid, extra: true }, 'REPORT_PAYLOAD_INVALID'],
+    [{ ...base, failureReasonCode: 'RECIPIENT_REFUSED', reportEvidence: {} }, 'REPORT_INTERACTION_REQUIRED'],
+    [{ ...base, failureReasonCode: 'RECIPIENT_REFUSED', reportEvidence: { interactionNote: 'No.' } }, 'REPORT_INTERACTION_INVALID'],
+    [{ ...base, failureReasonCode: 'OTHER', failureReasonNote: 'Road closed.', reportEvidence: valid }, 'REPORT_EVIDENCE_IRRELEVANT'],
+  ];
+  for (const [payload, reason] of cases) {
+    const f = fixture();
+    f.records.set('requests/order-a', { ...f.records.get('requests/order-a'), assignedDistributorUid: 'distributor-a', status: 'out_for_delivery' });
+    const response = await call(createDistributorAssignedOrdersHandler(f.getAdmin), 'PATCH', 'distributor-a-token', payload);
+    assert.equal(response.statusCode, 400, reason);
+    assert.equal(response.body.error.reason, reason);
+    assert.equal(f.records.get('requests/order-a').status, 'out_for_delivery');
+    assert.equal([...f.records.keys()].filter((key) => key.startsWith('deliveryAttemptEvents/')).length, 0);
+  }
+  const f = fixture();
+  f.records.set('requests/order-a', { ...f.records.get('requests/order-a'), assignedDistributorUid: 'distributor-a', status: 'out_for_delivery' });
+  const refusal = await call(createDistributorAssignedOrdersHandler(f.getAdmin), 'PATCH', 'distributor-a-token', {
+    ...base, failureReasonCode: 'RECIPIENT_REFUSED', reportEvidence: { interactionNote: 'Recipient said they would not accept delivery.' },
+  });
+  assert.equal(refusal.statusCode, 200);
+  assert.equal(refusal.body.order.failureReasonNote, '');
+  assert.equal(f.records.get('requests/order-a').failureReason.includes('Recipient said'), false);
+  const attempt = [...f.records.entries()].find(([key]) => key.startsWith('deliveryAttempts/'))[1];
+  assert.equal(attempt.reportEvidence.interactionNote, 'Recipient said they would not accept delivery.');
+  for (const [failureReasonCode, reportEvidence, failureReasonNote] of [
+    ['CUSTOMER_UNAVAILABLE', { contactAttempts: [{ method: 'IN_PERSON', outcome: 'NOT_AT_ADDRESS' }] }, ''],
+    ['WEATHER_OR_ROAD', {}, ''],
+    ['OTHER', {}, 'Road closed.'],
+  ]) {
+    const next = fixture();
+    next.records.set('requests/order-a', { ...next.records.get('requests/order-a'), assignedDistributorUid: 'distributor-a', status: 'out_for_delivery' });
+    const response = await call(createDistributorAssignedOrdersHandler(next.getAdmin), 'PATCH', 'distributor-a-token', {
+      ...base, failureReasonCode, failureReasonNote, reportEvidence,
+    });
+    assert.equal(response.statusCode, 200, failureReasonCode);
+    assert.equal([...next.records.values()].filter((value) => value?.reportFormat === 'structured-v1').length, 2);
+  }
+});
+
 test('Distributor profile completeness blocks mutation actions with 409 PROFILE_INCOMPLETE while GET is allowed', async () => {
   const f = fixture();
   // Set distributor-a profile to be incomplete (missing phone and address)

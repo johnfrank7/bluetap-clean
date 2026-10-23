@@ -21,7 +21,7 @@ function mutationIdOf(value) {
   return value;
 }
 
-async function prepareDeliveryAttemptTransition({ tx, db, orderId, order, action, distributorUid, branchId, now, failureReasonCode, failureReasonLabel, failureReasonNote, clientMutationId }) {
+async function prepareDeliveryAttemptTransition({ tx, db, orderId, order, action, distributorUid, branchId, now, failureReasonCode, failureReasonLabel, failureReasonNote, reportFormat, reportEvidence, clientMutationId }) {
   if (!['start-delivery', 'fail-delivery', 'mark-delivered'].includes(action)) return { orderUpdate: {}, writes: [] };
   const mutationId = mutationIdOf(clientMutationId);
   const requesterUid = clean(order.requesterUid || order.requester_id);
@@ -42,6 +42,7 @@ async function prepareDeliveryAttemptTransition({ tx, db, orderId, order, action
     reportedReasonCode: outcome === 'failed' ? failureReasonCode : null,
     reportedReasonLabel: outcome === 'failed' ? failureReasonLabel : null,
     reportedReasonNote: outcome === 'failed' ? failureReasonNote : null,
+    ...(outcome === 'failed' ? { reportFormat: reportFormat || null, reportEvidence: reportEvidence ?? null, reportReceivedAt: now } : {}),
   });
 
   if (action === 'start-delivery') {
@@ -84,6 +85,7 @@ async function prepareDeliveryAttemptTransition({ tx, db, orderId, order, action
       reportedReasonCode: outcome === 'failed' ? failureReasonCode : null,
       reportedReasonLabel: outcome === 'failed' ? failureReasonLabel : null,
       reportedReasonNote: outcome === 'failed' ? failureReasonNote : null,
+      ...(outcome === 'failed' ? { reportFormat: reportFormat || null, reportEvidence: reportEvidence ?? null, reportReceivedAt: now } : {}),
     } });
   } else {
     // Orders already out for delivery before this schema have no trustworthy start time.
@@ -98,6 +100,7 @@ async function prepareDeliveryAttemptTransition({ tx, db, orderId, order, action
   }
   writes.push({ method: 'create', ref: eventRef(id, 'outcome'), data: event(id, number, outcome === 'failed' ? 'ATTEMPT_FAILED' : 'ATTEMPT_DELIVERED', {
     outcome, reportedReasonCode: outcome === 'failed' ? failureReasonCode : null,
+    ...(outcome === 'failed' ? { reportFormat: reportFormat || null, reportEvidence: reportEvidence ?? null, reportReceivedAt: now } : {}),
   }) });
   return { orderUpdate: { activeDeliveryAttemptId: null, ...(legacy ? { deliveryAttemptSeq: number } : {}) }, writes };
 }

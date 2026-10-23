@@ -45,7 +45,9 @@ test('real Firestore transaction atomically commits attempt, moderation, chat, a
 
     assert.equal((await call(handler, orderId, 'fail-delivery', { failureReasonCode: 'INVALID' })).statusCode, 400);
     assert.equal((await db.collection('requests').doc(orderId).get()).data().status, 'out_for_delivery');
-    const failed = await call(handler, orderId, 'fail-delivery', { failureReasonCode: 'NO_RESPONSE' });
+    const report = { failureReasonCode: 'NO_RESPONSE', clientMutationId: `report_${suffix}`,
+      reportFormat: 'structured-v1', reportEvidence: { contactAttempts: [{ method: 'PHONE_CALL', outcome: 'NO_ANSWER', claimedAt: new Date().toISOString() }] } };
+    const failed = await call(handler, orderId, 'fail-delivery', report);
     assert.equal(failed.statusCode, 200, JSON.stringify(failed.body));
     const order = (await db.collection('requests').doc(orderId).get()).data();
     const attempt = (await db.collection('deliveryAttempts').doc(attemptId).get()).data();
@@ -55,9 +57,18 @@ test('real Firestore transaction atomically commits attempt, moderation, chat, a
     assert.equal(order.activeDeliveryAttemptId, null);
     assert.equal(attempt.outcome, 'failed');
     assert.equal(attempt.responsibility, 'undetermined');
+    assert.deepEqual(attempt.reportEvidence, report.reportEvidence);
+    assert.equal(attempt.reportReceivedAt.toMillis(), order.deliveryFailedAt.toMillis());
     assert.equal(review.incidentCount, 1);
     assert.equal(conversation.lifecycleReason, 'delivery_failed_grace');
-    assert.equal((await db.collection('deliveryAttemptEvents').doc(`${attemptId}_outcome`).get()).data().kind, 'ATTEMPT_FAILED');
+    const eventSnapshot = await db.collection('deliveryAttemptEvents').doc(`${attemptId}_outcome`).get();
+    assert.equal(eventSnapshot.data().kind, 'ATTEMPT_FAILED');
+    assert.deepEqual(eventSnapshot.data().reportEvidence, report.reportEvidence);
+    const replay = await call(handler, orderId, 'fail-delivery', report);
+    assert.equal(replay.statusCode, 200, JSON.stringify(replay.body));
+    assert.deepEqual(replay.body, failed.body);
+    assert.equal((await db.collection('deliveryAttemptEvents').doc(`${attemptId}_outcome`).get()).updateTime.toMillis(), eventSnapshot.updateTime.toMillis());
+    assert.equal((await db.collection('orderAbuseReviews').doc(hashId(branchId, requesterUid)).get()).data().incidentCount, 1);
   } finally {
     await deleteApp(app);
   }

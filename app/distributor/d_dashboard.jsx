@@ -38,6 +38,7 @@ import {
   toDistributorScreenOrder,
   completeAssignedDelivery,
   failAssignedDelivery,
+  getAssignedDistributorOrders,
   useAssignedDistributorOrders,
 } from '../../services/distributorOrders';
 import { useDistributorProfile } from '../../services/distributorProfile';
@@ -45,6 +46,7 @@ import { useLiveGreeting } from '../../services/liveTime';
 import { formatDisplayUniqueId, getProfileUniqueId } from '../../services/uniqueIds';
 const { getCurrentDistributorRequests, getDistributorDashboardCounts } = require('../../services/distributorDashboardMetrics');
 const { getCarouselIndexFromOffset, isCurrentCarouselOffset, resolveCarouselStepIndex, resolveDragTargetIndex } = require('../../services/carouselSnap');
+const { createDeliveryReportSubmission } = require('../../services/deliveryReportSubmission');
 
 const BLUE = BLUETAP_COLORS.primary;
 const BLUE_LIGHT = BLUETAP_COLORS.primarySoft;
@@ -356,6 +358,14 @@ function DistributorDashboardContent() {
   const [detailsVisible, setDetailsVisible] = useState(false);
   const [deliveryAction, setDeliveryAction] = useState(null);
   const [processing, setProcessing] = useState(false);
+  const [submissionError, setSubmissionError] = useState('');
+  const [reportLocked, setReportLocked] = useState(false);
+  const actionFlightRef = useRef(false);
+  const reportSubmissionRef = useRef(null);
+  if (!reportSubmissionRef.current) reportSubmissionRef.current = createDeliveryReportSubmission({
+    send: failAssignedDelivery,
+    readOrder: async (orderId) => (await getAssignedDistributorOrders()).find((order) => String(order.id) === String(orderId)) || null,
+  });
   const [toast, setToast] = useState({ visible: false, message: '', type: 'info' });
   const [activeRequestIndex, setActiveRequestIndex] = useState(0);
   const currentRequestsRef = useRef(null);
@@ -578,15 +588,22 @@ function DistributorDashboardContent() {
   };
 
   const submitDeliveryAction = async (failure = {}) => {
-    if (!deliveryAction || processing) return;
+    if (!deliveryAction || actionFlightRef.current) return;
+    actionFlightRef.current = true;
     setProcessing(true);
+    setSubmissionError('');
     try {
-      if (deliveryAction.type === 'failed') await failAssignedDelivery(deliveryAction.id, failure);
+      if (deliveryAction.type === 'failed') await reportSubmissionRef.current.submit(deliveryAction.id, failure);
       else await completeAssignedDelivery(deliveryAction.id);
+      setReportLocked(false);
       setDeliveryAction(null);
       setToast({ visible: true, type: 'success', message: 'Delivery status updated.' });
-    } catch (error) { setToast({ visible: true, type: 'error', message: error.message || 'Delivery could not be updated.' }); }
-    finally { setProcessing(false); }
+    } catch (error) {
+      if (deliveryAction.type === 'failed') {
+        setReportLocked(reportSubmissionRef.current.hasPending());
+        setSubmissionError(error.message || 'The report could not be confirmed. Please try again.');
+      } else setToast({ visible: true, type: 'error', message: error.message || 'Delivery could not be updated.' });
+    } finally { actionFlightRef.current = false; setProcessing(false); }
   };
 
   return (
@@ -656,7 +673,7 @@ function DistributorDashboardContent() {
               ) : activeRequest ? (
                 <PortalSwipeIgnore>
                   <ScrollView ref={currentRequestsRef} horizontal showsHorizontalScrollIndicator={false} snapToInterval={currentRequestSnap} disableIntervalMomentum decelerationRate="fast" scrollEventThrottle={16} contentContainerStyle={[styles.currentRequestsCarousel, { paddingRight: currentRequestPeek }]} onScroll={handleCarouselScroll} onScrollBeginDrag={handleCarouselDragStart} onScrollEndDrag={handleCarouselDragEnd} onMomentumScrollEnd={handleCarouselMomentumEnd} onTouchStart={handleCarouselTouchStart} onTouchEnd={handleCarouselTouchEnd} onTouchCancel={handleCarouselTouchEnd}>
-                    {activeRequestEntries.map((entry, index) => <CurrentRequestSlide key={entry.id} width={currentRequestCardWidth} active={index === activeRequestIndex}><AnimatedPresenceItem phase={entry.phase}><CurrentRequestCard colors={colors} request={entry.item} actionsDisabled={entry.actionsDisabled} distributorProfile={distributorProfile} processing={processing} onFailure={() => setDeliveryAction({ id: entry.item.sourceId, reference: entry.item.requestId, type: 'failed' })} onDetails={() => { commitCarouselIndex(index, { snap: false }); setDetailsVisible(true); }} onAction={() => { commitCarouselIndex(index, { snap: false }); handleCurrentRequestAction(entry.item); }} /></AnimatedPresenceItem></CurrentRequestSlide>)}
+                    {activeRequestEntries.map((entry, index) => <CurrentRequestSlide key={entry.id} width={currentRequestCardWidth} active={index === activeRequestIndex}><AnimatedPresenceItem phase={entry.phase}><CurrentRequestCard colors={colors} request={entry.item} actionsDisabled={entry.actionsDisabled} distributorProfile={distributorProfile} processing={processing} onFailure={() => { reportSubmissionRef.current.cancel(); setSubmissionError(''); setReportLocked(false); setDeliveryAction({ id: entry.item.sourceId, reference: entry.item.requestId, type: 'failed' }); }} onDetails={() => { commitCarouselIndex(index, { snap: false }); setDetailsVisible(true); }} onAction={() => { commitCarouselIndex(index, { snap: false }); handleCurrentRequestAction(entry.item); }} /></AnimatedPresenceItem></CurrentRequestSlide>)}
                   </ScrollView>
                   {activeRequestEntries.length > 1 && <View style={styles.carouselIndicators}><Text style={styles.carouselPosition}>{activeRequestIndex + 1}/{activeRequestEntries.length}</Text>{activeRequestEntries.map((entry, index) => <View key={`${entry.id}-${index}`} style={[styles.carouselIndicator, index === activeRequestIndex && styles.carouselIndicatorActive]} />)}</View>}
                 </PortalSwipeIgnore>
@@ -713,7 +730,9 @@ function DistributorDashboardContent() {
         action={deliveryAction?.type}
         orderReference={deliveryAction?.reference || activeRequest?.requestId}
         busy={processing}
-        onCancel={() => !processing && setDeliveryAction(null)}
+        locked={reportLocked}
+        submissionError={submissionError}
+        onCancel={() => { if (!processing) { reportSubmissionRef.current.cancel(); setSubmissionError(''); setReportLocked(false); setDeliveryAction(null); } }}
         onConfirm={submitDeliveryAction}
       />
       <TopToastFeedback {...toast} onDismiss={() => setToast((value) => ({ ...value, visible: false }))} />
