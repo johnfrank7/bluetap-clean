@@ -14,6 +14,8 @@ const notFound = () => new OtpError(404, 'DELIVERY_REPORT_NOT_FOUND', 'Delivery 
 const invalidCursor = () => new OtpError(400, 'DELIVERY_REPORT_CURSOR_INVALID', 'The report cursor is invalid.');
 const validId = (value) => typeof value === 'string' && value.length > 0 && value.length <= 128
   && value !== '.' && value !== '..' && !value.includes('/');
+const validCursorId = (value) => typeof value === 'string' && value.length > 0 && value.length <= 1500
+  && value !== '.' && value !== '..' && !value.includes('/');
 const validAttemptId = (value) => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
 
 function pageSize(value) {
@@ -113,10 +115,14 @@ async function reportList(db, { requesterUid, orderId = '', limit = DEFAULT_PAGE
   query = query.where('outcome', '==', 'failed')
     .orderBy('endedAt', 'desc').orderBy(FieldPath.documentId(), 'desc').limit(limit + 1);
   if (cursor) {
-    if (!validAttemptId(cursor)) throw invalidCursor();
+    if (!(orderId ? validAttemptId(cursor) : validCursorId(cursor))) throw invalidCursor();
     const position = await attempts.doc(cursor).get();
     try {
-      await verifiedAttempt(db, position, requesterUid, orderId, cache);
+      if (orderId) await verifiedAttempt(db, position, requesterUid, orderId, cache);
+      // A global cursor may point to a skipped record, so validate its query scope
+      // without granting it report visibility or relying on its parent order.
+      else if (!position.exists || position.data()?.requesterUid !== requesterUid
+        || position.data()?.outcome !== 'failed') throw invalidCursor();
       if (!isoTime(position.data().endedAt)) throw invalidCursor();
     } catch (error) {
       if (error instanceof OtpError) throw invalidCursor();
@@ -128,8 +134,13 @@ async function reportList(db, { requesterUid, orderId = '', limit = DEFAULT_PAGE
   const docs = (snapshot.docs || []).slice(0, limit);
   const reports = [];
   for (const doc of docs) {
-    const attempt = await verifiedAttempt(db, doc, requesterUid, orderId, cache);
-    reports.push(safeReport(doc.id, attempt));
+    try {
+      const attempt = await verifiedAttempt(db, doc, requesterUid, orderId, cache);
+      reports.push(safeReport(doc.id, attempt));
+    } catch (error) {
+      if (orderId || !(error instanceof OtpError) || error.status !== 404) throw error;
+      // The global feed advances past invalid candidates without publishing their data.
+    }
   }
   return { reports, nextCursor: (snapshot.docs || []).length > limit ? docs[docs.length - 1].id : null };
 }

@@ -49,9 +49,15 @@ async function request(path, { method = 'GET', body } = {}) {
   }
 }
 
-export function fetchRequesterDeliveryReports(orderId, { cursor = '', limit = 20 } = {}) {
-  const query = `orderId=${encodeURIComponent(orderId)}&limit=${limit}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`;
-  return request(`${PATH}?${query}`);
+export function fetchRequesterDeliveryReports(orderId = '', { cursor = '', limit = 20 } = {}) {
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 25) {
+    throw new RangeError('Choose a report page size from 1 to 25.');
+  }
+  const params = new URLSearchParams();
+  if (orderId) params.set('orderId', orderId);
+  params.set('limit', String(limit));
+  if (cursor) params.set('cursor', cursor);
+  return request(`${PATH}?${params.toString()}`);
 }
 
 export function fetchRequesterDeliveryReport(attemptId, orderId) {

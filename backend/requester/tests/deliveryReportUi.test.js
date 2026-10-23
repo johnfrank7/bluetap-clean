@@ -59,6 +59,31 @@ test('authenticated API client requests bounded order reports, one detail, and e
   assert.doesNotMatch(read('services/requesterDeliveryReports.js'), /collection\(|deliveryAttempts|deliveryAttemptEvents/);
 });
 
+test('global report feed omits orderId and encodes bounded pagination without changing scoped reads', async () => {
+  const calls = [];
+  const client = loadClient({ fetch: async (url, options) => {
+    calls.push({ url, options });
+    return { ok: true, status: 200, json: async () => url.includes('attemptId=')
+      ? { report: report() } : { reports: [report()], nextCursor: null } };
+  } });
+  await client.fetchRequesterDeliveryReports();
+  await client.fetchRequesterDeliveryReports(undefined, { limit: 25, cursor: attemptId });
+  await client.fetchRequesterDeliveryReports('order/one', { limit: 1, cursor: attemptId });
+  await client.fetchRequesterDeliveryReport(attemptId, 'order-one');
+  await client.fetchRequesterDeliveryReports(undefined, { cursor: 'skipped&cursor=other' });
+  assert.equal(calls.length, 5);
+  assert.equal(new URL(calls[0].url).search, '?limit=20');
+  assert.equal(new URL(calls[1].url).search, `?limit=25&cursor=${attemptId}`);
+  assert.equal(new URL(calls[2].url).search, `?orderId=order%2Fone&limit=1&cursor=${attemptId}`);
+  assert.equal(new URL(calls[3].url).search, `?attemptId=${attemptId}&orderId=order-one`);
+  assert.equal(new URL(calls[4].url).searchParams.get('cursor'), 'skipped&cursor=other');
+  assert.ok(!new URL(calls[4].url).searchParams.has('orderId'));
+  for (const call of calls) assert.equal(call.options.headers.Authorization, 'Bearer trusted-token');
+  assert.throws(() => client.fetchRequesterDeliveryReports('', { limit: 26 }), RangeError);
+  assert.throws(() => client.fetchRequesterDeliveryReports('', { limit: 0 }), RangeError);
+  assert.equal(calls.length, 5);
+});
+
 test('client distinguishes unauthenticated, confirmed conflict, server failure, and uncertain network result', async () => {
   const body = { attemptId, explanation: 'I received no call.', clientMutationId: 'stable-uuid' };
   const missing = loadClient({ auth: { currentUser: null }, fetch: async () => { throw new Error('must not fetch'); } });

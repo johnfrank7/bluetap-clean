@@ -84,6 +84,80 @@ test('real Firestore indexes serve bounded owned reports while client reads stay
   }
 });
 
+test('global feed advances past orphaned and conflicting-parent attempts without disclosing reports', { skip: !host }, async () => {
+  const projectId = 'demo-bluetap';
+  const suffix = randomUUID();
+  const app = initializeAdminApp({ projectId }, `requester-report-orphans-${suffix}`);
+  const db = getAdminFirestore(app);
+  const uid = `r-${suffix}`;
+  const otherUid = `other-${suffix}`;
+  const validOrder = `valid-${suffix}`;
+  const orphanOrder = `orphan-${suffix}`;
+  const conflictOrder = `conflict-${suffix}`;
+  const malformedOrder = `malformed-${suffix}`;
+  const otherOrder = `other-${suffix}`;
+  const validId = attemptIdFor(validOrder, 1);
+  const orphanId = attemptIdFor(orphanOrder, 1);
+  const conflictId = attemptIdFor(conflictOrder, 1);
+  const malformedId = attemptIdFor(malformedOrder, 1);
+  const oversizedMalformedId = 'x'.repeat(129);
+  const otherId = attemptIdFor(otherOrder, 1);
+  const auth = { async verifyIdToken(token, checkRevoked) {
+    assert.equal(checkRevoked, true);
+    if (token === 'requester-token') return { uid };
+    if (token === 'other-token') return { uid: otherUid };
+    throw new Error('invalid token');
+  } };
+  const handler = createRequesterDeliveryReportsHandler(() => ({ auth, db }));
+  const record = (orderId, requesterUid, day) => ({
+    orderId, requesterUid, attemptNumber: 1, outcome: 'failed', reviewState: 'reported',
+    endedAt: new Date(`2026-10-${day}T01:00:00.000Z`), reportedReasonCode: 'NO_RESPONSE',
+  });
+  try {
+    await Promise.all([
+      db.collection('users').doc(uid).set({ role: 'requester', accountStatus: 'active' }),
+      db.collection('users').doc(otherUid).set({ role: 'requester', accountStatus: 'active' }),
+      db.collection('requests').doc(validOrder).set({ requesterUid: uid, requester_id: uid }),
+      db.collection('requests').doc(conflictOrder).set({ requesterUid: uid, requester_id: otherUid }),
+      db.collection('requests').doc(otherOrder).set({ requesterUid: otherUid, requester_id: otherUid }),
+      db.collection('deliveryAttempts').doc(validId).set(record(validOrder, uid, 20)),
+      db.collection('deliveryAttempts').doc(orphanId).set(record(orphanOrder, uid, 23)),
+      db.collection('deliveryAttempts').doc(conflictId).set(record(conflictOrder, uid, 22)),
+      db.collection('deliveryAttempts').doc(malformedId).set({ ...record(malformedOrder, uid, 21), orderId: validOrder }),
+      db.collection('deliveryAttempts').doc(oversizedMalformedId).set(record(validOrder, uid, 20)),
+      db.collection('deliveryAttempts').doc(otherId).set(record(otherOrder, otherUid, 21)),
+    ]);
+    const before = await Promise.all([validId, orphanId, conflictId, malformedId, oversizedMalformedId].map(async (id) =>
+      (await db.collection('deliveryAttempts').doc(id).get()).updateTime.toMillis()));
+    const pages = [];
+    let cursor = '';
+    for (let index = 0; index < 5; index += 1) {
+      const response = await call(handler, `/api/requester/delivery-reports?limit=1${cursor ? `&cursor=${cursor}` : ''}`);
+      assert.equal(response.statusCode, 200, JSON.stringify(response.body));
+      pages.push(response.body);
+      if (!response.body.nextCursor) break;
+      assert.notEqual(response.body.nextCursor, cursor);
+      cursor = response.body.nextCursor;
+    }
+    assert.equal(pages.length, 5);
+    assert.deepEqual(pages.flatMap((page) => page.reports.map((report) => report.attemptId)), [validId]);
+    assert.equal(pages.at(-1).nextCursor, null);
+    assert.equal((await call(handler, `/api/requester/delivery-reports?attemptId=${orphanId}`)).statusCode, 404);
+    assert.equal((await call(handler, `/api/requester/delivery-reports?attemptId=${conflictId}`)).statusCode, 404);
+    assert.equal((await call(handler, `/api/requester/delivery-reports?attemptId=${malformedId}`)).statusCode, 404);
+    assert.equal((await call(handler, `/api/requester/delivery-reports?attemptId=${oversizedMalformedId}`)).statusCode, 400);
+    assert.equal((await call(handler, `/api/requester/delivery-reports?orderId=${conflictOrder}`)).statusCode, 404);
+    assert.equal((await call(handler, `/api/requester/delivery-reports?cursor=${otherId}`)).statusCode, 400);
+    const otherFeed = await call(handler, '/api/requester/delivery-reports', 'other-token');
+    assert.deepEqual(otherFeed.body.reports.map((report) => report.attemptId), [otherId]);
+    const after = await Promise.all([validId, orphanId, conflictId, malformedId, oversizedMalformedId].map(async (id) =>
+      (await db.collection('deliveryAttempts').doc(id).get()).updateTime.toMillis()));
+    assert.deepEqual(after, before);
+  } finally {
+    await deleteAdminApp(app);
+  }
+});
+
 test('real Firestore transaction stores one Requester response and immutable event with exact replay', { skip: !host }, async () => {
   const projectId = 'demo-bluetap';
   const suffix = randomUUID();
