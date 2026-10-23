@@ -48,6 +48,7 @@ const EXPECTED_ROUTES = [
   '/api/moderation/notices',
   '/api/orders/details',
   '/api/requester/catalog',
+  '/api/requester/delivery-reports',
   '/api/requester/orders',
   '/api/verification/face-service-status',
   '/api/verification/registration-face',

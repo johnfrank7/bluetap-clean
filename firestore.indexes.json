@@ -110,6 +110,24 @@
       ]
     },
     {
+      "collectionGroup": "deliveryAttempts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "requesterUid", "order": "ASCENDING" },
+        { "fieldPath": "outcome", "order": "ASCENDING" },
+        { "fieldPath": "endedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "deliveryAttempts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "orderId", "order": "ASCENDING" },
+        { "fieldPath": "outcome", "order": "ASCENDING" },
+        { "fieldPath": "endedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "orderAbuseReviews",
       "queryScope": "COLLECTION",
       "fields": [
