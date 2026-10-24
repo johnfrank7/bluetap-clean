@@ -1,5 +1,6 @@
 const { createHash } = require('node:crypto');
 const { OtpError } = require('../utils/otpError');
+const { attemptIdFor } = require('../delivery/deliveryAttemptService');
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const REPORT_RATE_LIMIT = 5;
@@ -129,7 +130,36 @@ function cancellationConcern(stage) {
   return 'low';
 }
 
-async function prepareOrderAbuseIncidentInTransaction({ tx, db, orderId, order = {}, incidentType, category, stage, now = new Date() }) {
+function linkedFailedOutcome(writes, { orderId, order, requesterUid, branchId, category, now }) {
+  const invalid = () => new OtpError(409, 'DELIVERY_INCIDENT_SOURCE_INVALID', 'The delivery report could not be linked to its attempt.');
+  if (!Array.isArray(writes)) throw invalid();
+  const outcomes = writes.filter(({ data }) => data?.kind === 'ATTEMPT_FAILED');
+  if (outcomes.length !== 1) throw invalid();
+  const { ref, method, data } = outcomes[0];
+  const number = data.attemptNumber;
+  const attemptId = data.attemptId;
+  const eventId = `${attemptId}_outcome`;
+  const expectedNumber = clean(order.activeDeliveryAttemptId) ? order.deliveryAttemptSeq : 1;
+  if (method !== 'create' || !Number.isSafeInteger(number) || number < 1
+    || number !== expectedNumber || attemptId !== attemptIdFor(orderId, number)
+    || ref?.path !== `deliveryAttemptEvents/${eventId}`
+    || data.orderId !== orderId || data.branchId !== branchId
+    || data.outcome !== 'failed' || data.reportedReasonCode !== category
+    || timeOf(data.createdAt) !== timeOf(now)) throw invalid();
+  const attempts = writes.filter((write) => write.ref?.path === `deliveryAttempts/${attemptId}`);
+  if (attempts.length !== 1 || !['create', 'update'].includes(attempts[0].method)
+    || (attempts[0].method === 'create' && (clean(order.activeDeliveryAttemptId)
+      || ![undefined, 0].includes(order.deliveryAttemptSeq)))
+    || (attempts[0].method === 'update' && order.activeDeliveryAttemptId !== attemptId)
+    || attempts[0].data?.outcome !== 'failed'
+    || attempts[0].data?.reportedReasonCode !== category
+    || timeOf(attempts[0].data?.reportReceivedAt) !== timeOf(now)
+    || (attempts[0].method === 'create' && (attempts[0].data.requesterUid !== requesterUid
+      || attempts[0].data.orderId !== orderId || attempts[0].data.branchId !== branchId))) throw invalid();
+  return { attemptId, eventId };
+}
+
+async function prepareOrderAbuseIncidentInTransaction({ tx, db, orderId, order = {}, incidentType, category, stage, now = new Date(), deliveryAttemptWrites }) {
   const requesterUid = clean(order.requesterUid || order.requester_id, 128);
   const branchId = clean(order.currentBranchId || order.branchId, 128);
   if (!requesterUid || !branchId) return { result: { recorded: false, reason: 'missing-authority' }, write: null };
@@ -139,17 +169,23 @@ async function prepareOrderAbuseIncidentInTransaction({ tx, db, orderId, order =
   }
   const concern = incidentType === 'cancellation' ? cancellationConcern(stage) : 'moderate';
   if (incidentType === 'cancellation' && concern === 'low') return { result: { recorded: false, reason: 'low-concern-cancellation' }, write: null };
+  const source = incidentType === 'delivery_failure'
+    ? linkedFailedOutcome(deliveryAttemptWrites, { orderId, order, requesterUid, branchId, category: normalizedCategory, now })
+    : null;
 
   const ref = db.collection('orderAbuseReviews').doc(hashId(branchId, requesterUid));
   const snapshot = await tx.get(ref);
   const current = snapshot.exists ? snapshot.data() || {} : {};
   const cutoff = timeOf(now) - ABUSE_REVIEW_WINDOW_DAYS * DAY_MS;
-  const incidentKey = hashId(orderId, incidentType, normalizedCategory, stage, timeOf(now));
+  const incidentKey = source ? hashId('delivery_failure', source.attemptId)
+    : hashId(orderId, incidentType, normalizedCategory, stage, timeOf(now));
   const incidents = (Array.isArray(current.incidents) ? current.incidents : [])
     .filter((incident) => timeOf(incident.at) > cutoff && incident.key !== incidentKey)
     .slice(-49);
   incidents.push({
     key: incidentKey,
+    ...(source ? { incidentId: incidentKey, attemptId: source.attemptId,
+      sourceEventId: source.eventId, requesterUid, reportingBranchId: branchId } : {}),
     orderId: clean(orderId, 128),
     orderReference: clean(order.requestId || order.request_id || orderId, 80),
     type: incidentType,

@@ -282,11 +282,12 @@ function createDistributorAssignedOrdersHandler(getAdmin = getFirebaseAdmin) {
             tx,
             db,
             orderId,
-            order: { ...current, ...result },
+            order: current,
             incidentType: 'delivery_failure',
             category: failureReasonCode,
             stage: 'out_for_delivery',
             now,
+            deliveryAttemptWrites: attempt.writes,
           });
           moderationWrite = moderation.write;
         }

@@ -24,7 +24,13 @@ function mutationIdOf(value) {
 async function prepareDeliveryAttemptTransition({ tx, db, orderId, order, action, distributorUid, branchId, now, failureReasonCode, failureReasonLabel, failureReasonNote, reportFormat, reportEvidence, clientMutationId }) {
   if (!['start-delivery', 'fail-delivery', 'mark-delivered'].includes(action)) return { orderUpdate: {}, writes: [] };
   const mutationId = mutationIdOf(clientMutationId);
-  const requesterUid = clean(order.requesterUid || order.requester_id);
+  const canonicalRequesterUid = clean(order.requesterUid);
+  const legacyRequesterUid = clean(order.requester_id);
+  if ((!canonicalRequesterUid && !legacyRequesterUid)
+    || (canonicalRequesterUid && legacyRequesterUid && canonicalRequesterUid !== legacyRequesterUid)) {
+    throw new OtpError(409, 'DELIVERY_ATTEMPT_INVALID', 'The delivery attempt requires repair.');
+  }
+  const requesterUid = canonicalRequesterUid || legacyRequesterUid;
   const assignmentVersion = getAssignmentVersion(order);
   const eventRef = (id, kind) => db.collection('deliveryAttemptEvents').doc(`${id}_${kind}`);
   const event = (id, number, kind, extra = {}) => ({
@@ -71,7 +77,8 @@ async function prepareDeliveryAttemptTransition({ tx, db, orderId, order, action
     const ref = db.collection('deliveryAttempts').doc(activeId);
     const snapshot = await tx.get(ref);
     const current = snapshot.exists ? snapshot.data() || {} : null;
-    if (!current || current.orderId !== orderId || current.distributorUid !== distributorUid
+    if (!current || current.orderId !== orderId || current.requesterUid !== requesterUid
+      || current.distributorUid !== distributorUid
       || current.branchId !== branchId || current.assignmentVersion !== assignmentVersion
       || current.outcome !== 'in_progress' || !Number.isSafeInteger(current.attemptNumber)
       || current.attemptNumber !== order.deliveryAttemptSeq
