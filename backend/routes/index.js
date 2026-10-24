@@ -18,6 +18,7 @@ const { createManagerDispatchHandler } = require('../manager/dispatchHandler');
 const { createManagerWorkspaceHandler } = require('../manager/workspaceHandler');
 const { createManagerProfileHandler } = require('../manager/profileHandler');
 const { createDistributorAssignedOrdersHandler } = require('../distributor/assignedOrdersHandler');
+const { createDistributorDeliveryReviewsHandler } = require('../distributor/deliveryReviewsHandler');
 const { createAdminAccountsHandler } = require('../admin/accountManagementHandler');
 const { createAdminDistributorsHandler } = require('../admin/distributorManagementHandler');
 const { createSessionPolicyHandler } = require('../auth/sessionPolicyHandler');
@@ -72,6 +73,7 @@ const routes = new Map([
   ['/api/manager/outside-radius-orders', createOutsideRadiusApprovalsHandler()],
   ['/api/manager/dispatch-orders', createManagerDispatchHandler()],
   ['/api/distributor/orders', createDistributorAssignedOrdersHandler()],
+  ['/api/distributor/delivery-reviews', createDistributorDeliveryReviewsHandler()],
   ['/api/orders/details', createOrderDetailsHandler()],
   ['/api/auth/complete-required-password-change', createRequiredPasswordChangeHandler()],
   ['/api/auth/password-recovery', createPasswordRecoveryHandler()],

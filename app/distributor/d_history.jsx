@@ -27,6 +27,8 @@ import {
 } from '../../services/distributorOrders';
 import { formatDisplayUniqueId } from '../../services/uniqueIds';
 import AnimatedPresenceItem from '../../components/AnimatedPresenceItem';
+import DistributorDeliveryReviews from '../../components/DistributorDeliveryReviews';
+import { useDistributorData } from '../../components/RoleDataProviders';
 import { useAnimatedPresenceList } from '../../components/useAnimatedPresenceList';
 
 const BLUE = BLUETAP_COLORS.primary;
@@ -190,6 +192,7 @@ const HistoryRequestCard = ({ actionsDisabled = false, request, onViewDetails })
 
 export default function DistributorHistory() {
   const { colors, isDark } = useBlueTapTheme();
+  const distributorData = useDistributorData();
   const router = useRouter();
   const [selectedRequestId, setSelectedRequestId] = useState(null);
   const { orders, loading, error, refresh } = useAssignedDistributorOrders();
@@ -245,7 +248,7 @@ export default function DistributorHistory() {
                 <BlueTapEmptyState
                   variant="history"
                   title="No Delivery History"
-                  description="Completed assigned deliveries will appear here."
+                  description="Completed assigned deliveries will appear here. Your reported delivery reviews are listed below."
                 />
               )
                 : historyPresentation.map((entry) => (
@@ -257,6 +260,7 @@ export default function DistributorHistory() {
             />
             </AnimatedPresenceItem>
           ))}
+          <DistributorDeliveryReviews uid={distributorData.readiness === 'READY' ? distributorData.uid : ''} />
         </ScrollView>
       </View>
     </PortalSwipeContainer>
