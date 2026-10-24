@@ -32,7 +32,7 @@ function queryOptions(req) {
   return { attemptId, orderId, cursor, limit: attemptId ? null : pageSize(params.get('limit')) };
 }
 
-function createRequesterDeliveryReportsHandler(getAdmin = getFirebaseAdmin) {
+function createRequesterDeliveryReportsHandler(getAdmin = getFirebaseAdmin, now = () => new Date()) {
   return async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     if (!applyCors(req, res)) return;
@@ -41,7 +41,7 @@ function createRequesterDeliveryReportsHandler(getAdmin = getFirebaseAdmin) {
     try {
       const { auth, db } = getAdmin();
       const { decoded } = await requireRequester(req, auth, db);
-      if (req.method === 'POST') return res.status(200).json(await submitInitialResponse(db, decoded.uid, bodyOf(req)));
+      if (req.method === 'POST') return res.status(200).json(await submitInitialResponse(db, decoded.uid, bodyOf(req), now));
       const { attemptId, orderId, cursor, limit } = queryOptions(req);
       const result = attemptId
         ? await reportDetail(db, attemptId, decoded.uid, orderId)

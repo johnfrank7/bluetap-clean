@@ -175,7 +175,8 @@ test('real Firestore transaction stores one Requester response and immutable eve
     if (token === 'manager-token') return { uid: `manager-${suffix}`, role: 'manager' };
     throw new Error('invalid token');
   } };
-  const handler = createRequesterDeliveryReportsHandler(() => ({ auth, db }));
+  const responseTime = new Date('2026-10-21T12:00:00.000Z');
+  const handler = createRequesterDeliveryReportsHandler(() => ({ auth, db }), () => responseTime);
   const body = { attemptId, explanation: 'I was at the delivery address and received no call.', clientMutationId: `response_${suffix}` };
   const post = (payload = body, token = 'requester-token') => call(handler, '/api/requester/delivery-reports', token, 'POST', payload);
   try {
@@ -186,12 +187,12 @@ test('real Firestore transaction stores one Requester response and immutable eve
       db.collection('requests').doc(orderId).set({ requesterUid: uid, requester_id: uid, status: 'scheduled', deliveryAttemptSeq: 1 }),
       db.collection('deliveryAttempts').doc(attemptId).set({ orderId, requesterUid: uid, attemptNumber: 1,
         outcome: 'failed', reviewState: 'reported', responsibility: 'undetermined',
-        endedAt: new Date('2026-10-20T12:00:00.000Z'), reportedReasonCode: 'RECIPIENT_REFUSED',
+        endedAt: new Date('2026-10-20T12:00:00.000Z'), reportReceivedAt: new Date('2026-10-20T12:00:00.000Z'), reportedReasonCode: 'RECIPIENT_REFUSED',
         reportFormat: 'structured-v1', reportEvidence: { interactionNote: 'private distributor description' } }),
     ]);
     const orderBefore = (await db.collection('requests').doc(orderId).get()).updateTime.toMillis();
     const userBefore = (await db.collection('users').doc(uid).get()).updateTime.toMillis();
-    const started = Date.now();
+    const started = responseTime.getTime();
     assert.equal((await post(body, 'other-token')).statusCode, 404);
     assert.equal((await post(body, 'manager-token')).statusCode, 403);
     assert.equal((await post(body, '')).statusCode, 401);
@@ -233,7 +234,8 @@ test('real Firestore transaction stores one Requester response and immutable eve
 
     const nextAttemptId = attemptIdFor(orderId, 2);
     await db.collection('deliveryAttempts').doc(nextAttemptId).set({ orderId, requesterUid: uid, attemptNumber: 2,
-      outcome: 'failed', reviewState: 'reported', responsibility: 'undetermined', endedAt: new Date() });
+      outcome: 'failed', reviewState: 'reported', responsibility: 'undetermined', endedAt: responseTime,
+      reportReceivedAt: responseTime });
     const nextBody = { ...body, attemptId: nextAttemptId };
     const different = await Promise.all([
       post(nextBody),

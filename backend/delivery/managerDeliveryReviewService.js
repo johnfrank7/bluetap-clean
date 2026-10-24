@@ -1,6 +1,7 @@
 const { createHash } = require('node:crypto');
 const { FieldPath } = require('firebase-admin/firestore');
 const { attemptIdFor } = require('./deliveryAttemptService');
+const { RESPONSE_WINDOW_MS } = require('./deliveryReviewPolicy');
 const { orderOwner } = require('./requesterDeliveryReportService');
 const { OtpError } = require('../utils/otpError');
 const {
@@ -12,7 +13,6 @@ const {
 
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 25;
-const RESPONSE_WINDOW_MS = 72 * 60 * 60 * 1000;
 const notFound = () => new OtpError(404, 'DELIVERY_REVIEW_NOT_FOUND', 'Delivery review not found.');
 const invalidCursor = () => new OtpError(400, 'DELIVERY_REVIEW_CURSOR_INVALID', 'The review cursor is invalid.');
 const validId = (value) => typeof value === 'string' && value.length > 0 && value.length <= 128
@@ -109,12 +109,16 @@ function candidateOf(snapshot, manager) {
 
 async function verifiedReview(db, snapshot, manager, orderCache = new Map()) {
   const attempt = candidateOf(snapshot, manager);
-  contactEvidence(attempt);
-  responseOf(attempt);
   if (!orderCache.has(attempt.orderId)) {
     orderCache.set(attempt.orderId, await db.collection('requests').doc(attempt.orderId).get());
   }
-  const orderSnapshot = orderCache.get(attempt.orderId);
+  return validatedReview(snapshot, orderCache.get(attempt.orderId), manager);
+}
+
+function validatedReview(snapshot, orderSnapshot, manager) {
+  const attempt = candidateOf(snapshot, manager);
+  contactEvidence(attempt);
+  responseOf(attempt);
   if (!orderSnapshot?.exists || orderSnapshot.id !== attempt.orderId
     || orderOwner(orderSnapshot.data() || {}) !== attempt.requesterUid) throw notFound();
   return { attempt, order: orderSnapshot.data() || {} };
@@ -194,4 +198,4 @@ async function reviewList(db, { manager, limit = DEFAULT_PAGE_SIZE, cursor = '' 
   return { reviews, nextCursor };
 }
 
-module.exports = { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, RESPONSE_WINDOW_MS, pageSize, reviewDetail, reviewList, revisionFor };
+module.exports = { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, RESPONSE_WINDOW_MS, pageSize, reviewDetail, reviewList, revisionFor, validatedReview };

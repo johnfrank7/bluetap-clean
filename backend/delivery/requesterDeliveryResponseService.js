@@ -1,4 +1,5 @@
 const { attemptIdFor } = require('./deliveryAttemptService');
+const { RESPONSE_WINDOW_MS } = require('./deliveryReviewPolicy');
 const { orderOwner, safeReport, validAttemptId } = require('./requesterDeliveryReportService');
 const { OtpError } = require('../utils/otpError');
 
@@ -67,6 +68,12 @@ async function submitInitialResponse(db, requesterUid, body, now = () => new Dat
 
     const submittedAt = now();
     if (!(submittedAt instanceof Date) || !Number.isFinite(submittedAt.getTime())) throw new Error('Invalid server time.');
+    const receivedAt = attempt.reportReceivedAt?.toDate?.()
+      || (attempt.reportReceivedAt instanceof Date ? attempt.reportReceivedAt : null);
+    if (!receivedAt || !Number.isFinite(receivedAt.getTime())
+      || !Number.isFinite(receivedAt.getTime() + RESPONSE_WINDOW_MS)
+      || receivedAt.getTime() > submittedAt.getTime()
+      || submittedAt.getTime() >= receivedAt.getTime() + RESPONSE_WINDOW_MS) throw conflict();
     const response = { status: 'submitted', requesterUid, explanation: input.explanation,
       submittedAt, clientMutationId: input.clientMutationId };
     tx.update(attemptRef, { requesterResponse: response, updatedAt: submittedAt });

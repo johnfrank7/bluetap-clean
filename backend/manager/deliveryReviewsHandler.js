@@ -3,6 +3,13 @@ const { requireActiveManager } = require('../auth/authorization');
 const { applyCors } = require('../utils/cors');
 const { OtpError } = require('../utils/otpError');
 const { pageSize, reviewDetail, reviewList } = require('../delivery/managerDeliveryReviewService');
+const { submitManagerDecision } = require('../delivery/managerDeliveryDecisionService');
+
+function bodyOf(req) {
+  if (req.body && typeof req.body === 'object') return req.body;
+  try { return JSON.parse(String(req.body || '{}')); }
+  catch { throw new OtpError(400, 'DELIVERY_DECISION_INVALID', 'The decision payload is invalid.'); }
+}
 
 function queryOptions(req) {
   const params = new URL(req.url || '/api/manager/delivery-reviews', 'http://localhost').searchParams;
@@ -30,10 +37,16 @@ function createManagerDeliveryReviewsHandler(getAdmin = getFirebaseAdmin, now = 
     res.setHeader('Cache-Control', 'no-store');
     if (!applyCors(req, res)) return;
     if (req.method === 'OPTIONS') return res.status(204).end();
-    if (req.method !== 'GET') return res.status(405).json({ error: { reason: 'method-not-allowed', message: 'Use GET.' } });
+    if (!['GET', 'POST'].includes(req.method)) return res.status(405).json({ error: { reason: 'method-not-allowed', message: 'Use GET or POST.' } });
     try {
       const { auth, db } = getAdmin();
       const manager = await requireActiveManager(req, auth, db);
+      if (req.method === 'POST') {
+        if (new URL(req.url || '/api/manager/delivery-reviews', 'http://localhost').search) {
+          throw new OtpError(400, 'DELIVERY_DECISION_INVALID', 'The decision query is invalid.');
+        }
+        return res.status(200).json(await submitManagerDecision(db, manager, bodyOf(req), now));
+      }
       const options = queryOptions(req);
       const result = options.attemptId
         ? await reviewDetail(db, options.attemptId, manager, now())

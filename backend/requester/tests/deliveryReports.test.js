@@ -8,7 +8,7 @@ const { routes } = require('../../routes');
 
 const date = (day) => new Date(`2026-10-${String(day).padStart(2, '0')}T12:00:00.000Z`);
 
-function fixture() {
+function fixture(now = () => date(22)) {
   const records = new Map([
     ['users/r1', { role: 'requester', accountStatus: 'active' }],
     ['users/r2', { role: 'requester', accountStatus: 'active' }],
@@ -84,7 +84,7 @@ function fixture() {
     if (!identities[token]) throw new Error('invalid token');
     return identities[token];
   } };
-  const handler = createRequesterDeliveryReportsHandler(() => ({ auth, db }));
+  const handler = createRequesterDeliveryReportsHandler(() => ({ auth, db }), now);
   async function call(url, token = 'r1', method = 'GET', body) {
     const res = { statusCode: 200, body: null, headers: {}, setHeader(key, value) { this.headers[key] = value; }, getHeader() {}, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; }, end() { return this; } };
     await handler({ url, method, body, headers: token ? { authorization: `Bearer ${token}` } : {} }, res);
@@ -243,7 +243,7 @@ test('Requester submits one factual response after rescheduling with one immutab
   f.records.get(`deliveryAttempts/${f.ids.first}`).responsibility = 'undetermined';
   const orderBefore = JSON.stringify(f.records.get('requests/order-one'));
   const userBefore = JSON.stringify(f.records.get('users/r1'));
-  const before = Date.now();
+  const before = date(22).getTime();
   const result = await post(f, responseBody(f.ids.first, { explanation: '  I was at the address   and received no call.  ' }));
   assert.equal(result.statusCode, 200, JSON.stringify(result.body));
   assert.equal(result.body.report.requesterResponseStatus, 'submitted');
@@ -281,6 +281,28 @@ test('exact replay is read-only; changed explanation, mutation ID, and second re
   assert.equal((await post(f, responseBody(f.ids.first, { explanation: 'I waited outside the address for a long time.' }))).statusCode, 409);
   assert.equal((await post(f, responseBody(f.ids.first, { clientMutationId: 'requester_response_002' }))).statusCode, 409);
   assert.equal([...f.records.keys()].filter((key) => key.startsWith('deliveryAttemptEvents/')).length, 1);
+});
+
+test('new responses expire at 72 hours while an accepted response replays after the cutoff', async () => {
+  let current = new Date(date(24).getTime() - 1);
+  const f = fixture(() => current);
+  f.records.get(`deliveryAttempts/${f.ids.first}`).responsibility = 'undetermined';
+  const body = responseBody(f.ids.first);
+  assert.equal((await post(f, body)).statusCode, 200);
+  const attempt = f.records.get(`deliveryAttempts/${f.ids.first}`);
+  const event = f.records.get(`deliveryAttemptEvents/${f.ids.first}_requester_response_v1`);
+  current = date(24);
+  assert.equal((await post(f, body)).statusCode, 200);
+  assert.equal(f.records.get(`deliveryAttempts/${f.ids.first}`), attempt);
+  assert.equal(f.records.get(`deliveryAttemptEvents/${f.ids.first}_requester_response_v1`), event);
+  const expired = fixture(() => date(24));
+  expired.records.get(`deliveryAttempts/${expired.ids.first}`).responsibility = 'undetermined';
+  assert.equal((await post(expired, body)).statusCode, 409);
+  expired.records.get(`deliveryAttempts/${expired.ids.first}`).reportReceivedAt = null;
+  assert.equal((await post(expired, body)).statusCode, 409);
+  expired.records.get(`deliveryAttempts/${expired.ids.first}`).reportReceivedAt = date(25);
+  assert.equal((await post(expired, body)).statusCode, 409);
+  assert.equal([...expired.records.keys()].filter((key) => key.endsWith('_requester_response_v1')).length, 0);
 });
 
 test('POST validates authentication, role, ownership, attempt identity, and review eligibility', async () => {

@@ -132,7 +132,8 @@ test('active Manager authorization precedes query parsing and rejects forged rol
   assert.equal((await f.call('/api/manager/delivery-reviews?branchId=b2')).statusCode, 400);
   assert.equal((await f.call(`/api/manager/delivery-reviews?attemptId=${f.ids.first}&branchId=b1`)).statusCode, 400);
   assert.equal((await f.call('/api/manager/delivery-reviews?state=resolved')).statusCode, 400);
-  assert.equal((await f.call('/api/manager/delivery-reviews', 'm1', 'POST')).statusCode, 405);
+  assert.equal((await f.call('/api/manager/delivery-reviews', 'm1', 'PATCH')).statusCode, 405);
+  assert.equal((await f.call('/api/manager/delivery-reviews', 'm1', 'POST')).statusCode, 400);
   assert.equal(f.queryShapes.length, 0);
 });
 
