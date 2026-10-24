@@ -212,6 +212,9 @@ service cloud.firestore {
     match /chatModerationActions/{document=**} { allow read, write: if false; }
     match /moderationActions/{document=**} { allow read, write: if false; }
     match /moderationMutationIds/{document=**} { allow read, write: if false; }
+    // Durable account-action authority and reservations belong only to the backend.
+    match /accountActionIntents/{document=**} { allow read, write: if false; }
+    match /accountActionReservations/{document=**} { allow read, write: if false; }
     match /moderationNotices/{document=**} { allow read, write: if false; }
     // Content-free invalidation documents may be read only by their exact
     // authorized audience. All activity writes remain server-owned.
