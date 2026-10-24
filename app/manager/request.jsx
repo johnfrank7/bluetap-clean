@@ -1,8 +1,9 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useLocalSearchParams } from 'expo-router';
 import {
   ActivityIndicator,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -27,6 +28,9 @@ import TopToastFeedback from '../../components/TopToastFeedback';
 import ManagerShell, { MANAGER_COLORS, ManagerPill } from '../../components/ManagerShell';
 import { useManagerOngoingRequests } from '../../components/ManagerOngoingRequestsMonitor';
 import { useManagerRealtimeData } from '../../components/ManagerRealtimeData';
+import { ManagerDeliveryReviewList, ManagerDeliveryReviewModal } from '../../components/ManagerDeliveryReview';
+import { fetchManagerDeliveryReviews, fetchManagerDeliveryReview, submitManagerDeliveryDecision } from '../../services/managerDeliveryReviews';
+import { createManagerDeliveryReviewFlow } from '../../services/managerDeliveryReviewFlow';
 import { parseTimestamp } from '../../services/notificationTimestamp';
 import LocationMap from '../../components/LocationMap';
 import { ManagerOrderChatAction } from '../../components/chat/ChatOrderActions';
@@ -38,6 +42,7 @@ const {
   matchesOrderIdentifier,
   resolveManagerOrderTarget,
 } = require('../../services/managerOrderTargetNavigation');
+const { createMutationId } = require('../../services/deliveryReportSubmission');
 
 
 
@@ -196,6 +201,9 @@ function OutsideRadiusApprovalQueue({
   onSectionLayout,
   onTargetCardLayout,
   sectionScrollRef,
+  reviewFlow,
+  reviewState,
+  onOpenReview,
   style,
 }) {
   const [error, setError] = useState('');
@@ -253,13 +261,29 @@ function OutsideRadiusApprovalQueue({
       <View style={styles.cardHeaderRow}>
         <View style={{ flex: 1, minWidth: 0 }}>
           <Text style={styles.eyebrow}>DELIVERY EXCEPTIONS</Text>
-          <Text style={styles.cardTitle}>Order Approvals</Text>
+          <Text style={styles.cardTitle}>Delivery Exceptions</Text>
           <Text style={styles.helperText}>
-            Review delivery requests outside your branch radius or above a product order limit.
+            Review order approvals and reported failed deliveries for your branch.
           </Text>
         </View>
-        <ManagerPill tone="warning">{orders.length} pending</ManagerPill>
+        <ManagerPill tone="warning">{reviewState.activeTab === 'approvals' ? `${orders.length} pending` : `${reviewState.reviews.length} loaded`}</ManagerPill>
       </View>
+
+      <View accessibilityRole="tablist" style={styles.exceptionTabs}>
+        {[
+          ['approvals', 'Approvals'], ['failed', 'Failed Deliveries'],
+        ].map(([tab, label]) => <Pressable key={tab} accessibilityRole="tab" accessibilityLabel={label}
+          accessibilityState={{ selected: reviewState.activeTab === tab }}
+          onPress={() => { reviewFlow.setTab(tab); if (tab === 'failed' && !reviewState.listLoaded) void reviewFlow.load(); }}
+          style={({ focused }) => [styles.exceptionTab, reviewState.activeTab === tab && styles.exceptionTabSelected,
+            focused && styles.exceptionTabFocused]}>
+          <Text style={[styles.exceptionTabText, reviewState.activeTab === tab && styles.exceptionTabTextSelected]}>{label}</Text>
+        </Pressable>)}
+      </View>
+
+      {reviewState.activeTab === 'failed' ? (
+        <ManagerDeliveryReviewList state={reviewState} flow={reviewFlow} colors={colors} onReview={onOpenReview} />
+      ) : <>
 
       {!!error && (
         <View accessibilityRole="alert" style={styles.errorBanner}>
@@ -393,11 +417,12 @@ function OutsideRadiusApprovalQueue({
         styles={styles}
         itemLabel="exceptions"
       />
+      </>}
     </View>
   );
 }
 
-function EditOrderModal({ visible, order, onClose, onSaveSuccess, colors, styles }) {
+function EditOrderModal({ visible, order, onClose, onDismiss, onSaveSuccess, colors, styles }) {
   const [catalogProducts, setCatalogProducts] = useState([]);
   const [items, setItems] = useState([]);
   const [notes, setNotes] = useState('');
@@ -502,7 +527,7 @@ function EditOrderModal({ visible, order, onClose, onSaveSuccess, colors, styles
   if (!order) return null;
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} onDismiss={onDismiss}>
       <View style={styles.modalBackdrop}>
         <View accessibilityViewIsModal style={styles.editModalCard}>
           <View style={styles.modalHeaderRow}>
@@ -1455,6 +1480,20 @@ export default function ManagerRequestPage() {
   const targetHighlightTimerRef = useRef(null);
   const { viewAllTick = 0 } = useManagerOngoingRequests();
   const realtime = useManagerRealtimeData();
+  const reviewScope = realtime.managerUid && realtime.branchId ? `${realtime.managerUid}:${realtime.branchId}` : '';
+  const reviewFlow = useMemo(() => {
+    const uid = realtime.managerUid;
+    const flow = createManagerDeliveryReviewFlow({
+      list: (cursor) => fetchManagerDeliveryReviews(cursor, uid),
+      detail: (attemptId) => fetchManagerDeliveryReview(attemptId, uid),
+      decide: (payload) => submitManagerDeliveryDecision(payload, uid),
+    }, createMutationId);
+    flow.setScope(reviewScope);
+    return flow;
+  }, [reviewScope]);
+  const reviewState = useSyncExternalStore(reviewFlow.subscribe, reviewFlow.getState, reviewFlow.getState);
+  const pendingReviewRef = useRef(null);
+  useEffect(() => { pendingReviewRef.current = null; }, [reviewScope]);
   const dispatchData = useMemo(() => {
     const queues = getManagerQueues(realtime.requests, realtime.incomingTransfers, realtime.branchId);
     const branchLocation = Number.isFinite(Number(realtime.branch?.latitude)) && Number.isFinite(Number(realtime.branch?.longitude))
@@ -1524,6 +1563,29 @@ export default function ManagerRequestPage() {
     setSelectedOrder(order);
     setModalVisible(true);
   };
+
+  const finishReviewHandoff = () => {
+    if (modalVisible || !pendingReviewRef.current) return;
+    const target = pendingReviewRef.current;
+    pendingReviewRef.current = null;
+    setSelectedOrder(null);
+    if (target.scope !== reviewScope) return;
+    void reviewFlow.open(target.attemptId, target.orderId);
+  };
+
+  const handleOpenReview = (review) => {
+    if (modalVisible) {
+      pendingReviewRef.current = { ...review, scope: reviewScope };
+      setModalVisible(false);
+      return;
+    }
+    void reviewFlow.open(review.attemptId, review.orderId);
+  };
+
+  useEffect(() => {
+    // Web and Android can hand off after the hidden-modal render; iOS waits for onDismiss.
+    if (Platform.OS !== 'ios' && !modalVisible && pendingReviewRef.current) finishReviewHandoff();
+  }, [modalVisible]);
 
   const attemptScrollToTarget = useCallback(() => {
     if (!targetResolution.canonicalOrderId || !targetResolution.section) return;
@@ -1706,6 +1768,9 @@ export default function ManagerRequestPage() {
           sectionScrollRef={(node) => {
             sectionScrollRefs.current.exceptions = node;
           }}
+          reviewFlow={reviewFlow}
+          reviewState={reviewState}
+          onOpenReview={handleOpenReview}
           style={styles.ordersColumnCard}
         />
       </View>
@@ -1753,10 +1818,12 @@ export default function ManagerRequestPage() {
         visible={modalVisible}
         order={selectedOrder}
         onClose={() => setModalVisible(false)}
+        onDismiss={finishReviewHandoff}
         onSaveSuccess={() => {}}
         colors={colors}
         styles={styles}
       />
+      <ManagerDeliveryReviewModal state={reviewState} flow={reviewFlow} colors={colors} visible={!modalVisible} />
     </ManagerShell>
   );
 }
@@ -1806,6 +1873,31 @@ const createStyles = (
       width: '100%',
       minWidth: 0,
     },
+    exceptionTabs: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 8,
+      marginBottom: 12,
+    },
+    exceptionTab: {
+      minHeight: 44,
+      paddingHorizontal: 14,
+      justifyContent: 'center',
+      borderRadius: 9,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surfaceAlt,
+    },
+    exceptionTabSelected: {
+      borderColor: colors.primary,
+      backgroundColor: colors.primarySoft,
+    },
+    exceptionTabFocused: {
+      borderWidth: 2,
+      borderColor: colors.primary,
+    },
+    exceptionTabText: { color: colors.textPrimary, fontSize: 12, fontWeight: '700' },
+    exceptionTabTextSelected: { color: colors.primary, fontWeight: '900' },
     orderHeaderAside: {
       flexDirection: width < 377 ? 'row' : 'column',
       alignItems: width < 377 ? 'center' : 'flex-end',
