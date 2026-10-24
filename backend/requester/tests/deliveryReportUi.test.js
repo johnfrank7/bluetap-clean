@@ -8,6 +8,7 @@ const {
   canSubmitResponse, createMutationId, createReportModalHandoff, createRequesterResponseFlow,
   createRequesterResponseRegistry, explanationError,
   reportDisplayState, reportViewModel,
+  responsibilityLabel,
 } = require('../../../services/requesterDeliveryReportFlow');
 
 const root = resolve(__dirname, '../../..');
@@ -84,6 +85,19 @@ test('global report feed omits orderId and encodes bounded pagination without ch
   assert.equal(calls.length, 5);
 });
 
+test('review completion client uses the protected bounded feed without a client collection read', async () => {
+  const calls = [];
+  const client = loadClient({ fetch: async (url, options) => {
+    calls.push({ url, options });
+    return { ok: true, status: 200, json: async () => ({ completions: [], nextCursor: null }) };
+  } });
+  assert.deepEqual(await client.fetchRequesterReviewCompletions({ limit: 1, cursor: attemptId }),
+    { completions: [], nextCursor: null });
+  assert.match(calls[0].url, new RegExp(`feed=review-completions&limit=1&cursor=${attemptId}`));
+  assert.equal(calls[0].options.headers.Authorization, 'Bearer trusted-token');
+  assert.throws(() => client.fetchRequesterReviewCompletions({ limit: 26 }), RangeError);
+});
+
 test('client distinguishes unauthenticated, confirmed conflict, server failure, and uncertain network result', async () => {
   const body = { attemptId, explanation: 'I received no call.', clientMutationId: 'stable-uuid' };
   const missing = loadClient({ auth: { currentUser: null }, fetch: async () => { throw new Error('must not fetch'); } });
@@ -125,6 +139,28 @@ test('response text validation matches server limits and DTO projection drops pr
   for (const secret of ['private refusal', 'private note', 'private-id', 'private-response-id', 'secret']) assert.ok(!encoded.includes(secret));
   assert.equal(visible.contactAttempts[0].claimedAtUnverified, true);
   assert.match(createMutationId(), /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/);
+});
+
+test('pending deadline and resolved decision state use neutral labels and block a new response', () => {
+  const pending = reportViewModel({ ...report(), responseWindowOpen: true,
+    responseDeadlineAt: '2026-10-23T12:00:00.000Z' });
+  assert.equal(canSubmitResponse(pending), true);
+  assert.equal(pending.responseDeadlineAt, '2026-10-23T12:00:00.000Z');
+  assert.equal(canSubmitResponse(reportViewModel({ ...report(), responseWindowOpen: false })), false);
+  const resolved = reportViewModel({ ...report(), reviewState: 'resolved', responseWindowOpen: false,
+    responsibility: 'shared', decisionReason: 'Both accounts were reviewed against the delivery record.',
+    decidedAt: '2026-10-24T12:00:00.000Z' });
+  assert.equal(resolved.decisionReason, 'Both accounts were reviewed against the delivery record.');
+  assert.equal(resolved.decidedAt, '2026-10-24T12:00:00.000Z');
+  assert.equal(canSubmitResponse(resolved), false);
+  assert.deepEqual(['requester_responsible', 'provider_responsible', 'shared', 'undetermined']
+    .map(responsibilityLabel), ['Requester responsibility', 'Provider responsibility',
+      'Shared responsibility', 'Responsibility undetermined']);
+  const dialog = read('components/RequesterDeliveryReportDialog.jsx');
+  assert.match(dialog, /Review Completed/);
+  assert.match(dialog, /decisionReason/);
+  assert.match(dialog, /colors\.textPrimary/);
+  assert.match(dialog, /onCancel=\{onClose\}/);
 });
 
 test('rapid duplicate taps send once; uncertain retry freezes text and mutation ID until exact replay', async () => {

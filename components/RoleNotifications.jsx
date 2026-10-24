@@ -3,17 +3,17 @@ import React from 'react';
 import { AppState, Platform } from 'react-native';
 
 import { auth } from '../firebase';
-import { fetchRequesterDeliveryReports } from '../services/requesterDeliveryReports';
+import { fetchRequesterDeliveryReports, fetchRequesterReviewCompletions } from '../services/requesterDeliveryReports';
 import { useDistributorData, useRequesterData } from './RoleDataProviders';
 import { useChat } from './chat/ChatContext';
 import { useModerationNotices } from './ModerationNotices';
 const { getChatFollowupNotifications, getDistributorAttentionCounts, getRoleOrderNotifications } = require('../services/orderNotifications');
-const { combineLoadedNotifications, countLoadedUnseen, createRequesterReportFeed } = require('../services/requesterReportNotificationFeed');
+const { combineLoadedNotifications, countLoadedUnseen, createRequesterReportFeed, createRequesterReviewFeed } = require('../services/requesterReportNotificationFeed');
 const { createRoleNotificationSeenStore } = require('../services/roleNotificationSeenStore');
 
 const RoleNotificationContext = React.createContext({
   events: [], allEvents: [], unseenCount: 0, attentionCounts: { requests: 0, schedule: 0 },
-  reportFeed: null, refreshReports: () => {}, loadOlderReports: () => {},
+  reportFeed: null, completionFeed: null, refreshReports: () => {}, loadOlderReports: () => {}, loadOlderCompletions: () => {},
   markSeen: () => {}, markAllSeen: () => {}, ready: false, unseenCountScope: 'loaded',
 });
 const seenStore = createRoleNotificationSeenStore(AsyncStorage);
@@ -39,8 +39,19 @@ export function RoleNotificationProvider({ role, children }) {
       return result;
     },
   });
+  const completionFeedRef = React.useRef(null);
+  if (!completionFeedRef.current) completionFeedRef.current = createRequesterReviewFeed({
+    fetchPage: async (ownerUid, options) => {
+      if (auth.currentUser?.uid !== ownerUid) throw new Error('Your review session changed. Please retry.');
+      const result = await fetchRequesterReviewCompletions(options);
+      if (auth.currentUser?.uid !== ownerUid) throw new Error('Your review session changed. Please retry.');
+      return result;
+    },
+  });
   const [reportFeedState, setReportFeedState] = React.useState(reportFeedRef.current.getState());
+  const [completionFeedState, setCompletionFeedState] = React.useState(completionFeedRef.current.getState());
   const reportFeed = requesterUid && reportFeedState.uid === requesterUid ? reportFeedState : EMPTY_REPORT_FEED;
+  const completionFeed = requesterUid && completionFeedState.uid === requesterUid ? completionFeedState : EMPTY_REPORT_FEED;
   const [seen, setSeen] = React.useState(new Set());
   const [seenKey, setSeenKey] = React.useState('');
   const seenRef = React.useRef(seen);
@@ -60,18 +71,27 @@ export function RoleNotificationProvider({ role, children }) {
           : `${notice.title}${notice.branchName ? ` for ${notice.branchName}` : ''}${notice.reasonLabel ? ` (${notice.reasonLabel})` : ''}.`,
     })),
   ].sort((left, right) => right.at.getTime() - left.at.getTime()).slice(0, 150), [chat.conversations, moderation.notices, role, roleData.orders]);
-  const allEvents = React.useMemo(() => combineLoadedNotifications(baseEvents, reportFeed.events), [baseEvents, reportFeed.events]);
+  const allEvents = React.useMemo(() => combineLoadedNotifications(baseEvents, reportFeed.events, completionFeed.events),
+    [baseEvents, reportFeed.events, completionFeed.events]);
   const events = React.useMemo(() => allEvents.slice(0, 150), [allEvents]);
 
   React.useEffect(() => reportFeedRef.current.subscribe(setReportFeedState), []);
+  React.useEffect(() => completionFeedRef.current.subscribe(setCompletionFeedState), []);
   React.useEffect(() => {
     reportFeedRef.current.setUid(requesterUid);
-    if (requesterUid) reportFeedRef.current.refresh();
+    completionFeedRef.current.setUid(requesterUid);
+    if (requesterUid) {
+      reportFeedRef.current.refresh();
+      completionFeedRef.current.refresh();
+    }
   }, [requesterUid]);
   React.useEffect(() => {
     if (!requesterUid) return undefined;
     let previous = AppState.currentState;
-    const refresh = () => reportFeedRef.current.refresh();
+    const refresh = () => {
+      reportFeedRef.current.refresh();
+      completionFeedRef.current.refresh();
+    };
     const subscription = AppState.addEventListener?.('change', (next) => {
       if (next === 'active' && previous !== 'active') refresh();
       previous = next;
@@ -110,12 +130,17 @@ export function RoleNotificationProvider({ role, children }) {
   const markAllSeen = React.useCallback(() => markSeen(allEvents.map((event) => event.id)), [allEvents, markSeen]);
   const unseenCount = seenReady ? countLoadedUnseen(allEvents, seen) : 0;
   const attentionCounts = React.useMemo(() => role === 'distributor' ? getDistributorAttentionCounts(roleData.orders || []) : { requests: 0, schedule: 0 }, [role, roleData.orders]);
-  const refreshReports = React.useCallback((options) => reportFeedRef.current.refresh(options), []);
+  const refreshReports = React.useCallback((options) => Promise.all([
+    reportFeedRef.current.refresh(options), completionFeedRef.current.refresh(options),
+  ]), []);
   const loadOlderReports = React.useCallback(() => reportFeedRef.current.loadOlder(), []);
+  const loadOlderCompletions = React.useCallback(() => completionFeedRef.current.loadOlder(), []);
   const unseenCountScope = role === 'requester' ? 'loaded' : 'all';
   const value = React.useMemo(() => ({ events, allEvents, unseenCount, unseenCountScope, attentionCounts,
-    reportFeed, refreshReports, loadOlderReports, markSeen, markAllSeen, ready: seenReady }),
-  [allEvents, attentionCounts, events, loadOlderReports, markAllSeen, markSeen, seenReady, refreshReports, reportFeed, unseenCount, unseenCountScope]);
+    reportFeed, completionFeed, refreshReports, loadOlderReports, loadOlderCompletions,
+    markSeen, markAllSeen, ready: seenReady }),
+  [allEvents, attentionCounts, events, loadOlderReports, loadOlderCompletions, markAllSeen, markSeen,
+    seenReady, refreshReports, reportFeed, completionFeed, unseenCount, unseenCountScope]);
   return <RoleNotificationContext.Provider value={value}>{children}</RoleNotificationContext.Provider>;
 }
 

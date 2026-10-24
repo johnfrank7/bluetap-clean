@@ -180,6 +180,18 @@ test('legacy attempts have safe limited DTOs; old orders without attempts yield 
   assert.deepEqual(oldOrder.body, { reports: [], nextCursor: null });
 });
 
+test('pending report exposes the server response deadline and closes the action after 72 hours', async () => {
+  const open = fixture(() => date(22));
+  const openReport = (await open.call(`/api/requester/delivery-reports?attemptId=${open.ids.first}`)).body.report;
+  assert.equal(openReport.reviewState, 'awaiting_review');
+  assert.equal(openReport.responseDeadlineAt, '2026-10-24T12:00:00.000Z');
+  assert.equal(openReport.responseWindowOpen, true);
+  const closed = fixture(() => date(25));
+  const closedReport = (await closed.call(`/api/requester/delivery-reports?attemptId=${closed.ids.first}`)).body.report;
+  assert.equal(closedReport.reviewState, 'awaiting_review');
+  assert.equal(closedReport.responseWindowOpen, false);
+});
+
 test('DTO redacts refusal interaction, raw legacy notes, private identity, mutations, and audit details', async () => {
   const f = fixture();
   const raw = f.records.get(`deliveryAttempts/${f.ids.first}`);
@@ -196,7 +208,8 @@ test('DTO redacts refusal interaction, raw legacy notes, private identity, mutat
   assert.deepEqual(detail.body.report.contactAttempts, []);
   assert.deepEqual(Object.keys(detail.body.report).sort(), [
     'attemptId', 'contactAttempts', 'orderId', 'attemptNumber', 'reportReceivedAt',
-    'reportedReasonCode', 'reportedReasonLabel', 'reportedStatus', 'requesterResponse', 'requesterResponseStatus', 'reviewState',
+    'reportedReasonCode', 'reportedReasonLabel', 'reportedStatus', 'requesterResponse', 'requesterResponseStatus',
+    'responseDeadlineAt', 'responseWindowOpen', 'reviewState',
   ].sort());
   raw.requesterResponse.requesterUid = 'r2';
   const mismatchedResponse = await f.call(`/api/requester/delivery-reports?attemptId=${f.ids.first}`);
@@ -215,6 +228,63 @@ test('structured contact summaries use allowlisted labels and mark claimed time 
   assert.ok(!JSON.stringify(second.body).includes('SECRET_'));
 });
 
+test('resolved reports expose all four canonical findings and factual detail without private decision fields', async () => {
+  for (const responsibility of ['requester_responsible', 'provider_responsible', 'shared', 'undetermined']) {
+    const f = fixture();
+    const attempt = f.records.get(`deliveryAttempts/${f.ids.first}`);
+    const decidedAt = date(23);
+    const decisionReason = 'The submitted evidence and delivery timeline were reviewed.';
+    Object.assign(attempt, { branchId: 'original-branch', reviewState: 'resolved', responsibility,
+      managerDecision: { managerUid: 'private-manager', responsibility, decisionReason,
+        expectedRevision: 'private-revision', clientMutationId: 'private-mutation', decidedAt } });
+    f.records.set(`deliveryAttemptEvents/${f.ids.first}_manager_decision_v1`, {
+      schemaVersion: 1, kind: 'MANAGER_DELIVERY_DECISION', attemptId: f.ids.first, orderId: 'order-one', attemptNumber: 1,
+      branchId: 'original-branch', managerUid: 'private-manager', actorUid: 'private-manager',
+      actorRole: 'manager', previousReviewState: 'reported', reviewState: 'resolved',
+      responsibility, decisionReason, expectedRevision: 'private-revision',
+      clientMutationId: 'private-mutation', createdAt: decidedAt,
+    });
+    const detail = await f.call(`/api/requester/delivery-reports?attemptId=${f.ids.first}`);
+    assert.equal(detail.statusCode, 200, JSON.stringify(detail.body));
+    assert.equal(detail.body.report.reviewState, 'resolved');
+    assert.equal(detail.body.report.responsibility, responsibility);
+    assert.equal(detail.body.report.decisionReason, decisionReason);
+    assert.equal(detail.body.report.decidedAt, decidedAt.toISOString());
+    assert.equal(detail.body.report.responseWindowOpen, false);
+    const scoped = await f.call('/api/requester/delivery-reports?orderId=order-one');
+    assert.equal(scoped.statusCode, 200);
+    const summary = scoped.body.reports.find((item) => item.attemptId === f.ids.first);
+    assert.equal(summary.responsibility, responsibility);
+    assert.equal(summary.decisionReason, undefined);
+    assert.equal((await f.call(`/api/requester/delivery-reports?attemptId=${f.ids.first}`, 'r2')).statusCode, 404);
+    for (const privateValue of ['private-manager', 'private-revision', 'private-mutation']) {
+      assert.ok(!JSON.stringify(detail.body).includes(privateValue));
+    }
+  }
+});
+
+test('missing or mismatched decision events fail closed and cannot invent completed reviews', async () => {
+  const f = fixture();
+  const attempt = f.records.get(`deliveryAttempts/${f.ids.first}`);
+  Object.assign(attempt, { branchId: 'original-branch', reviewState: 'resolved', responsibility: 'shared',
+    managerDecision: { managerUid: 'manager', responsibility: 'shared',
+      decisionReason: 'A factual decision was recorded.', expectedRevision: 'revision',
+      clientMutationId: 'mutation', decidedAt: date(23) } });
+  const detailUrl = `/api/requester/delivery-reports?attemptId=${f.ids.first}`;
+  assert.equal((await f.call(detailUrl)).statusCode, 404);
+  assert.equal((await f.call('/api/requester/delivery-reports?orderId=order-one')).statusCode, 404);
+  assert.ok(!(await f.call('/api/requester/delivery-reports')).body.reports.some((item) => item.attemptId === f.ids.first));
+  f.records.set(`deliveryAttemptEvents/${f.ids.first}_manager_decision_v1`, {
+    schemaVersion: 1, kind: 'MANAGER_DELIVERY_DECISION', attemptId: f.ids.first, orderId: 'order-two', attemptNumber: 1,
+    branchId: 'original-branch', managerUid: 'manager', actorUid: 'manager', actorRole: 'manager',
+    previousReviewState: 'reported', reviewState: 'resolved', responsibility: 'shared',
+    decisionReason: 'A factual decision was recorded.', expectedRevision: 'revision',
+    clientMutationId: 'mutation', createdAt: date(23),
+  });
+  assert.equal((await f.call(detailUrl)).statusCode, 404);
+  assert.equal((await f.call('/api/requester/delivery-reports?feed=review-completions&orderId=order-one')).statusCode, 400);
+});
+
 test('rules still deny direct attempt and event access; indexes match the two scoped queries', () => {
   const root = resolve(__dirname, '..', '..', '..');
   const rules = readFileSync(resolve(root, 'firestore.rules'), 'utf8');
@@ -230,6 +300,13 @@ test('rules still deny direct attempt and event access; indexes match the two sc
         { fieldPath: 'endedAt', order: 'DESCENDING' },
       ])));
   }
+  assert.ok(indexes.indexes.some((index) => index.collectionGroup === 'deliveryAttempts'
+    && JSON.stringify(index.fields) === JSON.stringify([
+      { fieldPath: 'requesterUid', order: 'ASCENDING' },
+      { fieldPath: 'outcome', order: 'ASCENDING' },
+      { fieldPath: 'reviewState', order: 'ASCENDING' },
+      { fieldPath: 'managerDecision.decidedAt', order: 'DESCENDING' },
+    ])));
 });
 
 const responseBody = (attemptId, overrides = {}) => ({

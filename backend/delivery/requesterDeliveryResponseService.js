@@ -1,6 +1,7 @@
 const { attemptIdFor } = require('./deliveryAttemptService');
 const { RESPONSE_WINDOW_MS } = require('./deliveryReviewPolicy');
-const { orderOwner, safeReport, validAttemptId } = require('./requesterDeliveryReportService');
+const { decisionFromEvent, orderOwner, safeReport, validAttemptId } = require('./requesterDeliveryReportService');
+const { decisionEventIdFor } = require('./deliveryReviewPolicy');
 const { OtpError } = require('../utils/otpError');
 
 const EVENT_KIND = 'REQUESTER_INITIAL_RESPONSE_SUBMITTED';
@@ -52,6 +53,10 @@ async function submitInitialResponse(db, requesterUid, body, now = () => new Dat
     const eventSnapshot = await tx.get(eventRef);
     const attempt = assertOwnedAttempt(attemptSnapshot, orderSnapshot, requesterUid);
     if (attempt.outcome !== 'failed') throw notFound();
+    const decisionSnapshot = attempt.reviewState === 'resolved'
+      ? await tx.get(db.collection('deliveryAttemptEvents').doc(decisionEventIdFor(input.attemptId))) : null;
+    const decision = decisionSnapshot?.exists
+      ? decisionFromEvent(input.attemptId, attempt, decisionSnapshot.data() || {}) : null;
 
     const prior = attempt.requesterResponse;
     if (prior !== undefined && prior !== null) {
@@ -62,7 +67,8 @@ async function submitInitialResponse(db, requesterUid, body, now = () => new Dat
       if (event.kind !== EVENT_KIND || event.attemptId !== input.attemptId
         || event.requesterUid !== requesterUid || event.clientMutationId !== input.clientMutationId
         || event.explanation !== input.explanation) throw conflict();
-      return { report: safeReport(input.attemptId, attempt) };
+      if (attempt.reviewState === 'resolved' && !decision) throw notFound();
+      return { report: safeReport(input.attemptId, attempt, { decision, detail: true, now: now() }) };
     }
     if (eventSnapshot.exists || attempt.reviewState !== 'reported' || attempt.responsibility !== 'undetermined') throw conflict();
 
@@ -83,7 +89,7 @@ async function submitInitialResponse(db, requesterUid, body, now = () => new Dat
       requesterUid, actorUid: requesterUid, actorRole: 'requester',
       explanation: input.explanation, clientMutationId: input.clientMutationId, createdAt: submittedAt,
     });
-    return { report: safeReport(input.attemptId, { ...attempt, requesterResponse: response }) };
+    return { report: safeReport(input.attemptId, { ...attempt, requesterResponse: response }, { now: submittedAt }) };
   });
 }
 

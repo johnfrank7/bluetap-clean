@@ -64,6 +64,15 @@ export function fetchRequesterDeliveryReport(attemptId, orderId) {
   return request(`${PATH}?attemptId=${encodeURIComponent(attemptId)}&orderId=${encodeURIComponent(orderId)}`);
 }
 
+export function fetchRequesterReviewCompletions({ cursor = '', limit = 20 } = {}) {
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 25) {
+    throw new RangeError('Choose a review page size from 1 to 25.');
+  }
+  const params = new URLSearchParams({ feed: 'review-completions', limit: String(limit) });
+  if (cursor) params.set('cursor', cursor);
+  return request(`${PATH}?${params.toString()}`);
+}
+
 export function submitRequesterDeliveryResponse({ attemptId, explanation, clientMutationId }) {
   return request(PATH, { method: 'POST', body: { attemptId, explanation, clientMutationId } });
 }

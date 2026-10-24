@@ -1,6 +1,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { projectReportNotification, projectReportPage, mergeReportPages } = require('../../../services/requesterReportNotifications');
+const { projectReportNotification, projectReportPage, projectReviewCompletionNotification,
+  projectCompletionPage, mergeReportPages } = require('../../../services/requesterReportNotifications');
 
 const id = (letter) => letter.repeat(64);
 const dto = (attemptId, orderId = 'order-one', time = '2026-10-23T01:00:00.000Z') => ({
@@ -66,4 +67,28 @@ test('bounded pages preserve server order, deduplicate overlap, and distinguish 
   assert.equal(projectReportPage({ reports: Array.from({ length: 26 }, () => newest), nextCursor: null }), null);
   assert.equal(projectReportPage({ reports: [], nextCursor: 'bad/cursor' }), null);
   assert.equal(projectReportPage({ reports: [], nextCursor: 'x'.repeat(1501) }), null);
+});
+
+test('completion is a separate neutral event sourced from deterministic decision identity', () => {
+  const attemptId = id('a');
+  const completion = { attemptId, eventId: `${attemptId}_manager_decision_v1`, orderId: 'order-one',
+    decidedAt: '2026-10-24T01:00:00.000Z', reviewState: 'resolved',
+    responsibility: 'requester_responsible', decisionReason: 'private factual details', clientMutationId: 'private' };
+  const event = projectReviewCompletionNotification(completion);
+  assert.equal(event.id, `delivery-review:${completion.eventId}`);
+  assert.equal(event.kind, 'delivery_review_completed');
+  assert.equal(event.message, 'The review of your failed delivery report is complete. View the decision and details.');
+  assert.equal(event.at.toISOString(), completion.decidedAt);
+  assert.notEqual(event.id, projectReportNotification(dto(attemptId)).id);
+  for (const privateValue of ['requester_responsible', 'private factual details', 'private']) {
+    assert.ok(!JSON.stringify(event).includes(privateValue));
+  }
+  assert.equal(projectReviewCompletionNotification({ ...completion, reviewState: 'reported' }), null);
+  assert.equal(projectReviewCompletionNotification({ ...completion, eventId: `${id('b')}_manager_decision_v1` }), null);
+  assert.equal(projectReviewCompletionNotification({ ...completion, decidedAt: 'invalid' }), null);
+  const page = projectCompletionPage({ completions: [completion, completion], nextCursor: attemptId });
+  assert.equal(page.events.length, 1);
+  assert.equal(page.nextCursor, attemptId);
+  assert.equal(page.hasMore, true);
+  assert.equal(projectCompletionPage({ completions: [], nextCursor: attemptId }).events.length, 0);
 });

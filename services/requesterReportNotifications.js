@@ -2,6 +2,7 @@
 const ATTEMPT_ID = /^[a-f0-9]{64}$/;
 const SERVER_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const MESSAGE = 'A delivery issue was reported for your order. You can review the details and share your response.';
+const COMPLETION_MESSAGE = 'The review of your failed delivery report is complete. View the decision and details.';
 const validCursor = (value) => typeof value === 'string' && value.length > 0 && value.length <= 1500
   && value !== '.' && value !== '..' && !value.includes('/');
 
@@ -27,6 +28,20 @@ function projectReportNotification(report) {
   };
 }
 
+function projectReviewCompletionNotification(completion) {
+  if (!completion || typeof completion !== 'object' || !ATTEMPT_ID.test(completion.attemptId)
+    || completion.eventId !== `${completion.attemptId}_manager_decision_v1`
+    || typeof completion.orderId !== 'string' || !completion.orderId.trim()
+    || completion.orderId.length > 128 || completion.orderId.includes('/')
+    || completion.reviewState !== 'resolved' || typeof completion.decidedAt !== 'string'
+    || !SERVER_TIME.test(completion.decidedAt)) return null;
+  const at = new Date(completion.decidedAt);
+  if (!Number.isFinite(at.getTime()) || at.toISOString() !== completion.decidedAt) return null;
+  return { id: `delivery-review:${completion.eventId}`, kind: 'delivery_review_completed',
+    status: 'delivery_review_completed', title: 'Delivery review completed', message: COMPLETION_MESSAGE,
+    orderId: completion.orderId, attemptId: completion.attemptId, at };
+}
+
 function uniqueEvents(events) {
   const seen = new Set();
   return events.filter((event) => {
@@ -48,6 +63,14 @@ function projectReportPage(page) {
   };
 }
 
+function projectCompletionPage(page) {
+  if (!page || !Array.isArray(page.completions) || page.completions.length > 25
+    || !(page.nextCursor === null || validCursor(page.nextCursor))) return null;
+  return { events: uniqueEvents(page.completions.map(projectReviewCompletionNotification).filter(Boolean)),
+    nextCursor: page.nextCursor, hasMore: page.nextCursor !== null,
+    historyComplete: page.nextCursor === null, scope: 'loaded-review-pages' };
+}
+
 function mergeReportPages(current, next) {
   if (!current || !next) return null;
   return {
@@ -55,8 +78,9 @@ function mergeReportPages(current, next) {
     nextCursor: next.nextCursor,
     hasMore: next.hasMore,
     historyComplete: next.historyComplete,
-    scope: 'loaded-report-pages',
+    scope: next.scope || current.scope || 'loaded-report-pages',
   };
 }
 
-module.exports = { projectReportNotification, projectReportPage, mergeReportPages };
+module.exports = { projectReportNotification, projectReportPage, projectReviewCompletionNotification,
+  projectCompletionPage, mergeReportPages };

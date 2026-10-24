@@ -7,6 +7,7 @@ const { initializeApp: initializeClientApp, deleteApp: deleteClientApp } = requi
 const { getFirestore: getClientFirestore, connectFirestoreEmulator, doc, getDoc, terminate } = require('firebase/firestore');
 const { createRequesterDeliveryReportsHandler } = require('../../requester/deliveryReportsHandler');
 const { attemptIdFor } = require('../deliveryAttemptService');
+const { decisionEventIdFor } = require('../deliveryReviewPolicy');
 
 const host = process.env.FIRESTORE_EMULATOR_HOST;
 
@@ -156,6 +157,68 @@ test('global feed advances past orphaned and conflicting-parent attempts without
   } finally {
     await deleteAdminApp(app);
   }
+});
+
+test('real completion feed paginates immutable decisions and skips invalid or cross-requester records', { skip: !host }, async () => {
+  const suffix = randomUUID();
+  const app = initializeAdminApp({ projectId: 'demo-bluetap' }, `requester-completions-${suffix}`);
+  const db = getAdminFirestore(app);
+  const uid = `r-${suffix}`;
+  const otherUid = `other-${suffix}`;
+  const orderId = `order-${suffix}`;
+  const otherOrderId = `other-order-${suffix}`;
+  const ids = [1, 2, 3].map((number) => attemptIdFor(orderId, number));
+  const otherId = attemptIdFor(otherOrderId, 1);
+  const reason = 'The delivery and response records were reviewed together.';
+  const auth = { async verifyIdToken(token) {
+    if (token === 'owner') return { uid };
+    if (token === 'other') return { uid: otherUid };
+    throw new Error('Invalid token.');
+  } };
+  const handler = createRequesterDeliveryReportsHandler(() => ({ auth, db }));
+  const seed = async (id, number, owner, order, withEvent = true) => {
+    const decidedAt = new Date(`2026-10-2${number}T12:00:00.000Z`);
+    const decision = { managerUid: 'manager', responsibility: 'shared', decisionReason: reason,
+      expectedRevision: `revision-${number}`, clientMutationId: `mutation-${number}`, decidedAt };
+    await db.collection('deliveryAttempts').doc(id).set({ orderId: order, requesterUid: owner,
+      branchId: 'original-branch', attemptNumber: number, outcome: 'failed', reviewState: 'resolved',
+      responsibility: 'shared', managerDecision: decision,
+      endedAt: new Date('2026-10-20T12:00:00.000Z'), reportReceivedAt: new Date('2026-10-20T12:00:00.000Z'),
+      reportedReasonCode: 'NO_RESPONSE' });
+    if (withEvent) await db.collection('deliveryAttemptEvents').doc(decisionEventIdFor(id)).set({
+      schemaVersion: 1, kind: 'MANAGER_DELIVERY_DECISION', attemptId: id, orderId: order, attemptNumber: number,
+      branchId: 'original-branch', managerUid: 'manager', actorUid: 'manager', actorRole: 'manager',
+      previousReviewState: 'reported', reviewState: 'resolved', responsibility: 'shared',
+      decisionReason: reason, expectedRevision: decision.expectedRevision,
+      clientMutationId: decision.clientMutationId, createdAt: decidedAt,
+    });
+  };
+  try {
+    await Promise.all([
+      db.collection('users').doc(uid).set({ role: 'requester', accountStatus: 'active' }),
+      db.collection('users').doc(otherUid).set({ role: 'requester', accountStatus: 'active' }),
+      db.collection('requests').doc(orderId).set({ requesterUid: uid, requester_id: uid }),
+      db.collection('requests').doc(otherOrderId).set({ requesterUid: otherUid, requester_id: otherUid }),
+    ]);
+    await seed(ids[0], 1, uid, orderId);
+    await seed(ids[1], 2, uid, orderId, false);
+    await seed(ids[2], 3, uid, orderId);
+    await seed(otherId, 1, otherUid, otherOrderId);
+    const before = (await db.collection('deliveryAttempts').doc(ids[2]).get()).updateTime.toMillis();
+    const first = await call(handler, '/api/requester/delivery-reports?feed=review-completions&limit=1', 'owner');
+    assert.equal(first.statusCode, 200, JSON.stringify(first.body));
+    assert.deepEqual(first.body.completions.map((item) => item.attemptId), [ids[2]]);
+    const skipped = await call(handler, `/api/requester/delivery-reports?feed=review-completions&limit=1&cursor=${first.body.nextCursor}`, 'owner');
+    assert.deepEqual(skipped.body.completions, []);
+    assert.equal(skipped.body.nextCursor, ids[1]);
+    const last = await call(handler, `/api/requester/delivery-reports?feed=review-completions&limit=1&cursor=${skipped.body.nextCursor}`, 'owner');
+    assert.deepEqual(last.body.completions.map((item) => item.attemptId), [ids[0]]);
+    assert.equal(last.body.nextCursor, null);
+    assert.equal((await call(handler, `/api/requester/delivery-reports?feed=review-completions&cursor=${otherId}`, 'owner')).statusCode, 400);
+    assert.equal((await call(handler, `/api/requester/delivery-reports?attemptId=${otherId}`, 'owner')).statusCode, 404);
+    assert.equal((await call(handler, `/api/requester/delivery-reports?attemptId=${ids[1]}`, 'owner')).statusCode, 404);
+    assert.equal((await db.collection('deliveryAttempts').doc(ids[2]).get()).updateTime.toMillis(), before);
+  } finally { await deleteAdminApp(app); }
 });
 
 test('real Firestore transaction stores one Requester response and immutable event with exact replay', { skip: !host }, async () => {

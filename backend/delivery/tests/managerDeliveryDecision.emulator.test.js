@@ -98,6 +98,8 @@ async function fixture({ managerNow = deadline, requesterNow = new Date(deadline
     method === 'GET' ? `/api/manager/delivery-reviews?attemptId=${ids.attempt}` : '/api/manager/delivery-reviews', token, body);
   const requesterCall = (method, body) => call(requester, method,
     method === 'GET' ? `/api/requester/delivery-reports?attemptId=${ids.attempt}` : '/api/requester/delivery-reports', 'requester', body);
+  const completionCall = (url = '/api/requester/delivery-reports?feed=review-completions', token = 'requester') =>
+    call(requester, 'GET', url, token);
   const decisionBody = async (overrides = {}) => {
     const detail = await managerCall('GET');
     assert.equal(detail.statusCode, 200, JSON.stringify(detail.body));
@@ -108,7 +110,7 @@ async function fixture({ managerNow = deadline, requesterNow = new Date(deadline
   const responseBody = { attemptId: ids.attempt,
     explanation: 'I was at the delivery address and did not receive a call.',
     clientMutationId: `requester_${suffix}` };
-  return { app, db, ids, managerCall, requesterCall, decisionBody, responseBody, authMutations };
+  return { app, db, ids, managerCall, requesterCall, completionCall, decisionBody, responseBody, authMutations };
 }
 
 test('real transaction resolves a transferred report once and exact replay is read-only', { skip: !host }, async () => {
@@ -119,6 +121,7 @@ test('real transaction resolves a transferred report once and exact replay is re
     assert.equal(beforeSafety.requesterAbuseReviews.length, 0);
     assert.equal(beforeSafety.requesterActions.length, 0);
     assert.equal(beforeSafety.requesterNoticeDocuments.length, 0);
+    assert.deepEqual((await f.completionCall()).body, { completions: [], nextCursor: null });
     const body = await f.decisionBody();
     assert.equal((await f.managerCall('POST', 'cross', body)).statusCode, 404);
     assert.equal((await f.managerCall('POST', 'reporter', body)).statusCode, 404);
@@ -145,7 +148,19 @@ test('real transaction resolves a transferred report once and exact replay is re
       assert.equal((await f.managerCall('POST', 'm1', { ...body, ...change })).statusCode, 409);
     }
     assert.equal((await f.requesterCall('POST', f.responseBody)).statusCode, 409);
-    assert.equal((await f.requesterCall('GET')).statusCode, 200);
+    const requesterDetail = await f.requesterCall('GET');
+    assert.equal(requesterDetail.statusCode, 200, JSON.stringify(requesterDetail.body));
+    assert.equal(requesterDetail.body.report.reviewState, 'resolved');
+    assert.equal(requesterDetail.body.report.responsibility, 'shared');
+    assert.equal(requesterDetail.body.report.decisionReason, reason);
+    assert.equal(requesterDetail.body.report.decidedAt, deadline.toISOString());
+    const completion = await f.completionCall();
+    assert.equal(completion.statusCode, 200, JSON.stringify(completion.body));
+    assert.deepEqual(completion.body, { completions: [{ eventId: f.ids.event,
+      attemptId: f.ids.attempt, orderId: f.ids.order,
+      decidedAt: deadline.toISOString(), reviewState: 'resolved' }], nextCursor: null });
+    assert.equal((await f.completionCall(`/api/requester/delivery-reports?feed=review-completions&cursor=${f.ids.attempt}`)).body.completions.length, 0);
+    assert.equal((await f.completionCall('/api/requester/delivery-reports?feed=review-completions', 'm1')).statusCode, 403);
     assert.equal((await f.db.collection('requests').doc(f.ids.order).get()).updateTime.toMillis(), beforeOrder);
     assert.equal((await f.db.collection('deliveryAttemptEvents').where('attemptId', '==', f.ids.attempt).get()).size, 1);
     assert.deepEqual(await fixtureSafetySnapshot(f.db, f.ids), beforeSafety);
@@ -180,6 +195,8 @@ test('real concurrent decisions and response race produce one immutable decision
     assert.equal((await race.managerCall('POST', 'm1', updated)).statusCode, 200);
     const replay = await race.requesterCall('POST', race.responseBody);
     assert.equal(replay.statusCode, 200);
+    assert.equal(replay.body.report.reviewState, 'resolved');
+    assert.equal(replay.body.report.decisionReason, reason);
     assert.equal((await race.db.collection('deliveryAttemptEvents').where('attemptId', '==', race.ids.attempt).get()).size, 2);
   } finally { await deleteApp(race.app); }
 });

@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 
-const { createRequesterReportFeed, combineLoadedNotifications, countLoadedUnseen,
+const { createRequesterReportFeed, createRequesterReviewFeed, combineLoadedNotifications, countLoadedUnseen,
   PAGE_SIZE, MAX_CONTINUATION_PAGES } = require('../../../services/requesterReportNotificationFeed');
 const { createRoleNotificationSeenStore } = require('../../../services/roleNotificationSeenStore');
 const { notificationSeverity, compactNotificationStatus } = require('../../../components/notificationPresentation');
@@ -150,20 +150,46 @@ test('seen IDs persist on device across relogin, stay role and UID isolated, and
   assert.equal((await relogin.read(relogin.keyFor('distributor', 'r1'))).size, 0);
 });
 
+test('completion feed is paginated, UID-isolated, and counted separately from the original report', async () => {
+  const completion = (number) => ({ attemptId: id(number), eventId: `${id(number)}_manager_decision_v1`,
+    orderId: 'order-one', reviewState: 'resolved', decidedAt: new Date(Date.UTC(2026, 9, 24, 0, number)).toISOString() });
+  const feed = createRequesterReviewFeed({ fetchPage: async (_, { cursor }) => cursor
+    ? { completions: [completion(1)], nextCursor: null }
+    : { completions: [completion(2)], nextCursor: id(2) } });
+  feed.setUid('r1');
+  await feed.refresh();
+  await feed.loadOlder();
+  assert.equal(feed.getState().scope, 'loaded-review-pages');
+  const events = combineLoadedNotifications([{
+    id: `delivery-report:${id(2)}`, kind: 'delivery_report', at: new Date(0),
+  }], feed.getState().events);
+  assert.equal(events.length, 3);
+  assert.equal(countLoadedUnseen(events, new Set([`delivery-report:${id(2)}`])), 2);
+  feed.setUid('r2');
+  assert.deepEqual(feed.getState().events, []);
+  assert.equal(feed.getState().uid, 'r2');
+});
+
 test('report styling is neutral in both themes and Requester UI navigates only with the exact report target', () => {
   assert.equal(notificationSeverity('delivery_report').kind, 'info');
   assert.equal(notificationSeverity('delivery_report', true).kind, 'info');
   assert.equal(compactNotificationStatus('delivery_report'), 'Delivery report');
+  assert.equal(notificationSeverity('delivery_review_completed').kind, 'delivery');
+  assert.equal(notificationSeverity('delivery_review_completed', true).kind, 'delivery');
+  assert.equal(compactNotificationStatus('delivery_review_completed'), 'Review complete');
   const provider = source('components/RoleNotifications.jsx');
   const screen = source('app/requester/r_notification.jsx');
   const header = source('components/BlueTapHeader.jsx');
   assert.match(provider, /role === 'requester' && roleData\.readiness === 'READY'/);
   assert.match(provider, /fetchRequesterDeliveryReports\(undefined, options\)/);
+  assert.match(provider, /fetchRequesterReviewCompletions\(options\)/);
   assert.match(provider, /AppState\.addEventListener/);
   assert.match(screen, /reportNotificationTarget\(entry\.item\)/);
   assert.match(screen, /reportOrderId: target\.orderId, reportAttemptId: target\.attemptId/);
   assert.match(screen, /Load older reports/);
   assert.match(screen, /Seen status is saved on this device/);
+  assert.match(screen, /loadOlderCompletions/);
+  assert.match(screen, /\['delivery_report', 'delivery_review_completed'\]\.includes\(entry\.item\.kind\)/);
   assert.match(header, /loaded unseen/);
   assert.ok(!screen.includes('reportedReasonNote'));
   assert.ok(!screen.includes('clientMutationId'));

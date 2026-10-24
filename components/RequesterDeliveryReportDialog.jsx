@@ -16,6 +16,7 @@ const {
   reportDisplayState,
   reportViewModel,
   loadExactReport,
+  responsibilityLabel,
 } = require('../services/requesterDeliveryReportFlow');
 
 const displayTime = (value) => {
@@ -77,8 +78,16 @@ export default function RequesterDeliveryReportDialog({ visible, orderId, target
         const pendingReport = reportViewModel(pendingResult.report);
         if (pendingReport) next.unshift(pendingReport);
       }
-      setReports(next);
       const nextSelectedId = next.some((item) => item.attemptId === pendingId) ? pendingId : next[0]?.attemptId || '';
+      const selectedSummary = next.find((item) => item.attemptId === nextSelectedId);
+      if (selectedSummary?.reviewState === 'resolved' && !selectedSummary.decisionReason) {
+        const detail = await fetchRequesterDeliveryReport(nextSelectedId, orderId);
+        if (!activeRef.current || requestEpochRef.current !== epoch || auth.currentUser?.uid !== requestOwnerUid) return;
+        const full = reportViewModel(detail.report);
+        if (!full || full.attemptId !== nextSelectedId || full.orderId !== orderId || !full.decisionReason) throw new Error('Review details unavailable');
+        next.splice(next.indexOf(selectedSummary), 1, full);
+      }
+      setReports(next);
       selectedIdRef.current = nextSelectedId;
       setSelectedId(nextSelectedId);
       setNextCursor(result.nextCursor || null);
@@ -115,9 +124,11 @@ export default function RequesterDeliveryReportDialog({ visible, orderId, target
     return () => { activeRef.current = false; requestEpochRef.current += 1; selectionRef.current += 1; };
   }, [visible, orderId, ownerUid, targetAttemptId, loadFirstPage]);
 
-  const selected = reports.find((report) => report.attemptId === selectedId) || null;
-  const displayState = reportDisplayState({ loading, error: loadError, reports });
-  const flow = visible && ownerUid && auth.currentUser?.uid === ownerUid
+  const sessionCurrent = Boolean(ownerUid && auth.currentUser?.uid === ownerUid);
+  const visibleReports = sessionCurrent ? reports : [];
+  const selected = visibleReports.find((report) => report.attemptId === selectedId) || null;
+  const displayState = reportDisplayState({ loading, error: loadError, reports: visibleReports });
+  const flow = visible && sessionCurrent
     ? responseRegistry.get(ownerUid, orderId, selectedId) : null;
   const currentFlowState = flow?.getState();
   const pending = Boolean(currentFlowState?.pending);
@@ -157,35 +168,42 @@ export default function RequesterDeliveryReportDialog({ visible, orderId, target
     setSubmitError('');
     setSuccess('');
     const sequence = selectionRef.current;
+    const epoch = requestEpochRef.current;
+    const requestOwnerUid = auth.currentUser?.uid;
     setDetailLoading(true);
     try {
       const result = await fetchRequesterDeliveryReport(attemptId, orderId);
-      if (activeRef.current && selectionRef.current === sequence) {
+      if (activeRef.current && requestEpochRef.current === epoch && selectionRef.current === sequence
+        && auth.currentUser?.uid === requestOwnerUid && requestOwnerUid === ownerUid) {
         setReports((current) => current.map((item) => item.attemptId === attemptId ? reportViewModel(result.report) : item));
       }
     } catch (error) {
-      if (activeRef.current && selectionRef.current === sequence) setSubmitError(error.message || 'This report could not be refreshed.');
+      if (activeRef.current && requestEpochRef.current === epoch && selectionRef.current === sequence
+        && auth.currentUser?.uid === requestOwnerUid) setSubmitError(error.message || 'This report could not be refreshed.');
     } finally {
-      if (activeRef.current && selectionRef.current === sequence) setDetailLoading(false);
+      if (activeRef.current && requestEpochRef.current === epoch && selectionRef.current === sequence) setDetailLoading(false);
     }
   };
 
   const loadMore = async () => {
     if (!nextCursor || loadingMore || listBusyRef.current) return;
     const epoch = requestEpochRef.current;
+    const requestOwnerUid = auth.currentUser?.uid;
     listBusyRef.current = true;
     setLoadingMore(true);
     setLoadError('');
     try {
       const result = await fetchRequesterDeliveryReports(orderId, { cursor: nextCursor });
-      if (!activeRef.current || requestEpochRef.current !== epoch) return;
+      if (!activeRef.current || requestEpochRef.current !== epoch || auth.currentUser?.uid !== requestOwnerUid
+        || requestOwnerUid !== ownerUid) return;
       setReports((current) => {
         const seen = new Set(current.map((item) => item.attemptId));
         return [...current, ...(result.reports || []).map(reportViewModel).filter((item) => item && !seen.has(item.attemptId))];
       });
       setNextCursor(result.nextCursor || null);
     } catch (error) {
-      if (activeRef.current && requestEpochRef.current === epoch) setLoadError(error.message || 'More reports could not be loaded.');
+      if (activeRef.current && requestEpochRef.current === epoch && auth.currentUser?.uid === requestOwnerUid)
+        setLoadError(error.message || 'More reports could not be loaded.');
     } finally {
       if (requestEpochRef.current === epoch) {
         listBusyRef.current = false;
@@ -237,6 +255,7 @@ export default function RequesterDeliveryReportDialog({ visible, orderId, target
   };
 
   const onConfirm = () => {
+    if (!sessionCurrent) { onClose?.(); return; }
     if (loadError && !reports.length) { loadFirstPage(); return; }
     if (selected && eligible) { submit(); return; }
     onClose?.();
@@ -246,7 +265,7 @@ export default function RequesterDeliveryReportDialog({ visible, orderId, target
     <ResponsiveActionDialog
       visible={visible}
       title="Delivery reports"
-      body="Review reported delivery attempts and add one factual response while review is pending."
+      body="Review reported delivery attempts, your response, and any completed Manager decision."
       cancelLabel="Close"
       confirmLabel={loadError && !reports.length ? 'Retry' : eligible ? inFlight ? 'Submitting response' : pending ? 'Retry original response' : 'Submit response' : 'Done'}
       busy={false}
@@ -254,14 +273,15 @@ export default function RequesterDeliveryReportDialog({ visible, orderId, target
       onCancel={onClose}
       onConfirm={onConfirm}
     >
-      {displayState === 'loading' ? <View style={styles.center}><ActivityIndicator color={colors.primary} /><Text style={[styles.muted, { color: colors.textSecondary }]}>Loading delivery reports…</Text></View> : null}
-      {displayState === 'empty' ? <Text style={[styles.muted, { color: colors.textSecondary }]}>No delivery reports are available for this order.</Text> : null}
+      {!sessionCurrent && <Text accessibilityRole="alert" style={[styles.error, { color: colors.danger }]}>Sign in again to view delivery reports.</Text>}
+      {sessionCurrent && displayState === 'loading' ? <View style={styles.center}><ActivityIndicator color={colors.primary} /><Text style={[styles.muted, { color: colors.textSecondary }]}>Loading delivery reports…</Text></View> : null}
+      {sessionCurrent && displayState === 'empty' ? <Text style={[styles.muted, { color: colors.textSecondary }]}>No delivery reports are available for this order.</Text> : null}
       {!!loadError && <Text accessibilityRole="alert" accessibilityLiveRegion="assertive" style={[styles.error, { color: colors.danger }]}>{loadError}</Text>}
-      {reports.length > 0 && (
+      {visibleReports.length > 0 && (
         <>
-          {reports.length > 1 && (
+          {visibleReports.length > 1 && (
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.attemptTabs} contentContainerStyle={styles.attemptTabsContent}>
-              {reports.map((report) => (
+              {visibleReports.map((report) => (
                 <Pressable key={report.attemptId} accessibilityRole="tab" accessibilityState={{ selected: selectedId === report.attemptId }}
                   accessibilityLabel={`Delivery attempt ${report.attemptNumber}`}
                   disabled={detailLoading}
@@ -277,9 +297,22 @@ export default function RequesterDeliveryReportDialog({ visible, orderId, target
             <Text style={[styles.eyebrow, { color: accent }]}>REPORTED BY DISTRIBUTOR · ATTEMPT {selected.attemptNumber}</Text>
             <Text style={[styles.reason, { color: colors.textPrimary }]}>{selected.reportedReasonLabel}</Text>
             <Text style={[styles.muted, { color: colors.textSecondary }]}>Report received: {displayTime(selected.reportReceivedAt)}</Text>
-            <Text style={[styles.status, { color: selected.reviewState === 'awaiting_review' ? colors.primary : colors.textSecondary }]}>
-              {selected.reviewState === 'awaiting_review' ? 'Awaiting review' : 'Review status unavailable'}
+            <Text style={[styles.status, { color: selected.reviewState === 'resolved' ? colors.success : colors.primary }]}>
+              {selected.reviewState === 'resolved' ? 'Review Completed'
+                : selected.reviewState === 'awaiting_review' ? 'Awaiting review' : 'Review status unavailable'}
             </Text>
+            {selected.reviewState === 'awaiting_review' && !!selected.responseDeadlineAt &&
+              <Text style={[styles.muted, { color: colors.textSecondary }]}>Initial response deadline: {displayTime(selected.responseDeadlineAt)}</Text>}
+            {selected.reviewState === 'awaiting_review' && selected.responseWindowOpen === false
+              && selected.requesterResponseStatus === 'not_submitted' &&
+              <Text style={[styles.muted, { color: colors.textSecondary }]}>The initial response window is closed.</Text>}
+            {selected.reviewState === 'resolved' && !!selected.decisionReason && <View style={styles.decision}>
+              <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>Manager review outcome</Text>
+              <Text style={[styles.bodyText, { color: colors.textPrimary }]}>{responsibilityLabel(selected.responsibility)}</Text>
+              <Text style={[styles.bodyText, { color: colors.textPrimary }]}>{selected.decisionReason}</Text>
+              <Text style={[styles.muted, { color: colors.textSecondary }]}>Decided: {displayTime(selected.decidedAt)}</Text>
+              <Text style={[styles.muted, { color: colors.textSecondary }]}>This review records a finding; it does not by itself create an account warning or restriction.</Text>
+            </View>}
             {selected.contactAttempts.length > 0 && <View style={styles.contacts}>
               <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>Reported contact attempts</Text>
               {selected.contactAttempts.map((entry, index) => <View key={`${selected.attemptId}-contact-${index}`} style={styles.contactRow}>
@@ -339,6 +372,7 @@ const styles = StyleSheet.create({
   reason: { fontSize: 16, fontWeight: '800', marginTop: 5 },
   status: { fontSize: 12, fontWeight: '800', marginTop: 10 },
   contacts: { marginTop: 14, gap: 8 },
+  decision: { marginTop: 14, gap: 4 },
   contactRow: { paddingTop: 8 },
   sectionTitle: { fontSize: 13, fontWeight: '800' },
   bodyText: { fontSize: 13, lineHeight: 19, marginTop: 5 },

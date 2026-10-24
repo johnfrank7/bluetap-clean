@@ -30,6 +30,13 @@ test('notification target preserves exact order and attempt for multiple histori
   assert.equal(Object.keys(first).length, 2);
 });
 
+test('completion notification opens the exact authorized attempt and rejects forged event identity', () => {
+  const completion = { id: `delivery-review:${b}_manager_decision_v1`, kind: 'delivery_review_completed',
+    status: 'delivery_review_completed', attemptId: b, orderId: 'old-rescheduled-order' };
+  assert.deepEqual(reportNotificationTarget(completion), { orderId: 'old-rescheduled-order', attemptId: b });
+  assert.equal(reportNotificationTarget({ ...completion, id: `delivery-review:${a}_manager_decision_v1` }), null);
+});
+
 test('forged or incomplete notification and route targets fail closed', () => {
   const valid = projectReportNotification(dto());
   for (const event of [null, { ...valid, id: `delivery-report:${b}` },

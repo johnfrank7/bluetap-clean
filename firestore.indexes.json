@@ -138,6 +138,16 @@
       ]
     },
     {
+      "collectionGroup": "deliveryAttempts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "requesterUid", "order": "ASCENDING" },
+        { "fieldPath": "outcome", "order": "ASCENDING" },
+        { "fieldPath": "reviewState", "order": "ASCENDING" },
+        { "fieldPath": "managerDecision.decidedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "orderAbuseReviews",
       "queryScope": "COLLECTION",
       "fields": [

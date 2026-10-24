@@ -10,6 +10,14 @@ function explanationError(value) {
     ? '' : 'Enter a factual explanation of 10 to 500 characters.';
 }
 
+const RESPONSIBILITY_LABELS = Object.freeze({
+  requester_responsible: 'Requester responsibility',
+  provider_responsible: 'Provider responsibility',
+  shared: 'Shared responsibility',
+  undetermined: 'Responsibility undetermined',
+});
+const responsibilityLabel = (value) => RESPONSIBILITY_LABELS[value] || 'Outcome unavailable';
+
 function reportViewModel(report) {
   if (!report || typeof report !== 'object') return null;
   return {
@@ -19,6 +27,11 @@ function reportViewModel(report) {
     reportedReasonLabel: report.reportedReasonLabel,
     reportReceivedAt: report.reportReceivedAt,
     reviewState: report.reviewState,
+    responseDeadlineAt: report.responseDeadlineAt || null,
+    responseWindowOpen: report.responseWindowOpen !== false,
+    responsibility: report.reviewState === 'resolved' ? report.responsibility : null,
+    decisionReason: report.reviewState === 'resolved' ? report.decisionReason || null : null,
+    decidedAt: report.reviewState === 'resolved' ? report.decidedAt || null : null,
     requesterResponseStatus: report.requesterResponseStatus,
     requesterResponse: report.requesterResponse ? {
       explanation: report.requesterResponse.explanation,
@@ -39,9 +52,12 @@ const validReportOrderId = (value) => typeof value === 'string' && value.trim() 
 const validReportAttemptId = (value) => typeof value === 'string' && ATTEMPT_ID.test(value);
 
 function reportNotificationTarget(event) {
-  if (event?.kind !== 'delivery_report' || event.status !== 'delivery_report'
-    || !validReportOrderId(event.orderId) || !validReportAttemptId(event.attemptId)
-    || event.id !== `delivery-report:${event.attemptId}`) return null;
+  const original = event?.kind === 'delivery_report' && event.status === 'delivery_report'
+    && event.id === `delivery-report:${event.attemptId}`;
+  const completion = event?.kind === 'delivery_review_completed' && event.status === 'delivery_review_completed'
+    && event.id === `delivery-review:${event.attemptId}_manager_decision_v1`;
+  if ((!original && !completion) || !validReportOrderId(event.orderId)
+    || !validReportAttemptId(event.attemptId)) return null;
   return { orderId: event.orderId, attemptId: event.attemptId };
 }
 
@@ -67,7 +83,8 @@ async function loadExactReport(target, fetchDetail, isCurrent) {
 }
 
 function canSubmitResponse(report) {
-  return report?.reviewState === 'awaiting_review' && report?.requesterResponseStatus === 'not_submitted';
+  return report?.reviewState === 'awaiting_review' && report?.requesterResponseStatus === 'not_submitted'
+    && report?.responseWindowOpen !== false;
 }
 
 function reportDisplayState({ loading, error, reports }) {
@@ -211,4 +228,7 @@ function createRequesterResponseRegistry({ send, readReport, makeId = createMuta
   };
 }
 
-module.exports = { canSubmitResponse, createMutationId, createReportModalHandoff, createRequesterResponseFlow, createRequesterResponseRegistry, exactReportViewModel, explanationError, loadExactReport, normalizeExplanation, reportDisplayState, reportNotificationTarget, reportRouteTarget, reportViewModel };
+module.exports = { canSubmitResponse, createMutationId, createReportModalHandoff, createRequesterResponseFlow,
+  createRequesterResponseRegistry, exactReportViewModel, explanationError, loadExactReport,
+  normalizeExplanation, reportDisplayState, reportNotificationTarget, reportRouteTarget,
+  reportViewModel, responsibilityLabel };

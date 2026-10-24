@@ -1,4 +1,4 @@
-const { mergeReportPages, projectReportPage } = require('./requesterReportNotifications');
+const { mergeReportPages, projectReportPage, projectCompletionPage } = require('./requesterReportNotifications');
 
 const PAGE_SIZE = 20;
 const MAX_CONTINUATION_PAGES = 3;
@@ -9,9 +9,9 @@ const emptyState = (uid = '') => ({
   loaded: false, loading: false, loadingMore: false, error: '',
 });
 
-function combineLoadedNotifications(baseEvents = [], reportEvents = []) {
+function combineLoadedNotifications(...eventGroups) {
   const byId = new Map();
-  for (const event of [...baseEvents, ...reportEvents]) {
+  for (const event of eventGroups.flat()) {
     if (event?.id && !byId.has(event.id)) byId.set(event.id, event);
   }
   return [...byId.values()].sort((left, right) =>
@@ -23,7 +23,8 @@ function countLoadedUnseen(events, seen) {
 }
 
 function createRequesterReportFeed({ fetchPage, now = Date.now, pageSize = PAGE_SIZE,
-  maxContinuationPages = MAX_CONTINUATION_PAGES, refreshIntervalMs = REFRESH_INTERVAL_MS }) {
+  maxContinuationPages = MAX_CONTINUATION_PAGES, refreshIntervalMs = REFRESH_INTERVAL_MS,
+  projectPage = projectReportPage }) {
   let state = emptyState();
   let generation = 0;
   let inFlight = null;
@@ -39,7 +40,7 @@ function createRequesterReportFeed({ fetchPage, now = Date.now, pageSize = PAGE_
     let loaded = { events: [], nextCursor: cursor || null, hasMore: Boolean(cursor), historyComplete: false };
     const visited = new Set(cursor ? [cursor] : []);
     for (let pageNumber = 0; pageNumber < maxContinuationPages; pageNumber += 1) {
-      const page = projectReportPage(await fetchPage(uid, { cursor, limit: pageSize }));
+      const page = projectPage(await fetchPage(uid, { cursor, limit: pageSize }));
       if (!page) throw new Error('Delivery reports returned an invalid page. Please retry.');
       if (page.nextCursor && visited.has(page.nextCursor)) {
         throw new Error('Delivery report pagination did not advance. Please retry.');
@@ -79,7 +80,7 @@ function createRequesterReportFeed({ fetchPage, now = Date.now, pageSize = PAGE_
           : state.loaded ? mergeReportPages(page, state) : page;
         publish({ ...state, events: merged.events, nextCursor: merged.nextCursor,
           hasMore: merged.hasMore, historyComplete: merged.historyComplete,
-          loaded: true, loading: false, loadingMore: false, error: '' });
+          scope: merged.scope, loaded: true, loading: false, loadingMore: false, error: '' });
       } catch (error) {
         if (requestGeneration === generation && state.uid === uid) {
           publish({ ...state, loading: false, loadingMore: false,
@@ -110,4 +111,5 @@ function createRequesterReportFeed({ fetchPage, now = Date.now, pageSize = PAGE_
 module.exports = {
   PAGE_SIZE, MAX_CONTINUATION_PAGES, REFRESH_INTERVAL_MS,
   combineLoadedNotifications, countLoadedUnseen, createRequesterReportFeed,
+  createRequesterReviewFeed: (options) => createRequesterReportFeed({ ...options, projectPage: projectCompletionPage }),
 };
