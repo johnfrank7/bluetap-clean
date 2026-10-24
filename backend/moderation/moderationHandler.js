@@ -18,11 +18,14 @@ const {
   safeRestriction,
   timeOf,
 } = require('./moderationService');
+const { selectedIncidentIds, validatedGroundsInTransaction } = require('./moderationGrounds');
 
 const MANAGER_ACTIONS = new Set(['dismiss', 'warn', 'suspend_branch_chat', 'suspend_branch_ordering', 'escalate']);
 const ADMIN_ACTIONS = new Set(['dismiss', 'warn', 'suspend_platform_chat', 'suspend_platform_ordering', 'suspend_account', 'terminate_account', 'reactivate']);
 const RESTRICTION_ACTIONS = new Set(['suspend_branch_chat', 'suspend_branch_ordering', 'suspend_platform_chat', 'suspend_platform_ordering']);
 const NOTICE_ACTIONS = new Set(['warn', ...RESTRICTION_ACTIONS, 'suspend_account']);
+const ABUSE_PUNITIVE_ACTIONS = new Set(['warn', 'suspend_branch_ordering', 'suspend_platform_ordering']);
+const HELD_ABUSE_ACCOUNT_ACTIONS = new Set(['suspend_account', 'terminate_account']);
 
 function bodyOf(req) {
   if (req.body && typeof req.body === 'object') return req.body;
@@ -101,6 +104,8 @@ function safeAbuseReview(review = {}) {
     firstIncidentAt: isoTimestamp(review.firstIncidentAt),
     lastIncidentAt: isoTimestamp(review.lastIncidentAt),
     incidents: (review.incidents || []).slice(-10).map((incident) => ({
+      incidentId: /^[a-f0-9]{64}$/.test(incident.incidentId || incident.key || '') ? incident.incidentId || incident.key : null,
+      linkedAttempt: Boolean(incident.type === 'delivery_failure' && incident.attemptId && incident.incidentId),
       orderReference: clean(incident.orderReference, 80),
       type: clean(incident.type, 48),
       category: clean(incident.category, 80),
@@ -123,6 +128,7 @@ function safeAction(action = {}) {
     actorRole: clean(action.actorRole, 30),
     reasonCategory: clean(action.reasonCategory, 80),
     reason: clean(action.reason, 1000),
+    ...(Array.isArray(action.selectedIncidentIds) ? { selectedIncidentIds: action.selectedIncidentIds.slice(0, 5) } : {}),
     startsAt: isoTimestamp(action.startsAt),
     endsAt: isoTimestamp(action.endsAt),
     createdAt: isoTimestamp(action.createdAt),
@@ -249,14 +255,27 @@ async function applyModerationAction({ auth, db, actor, actorRole, actorBranch =
   if (abuseReviewId && !['warn', 'suspend_branch_ordering', 'suspend_platform_ordering', 'suspend_account', 'terminate_account', 'escalate'].includes(action)) {
     throw new OtpError(403, 'MODERATION_ACTION_DENIED', 'This action is not available for an order-abuse review.');
   }
+  if (abuseReviewId && HELD_ABUSE_ACCOUNT_ACTIONS.has(action)) {
+    throw new OtpError(409, 'ABUSE_ACCOUNT_ACTION_TEMPORARILY_UNAVAILABLE',
+      'Ordering-abuse account actions are temporarily unavailable pending security hardening.');
+  }
+  const punitiveAbuse = Boolean(abuseReviewId && ABUSE_PUNITIVE_ACTIONS.has(action));
+  if (!punitiveAbuse && body.incidentIds !== undefined) {
+    throw new OtpError(400, 'MODERATION_GROUNDS_UNEXPECTED', 'This action does not accept incident grounds.');
+  }
+  const incidentIds = punitiveAbuse ? selectedIncidentIds(body.incidentIds) : [];
   const actorUid = actor.uid || actor.decoded?.uid;
-  const payloadHash = hashId(JSON.stringify({ action, reportId, abuseReviewId, reason, privateNote, duration }));
+  const payloadHash = hashId(JSON.stringify({ action, reportId, abuseReviewId, reason, privateNote, duration,
+    ...(incidentIds.length ? { incidentIds } : {}) }));
   const mutationRef = db.collection('moderationMutationIds').doc(hashId(actorUid, mutationId));
   const existingMutation = await mutationRef.get();
   if (existingMutation.exists) {
     if (existingMutation.data()?.payloadHash !== payloadHash) throw new OtpError(409, 'MODERATION_MUTATION_CONFLICT', 'This mutation ID was already used for a different action.');
     const existingAction = await db.collection('moderationActions').doc(existingMutation.data()?.actionId).get();
     if (existingAction.exists) return { created: false, action: safeAction(withId(existingAction)) };
+  }
+  if (punitiveAbuse && !incidentIds.length) {
+    throw new OtpError(400, 'MODERATION_GROUNDS_REQUIRED', 'Select at least one incident for this action.');
   }
 
   const caseSnapshot = reportId
@@ -311,6 +330,36 @@ async function applyModerationAction({ auth, db, actor, actorRole, actorBranch =
     const latestStatus = clean(latestCase.data()?.status || (reportId ? '' : 'open'), 24);
     if (reportId && !['open', 'escalated'].includes(latestStatus)) throw new OtpError(409, 'REPORT_NOT_ACTIONABLE', 'This report has already been resolved.');
     if (abuseReviewId && latestStatus === 'resolved') throw new OtpError(409, 'ABUSE_REVIEW_NOT_ACTIONABLE', 'This review has already been resolved.');
+    const latestSource = casePayload(reportId ? withId(latestCase) : null, abuseReviewId ? withId(latestCase) : null);
+    if (latestSource.targetUid !== source.targetUid || latestSource.branchId !== source.branchId
+      || (actorRole === 'manager' && latestSource.branchId !== actorBranch?.id)) {
+      throw new OtpError(409, 'MODERATION_CASE_CHANGED', 'Refresh this moderation case before acting.');
+    }
+    if (punitiveAbuse) {
+      const actorSnapshot = await tx.get(db.collection('users').doc(actorUid));
+      const actorProfile = actorSnapshot.exists ? actorSnapshot.data() || {} : null;
+      if (!actorProfile || actorProfile.role !== actorRole
+        || canonicalAccountStatus(actorProfile) !== ACCOUNT_STATUS.ACTIVE) {
+        throw new OtpError(403, 'MODERATION_ACTOR_CHANGED', 'Your moderation access has changed.');
+      }
+      if (actorRole === 'manager') {
+        if (actorProfile.managerStatus !== 'active' || actorProfile.mustChangePassword === true
+          || actorProfile.branchId !== source.branchId) {
+          throw new OtpError(403, 'BRANCH_ACCESS_DENIED', 'Your Manager branch access has changed.');
+        }
+        const branchSnapshot = await tx.get(db.collection('branches').doc(source.branchId));
+        if (!branchSnapshot.exists || branchSnapshot.data()?.status !== 'active') {
+          throw new OtpError(403, 'BRANCH_INACTIVE', 'The Manager branch is inactive.');
+        }
+      }
+    }
+    const latestTarget = await tx.get(db.collection('users').doc(source.targetUid));
+    if (!latestTarget.exists || latestTarget.data()?.role !== targetProfile.role) {
+      throw new OtpError(409, 'MODERATION_TARGET_CHANGED', 'Refresh the target account before acting.');
+    }
+    const validatedGrounds = punitiveAbuse
+      ? await validatedGroundsInTransaction(tx, db, abuseReviewId, latestCase.data() || {}, incidentIds)
+      : [];
 
     let restrictionRef = null;
     let restrictionProjection = null;
@@ -343,6 +392,7 @@ async function applyModerationAction({ auth, db, actor, actorRole, actorBranch =
       reasonCategory: source.category,
       reason,
       privateNote,
+      ...(punitiveAbuse ? { selectedIncidentIds: incidentIds, validatedGrounds } : {}),
       actorUid,
       actorPublicUidSnapshot: publicUidOf(actor.profile || actor),
       actorRole,

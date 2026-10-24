@@ -27,7 +27,8 @@ const ACTIONS = {
   ],
 };
 const RESTRICTIONS = new Set(['suspend_branch_chat', 'suspend_branch_ordering', 'suspend_platform_chat', 'suspend_platform_ordering']);
-const ABUSE_ACTIONS = new Set(['warn', 'suspend_branch_ordering', 'suspend_platform_ordering', 'suspend_account', 'terminate_account', 'escalate']);
+const ABUSE_ACTIONS = new Set(['warn', 'suspend_branch_ordering', 'suspend_platform_ordering', 'escalate']);
+const ABUSE_PUNITIVE_ACTIONS = new Set(['warn', 'suspend_branch_ordering', 'suspend_platform_ordering']);
 const newMutationId = () => globalThis.crypto?.randomUUID?.() || `mod-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 const dateLabel = formatModerationTimestamp;
 
@@ -50,10 +51,11 @@ export default function ModerationWorkspace({ role }) {
   const [saving, setSaving] = React.useState(false);
   const [expanded, setExpanded] = React.useState(null);
   const [confirming, setConfirming] = React.useState(false);
+  const [selectedGrounds, setSelectedGrounds] = React.useState([]);
   const activityRevision = useModerationActivitySignal(role);
 
   const refresh = React.useCallback(async () => {
-    setLoading(true); setError(''); setSelected(null); setDetail(null); setExpanded(null);
+    setLoading(true); setError(''); setSelected(null); setDetail(null); setExpanded(null); setSelectedGrounds([]);
     try {
       const result = await loadModerationCases(role, { kind, status: kind === 'reports' ? status : '', limit: 25 });
       setItems(kind === 'reports' ? result.reports || [] : result.abuseReviews || []);
@@ -64,13 +66,16 @@ export default function ModerationWorkspace({ role }) {
   React.useEffect(() => { if (activityRevision) refresh(); }, [activityRevision, refresh]);
 
   const select = async (item) => {
-    setSelected(item); setDetail(null); setExpanded(null); setAction(''); setReason(''); setPrivateNote(''); setError('');
+    setSelected(item); setDetail(null); setExpanded(null); setAction(''); setReason(''); setPrivateNote(''); setError(''); setSelectedGrounds([]);
     if (kind !== 'reports') return;
     try { setDetail(await loadModerationDetail(role, item.id)); } catch (loadError) { setError(loadError.message); }
   };
   const submitAction = () => {
     if (!action) return setError('Choose a moderation action.');
     if (action !== 'dismiss' && !reason.trim()) return setError('A user-safe reason is required.');
+    if (kind === 'abuse' && ABUSE_PUNITIVE_ACTIONS.has(action) && !selectedGrounds.length) {
+      return setError('Select at least one incident. The server will verify its eligibility.');
+    }
     setConfirming(true);
   };
   const confirmAction = async () => {
@@ -80,6 +85,7 @@ export default function ModerationWorkspace({ role }) {
       await applyModerationAction(role, {
         ...(kind === 'reports' ? { reportId: selected.id } : { abuseReviewId: selected.id }),
         action, reason: reason.trim(), privateNote: privateNote.trim(), clientMutationId: newMutationId(),
+        ...(kind === 'abuse' && ABUSE_PUNITIVE_ACTIONS.has(action) ? { incidentIds: selectedGrounds } : {}),
         ...(RESTRICTIONS.has(action) ? { durationDays: Number(durationDays) } : {}),
       });
       await refresh();
@@ -123,7 +129,27 @@ export default function ModerationWorkspace({ role }) {
             <View style={styles.section}><Text style={styles.sectionLabel}>MODERATION HISTORY</Text>{(detail?.restrictions || []).map((entry, index) => <Text key={`${entry.kind}-${entry.scope}-${index}`} style={styles.history}>Active {entry.kind} restriction · {entry.scope} · until {dateLabel(entry.endsAt)}</Text>)}{(detail?.actions || []).length === 0 ? <Text style={styles.metaStrong}>No moderation actions recorded yet.</Text> : [...(detail?.actions || [])].reverse().map((entry) => <Text key={entry.id} style={styles.history}>{moderationActionLabel(entry.action)} by {entry.actorRole} · {dateLabel(entry.createdAt)}</Text>)}</View>
             {role === 'admin' && <Pressable disabled={saving} onPress={expandReview} style={styles.outlineButton}><Text style={styles.outlineButtonText}>Audit and load up to 20 messages</Text></Pressable>}
             {(expanded?.context || []).map((message) => <View key={`expanded-${message.messageId}`} style={styles.expanded}><Text style={styles.evidenceMeta}>Expanded · sequence {message.seq}</Text><Text style={styles.body}>{message.body}</Text></View>)}
-          </> : <>{(selected.incidents || []).map((incident, index) => <View key={`${incident.orderReference}-${index}`} style={styles.evidence}><Text style={styles.evidenceMeta}>{incident.type} · {incident.concern} concern</Text><Text style={styles.body}>Order {incident.orderReference} · {incident.category} · {incident.stage}</Text></View>)}</>}
+          </> : <View style={styles.section}>
+            <Text style={styles.sectionLabel}>INCIDENT GROUNDS</Text>
+            <Text style={styles.metaStrong}>These are allegations. Select up to five; the server verifies each ground before a warning or restriction.</Text>
+            {(selected.incidents || []).map((incident, index) => {
+              const selectable = Boolean(incident.incidentId && (incident.type === 'cancellation' || incident.linkedAttempt));
+              const selectedGround = selectedGrounds.includes(incident.incidentId);
+              return <Pressable key={`${incident.incidentId || incident.orderReference}-${index}`} accessibilityRole="checkbox"
+                accessibilityLabel={`Select ${incident.type} incident for order ${incident.orderReference}`}
+                accessibilityState={{ checked: selectedGround, disabled: !selectable }} disabled={!selectable}
+                onPress={() => setSelectedGrounds((current) => current.includes(incident.incidentId)
+                  ? current.filter((id) => id !== incident.incidentId)
+                  : current.length < 5 ? [...current, incident.incidentId] : current)}
+                style={[styles.evidence, { minHeight: 44 }, selectedGround && styles.caseSelected, !selectable && { opacity: .7 }]}>
+                <Text style={styles.evidenceMeta}>{incident.type} · {incident.concern} concern</Text>
+                <Text style={styles.body}>Order {incident.orderReference} · {incident.category} · {incident.stage}</Text>
+                <Text style={styles.metaStrong}>{!selectable ? 'Historical unlinked allegation — unavailable as a ground'
+                  : selectedGround ? 'Selected for server verification' : 'Tap to select for server verification'}</Text>
+              </Pressable>;
+            })}
+            {role === 'admin' && <Text style={styles.metaStrong}>Account suspension and termination from ordering-abuse cases are temporarily unavailable pending security hardening.</Text>}
+          </View>}
           <View style={styles.section}><Text style={styles.sectionLabel}>DECISION</Text><View style={styles.actionGrid}>{ACTIONS[role].filter(([value]) => kind === 'reports' || ABUSE_ACTIONS.has(value)).map(([value, label]) => <Pressable accessibilityRole="button" accessibilityState={{ selected: action === value }} key={value} onPress={() => setAction(value)} style={[styles.action, action === value && styles.actionSelected, ['terminate_account', 'suspend_account'].includes(value) && styles.dangerAction]}><Text style={[styles.actionText, action === value && styles.actionTextSelected]}>{label}</Text></Pressable>)}</View>{RESTRICTIONS.has(action) && <View style={styles.durations}>{durations.map((days) => <Pressable key={days} onPress={() => setDurationDays(String(days))} style={[styles.duration, durationDays === String(days) && styles.actionSelected]}><Text style={styles.actionText}>{days} day{days === 1 ? '' : 's'}</Text></Pressable>)}</View>}<TextInput accessibilityLabel="User-safe moderation reason" placeholder="Reason shown in the audit record" placeholderTextColor={colors.placeholder} value={reason} onChangeText={(value) => setReason(value.slice(0, 1000))} multiline style={styles.input} /><TextInput accessibilityLabel="Private moderator note" placeholder="Private moderator note (never shown to the user)" placeholderTextColor={colors.placeholder} value={privateNote} onChangeText={(value) => setPrivateNote(value.slice(0, 1000))} multiline style={styles.input} /><Pressable disabled={saving} onPress={submitAction} style={[styles.primaryButton, saving && { opacity: .6 }]}><Text style={styles.primaryButtonText}>{saving ? 'Saving…' : 'Apply decision'}</Text></Pressable></View>
         </>}
       </View>}
