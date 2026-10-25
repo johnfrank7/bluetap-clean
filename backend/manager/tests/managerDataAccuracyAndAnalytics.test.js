@@ -6,7 +6,7 @@ const test = require('node:test');
 const root = resolve(__dirname, '../../..');
 const read = (path) => readFileSync(resolve(root, path), 'utf8');
 
-const dashboardCode = read('app/manager/dashboard.jsx');
+const dashboardCode = read('components/ManagerOperationsDashboard.jsx');
 const analyticsCode = read('app/manager/analytics.jsx');
 const analyticsCardCode = read('components/AnalyticsMetricCard.jsx');
 const accountsCode = read('app/manager/accounts.jsx');
@@ -82,13 +82,17 @@ test('safeOrder extracts requesterUid across alternative order field aliases', (
   assert.equal(order4.requesterUid, 'u4');
 });
 
-test('Manager Dashboard calculates registeredUsers as sum of distributors and branch requesters without counting Manager', () => {
-  assert.match(dashboardCode, /extractBranchRequesters/);
-  assert.match(dashboardCode, /registeredUsers = registeredDistributorCount \+ registeredRequesterCount/);
-  assert.match(dashboardCode, /registeredDistributors: registeredDistributorCount/);
-  assert.match(dashboardCode, /registeredRequesters: registeredRequesterCount/);
-  assert.doesNotMatch(dashboardCode, /\+18 this month/, 'Fake metric +18 this month must be removed');
-  assert.match(dashboardCode, /helper="Distributors & branch requesters"/);
+test('Manager Dashboard uses branch operations and keeps detailed accounts and people metrics on existing pages', () => {
+  assert.match(dashboardCode, /getManagerDashboardOperations\(requests, branchId, now\)/);
+  assert.match(dashboardCode, /getManagerOrderAnalytics\(operations\.branchOrders\)/);
+  assert.match(dashboardCode, /Sales Overview/);
+  assert.doesNotMatch(dashboardCode, /Registered accounts|Stations Online|User Composition/);
+  assert.match(accountsCode, /Branch Accounts/);
+  assert.match(analyticsCode, /Branch people/);
+  assert.match(analyticsCode, /Delivered units by month/);
+  assert.match(analyticsCode, /metrics\.trend\.map/);
+  assert.match(analyticsCode, /Registered users by barangay/);
+  assert.match(analyticsCode, /String\(user\.barangay \|\| ''\)/);
 });
 
 test('Manager Analytics UI has uniform KPI cards, responsive layout, and accurate branch people count', () => {

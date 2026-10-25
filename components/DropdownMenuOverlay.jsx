@@ -6,6 +6,7 @@ const MENU_GAP = 6;
 
 export default function DropdownMenuOverlay({
   accessibilityLabel = 'Close dropdown',
+  allowAbove = false,
   anchorRef,
   children,
   maxHeight = 320,
@@ -72,9 +73,12 @@ export default function DropdownMenuOverlay({
     const width = Math.min(Math.max(anchor.width, minWidth), maxWidth, windowWidth - EDGE_GAP * 2);
     const left = Math.max(EDGE_GAP, Math.min(anchor.x, windowWidth - width - EDGE_GAP));
     const top = anchor.y + anchor.height + MENU_GAP;
-    const availableHeight = Math.max(0, windowHeight - top - EDGE_GAP);
+    const belowHeight = Math.max(0, windowHeight - top - EDGE_GAP);
+    const aboveHeight = Math.max(0, anchor.y - MENU_GAP - EDGE_GAP);
+    const placeAbove = allowAbove && belowHeight < Math.min(maxHeight, 200) && aboveHeight > belowHeight;
+    const availableHeight = placeAbove ? aboveHeight : belowHeight;
     const availableMaxHeight = Math.max(100, Math.min(maxHeight, availableHeight));
-    menuPosition = { left, maxHeight: availableMaxHeight, top, width };
+    menuPosition = { bottom: placeAbove ? windowHeight - anchor.y + MENU_GAP : undefined, left, maxHeight: availableMaxHeight, top: placeAbove ? undefined : top, width };
   }
 
   const translateY = progress.interpolate({
@@ -98,6 +102,7 @@ export default function DropdownMenuOverlay({
               styles.menu,
               {
                 left: menuPosition.left,
+                bottom: menuPosition.bottom,
                 maxHeight: menuPosition.maxHeight,
                 opacity: progress,
                 top: menuPosition.top,

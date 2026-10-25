@@ -63,9 +63,11 @@ test('every active Admin workspace route inherits the shared shell and themed da
   assert.match(read('app', 'admin', '_layout.jsx'), /AdminThemeProvider/);
   assert.match(read('app', 'manager', '_layout.jsx'), /AdminThemeProvider/);
   assert.match(read('components', 'ManagerShell.jsx'), /useAdminTheme/);
-  for (const page of ['dashboard.jsx', 'analytics.jsx', 'products.jsx', 'request.jsx', 'distributors.jsx', 'profile.jsx']) {
+  for (const page of ['analytics.jsx', 'products.jsx', 'request.jsx', 'distributors.jsx', 'profile.jsx']) {
     assert.match(read('app', 'manager', page), /useAdminTheme/);
   }
+  assert.match(read('app', 'manager', 'dashboard.jsx'), /ManagerOperationsDashboard/);
+  assert.match(read('components', 'ManagerOperationsDashboard.jsx'), /useAdminTheme/);
   const dashboardUi = read('components', 'DashboardUi.jsx');
   assert.match(dashboardUi, /useAdminTheme/);
   assert.match(dashboardUi, /colors\.surface/);

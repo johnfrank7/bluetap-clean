@@ -20,6 +20,8 @@ import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from '../../firebase';
 import { findLocalUserForAuthRole } from '../../localUsers';
 import RequestDetailsModal from '../../components/RequestDetailsModal';
+import RequesterTutorialModal, { TUTORIAL_SEEN_KEY, getTutorialSeenKey } from '../../components/RequesterTutorialModal';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRequesterData } from '../../components/RoleDataProviders';
 import SoftStatusBadge from '../../components/SoftStatusBadge';
 import { createShadow } from '../../components/shadowStyles';
@@ -429,6 +431,23 @@ export default function RequesterDashboard() {
   const [requestToCancel, setRequestToCancel] = useState(null);
   const [detailsRequest, setDetailsRequest] = useState(null);
   const [notification, setNotification] = useState(null);
+  const [tutorialVisible, setTutorialVisible] = useState(false);
+  const requesterId = requesterData?.uid || auth.currentUser?.uid;
+
+  useEffect(() => {
+    let mounted = true;
+    const storageKey = getTutorialSeenKey(requesterId);
+    AsyncStorage.getItem(storageKey)
+      .then((seen) => {
+        if (mounted && seen !== 'true') {
+          setTutorialVisible(true);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      mounted = false;
+    };
+  }, [requesterId]);
   const [requesterName, setRequesterName] = useState('Requester');
   const productCarouselWidth = Math.max(
     1,
@@ -933,6 +952,11 @@ export default function RequesterDashboard() {
           onClose={() => setDetailsRequest(null)}
           request={detailsRequestData}
           branches={requesterData.branches}
+        />
+        <RequesterTutorialModal
+          visible={tutorialVisible}
+          onClose={() => setTutorialVisible(false)}
+          userId={requesterId}
         />
 
         <Modal visible={!!notification} transparent animationType="fade">

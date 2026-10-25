@@ -8,6 +8,7 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   TouchableOpacity,
@@ -29,9 +30,12 @@ import BlueTapHeader from '../../components/BlueTapHeader';
 import DistributorPortalBackground from '../../components/DistributorPortalBackground';
 import PortalSwipeContainer, { DISTRIBUTOR_TABS } from '../../components/PortalSwipeContainer';
 import { createShadow } from '../../components/shadowStyles';
-import { createPortalStyleSheet, useBlueTapTheme } from '../../components/BlueTapTheme';
+import { createPortalStyleSheet,
+  useBlueTapTheme } from '../../components/BlueTapTheme';
 import BlueTapBrandMark from '../../components/BlueTapBrandMark';
 import TopToastFeedback from '../../components/TopToastFeedback';
+import ChangePasswordModal from '../../components/ChangePasswordModal';
+import { getAssistantVisibility, setAssistantVisibility } from '../../services/assistant/assistantStorage';
 import { USER_PORTAL_BOTTOM_CONTENT_INSET, USER_PORTAL_LAYOUT } from '../../constants/userPortalLayout';
 import { BLUETAP_COLORS } from '../../constants/bluetapTheme';
 
@@ -228,6 +232,23 @@ export default function DistributorProfilePage() {
   const [savingProfile, setSavingProfile] = useState(false);
   const [profileDraft, setProfileDraft] = useState(() => buildProfileDraft());
   const [toast, setToast] = useState({ visible: false, message: '', type: 'success' });
+  const [changePasswordVisible, setChangePasswordVisible] = useState(false);
+  const [assistantVisible, setAssistantVisible] = useState(true);
+
+  useEffect(() => {
+    let isMounted = true;
+    getAssistantVisibility().then((visible) => {
+      if (isMounted) setAssistantVisible(visible);
+    });
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  const handleToggleAssistant = async (value) => {
+    setAssistantVisible(value);
+    await setAssistantVisibility(value);
+  };
 
 
   useEffect(() => {
@@ -633,35 +654,78 @@ export default function DistributorProfilePage() {
             )}
           </View>
 
-          <View style={styles.helpCard}>
-            <Pressable style={({ hovered, pressed }) => [styles.helpRow, hovered && styles.helpRowHovered, pressed && styles.helpRowPressed]} onPress={() => replaceOnce('/distributor/bluetap_AI')} accessibilityRole="button" accessibilityLabel="Open BlueTap Assistant">
-              <View style={styles.helpTextBlock}>
-                <Text style={styles.helpTitle}>BlueTap Assistant</Text>
-                <Text style={styles.helpSubtitle}>Get quick help with deliveries, schedules, and routes.</Text>
-                <Text style={styles.helpAction}>Open Assistant →</Text>
-              </View>
-              <View style={styles.helpIconWrapper}>
-                <BlueTapBrandMark color={colors.iconInteractive || BLUE} size={38} style={styles.helpIcon} />
-              </View>
-            </Pressable>
+          <View style={styles.settingsSection}>
+            <View style={styles.infoHeader}>
+              <Text style={styles.infoTitle}>Account Settings</Text>
+            </View>
+            <View style={styles.infoDivider} />
 
-            <TouchableOpacity
-              activeOpacity={0.85}
-              style={styles.logoutButton}
-              onPress={() => confirmLeave(handleLogout)}
-              disabled={savingProfile}
-            >
-              <ExpoImage
-                source={LOGOUT_ICON}
-                contentFit="contain"
-                tintColor={colors.onPrimary || '#FFFFFF'}
-                transition={0}
-                accessible={false}
-                style={styles.logoutIcon}
+            <View style={styles.settingRow}>
+              <View style={styles.settingTextWrap}>
+                <Text style={styles.settingLabel}>Account Password</Text>
+                <Text style={styles.settingSubtitle}>Update your password for security</Text>
+              </View>
+              <TouchableOpacity
+                accessibilityRole="button"
+                accessibilityLabel="Change Password"
+                onPress={() => setChangePasswordVisible(true)}
+                style={styles.changePasswordButton}
+              >
+                <Text style={styles.changePasswordButtonText}>Change Password</Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.settingDivider} />
+
+            <View style={styles.settingRow}>
+              <View style={styles.settingTextWrap}>
+                <Text style={styles.settingLabel}>BlueTap Assistant</Text>
+                <Text style={styles.settingSubtitle}>Show assistant quick access shortcut</Text>
+              </View>
+              <Switch
+                value={assistantVisible}
+                onValueChange={handleToggleAssistant}
+                trackColor={{ false: CARD_BORDER, true: BLUE_LIGHT }}
+                thumbColor={assistantVisible ? BLUE : TEXT_MUTED}
+                accessibilityRole="switch"
+                accessibilityLabel="Toggle BlueTap Assistant Visibility"
               />
-              <Text style={styles.logoutText}>Logout</Text>
-            </TouchableOpacity>
+            </View>
           </View>
+
+          {assistantVisible && (
+            <View style={styles.helpCard}>
+              <Pressable style={({ hovered, pressed }) => [styles.helpRow, hovered && styles.helpRowHovered, pressed && styles.helpRowPressed]} onPress={() => replaceOnce('/distributor/bluetap_AI')} accessibilityRole="button" accessibilityLabel="Open BlueTap Assistant">
+                <View style={styles.helpTextBlock}>
+                  <Text style={styles.helpTitle}>BlueTap Assistant</Text>
+                  <Text style={styles.helpSubtitle}>Get quick help with deliveries, schedules, and routes.</Text>
+                  <Text style={styles.helpAction}>Open Assistant →</Text>
+                </View>
+                <View style={styles.helpIconWrapper}>
+                  <BlueTapBrandMark color={colors.iconInteractive || BLUE} size={38} style={styles.helpIcon} />
+                </View>
+              </Pressable>
+            </View>
+          )}
+
+          <TouchableOpacity
+            activeOpacity={0.85}
+            style={styles.logoutButton}
+            onPress={() => confirmLeave(handleLogout)}
+            disabled={savingProfile}
+            accessibilityRole="button"
+            accessibilityLabel="Log out of your account"
+          >
+            <ExpoImage
+              source={LOGOUT_ICON}
+              contentFit="contain"
+              tintColor={colors.onPrimary || '#FFFFFF'}
+              transition={0}
+              accessible={false}
+              style={styles.logoutIcon}
+            />
+            <Text style={styles.logoutText}>Logout</Text>
+          </TouchableOpacity>
 
         </ScrollView>
       </View>
@@ -673,6 +737,7 @@ export default function DistributorProfilePage() {
         type={toast.type}
         onDismiss={() => setToast((t) => ({ ...t, visible: false }))}
       />
+      <ChangePasswordModal visible={changePasswordVisible} onClose={() => setChangePasswordVisible(false)} onSuccess={() => setToast({ visible: true, message: 'Password updated successfully.', type: 'success' })} />
       <UnsavedModal />
     </SafeAreaView>
     </DistributorPortalBackground>
@@ -837,6 +902,60 @@ const styles = createPortalStyleSheet({
   },
   buttonDisabled: {
     opacity: 0.65,
+  },
+  settingsSection: {
+    marginTop: 18,
+    backgroundColor: BLUETAP_COLORS.surface,
+    borderRadius: USER_PORTAL_LAYOUT.cardRadius,
+    borderWidth: 1,
+    borderColor: CARD_BORDER,
+    padding: 16,
+    ...createShadow({
+      color: '#0D47A1',
+      elevation: 6,
+      opacity: 0.1,
+      radius: 10,
+      offset: { width: 0, height: 5 },
+    }),
+  },
+  settingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+    gap: 12,
+  },
+  settingTextWrap: {
+    flex: 1,
+    minWidth: 0,
+  },
+  settingLabel: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: TEXT_DARK,
+  },
+  settingSubtitle: {
+    fontSize: 12,
+    color: TEXT_MUTED,
+    marginTop: 2,
+  },
+  settingDivider: {
+    height: 1,
+    backgroundColor: BLUE_LIGHT,
+    marginVertical: 4,
+  },
+  changePasswordButton: {
+    minHeight: 38,
+    paddingHorizontal: 14,
+    borderRadius: 8,
+    backgroundColor: BLUE,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  changePasswordButtonText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '800',
   },
   helpCard: {
     marginTop: 22,

@@ -232,8 +232,10 @@ test('message bubbles keep incoming and outgoing alignment with semantic theme s
   assert.match(source, /onFocus/);
   assert.match(source, /delayLongPress=\{500\}/);
   assert.match(source, /More message actions/);
-  assert.match(source, /event\.key === 'Escape'/);
-  assert.match(source, /\\u2022\\u2022\\u2022/);
+  assert.match(source, /\\u22EE/);
+  const conversation = read('components/chat/ChatConversationView.jsx');
+  assert.match(conversation, /event\.key === 'Escape'/);
+  assert.match(conversation, /document\.addEventListener\('pointerdown', closeOutside\)/);
 });
 
 test('desktop message action visibility survives focus and an open menu while mouse leave hides a closed trigger', () => {
@@ -248,10 +250,42 @@ test('message action presentation keeps fine-pointer hover, touch long-press, an
   const conversation = read('components/chat/ChatConversationView.jsx');
   assert.match(bubble, /const useActionSheet = Platform\.OS !== 'web' \|\| !finePointer/);
   assert.match(bubble, /onLongPress=\{useActionSheet && hasOptions/);
-  assert.match(bubble, /\{own && desktopControl\}[\s\S]*styles\.bubble[\s\S]*\{!own && desktopControl\}/);
-  assert.match(bubble, /pointerEvents=\{buttonVisible \? 'auto' : 'none'\}/);
+  assert.match(bubble, /\{own && actionControl\}[\s\S]*styles\.bubble[\s\S]*\{!own && actionControl\}/);
+  assert.match(bubble, /onToggleDesktopMenu\?\.\(\{ message, actions, own, anchorRef: buttonRef, onChoose: chooseAction \}\)/);
+  assert.match(bubble, /style=\{\[styles\.menuButton, !useActionSheet && !buttonVisible && styles\.menuButtonHidden\]\}/);
+  assert.match(conversation, /desktopMenuOpen=\{activeMessageMenu\?\.id === message\.id\}/);
+  assert.match(conversation, /onToggleDesktopMenu=\{toggleDesktopMessageMenu\}/);
+  assert.match(conversation, /style=\{styles\.messageMenuLayer\}/);
   assert.match(conversation, /\['requester', 'distributor'\]\.includes\(role\) && currentConversation\?\.type === 'requester_distributor'/);
   assert.match(conversation, /onReport=\{reportingAllowed \? \(item\) => setReportTarget/);
+});
+
+test('desktop message menus stay within the chat viewport and open above low anchors', () => {
+  const viewport = { x: 40, y: 80, width: 350, height: 400 };
+  const root = { x: 30, y: 40 };
+  const low = model.positionMessageMenu({ anchor: { x: 350, y: 430, width: 36, height: 40 }, viewport, root, own: true, actionCount: 3 });
+  assert.equal(low.width, 152);
+  assert.ok(low.left >= viewport.x - root.x + 8);
+  assert.ok(low.left + low.width <= viewport.x - root.x + viewport.width - 8);
+  assert.ok(low.top + root.y < 430);
+  assert.ok(low.top + root.y >= viewport.y + 8);
+  const high = model.positionMessageMenu({ anchor: { x: 45, y: 92, width: 36, height: 40 }, viewport, root, actionCount: 2 });
+  assert.ok(high.top + root.y >= 132);
+  assert.ok(high.top + root.y + 96 <= viewport.y + viewport.height - 8);
+  const narrow = model.positionMessageMenu({ anchor: { x: 10, y: 80, width: 36, height: 40 }, viewport: { x: 0, y: 0, width: 190, height: 240 }, root: { x: 0, y: 0 }, actionCount: 3 });
+  assert.ok(narrow.left >= 8);
+  assert.ok(narrow.left + narrow.width <= 182);
+});
+
+test('menu placement does not resize the message list or alter its scroll position', () => {
+  const conversation = read('components/chat/ChatConversationView.jsx');
+  const bubble = read('components/chat/ChatMessageBubble.jsx');
+  assert.match(conversation, /<View pointerEvents="box-none" style=\{styles\.messageMenuLayer\}>/);
+  assert.match(conversation, /messageMenuLayer: \{ \.\.\.StyleSheet\.absoluteFillObject/);
+  assert.match(conversation, /if \(activeMessageMenu\) closeMessageMenu\(\)/);
+  assert.match(conversation, /if \(messages\.length !== prevLen && activeMessageMenu\) closeMessageMenu\(\)/);
+  assert.match(conversation, /menuRequestRef\.current \+= 1/);
+  assert.doesNotMatch(bubble, /position: 'absolute', top: 32, minWidth: 144/);
 });
 
 test('message action controls preserve compact metadata and receipts', () => {

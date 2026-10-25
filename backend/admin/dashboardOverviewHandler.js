@@ -89,8 +89,8 @@ function createAdminDashboardOverviewHandler(getAdmin = getFirebaseAdmin) {
       const sales = requestResult.status === 'fulfilled'
         ? requestResult.value.docs.reduce((total, doc) => {
             const stats = deliveredOrderStats(doc.data() || {});
-            return { deliveredOrders: total.deliveredOrders + stats.deliveredOrders, revenue: total.revenue + stats.revenue, units: total.units + stats.units, scope: 'Recent 500 orders' };
-          }, { deliveredOrders: 0, revenue: 0, units: 0, scope: 'Recent 500 orders' })
+            return { totalOrders: total.totalOrders + 1, deliveredOrders: total.deliveredOrders + stats.deliveredOrders, revenue: total.revenue + stats.revenue, units: total.units + stats.units, scope: 'Recent 500 orders' };
+          }, { totalOrders: 0, deliveredOrders: 0, revenue: 0, units: 0, scope: 'Recent 500 orders' })
         : null;
 
       logDevelopmentTiming('[admin-performance]', { stage: 'ADMIN_DASHBOARD_OVERVIEW_FINISHED', durationMs: Date.now() - startedAt });

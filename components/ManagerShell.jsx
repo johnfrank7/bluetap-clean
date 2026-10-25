@@ -51,7 +51,7 @@ const NAV_ITEMS = [
   { key: 'products', label: 'Products', path: '/manager/products' },
   { key: 'analytics', label: 'Analytics', path: '/manager/analytics' },
   { key: 'reports', label: 'Reports & Safety', path: '/manager/reports-safety' },
-  { key: 'profile', label: 'Profile', path: '/manager/profile' },
+  { key: 'settings', label: 'Settings', path: '/manager/settings' },
 ];
 
 const DESKTOP_WIDTH = 244;
@@ -303,7 +303,7 @@ export default function ManagerShell({
 
       <View style={styles.navigation}>
         {NAV_ITEMS.map((item) => {
-          const isActive = active === item.key;
+          const isActive = active === item.key || (item.key === 'settings' && active === 'profile');
           const isReq = item.key === 'requests';
           const isDispatch = item.key === 'distributors';
           const isReports = item.key === 'reports';
@@ -456,7 +456,13 @@ export default function ManagerShell({
           </View>
 
           <ScrollView ref={contentScrollRef} contentContainerStyle={[styles.content, compact && styles.compactContent]} keyboardShouldPersistTaps="handled">
-            <PageEnterTransition axis="y" distance={8} duration={230} resetKey={pathname} style={styles.contentEntry}>
+            <PageEnterTransition
+              axis="y"
+              distance={active === 'dashboard' ? 0 : 8}
+              duration={active === 'dashboard' ? 0 : 230}
+              resetKey={pathname}
+              style={styles.contentEntry}
+            >
               {children}
             </PageEnterTransition>
           </ScrollView>
@@ -587,9 +593,7 @@ const styles = StyleSheet.create({
   notificationIcon: { width: 22, height: 22 },
   notificationCount: { position: 'absolute', right: 1, top: 1, minWidth: 18, height: 18, paddingHorizontal: 3, borderRadius: 10, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
   notificationCountText: { color: '#FFFFFF', fontSize: 10, fontWeight: '900' },
-  content: { paddingHorizontal: 28, paddingBottom: 148, paddingTop: 14, flexGrow: 1 },
-  contentEntry: { flexGrow: 1 },
-  compactContent: { paddingHorizontal: 14, paddingBottom: 156 },
+  content: { paddingHorizontal: 24, paddingBottom: 164, paddingTop: 16, flexGrow: 1 },  contentEntry: { flexGrow: 1 },  compactContent: { paddingHorizontal: 16, paddingBottom: 172 },
   backdrop: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, zIndex: 3 },
   modalBackdrop: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 20 },
   modal: { width: '100%', maxWidth: 420, borderWidth: 1, borderRadius: 18, padding: 22 },

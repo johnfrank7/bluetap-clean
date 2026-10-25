@@ -21,24 +21,37 @@ import { BLUETAP_COLORS } from '../constants/bluetapTheme';
 import { useAdminTheme } from './AdminTheme';
 import BlueTapEmptyState from './BlueTapEmptyState';
 import { useManagerRealtimeData } from './ManagerRealtimeData';
+import OngoingRequestFieldIcon from './OngoingRequestFieldIcon';
 import RequestDetailsModal from './RequestDetailsModal';
 import SidebarIcon from './SidebarIcon';
+import { getSoftStatusMeta } from './SoftStatusBadge';
 import { createShadow } from './shadowStyles';
 import useCurrentPageRequestDetails from './useCurrentPageRequestDetails';
 import useSingleFlightNavigation from './useSingleFlightNavigation';
 import { parseTimestamp } from '../services/notificationTimestamp';
 import { formatDisplayUniqueId } from '../services/uniqueIds';
 
-const { getOngoingDeliveryProgress, statusOf } = require('../services/managerOperational');
+const {
+  getOngoingDeliveryProgress,
+  splitOngoingManagerOrders,
+  statusOf,
+} = require('../services/managerOperational');
 const { formatDeliveryFailureReason } = require('../constants/deliveryFailureReasons');
 
 const defaultContextValue = {
   isOpen: false,
+  requestedSegment: 'active',
   openPanel: () => {},
   closePanel: () => {},
   togglePanel: () => {},
   ongoingCount: 0,
+  activeDeliveriesCount: 0,
+  scheduledCount: 0,
+  failedDeliveriesCount: 0,
   ongoingRequests: [],
+  activeDeliveries: [],
+  scheduledOrders: [],
+  failedDeliveries: [],
   loading: false,
   hasError: false,
   retry: () => {},
@@ -51,27 +64,27 @@ const ManagerOngoingRequestsContext = React.createContext(defaultContextValue);
 const STATUS_META = {
   distributor_assigned: {
     label: 'Assigned to Distributor',
-    tone: 'info',
+    tone: 'assigned',
   },
   assigned: {
     label: 'Assigned to Distributor',
-    tone: 'info',
+    tone: 'assigned',
   },
   accepted: {
     label: 'Distributor Accepted',
-    tone: 'info',
+    tone: 'assigned',
   },
   scheduled: {
     label: 'Scheduled for Delivery',
-    tone: 'primary',
+    tone: 'scheduled',
   },
   rescheduled: {
     label: 'Rescheduled Delivery',
-    tone: 'primary',
+    tone: 'scheduled',
   },
   out_for_delivery: {
     label: 'Out for Delivery',
-    tone: 'success',
+    tone: 'active_delivery',
   },
   delivery_failed: {
     label: 'Delivery Issue Reported',
@@ -94,34 +107,51 @@ export function formatOngoingStatusLabel(status) {
     .join(' ');
 }
 
-function resolveStatusToneColors(status, colors, isDark) {
+export function resolveStatusToneColors(status, colors, isDark) {
   const normalized = statusOf(status);
-  const tone = STATUS_META[normalized]?.tone || 'info';
+  if (typeof getSoftStatusMeta === 'function') {
+    const sharedMeta = getSoftStatusMeta(normalized || status, { isDark });
+    if (sharedMeta && sharedMeta.backgroundColor && sharedMeta.color) {
+      return {
+        bg: sharedMeta.backgroundColor,
+        border: sharedMeta.borderColor || sharedMeta.color,
+        text: sharedMeta.color,
+      };
+    }
+  }
+  const tone = STATUS_META[normalized]?.tone || 'assigned';
   if (tone === 'danger') {
     return {
-      bg: isDark ? 'rgba(239, 68, 68, 0.18)' : colors.dangerSoft || '#FEE2E2',
-      border: isDark ? 'rgba(248, 113, 113, 0.45)' : '#FCA5A5',
-      text: isDark ? '#FCA5A5' : colors.danger || '#B91C1C',
+      bg: isDark ? '#3B181A' : colors?.dangerSoft || '#FEF2F2',
+      border: isDark ? '#DC2626' : '#FCA5A5',
+      text: isDark ? '#F87171' : colors?.danger || '#B91C1C',
     };
   }
   if (tone === 'success') {
     return {
-      bg: isDark ? 'rgba(16, 185, 129, 0.18)' : colors.successSoft || '#DCFCE7',
-      border: isDark ? 'rgba(52, 211, 153, 0.45)' : '#86EFAC',
-      text: isDark ? '#6EE7B7' : colors.success || '#047857',
+      bg: isDark ? '#0F392B' : colors?.successSoft || '#ECFDF5',
+      border: isDark ? '#059669' : '#86EFAC',
+      text: isDark ? '#34D399' : colors?.success || '#047857',
     };
   }
-  if (tone === 'primary') {
+  if (tone === 'active_delivery') {
     return {
-      bg: isDark ? 'rgba(56, 189, 248, 0.18)' : colors.primarySoft || '#E0F2FE',
-      border: isDark ? 'rgba(56, 189, 248, 0.45)' : '#7DD3FC',
-      text: isDark ? '#7DD3FC' : colors.primary || '#0369A1',
+      bg: isDark ? '#0C4A6E' : colors?.primarySoft || '#E0F2FE',
+      border: isDark ? '#0284C7' : '#7DD3FC',
+      text: isDark ? '#38BDF8' : colors?.primary || '#0369A1',
+    };
+  }
+  if (tone === 'scheduled') {
+    return {
+      bg: isDark ? '#431407' : '#FFF3E6',
+      border: isDark ? '#EA580C' : '#FDBA74',
+      text: isDark ? '#FB923C' : '#9A4D00',
     };
   }
   return {
-    bg: isDark ? 'rgba(59, 130, 246, 0.18)' : '#EFF6FF',
-    border: isDark ? 'rgba(96, 165, 250, 0.42)' : '#BFDBFE',
-    text: isDark ? '#93C5FD' : '#1D4ED8',
+    bg: isDark ? '#133554' : '#EFF6FF',
+    border: isDark ? '#2563EB' : '#BFDBFE',
+    text: isDark ? '#60A5FA' : '#1D4ED8',
   };
 }
 
@@ -195,9 +225,14 @@ export function ManagerOngoingRequestsProvider({ children }) {
     retry,
   } = useManagerRealtimeData();
   const [isOpen, setIsOpen] = React.useState(false);
+  const [requestedSegment, setRequestedSegment] = React.useState('active');
   const [viewAllTick, setViewAllTick] = React.useState(0);
 
   const hasError = Boolean(errors?.requests || (error && ongoingRequests.length === 0));
+  const split = React.useMemo(
+    () => splitOngoingManagerOrders(ongoingRequests),
+    [ongoingRequests]
+  );
 
   React.useEffect(() => {
     if (pathname === '/manager/login') {
@@ -205,7 +240,10 @@ export function ManagerOngoingRequestsProvider({ children }) {
     }
   }, [pathname]);
 
-  const openPanel = React.useCallback(() => setIsOpen(true), []);
+  const openPanel = React.useCallback((segment = 'active') => {
+    setRequestedSegment(['active', 'scheduled', 'exceptions'].includes(segment) ? segment : 'active');
+    setIsOpen(true);
+  }, []);
   const closePanel = React.useCallback(() => setIsOpen(false), []);
   const togglePanel = React.useCallback(() => setIsOpen((prev) => !prev), []);
   const triggerViewAllFilter = React.useCallback(() => setViewAllTick((prev) => prev + 1), []);
@@ -214,10 +252,17 @@ export function ManagerOngoingRequestsProvider({ children }) {
     () => ({
       isOpen,
       openPanel,
+      requestedSegment,
       closePanel,
       togglePanel,
-      ongoingCount: hasError ? 0 : ongoingCount,
+      ongoingCount: hasError ? 0 : ongoingCount || split.ongoingCount,
+      activeDeliveriesCount: hasError ? 0 : split.activeDeliveriesCount,
+      scheduledCount: hasError ? 0 : split.scheduledCount,
+      failedDeliveriesCount: hasError ? 0 : split.failedDeliveriesCount,
       ongoingRequests,
+      activeDeliveries: split.activeDeliveries,
+      scheduledOrders: split.scheduledOrders,
+      failedDeliveries: split.failedDeliveries,
       loading,
       hasError,
       retry: typeof retry === 'function' ? retry : () => {},
@@ -227,10 +272,12 @@ export function ManagerOngoingRequestsProvider({ children }) {
     [
       isOpen,
       openPanel,
+      requestedSegment,
       closePanel,
       togglePanel,
       hasError,
       ongoingCount,
+      split,
       ongoingRequests,
       loading,
       retry,
@@ -342,56 +389,80 @@ function DeliveryProgressTrack({ order, colors, isDark }) {
       </View>
       <View style={styles.progressStepsRow}>
         {progress.steps.map((step, index) => {
-          const isReached = step.completed || step.current;
+          const prevStepCompleted = index > 0 && Boolean(progress.steps[index - 1]?.completed);
+          const successColor = isDark ? '#10B981' : BLUETAP_COLORS.success || '#1F9D61';
+          const inactiveLineColor = isDark ? '#1E3A5F' : '#CBD5E1';
           const dotBg = step.completed
-            ? BLUETAP_COLORS.success || '#10B981'
+            ? successColor
             : step.current
             ? BLUETAP_COLORS.primary
             : isDark
             ? '#1E3A5F'
+            : '#E2E8F0';
+          const dotBorderColor = step.completed
+            ? isDark
+              ? '#34D399'
+              : '#16824E'
+            : step.current
+            ? isDark
+              ? '#7DD3FC'
+              : '#BAE6FD'
+            : isDark
+            ? '#334155'
             : '#CBD5E1';
           const labelColor = step.current
             ? colors.textPrimary
             : step.completed
-            ? colors.textSecondary
+            ? isDark
+              ? '#34D399'
+              : '#16824E'
             : colors.textMuted || colors.textSecondary;
+          const stepStateLabel = step.completed
+            ? 'completed'
+            : step.current
+            ? 'current'
+            : 'upcoming';
 
           return (
-            <View key={step.key} style={styles.progressStepItem}>
+            <View
+              key={step.key}
+              accessibilityLabel={`Step ${index + 1}: ${step.label}, ${stepStateLabel}`}
+              style={styles.progressStepItem}
+            >
               <View style={styles.progressTrackLineRow}>
                 <View
                   style={[
                     styles.progressLineSegment,
                     index === 0 && styles.progressLineHidden,
                     {
-                      backgroundColor: isReached
-                        ? BLUETAP_COLORS.primary
-                        : isDark
-                        ? '#1E3A5F'
-                        : '#E2E8F0',
+                      backgroundColor: prevStepCompleted ? successColor : inactiveLineColor,
                     },
                   ]}
                 />
                 <View
                   style={[
                     styles.progressDot,
-                    { backgroundColor: dotBg },
-                    step.current && {
-                      borderWidth: 2,
-                      borderColor: isDark ? '#7DD3FC' : '#BAE6FD',
+                    {
+                      backgroundColor: dotBg,
+                      borderColor: dotBorderColor,
+                      borderWidth: step.current ? 2.5 : 1.5,
                     },
                   ]}
-                />
+                >
+                  {step.completed ? (
+                    <Text allowFontScaling={false} style={styles.progressCheckGlyph}>
+                      {'\u2713'}
+                    </Text>
+                  ) : step.current ? (
+                    <View style={styles.progressCurrentInnerDot} />
+                  ) : null}
+                </View>
                 <View
                   style={[
                     styles.progressLineSegment,
                     index === progress.steps.length - 1 && styles.progressLineHidden,
                     {
-                      backgroundColor: step.completed
-                        ? BLUETAP_COLORS.primary
-                        : isDark
-                        ? '#1E3A5F'
-                        : '#E2E8F0',
+                      backgroundColor: step.completed ? successColor : inactiveLineColor,
                     },
                   ]}
                 />
@@ -429,6 +500,12 @@ function OngoingRequestCard({ order, colors, isDark, onViewDetails }) {
   const lastUpdateLabel = formatDateTimeValue(order.lastStatusUpdateAt, 'Not available');
   const containerLabel = String(order.container || '').trim() || 'Not available';
   const addressLabel = String(order.address || '').trim() || 'Not available';
+  const distributorIconColor = isDark
+    ? colors.iconPrimary || '#7DD3FC'
+    : colors.primaryDark || BLUETAP_COLORS.primaryDark || '#0B4F8A';
+  const detailIconColor = isDark
+    ? colors.iconMuted || '#9FB4C8'
+    : colors.textSecondary || '#4A6378';
 
   return (
     <View
@@ -464,6 +541,7 @@ function OngoingRequestCard({ order, colors, isDark, onViewDetails }) {
             },
           ]}
         >
+          <View style={[styles.statusBadgeDot, { backgroundColor: statusTone.text }]} />
           <Text style={[styles.statusBadgeText, { color: statusTone.text }]}>
             {statusLabel}
           </Text>
@@ -475,16 +553,27 @@ function OngoingRequestCard({ order, colors, isDark, onViewDetails }) {
         style={[
           styles.distributorStrip,
           {
-            backgroundColor: isDark ? 'rgba(29, 120, 193, 0.14)' : colors.primarySoft || '#F0F9FF',
-            borderColor: isDark ? 'rgba(56, 189, 248, 0.28)' : '#BAE6FD',
+            backgroundColor: isDark ? 'rgba(29, 120, 193, 0.16)' : colors.primarySoft || '#F0F9FF',
+            borderColor: isDark ? 'rgba(56, 189, 248, 0.32)' : '#BAE6FD',
           },
         ]}
       >
-        <SidebarIcon
-          name="Truck"
-          size={16}
-          tintColor={isDark ? '#7DD3FC' : BLUETAP_COLORS.primary}
-        />
+        <View
+          style={[
+            styles.distributorIconWrap,
+            {
+              backgroundColor: isDark ? 'rgba(56, 189, 248, 0.18)' : '#D8EEFF',
+              borderColor: isDark ? 'rgba(125, 211, 252, 0.38)' : '#93C5FD',
+            },
+          ]}
+        >
+          <SidebarIcon
+            name="Truck"
+            size={16}
+            color={distributorIconColor}
+            tintColor={distributorIconColor}
+          />
+        </View>
         <View style={styles.distributorStripCopy}>
           <Text style={[styles.distributorStripLabel, { color: colors.textSecondary }]}>
             Assigned Distributor
@@ -503,37 +592,77 @@ function OngoingRequestCard({ order, colors, isDark, onViewDetails }) {
       {/* Delivery Details Grid */}
       <View style={[styles.detailsGrid, { borderColor: colors.border }]}>
         <View style={[styles.detailRow, { borderBottomColor: colors.border }]}>
-          <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>Product</Text>
+          <View style={styles.detailLabelWrap}>
+            <OngoingRequestFieldIcon
+              name="Package"
+              size={16}
+              color={detailIconColor}
+              tintColor={detailIconColor}
+            />
+            <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>Product</Text>
+          </View>
           <Text style={[styles.detailValue, { color: colors.textPrimary }]}>{productName}</Text>
         </View>
         <View style={[styles.detailRow, { borderBottomColor: colors.border }]}>
-          <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>
-            Quantity & Container
-          </Text>
+          <View style={styles.detailLabelWrap}>
+            <OngoingRequestFieldIcon
+              name="Layers"
+              size={16}
+              color={detailIconColor}
+              tintColor={detailIconColor}
+            />
+            <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>
+              Quantity & Container
+            </Text>
+          </View>
           <Text style={[styles.detailValue, { color: colors.textPrimary }]}>
             {quantityLabel} · {containerLabel}
           </Text>
         </View>
         <View style={[styles.detailRow, { borderBottomColor: colors.border }]}>
-          <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>
-            Scheduled Delivery
-          </Text>
+          <View style={styles.detailLabelWrap}>
+            <OngoingRequestFieldIcon
+              name="CalendarClock"
+              size={16}
+              color={detailIconColor}
+              tintColor={detailIconColor}
+            />
+            <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>
+              Scheduled Delivery
+            </Text>
+          </View>
           <Text style={[styles.detailValue, { color: colors.textPrimary }]}>
             {scheduleSummary}
           </Text>
         </View>
         <View style={[styles.detailRow, { borderBottomColor: colors.border }]}>
-          <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>
-            Delivery Address
-          </Text>
+          <View style={styles.detailLabelWrap}>
+            <OngoingRequestFieldIcon
+              name="MapPin"
+              size={16}
+              color={detailIconColor}
+              tintColor={detailIconColor}
+            />
+            <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>
+              Delivery Address
+            </Text>
+          </View>
           <Text numberOfLines={2} style={[styles.detailValue, { color: colors.textPrimary }]}>
             {addressLabel}
           </Text>
         </View>
         <View style={styles.detailRowLast}>
-          <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>
-            Last Status Update
-          </Text>
+          <View style={styles.detailLabelWrap}>
+            <OngoingRequestFieldIcon
+              name="ClockHistory"
+              size={16}
+              color={detailIconColor}
+              tintColor={detailIconColor}
+            />
+            <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>
+              Last Status Update
+            </Text>
+          </View>
           <Text style={[styles.detailValue, { color: colors.textSecondary }]}>
             {lastUpdateLabel}
           </Text>
@@ -586,8 +715,14 @@ export function ManagerOngoingRequestsPanel() {
   const {
     isOpen,
     closePanel,
+    requestedSegment,
     ongoingRequests,
-    ongoingCount,
+    activeDeliveries = [],
+    scheduledOrders = [],
+    failedDeliveries = [],
+    activeDeliveriesCount = 0,
+    scheduledCount = 0,
+    failedDeliveriesCount = 0,
     loading,
     hasError,
     retry,
@@ -598,6 +733,12 @@ export function ManagerOngoingRequestsPanel() {
   const requestDetails = useCurrentPageRequestDetails(ongoingRequests);
   const slideAnim = React.useRef(new Animated.Value(0)).current;
   const [reduceMotion, setReduceMotion] = React.useState(false);
+  const [selectedSegment, setSelectedSegment] = React.useState('active');
+  const visibleSegmentOrders = selectedSegment === 'scheduled' ? scheduledOrders : selectedSegment === 'exceptions' ? failedDeliveries : activeDeliveries;
+
+  React.useEffect(() => {
+    if (isOpen) setSelectedSegment(requestedSegment);
+  }, [isOpen, requestedSegment]);
 
   React.useEffect(() => {
     let mounted = true;
@@ -748,25 +889,65 @@ export function ManagerOngoingRequestsPanel() {
                     Ongoing Requests
                   </Text>
                   {!hasError && !loading ? (
-                    <View
-                      style={[
-                        styles.activeCountPill,
-                        {
-                          backgroundColor: isDark
-                            ? 'rgba(56, 189, 248, 0.18)'
-                            : colors.primarySoft || '#E0F2FE',
-                          borderColor: isDark ? 'rgba(56, 189, 248, 0.4)' : '#BAE6FD',
-                        },
-                      ]}
-                    >
-                      <Text
+                    <View style={styles.headerBadgesRow}>
+                      <View
                         style={[
-                          styles.activeCountPillText,
-                          { color: isDark ? '#7DD3FC' : colors.primary },
+                          styles.activeCountPill,
+                          {
+                            backgroundColor: isDark
+                              ? '#0C4A6E'
+                              : colors.primarySoft || '#E0F2FE',
+                            borderColor: isDark ? '#0284C7' : '#7DD3FC',
+                          },
                         ]}
                       >
-                        {ongoingCount} active
-                      </Text>
+                        <Text
+                          style={[
+                            styles.activeCountPillText,
+                            { color: isDark ? '#38BDF8' : colors.primary || '#0369A1' },
+                          ]}
+                        >
+                          {activeDeliveriesCount} active
+                        </Text>
+                      </View>
+                      <View
+                        style={[
+                          styles.scheduledCountPill,
+                          {
+                            backgroundColor: isDark ? '#431407' : '#FFF3E6',
+                            borderColor: isDark ? '#EA580C' : '#FDBA74',
+                          },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.scheduledCountPillText,
+                            { color: isDark ? '#FB923C' : '#9A4D00' },
+                          ]}
+                        >
+                          {scheduledCount} scheduled
+                        </Text>
+                      </View>
+                      {failedDeliveriesCount > 0 ? (
+                        <View
+                          style={[
+                            styles.failedCountPill,
+                            {
+                              backgroundColor: isDark ? '#3B181A' : '#FEF2F2',
+                              borderColor: isDark ? '#DC2626' : '#FCA5A5',
+                            },
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.failedCountPillText,
+                              { color: isDark ? '#F87171' : '#B91C1C' },
+                            ]}
+                          >
+                            {failedDeliveriesCount} failed
+                          </Text>
+                        </View>
+                      ) : null}
                     </View>
                   ) : null}
                 </View>
@@ -798,6 +979,86 @@ export function ManagerOngoingRequestsPanel() {
                 </Text>
               </TouchableOpacity>
             </View>
+
+            {/* Segmented Control: Active Deliveries | Scheduled */}
+            {!hasError && !loading ? (
+              <View
+                style={[
+                  styles.segmentedHeaderWrap,
+                  {
+                    backgroundColor: colors.surface,
+                    borderBottomColor: colors.border,
+                  },
+                ]}
+              >
+                <View
+                  accessibilityRole="tablist"
+                  style={[
+                    styles.segmentedTrack,
+                    {
+                      backgroundColor: isDark ? '#0A1928' : colors.surfaceAlt || '#EEF3F7',
+                      borderColor: colors.border,
+                    },
+                  ]}
+                >
+                  {[
+                    {
+                      key: 'active',
+                      label: `Active Deliveries (${activeDeliveriesCount})`,
+                      count: activeDeliveriesCount,
+                    },
+                    {
+                      key: 'scheduled',
+                      label: `Scheduled (${scheduledCount})`,
+                      count: scheduledCount,
+                    },
+                    {
+                      key: 'exceptions',
+                      label: `Exceptions (${failedDeliveriesCount})`,
+                      count: failedDeliveriesCount,
+                    },
+                  ].map((segment) => {
+                    const selected = selectedSegment === segment.key;
+                    return (
+                      <Pressable
+                        key={segment.key}
+                        accessibilityRole="tab"
+                        accessibilityLabel={segment.label}
+                        accessibilityState={{ selected }}
+                        onPress={() => setSelectedSegment(segment.key)}
+                        style={[
+                          styles.segmentTab,
+                          selected && [
+                            styles.segmentTabSelected,
+                            {
+                              backgroundColor: isDark ? '#163B59' : colors.surface || '#FFFFFF',
+                              borderColor: isDark ? '#38BDF8' : colors.primary,
+                            },
+                          ],
+                        ]}
+                      >
+                        <Text
+                          numberOfLines={1}
+                          style={[
+                            styles.segmentTabText,
+                            {
+                              color: selected
+                                ? isDark
+                                  ? '#F5FAFF'
+                                  : colors.primary
+                                : colors.textSecondary,
+                              fontWeight: selected ? '900' : '700',
+                            },
+                          ]}
+                        >
+                          {segment.label}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              </View>
+            ) : null}
 
             {/* 2. Scrollable Body */}
             <View style={styles.bodyViewport}>
@@ -858,7 +1119,7 @@ export function ManagerOngoingRequestsPanel() {
                       <Text style={styles.retryButtonText}>Retry</Text>
                     </TouchableOpacity>
                   </View>
-                ) : ongoingRequests.length === 0 ? (
+                ) : ongoingRequests.length === 0 && selectedSegment === 'active' ? (
                   <View
                     style={[
                       styles.emptyStateWrap,
@@ -872,8 +1133,38 @@ export function ManagerOngoingRequestsPanel() {
                       compact
                     />
                   </View>
+                ) : visibleSegmentOrders.length === 0 ? (
+                  <View
+                    style={[
+                      styles.emptyStateWrap,
+                      { backgroundColor: colors.surface, borderColor: colors.border },
+                    ]}
+                  >
+                    {selectedSegment === 'exceptions' ? (
+                      <BlueTapEmptyState
+                        icon="truck"
+                        title="No delivery exceptions"
+                        description="Failed deliveries requiring follow-up will appear here."
+                        compact
+                      />
+                    ) : selectedSegment === 'scheduled' ? (
+                      <BlueTapEmptyState
+                        icon="schedule"
+                        title="No scheduled orders"
+                        description="Assigned and scheduled orders awaiting delivery start will appear here."
+                        compact
+                      />
+                    ) : (
+                      <BlueTapEmptyState
+                        icon="truck"
+                        title="No active deliveries"
+                        description="No orders are currently out for delivery. Check the Scheduled tab for upcoming assigned deliveries."
+                        compact
+                      />
+                    )}
+                  </View>
                 ) : (
-                  ongoingRequests.map((order) => (
+                  visibleSegmentOrders.map((order) => (
                     <OngoingRequestCard
                       key={order.id}
                       order={order}
@@ -883,6 +1174,42 @@ export function ManagerOngoingRequestsPanel() {
                     />
                   ))
                 )}
+
+                {/* Preserve Manager visibility for delivery_failed exceptions without presenting them as normal active deliveries */}
+                {!loading && !hasError && selectedSegment !== 'exceptions' && failedDeliveries.length > 0 ? (
+                  <View style={styles.failedSectionWrap}>
+                    <View
+                      style={[
+                        styles.failedSectionHeader,
+                        {
+                          backgroundColor: isDark ? '#3B181A' : '#FEF2F2',
+                          borderColor: isDark ? '#DC2626' : '#FCA5A5',
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.failedSectionTitle,
+                          { color: isDark ? '#F87171' : '#B91C1C' },
+                        ]}
+                      >
+                        Delivery Exceptions · Needs Rescheduling ({failedDeliveries.length})
+                      </Text>
+                      <Text style={[styles.failedSectionSubtitle, { color: colors.textSecondary }]}>
+                        These assigned orders reported a delivery issue and are not currently out for delivery.
+                      </Text>
+                    </View>
+                    {failedDeliveries.map((order) => (
+                      <OngoingRequestCard
+                        key={order.id}
+                        order={order}
+                        colors={colors}
+                        isDark={isDark}
+                        onViewDetails={(selected) => requestDetails.openRequestDetails(selected)}
+                      />
+                    ))}
+                  </View>
+                ) : null}
               </ScrollView>
             </View>
 
@@ -1054,6 +1381,12 @@ const styles = StyleSheet.create({
     marginTop: 4,
     fontWeight: '600',
   },
+  headerBadgesRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
   activeCountPill: {
     paddingHorizontal: 9,
     paddingVertical: 3,
@@ -1063,6 +1396,79 @@ const styles = StyleSheet.create({
   activeCountPillText: {
     fontSize: 11,
     fontWeight: '800',
+  },
+  scheduledCountPill: {
+    paddingHorizontal: 9,
+    paddingVertical: 3,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
+  scheduledCountPillText: {
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  failedCountPill: {
+    paddingHorizontal: 9,
+    paddingVertical: 3,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
+  failedCountPillText: {
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  failedSectionWrap: {
+    gap: 12,
+    marginTop: 4,
+  },
+  failedSectionHeader: {
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 3,
+  },
+  failedSectionTitle: {
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  failedSectionSubtitle: {
+    fontSize: 11,
+    lineHeight: 16,
+    fontWeight: '600',
+  },
+  segmentedHeaderWrap: {
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    flexShrink: 0,
+  },
+  segmentedTrack: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 12,
+    borderWidth: 1,
+    padding: 3,
+    gap: 4,
+  },
+  segmentTab: {
+    flex: 1,
+    minHeight: 38,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 9,
+    borderWidth: 1,
+    borderColor: 'transparent',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  segmentTabSelected: {
+    borderWidth: 1,
+  },
+  segmentTabText: {
+    fontSize: 12,
+    lineHeight: 16,
+    textAlign: 'center',
   },
   closeIconButton: {
     width: 38,
@@ -1169,11 +1575,20 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   statusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 999,
     borderWidth: 1,
     alignSelf: 'flex-start',
+  },
+  statusBadgeDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    flexShrink: 0,
   },
   statusBadgeText: {
     fontSize: 11,
@@ -1187,6 +1602,15 @@ const styles = StyleSheet.create({
     paddingVertical: 9,
     borderRadius: 12,
     borderWidth: 1,
+  },
+  distributorIconWrap: {
+    width: 30,
+    height: 30,
+    borderRadius: 8,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
   },
   distributorStripCopy: {
     flex: 1,
@@ -1229,6 +1653,12 @@ const styles = StyleSheet.create({
     gap: 10,
     paddingHorizontal: 12,
     paddingVertical: 8,
+  },
+  detailLabelWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    flexShrink: 0,
   },
   detailLabel: {
     fontSize: 11,
@@ -1279,19 +1709,35 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 5,
+    marginBottom: 6,
   },
   progressLineSegment: {
     flex: 1,
-    height: 2,
+    height: 3,
   },
   progressLineHidden: {
     backgroundColor: 'transparent',
   },
   progressDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  progressCheckGlyph: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    lineHeight: 14,
+    fontWeight: '900',
+    textAlign: 'center',
+  },
+  progressCurrentInnerDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
+    backgroundColor: '#FFFFFF',
   },
   progressStepLabel: {
     fontSize: 10,
