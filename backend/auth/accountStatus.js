@@ -53,6 +53,10 @@ function accountStatusFlags(profile = {}) {
 }
 
 function requireActiveAccount(profile = {}, options = {}) {
+  if (profile.accountActionHoldIntentId) {
+    throw new OtpError(403, 'ACCOUNT_ACTION_PENDING',
+      'An account access change is pending. Please contact BlueTap support.');
+  }
   const status = canonicalAccountStatus(profile);
   if (status === ACCOUNT_STATUS.ACTIVE) return status;
 

@@ -12,7 +12,8 @@ const host = process.env.FIRESTORE_EMULATOR_HOST;
 const projectId = 'demo-bluetap';
 const now = new Date('2026-10-25T00:00:00Z');
 const request = (targetUid, action, clientMutationId) =>
-  ({ source: 'admin_account', targetUid, action, clientMutationId });
+  ({ source: 'admin_account', targetUid, action, clientMutationId,
+    ...(['suspend', 'terminate'].includes(action) ? { reason: 'Reviewed account safety incident.' } : {}) });
 
 function adminAuth() {
   const calls = [];
@@ -25,6 +26,7 @@ function adminAuth() {
     },
     async updateUser() { throw Error('Unexpected Firebase Auth mutation'); },
     async revokeRefreshTokens() { throw Error('Unexpected Firebase Auth mutation'); },
+    async getUser(uid) { return { uid, email: `${uid}@example.test`, emailVerified: true }; },
   } };
 }
 
@@ -38,8 +40,8 @@ test('real Firestore serializes competing reservations, preserves replay and req
     try {
       await Promise.all([
         db.collection('users').doc('admin-test').set({ role: 'admin', accountStatus: 'active' }),
-        db.collection('users').doc(targetUid).set({ role: 'requester', accountStatus: 'active' }),
-        db.collection('users').doc(otherUid).set({ role: 'requester', accountStatus: 'active' }),
+        db.collection('users').doc(targetUid).set({ role: 'requester', accountStatus: 'active', email: `${targetUid}@example.test` }),
+        db.collection('users').doc(otherUid).set({ role: 'requester', accountStatus: 'active', email: `${otherUid}@example.test` }),
         db.collection('users').doc('forged-test').set({ role: 'requester', accountStatus: 'active' }),
       ]);
       const create = (action, mutation, uid = targetUid, token = 'admin-token') =>
@@ -114,7 +116,7 @@ test('real rules deny authenticated Admin and Requester direct access to both ac
         db.collection('users').doc(adminUid).set({ role: 'admin', accountStatus: 'active' }),
         db.collection('users').doc(requesterUid).set({ role: 'requester', accountStatus: 'active' }),
       ]);
-      for (const collectionName of ['accountActionIntents', 'accountActionReservations']) {
+      for (const collectionName of ['accountActionIntents', 'accountActionReservations', 'accountAccessHolds']) {
         const id = `private-${suffix}`;
         await db.collection(collectionName).doc(id).set({ private: true });
         for (const clientDb of [client(adminUid, { admin: true }), client(requesterUid)]) {
@@ -126,6 +128,15 @@ test('real rules deny authenticated Admin and Requester direct access to both ac
           await denied(deleteDoc(ref));
         }
       }
+      const requesterClient = client(requesterUid);
+      const catalogRef = doc(requesterClient, 'products', `hold-probe-${suffix}`);
+      await db.collection('products').doc(`hold-probe-${suffix}`).set({ active: true });
+      await getDoc(catalogRef);
+      await db.collection('accountAccessHolds').doc(requesterUid).set({ intentId: `intent-${suffix}`, state: 'pending_disable' });
+      await db.collection('users').doc(requesterUid).update({ accountActionHoldIntentId: `intent-${suffix}` });
+      await denied(getDoc(catalogRef));
+      await getDoc(doc(requesterClient, 'users', requesterUid));
+      await denied(updateDoc(doc(requesterClient, 'users', requesterUid), { fullName: 'Cannot edit during hold' }));
     } finally {
       for (const item of clients) { await terminate(item.clientDb); await deleteClientApp(item.clientApp); }
       await deleteAdminApp(app);

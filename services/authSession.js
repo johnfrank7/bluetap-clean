@@ -183,6 +183,9 @@ export const getPostAuthenticationDestination = (profile = {}) => {
   const role = normalizeRole(profile.role);
   if (profile.mustChangePassword === true) return '/required-password-change';
   if (role === 'admin') return '/admin/dashboard';
+  if (['manager', 'requester', 'distributor'].includes(role) &&
+      (profile.emailVerificationRequired === true || profile.accountSource === 'admin_created') &&
+      !auth.currentUser?.emailVerified) return '/email-verification';
   if (role === 'manager') return '/manager/dashboard';
   if (!['requester', 'distributor'].includes(role)) return '/login';
   if (profile.onboardingStatus === 'face_enrollment_pending' || profile.registrationCompleted === false) {
@@ -502,9 +505,10 @@ const validateRoleAccessOnce = async (expectedRole) => {
     };
   }
 
-  const accountStatus = getCanonicalAccountStatus(profile);
+  const accountStatus = profile.accountActionHoldIntentId ? 'pending' : getCanonicalAccountStatus(profile);
   if (accountStatus !== 'active') {
-    const label = accountStatus === 'terminated' ? 'terminated' : accountStatus === 'suspended' ? 'temporarily suspended' : 'inactive';
+    const label = accountStatus === 'pending' ? 'under an account access review'
+      : accountStatus === 'terminated' ? 'terminated' : accountStatus === 'suspended' ? 'temporarily suspended' : 'inactive';
     return {
       status: `account-${accountStatus}`,
       message: `Your account is ${label}. Please contact BlueTap support.`,
@@ -519,8 +523,8 @@ const validateRoleAccessOnce = async (expectedRole) => {
   }
 
   if (
-    (profile.role === 'requester' || profile.role === 'distributor') &&
-    profile.emailVerificationRequired === true &&
+    ['manager', 'requester', 'distributor'].includes(profile.role) &&
+    (profile.emailVerificationRequired === true || profile.accountSource === 'admin_created') &&
     !currentUser.emailVerified
   ) {
     return {

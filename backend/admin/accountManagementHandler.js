@@ -1,5 +1,5 @@
 const { getFirebaseAdmin } = require('../firebase/firebaseAdmin');
-const { requireAdmin } = require('../auth/authorization');
+const { bearerToken, requireAdmin } = require('../auth/authorization');
 const { applyCors } = require('../utils/cors');
 const { OtpError } = require('../utils/otpError');
 const { normalizeUsername } = require('../username/username');
@@ -7,6 +7,9 @@ const { loadRegistrationSecurity, SESSION_ROLES } = require('../registration/reg
 const { generateNextPublicUid, formatPublicUid, parsePublicUidNumber } = require('../utils/publicUidGenerator');
 const { normalizePhilippinePhone } = require('../utils/phoneUtils');
 const { ACCOUNT_STATUS, canonicalAccountStatus } = require('../auth/accountStatus');
+const { authorizeAccountActionIntent } = require('../auth/accountActionIntentService');
+const { resumePendingIntent } = require('../auth/accountActionExecutor');
+const { assertNoticeTransportConfigured } = require('../auth/accountActionNotice');
 const {
   RELATIONSHIP_VERSION_BASELINE,
   branchMembershipVersionForTransition,
@@ -17,6 +20,7 @@ const { reconcileDistributorMembershipInTransaction } = require('../chat/convers
 
 const ROLES = new Set(SESSION_ROLES);
 const ACTIONS = new Set(['deactivate', 'suspend', 'terminate', 'reactivate', 'resetPassword', 'updateProfile', 'reassignManager', 'signOutAllSessions', 'updateAccount', 'backfillUids']);
+const DURABLE_DISABLE_ACTIONS = new Set(['deactivate', 'suspend', 'terminate']);
 const IDLE_TIMEOUTS = new Set([5, 10, 15, 30, 60, 120]);
 const clean = (value, max = 160) => String(value || '').trim().slice(0, max);
 const emailFor = (value) => { const email = clean(value, 254).toLowerCase(); if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new OtpError(400, 'INVALID_EMAIL', 'Enter a valid email address.'); return email; };
@@ -31,17 +35,22 @@ const statusOf = (data = {}) => {
   const status = clean(raw, 30).toLowerCase();
   return status === 'approved' ? 'active' : status;
 };
-const onboardingOf = (data = {}) => ({ profile: data.registrationCompleted === false || data.onboardingStatus === 'face_enrollment_pending' ? 'incomplete' : 'complete', emailVerification: data.emailVerified === true ? 'otp_verified' : data.accountSource === 'admin_created' ? 'admin_provisioned' : 'not_verified', identity: data.faceVerification?.status === 'verified' ? 'verified' : data.faceVerification?.required === false || data.faceVerification?.status === 'not_required' ? 'not_required' : 'required' });
+const matchingVerifiedEmail = (data = {}, authData = {}) => {
+  const profileEmail = clean(data.email, 254).toLowerCase();
+  return Boolean(profileEmail) && authData.emailVerified === true
+    && profileEmail === clean(authData.email, 254).toLowerCase();
+};
+const onboardingOf = (data = {}, authData = {}) => ({ profile: data.registrationCompleted === false || data.onboardingStatus === 'face_enrollment_pending' ? 'incomplete' : 'complete', emailVerification: matchingVerifiedEmail(data, authData) ? 'auth_verified' : data.accountSource === 'admin_created' ? 'verification_required' : 'not_verified', identity: data.faceVerification?.status === 'verified' ? 'verified' : data.faceVerification?.required === false || data.faceVerification?.status === 'not_required' ? 'not_required' : 'required' });
 function safeAccount(uid, data = {}, branchNames = new Map(), authData = {}, rolePolicy = null) {
-  const onboarding = onboardingOf(data);
+  const onboarding = onboardingOf(data, authData);
   const role = clean(data.role, 30);
-  const status = clean(statusOf(data), 30).toLowerCase();
+  const status = data.accountActionHoldIntentId ? 'access pending' : clean(statusOf(data), 30).toLowerCase();
   const requestedBranchId = clean(data.requestedBranchId, 80);
   const assignedBranchName = branchNames.get(data.branchId) || clean(data.branchNameSnapshot);
   const requestedBranchName = branchNames.get(requestedBranchId) || clean(data.requestedBranchNameSnapshot);
   const branchName = assignedBranchName || (role === 'distributor' && status === 'pending' ? (requestedBranchName ? `Requested: ${requestedBranchName}` : 'Requested branch unavailable') : role === 'distributor' ? 'Branch assignment required' : '');
   const publicUid = clean(data.publicUid || data.displayUid || data.unique_id, 80);
-  return { uid, publicUid: publicUid || null, displayUid: publicUid || null, uniqueId: publicUid || null, fullName: clean(data.fullName || `${data.firstName || ''} ${data.lastName || ''}`), email: clean(data.email || authData.email).toLowerCase(), role, username: clean(data.username || data.usernameNormalized, 40), branchId: clean(data.branchId, 80), branchName, requestedBranchId, requestedBranchName, status, mustChangePassword: data.mustChangePassword === true, accountSource: clean(data.accountSource || 'public_registration', 40), createdAt: data.createdAt || authData.metadata?.creationTime || null, updatedAt: data.updatedAt || null, lastSignInAt: authData.metadata?.lastSignInTime || null, onboarding, sessionIdleTimeoutOverrideMinutes: Number.isInteger(data.sessionIdleTimeoutOverrideMinutes) ? data.sessionIdleTimeoutOverrideMinutes : null, sessionPolicy: rolePolicy ? { idleTimeoutMinutes: rolePolicy.idleTimeoutMinutes, absoluteSessionHours: rolePolicy.absoluteSessionHours } : null };
+  return { uid, publicUid: publicUid || null, displayUid: publicUid || null, uniqueId: publicUid || null, fullName: clean(data.fullName || `${data.firstName || ''} ${data.lastName || ''}`), email: clean(data.email || authData.email).toLowerCase(), role, username: clean(data.username || data.usernameNormalized, 40), branchId: clean(data.branchId, 80), branchName, requestedBranchId, requestedBranchName, status, pendingAccountActionId: data.accountActionHoldIntentId || null, noticeEligible: matchingVerifiedEmail(data, authData), mustChangePassword: data.mustChangePassword === true, accountSource: clean(data.accountSource || 'public_registration', 40), createdAt: data.createdAt || authData.metadata?.creationTime || null, updatedAt: data.updatedAt || null, lastSignInAt: authData.metadata?.lastSignInTime || null, onboarding, sessionIdleTimeoutOverrideMinutes: Number.isInteger(data.sessionIdleTimeoutOverrideMinutes) ? data.sessionIdleTimeoutOverrideMinutes : null, sessionPolicy: rolePolicy ? { idleTimeoutMinutes: rolePolicy.idleTimeoutMinutes, absoluteSessionHours: rolePolicy.absoluteSessionHours } : null };
 }
 function safeAuditMetadata(data = {}) { return { role: clean(data.role, 30), accountStatus: canonicalAccountStatus(data), status: statusOf(data), branchId: clean(data.branchId, 80), requestedBranchId: clean(data.requestedBranchId, 80), sessionIdleTimeoutOverrideMinutes: Number.isInteger(data.sessionIdleTimeoutOverrideMinutes) ? data.sessionIdleTimeoutOverrideMinutes : null, mustChangePassword: data.mustChangePassword === true }; }
 function safeAudit(id, data = {}) { return { id, action: clean(data.action, 80), actorUid: clean(data.actorUid || data.adminUid, 128), actorPublicUid: clean(data.actorPublicUid || data.actorPublicUidSnapshot || data.actorDisplayUid, 80) || null, targetUid: clean(data.targetUid || data.managerUid, 128), targetPublicUid: clean(data.targetPublicUid || data.targetPublicUidSnapshot || data.targetDisplayUid, 80) || null, role: clean(data.role || data.after?.role, 30), branchId: clean(data.branchId, 80), previousBranchId: clean(data.previousBranchId, 80), newBranchId: clean(data.newBranchId, 80), previousStatus: clean(data.previousStatus || data.before?.distributorStatus || data.before?.status || data.before?.managerStatus, 30), newStatus: clean(data.newStatus || data.after?.distributorStatus || data.after?.status || data.after?.managerStatus, 30), rejectionReason: clean(data.rejectionReason, 240), before: data.before && safeAuditMetadata(data.before), after: data.after && safeAuditMetadata(data.after), createdAt: data.createdAt || data.timestamp || null }; }
@@ -63,9 +72,15 @@ async function distributorHasActiveDeliveries(db, uid) { const snapshot = await 
 async function updateAccount({ auth, db, admin, uid, before, body }) {
   const now = new Date(); const requestedRole = clean(body.role || before.role, 30).toLowerCase(); if (!ROLES.has(requestedRole)) throw new OtpError(400, 'INVALID_ROLE', 'Choose requester, distributor, or manager.');
   if (canonicalAccountStatus(before) === ACCOUNT_STATUS.TERMINATED) throw new OtpError(409, 'ACCOUNT_TERMINATED', 'A terminated account cannot be changed through the general account editor.');
+  if (before.accountActionHoldIntentId || await pendingActionFor(db, uid)) throw new OtpError(409, 'ACCOUNT_ACTION_PENDING', 'Finish the pending account access change before editing this account.');
+  if (requestedRole !== before.role && canonicalAccountStatus(before) !== ACCOUNT_STATUS.ACTIVE) throw new OtpError(409, 'ACCOUNT_ACTION_WORKFLOW_REQUIRED', 'Reactivate this account through the account access workflow before changing its role.');
+  if (Object.prototype.hasOwnProperty.call(body, 'active') && typeof body.active === 'boolean'
+    && body.active !== (canonicalAccountStatus(before) === ACCOUNT_STATUS.ACTIVE)) {
+    throw new OtpError(409, 'ACCOUNT_ACTION_WORKFLOW_REQUIRED', 'Use the dedicated account access action to change active status.');
+  }
   const changes = {}; const authChanges = {}; const audits = []; let branch = null; let revoke = false;
   const fullName = clean(body.fullName ?? before.fullName, 160); if (!fullName) throw new OtpError(400, 'FULL_NAME_REQUIRED', 'Full name is required.'); if (fullName !== clean(before.fullName, 160)) { Object.assign(changes, nameChanges(fullName)); authChanges.displayName = fullName; }
-  const email = emailFor(body.email ?? before.email); if (email !== clean(before.email, 254).toLowerCase()) { const authUser = await auth.getUserByEmail(email).catch((error) => error?.code === 'auth/user-not-found' ? null : Promise.reject(error)); if ((authUser && authUser.uid !== uid) || await emailIsAttached(db, email, uid)) throw new OtpError(409, 'EMAIL_ALREADY_IN_USE', 'This email is already in use.'); changes.email = email; authChanges.email = email; }
+  const email = emailFor(body.email ?? before.email); if (email !== clean(before.email, 254).toLowerCase()) { const authUser = await auth.getUserByEmail(email).catch((error) => error?.code === 'auth/user-not-found' ? null : Promise.reject(error)); if ((authUser && authUser.uid !== uid) || await emailIsAttached(db, email, uid)) throw new OtpError(409, 'EMAIL_ALREADY_IN_USE', 'This email is already in use.'); changes.email = email; changes.emailVerified = false; authChanges.email = email; authChanges.emailVerified = false; revoke = true; }
   if (requestedRole !== before.role) { if (['manager', 'distributor'].includes(requestedRole)) branch = await activeBranch(db, body.branchId); if (before.role === 'manager' && requestedRole !== 'manager') { const username = clean(body.username, 20); const normalized = normalizeUsername(username); const usernameDoc = await db.collection('usernames').doc(normalized).get(); if (usernameDoc.exists && usernameDoc.data()?.uid !== uid) throw new OtpError(409, 'USERNAME_ALREADY_IN_USE', 'This username is already in use.'); changes.username = username; changes.usernameNormalized = normalized; } changes.role = requestedRole; if (requestedRole === 'manager') Object.assign(changes, { branchId: branch.id, branchNameSnapshot: clean(branch.name), ...statusChanges('manager', 'active'), ...activeOperationalStatus('manager') }); if (requestedRole === 'requester') Object.assign(changes, statusChanges('requester', 'active')); if (requestedRole === 'distributor') Object.assign(changes, { branchId: branch.id, branchNameSnapshot: clean(branch.name), ...statusChanges('distributor', 'active'), ...activeOperationalStatus('distributor') }); if (typeof auth.setCustomUserClaims === 'function') await auth.setCustomUserClaims(uid, requestedRole === 'manager' ? { role: 'manager', manager: true } : {}); }
   const effectiveRole = requestedRole;
   if (effectiveRole === 'manager' && body.branchId && (!branch || branch.id !== clean(before.branchId, 80))) { branch = await activeBranch(db, body.branchId); if (branch.id !== before.branchId) { changes.branchId = branch.id; changes.managerStatus = 'active'; } }
@@ -73,7 +88,6 @@ async function updateAccount({ auth, db, admin, uid, before, body }) {
   if (Object.prototype.hasOwnProperty.call(body, 'sessionIdleTimeoutOverrideMinutes')) { const override = timeoutOverride(body.sessionIdleTimeoutOverrideMinutes); const existing = Number.isInteger(before.sessionIdleTimeoutOverrideMinutes) ? before.sessionIdleTimeoutOverrideMinutes : null; if (override !== existing) changes.sessionIdleTimeoutOverrideMinutes = override; }
   if (Object.prototype.hasOwnProperty.call(body, 'requirePasswordChange') && typeof body.requirePasswordChange === 'boolean' && body.requirePasswordChange !== (before.mustChangePassword === true)) changes.mustChangePassword = body.requirePasswordChange;
   if (clean(body.temporaryPassword, 128)) { authChanges.password = passwordFor(body.temporaryPassword); changes.mustChangePassword = true; revoke = true; audits.push('TEMP_PASSWORD_RESET'); }
-  if (Object.prototype.hasOwnProperty.call(body, 'active') && typeof body.active === 'boolean') { const beforeStatus = statusOf(before); const currentStatus = statusOf({ ...before, ...changes, role: effectiveRole }); const active = body.active; if (before.role === 'distributor' && !['active', 'inactive', 'suspended'].includes(beforeStatus)) throw new OtpError(409, 'DISTRIBUTOR_WORKFLOW_REQUIRED', 'Pending and rejected distributors must be updated in Distributor Management.'); if (!active && currentStatus === 'active') { Object.assign(changes, statusChanges(effectiveRole, 'inactive')); authChanges.disabled = true; revoke = true; audits.push('ACCOUNT_DEACTIVATED'); } if (active && ['inactive', 'suspended'].includes(currentStatus)) { if (['manager', 'distributor'].includes(effectiveRole)) await activeBranch(db, changes.branchId || before.branchId); Object.assign(changes, statusChanges(effectiveRole, 'active')); authChanges.disabled = false; audits.push('ACCOUNT_REACTIVATED'); } }
   const membershipEpoch = branchMembershipVersionForTransition(before, { ...before, ...changes, role: effectiveRole });
   if (membershipEpoch.changed) changes.branchMembershipVersion = membershipEpoch.branchMembershipVersion;
   if (!Object.keys(changes).length && !Object.keys(authChanges).length) { const security = await loadRegistrationSecurity(db); return { account: safeAccount(uid, before, new Map(), await auth.getUser(uid), security.sessionSecurity[effectiveRole]), changed: false }; }
@@ -216,7 +230,34 @@ async function backfillLegacyUids({ auth, db, admin }) {
   };
 }
 
-function createAdminAccountsHandler(getAdmin = getFirebaseAdmin) { return async (req, res) => {
+async function pendingActionFor(db, uid) {
+  const reservation = await db.collection('accountActionReservations').doc(uid).get();
+  if (!reservation.exists) return null;
+  const intentId = reservation.data()?.intentId;
+  const intent = typeof intentId === 'string' ? await db.collection('accountActionIntents').doc(intentId).get() : null;
+  if (!intent?.exists || intent.data()?.targetUid !== uid) {
+    throw new OtpError(409, 'ACCOUNT_ACTION_RESERVATION_INVALID', 'The account reservation requires reconciliation.');
+  }
+  return ['authorized', 'applying', 'reconcile_required'].includes(intent.data().state) ? intent.data() : null;
+}
+
+async function accountActionStatus(db, adminUid, intentId) {
+  if (!/^[a-f0-9]{64}$/.test(String(intentId || ''))) {
+    throw new OtpError(400, 'ACCOUNT_ACTION_ID_INVALID', 'Choose a valid account action.');
+  }
+  const snap = await db.collection('accountActionIntents').doc(intentId).get();
+  const intent = snap.data();
+  if (!snap.exists || intent.source !== 'admin_account') {
+    throw new OtpError(404, 'ACCOUNT_ACTION_NOT_FOUND', 'Account action not found.');
+  }
+  return { id: intentId, targetUid: intent.targetUid, action: intent.action,
+    state: intent.state, pending: ['authorized', 'applying', 'reconcile_required'].includes(intent.state),
+    notice: intent.noticeDelivery ? { state: intent.noticeDelivery.state,
+      providerAccepted: intent.noticeDelivery.state === 'accepted',
+      deliveryConfirmed: intent.noticeDelivery.deliveryConfirmed === true } : null };
+}
+
+function createAdminAccountsHandler(getAdmin = getFirebaseAdmin, dependencies = {}) { return async (req, res) => {
   res.setHeader('Cache-Control', 'no-store'); if (!applyCors(req, res)) return; if (req.method === 'OPTIONS') return res.status(204).end(); if (!['GET', 'POST', 'PATCH'].includes(req.method)) return res.status(405).json({ error: { reason: 'method-not-allowed', message: 'Use GET, POST, or PATCH.' } });
   try { const { auth, db } = getAdmin(); const admin = await requireAdmin(req, auth, db); if (req.method === 'GET') return res.status(200).json(await listWorkspace(auth, db)); const body = bodyOf(req);
     if (body.action === 'backfillUids') {
@@ -244,7 +285,7 @@ function createAdminAccountsHandler(getAdmin = getFirebaseAdmin) { return async 
             ...(phone ? { phone, contactNumber: phone } : {}),
             ...nameChanges(fullName), role, accountStatus: 'active', accountSource: 'admin_created', verificationSource: 'admin_created',
             mustChangePassword, createdAt: now, updatedAt: now, createdBy: admin.uid,
-            emailVerificationRequired: false, emailVerified: false,
+            emailVerificationRequired: true, emailVerified: false,
             faceVerification: { required: false, status: 'not_required', verificationSource: 'admin_created' },
             registrationCompleted: true, onboardingStatus: 'complete',
             ...(role === 'manager' ? { branchId: branch.id, branchNameSnapshot: clean(branch.name), ...statusChanges(role, 'active'), ...activeOperationalStatus(role) } : role === 'distributor' ? { username, usernameNormalized, branchId: branch.id, branchNameSnapshot: clean(branch.name), branchMembershipVersion: RELATIONSHIP_VERSION_BASELINE, ...statusChanges(role, 'active'), ...activeOperationalStatus(role) } : { username, usernameNormalized, ...statusChanges(role, 'active') })
@@ -258,21 +299,51 @@ function createAdminAccountsHandler(getAdmin = getFirebaseAdmin) { return async 
         return res.status(201).json({ account: safeAccount(user.uid, createdProfile, new Map([[branch?.id, branch?.name]]), user, security.sessionSecurity[role]) });
       } catch (error) { if (user?.uid) try { await auth.deleteUser(user.uid); } catch {} throw error; }
     }
-    const uid = clean(body.uid, 128); const action = clean(body.action, 40); if (!uid || !ACTIONS.has(action)) throw new OtpError(400, 'INVALID_ACCOUNT_ACTION', 'Choose a valid account action.'); const ref = db.collection('users').doc(uid); const snapshot = await ref.get(); if (!snapshot.exists || !ROLES.has(snapshot.data()?.role)) throw new OtpError(404, 'ACCOUNT_NOT_FOUND', 'Account not found.'); const before = snapshot.data(); if (action === 'updateAccount') return res.status(200).json(await updateAccount({ auth, db, admin, uid, before, body }));
-    const currentAccountStatus = canonicalAccountStatus(before);
-    const requestedAccountStatus = ({ deactivate: ACCOUNT_STATUS.INACTIVE, suspend: ACCOUNT_STATUS.SUSPENDED, terminate: ACCOUNT_STATUS.TERMINATED, reactivate: ACCOUNT_STATUS.ACTIVE })[action];
-    if (requestedAccountStatus && currentAccountStatus === requestedAccountStatus) {
-      const disabled = requestedAccountStatus !== ACCOUNT_STATUS.ACTIVE;
-      await auth.updateUser(uid, { disabled });
-      if (disabled) await auth.revokeRefreshTokens(uid);
-      const security = await loadRegistrationSecurity(db);
-      return res.status(200).json({ account: safeAccount(uid, before, new Map(), await auth.getUser(uid), security.sessionSecurity[before.role]), changed: false });
+    const uid = clean(body.uid, 128); const action = clean(body.action, 40);
+    if (action === 'accountActionStatus' || action === 'retryAccountAction') {
+      const current = await accountActionStatus(db, admin.uid, body.intentId);
+      if (action === 'retryAccountAction' && current.pending) {
+        try { await resumePendingIntent({ db, auth, intentId: current.id, actingUid: admin.uid,
+          sendEmail: dependencies.sendEmail }); }
+        catch { /* The committed intent remains pending and can be retried. */ }
+      }
+      const latest = await accountActionStatus(db, admin.uid, current.id);
+      return res.status(latest.pending ? 202 : 200).json({ accountAction: latest });
     }
+    if (!uid || !ACTIONS.has(action)) throw new OtpError(400, 'INVALID_ACCOUNT_ACTION', 'Choose a valid account action.');
+    if (DURABLE_DISABLE_ACTIONS.has(action) || action === 'reactivate') {
+      if (Object.keys(body).some((field) => !['uid', 'action', 'clientMutationId', 'reason'].includes(field))) {
+        throw new OtpError(400, 'ACCOUNT_ACTION_FIELDS_INVALID', 'The account action contains unsupported fields.');
+      }
+      const result = await authorizeAccountActionIntent({ db, auth, idToken: bearerToken(req),
+        request: { source: 'admin_account', targetUid: uid, action,
+          clientMutationId: body.clientMutationId, ...(body.reason ? { reason: body.reason } : {}) }, now: new Date(),
+        noticeTransportCheck: () => assertNoticeTransportConfigured(dependencies.sendEmail,
+          dependencies.noticeEnv || process.env) });
+      if (result.intent.state !== 'applied') {
+        try { await resumePendingIntent({ db, auth, intentId: result.intent.id, actingUid: admin.uid,
+          sendEmail: dependencies.sendEmail }); }
+        catch { /* Status below exposes pending, never a false successful change. */ }
+      }
+      const latest = await accountActionStatus(db, admin.uid, result.intent.id);
+      return res.status(latest.pending ? 202 : 200).json({ accountAction: latest });
+    }
+    const ref = db.collection('users').doc(uid); const snapshot = await ref.get();
+    if (!snapshot.exists || !ROLES.has(snapshot.data()?.role)) throw new OtpError(404, 'ACCOUNT_NOT_FOUND', 'Account not found.');
+    const before = snapshot.data();
+    if (await pendingActionFor(db, uid)) throw new OtpError(409, 'ACCOUNT_ACTION_PENDING',
+      'Finish or reconcile the pending account action first.');
+    if (action === 'updateAccount') {
+      if (typeof body.active === 'boolean' && body.active !== (canonicalAccountStatus(before) === ACCOUNT_STATUS.ACTIVE)) {
+        throw new OtpError(409, 'ACCOUNT_ACTION_ROUTE_REQUIRED', 'Use the account action workflow to change access.');
+      }
+      if (body.role && body.role !== before.role && canonicalAccountStatus(before) !== ACCOUNT_STATUS.ACTIVE) {
+        throw new OtpError(409, 'ACCOUNT_ACTION_ROUTE_REQUIRED', 'An inactive account cannot change role here.');
+      }
+      return res.status(200).json(await updateAccount({ auth, db, admin, uid, before, body }));
+    }
+    const currentAccountStatus = canonicalAccountStatus(before);
     const now = new Date(); let changes = {}; let auditAction = 'ACCOUNT_UPDATED'; let authChanges = {}; let revoke = false;
-    if (action === 'deactivate') { if (currentAccountStatus !== ACCOUNT_STATUS.ACTIVE) throw new OtpError(409, 'ACCOUNT_NOT_ACTIVE', 'Only active accounts can be deactivated.'); changes = statusChanges(before.role, 'inactive'); authChanges.disabled = true; revoke = true; auditAction = 'ACCOUNT_DEACTIVATED'; }
-    if (action === 'suspend') { if (currentAccountStatus !== ACCOUNT_STATUS.ACTIVE) throw new OtpError(409, 'ACCOUNT_NOT_ACTIVE', 'Only active accounts can be suspended.'); changes = statusChanges(before.role, 'suspended'); authChanges.disabled = true; revoke = true; auditAction = 'ACCOUNT_SUSPENDED'; }
-    if (action === 'terminate') { changes = statusChanges(before.role, 'terminated'); authChanges.disabled = true; revoke = true; auditAction = 'ACCOUNT_TERMINATED'; }
-    if (action === 'reactivate') { if (!['inactive', 'suspended'].includes(currentAccountStatus)) throw new OtpError(409, 'ACCOUNT_NOT_REACTIVATABLE', 'Only inactive or suspended accounts can be reactivated.'); if (requiresOperationalBranch(before)) await activeBranch(db, before.branchId); changes = statusChanges(before.role, 'active'); authChanges.disabled = false; auditAction = 'ACCOUNT_REACTIVATED'; }
     if (action === 'resetPassword') { if (currentAccountStatus === ACCOUNT_STATUS.TERMINATED) throw new OtpError(409, 'ACCOUNT_TERMINATED', 'A terminated account cannot receive a password reset.'); authChanges.password = passwordFor(body.temporaryPassword); changes.mustChangePassword = true; revoke = true; auditAction = 'TEMP_PASSWORD_RESET'; }
     if (action === 'signOutAllSessions') { revoke = true; auditAction = 'USER_SESSIONS_REVOKED'; }
     if (action === 'updateProfile') { if (currentAccountStatus === ACCOUNT_STATUS.TERMINATED) throw new OtpError(409, 'ACCOUNT_TERMINATED', 'A terminated account cannot be changed.'); const fullName = clean(body.fullName, 160); if (!fullName) throw new OtpError(400, 'FULL_NAME_REQUIRED', 'Full name is required.'); changes = nameChanges(fullName); authChanges.displayName = fullName; }

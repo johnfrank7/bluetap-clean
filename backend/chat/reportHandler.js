@@ -1,7 +1,7 @@
 const { randomUUID } = require('node:crypto');
 const { REPORT_CATEGORY_BY_CODE } = require('../../constants/reportCategories');
 const { getFirebaseAdmin } = require('../firebase/firebaseAdmin');
-const { verifiedIdentity } = require('../auth/authorization');
+const { verifiedIdentity, requireVerifiedOperationalEmail } = require('../auth/authorization');
 const { applyCors } = require('../utils/cors');
 const { OtpError } = require('../utils/otpError');
 const { authorizeConversation } = require('./chatHandler');
@@ -268,6 +268,8 @@ function createChatReportsHandler(getAdmin = getFirebaseAdmin, dependencies = {}
     try {
       const { auth, db } = getAdmin();
       const decoded = await verifiedIdentity(req, auth);
+      const profile = await db.collection('users').doc(decoded.uid).get();
+      if (profile.exists) requireVerifiedOperationalEmail(profile.data() || {}, decoded);
       const result = await submitReport({ db, callerUid: decoded.uid, callerClaims: decoded, body: bodyOf(req), now: now(), createReportId });
       return res.status(result.duplicate ? 200 : 201).json(safeSubmission(result));
     } catch (error) { return errorResponse(res, error); }

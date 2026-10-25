@@ -47,8 +47,9 @@ export default function RequiredPasswordChangePage() {
         if (!profile || profile.mustChangePassword === true) {
           throw new Error('Account profile refresh failed.');
         }
-        saveRoleSession(profile);
-        router.replace(getPostAuthenticationDestination(profile));
+        const destination = getPostAuthenticationDestination(profile);
+        if (destination !== '/email-verification') saveRoleSession(profile);
+        router.replace(destination);
       } catch {
         await signOutAndClearSessions();
         passwordChangeFlow.current = false;

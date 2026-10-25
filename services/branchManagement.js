@@ -1,6 +1,13 @@
 import { adminApiRequest } from './adminApi';
 import { ADMIN_CACHE_KEYS, invalidateAdminData } from './adminDataCache';
 import { invalidateRequesterCatalog } from './requesterOrdering';
+import { auth } from '../firebase';
+
+const pendingAccountMutations = new Map();
+const accountActionKey = (uid, action) => `${auth.currentUser?.uid || ''}:${uid}:${action}`;
+const accountMutationId = () => typeof globalThis.crypto?.randomUUID === 'function'
+  ? globalThis.crypto.randomUUID()
+  : `account_${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`;
 
 async function request(path, method = 'GET', body) {
   return adminApiRequest(path, { method, body });
@@ -32,6 +39,24 @@ export const createAdminAccount = async (account) => {
   return created;
 };
 export const manageAdminAccount = async (uid, action, changes = {}) => {
+  if (['deactivate', 'suspend', 'terminate', 'reactivate'].includes(action)) {
+    const key = accountActionKey(uid, action);
+    const pending = pendingAccountMutations.get(key) || {
+      clientMutationId: accountMutationId(), reason: changes.reason?.trim() || '',
+    };
+    pendingAccountMutations.set(key, pending);
+    try {
+      const result = await request('/api/admin/accounts', 'PATCH', { uid, action,
+        clientMutationId: pending.clientMutationId,
+        ...(pending.reason ? { reason: pending.reason } : {}) });
+      if (result.accountAction?.state === 'applied') pendingAccountMutations.delete(key);
+      invalidateAdminData(ADMIN_CACHE_KEYS.accounts, ADMIN_CACHE_KEYS.dashboard);
+      return { accountAction: result.accountAction };
+    } catch (error) {
+      if (error.status && error.status < 500 && error.status !== 409) pendingAccountMutations.delete(key);
+      throw error;
+    }
+  }
   const updated = (await request('/api/admin/accounts', 'PATCH', { uid, action, ...changes })).account;
   invalidateAdminData(ADMIN_CACHE_KEYS.accounts);
   if (['deactivate', 'reactivate', 'updateProfile', 'reassignManager', 'updateAccount'].includes(action)) invalidateAdminData(ADMIN_CACHE_KEYS.dashboard);
@@ -39,6 +64,13 @@ export const manageAdminAccount = async (uid, action, changes = {}) => {
   if (updated?.role === 'distributor' && ['deactivate', 'reactivate', 'updateProfile', 'updateAccount'].includes(action)) invalidateAdminData(ADMIN_CACHE_KEYS.distributors);
   return updated;
 };
+export const retryAdminAccountAction = async (intentId) => {
+  const result = await request('/api/admin/accounts', 'PATCH', { action: 'retryAccountAction', intentId });
+  invalidateAdminData(ADMIN_CACHE_KEYS.accounts, ADMIN_CACHE_KEYS.dashboard);
+  return result.accountAction;
+};
+export const getAdminAccountActionStatus = async (intentId) =>
+  (await request('/api/admin/accounts', 'PATCH', { action: 'accountActionStatus', intentId })).accountAction;
 export const getDistributors = async () => (await request('/api/admin/distributors')).distributors || [];
 export const updateDistributor = async (uid, action, options = {}) => {
   const payload = typeof options === 'string' ? { rejectionReason: options } : options;

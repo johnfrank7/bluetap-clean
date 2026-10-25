@@ -70,7 +70,8 @@ const getApplicationStatus = (profile, defaultStatus = 'pending') =>
   normalizeApprovalStatus(
     profile?.approvalStatus || profile?.status || profile?.accountStatus || defaultStatus
   );
-const requiresEmailVerification = (profile) => profile?.emailVerificationRequired === true;
+const requiresEmailVerification = (profile) =>
+  profile?.emailVerificationRequired === true || profile?.accountSource === 'admin_created';
 const BASE_SCROLL_PADDING_BOTTOM = 20;
 const DEFAULT_KEYBOARD_GAP = 24;
 const PASSWORD_KEYBOARD_GAP = 112;
@@ -307,7 +308,8 @@ export default function LoginPage() {
     const role = normalizeRole(profile?.role || profile);
 
     if (
-      (role === 'requester' || role === 'distributor') &&
+      (role === 'manager' || role === 'requester' || role === 'distributor') &&
+      profile?.mustChangePassword !== true &&
       requiresEmailVerification(profile) &&
       !auth.currentUser?.emailVerified
     ) {

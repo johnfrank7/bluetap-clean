@@ -61,6 +61,8 @@ function createAdminDistributorsHandler(getAdmin = getFirebaseAdmin) {
         }
         const snapshot = await tx.get(targetRef); if (!snapshot.exists) throw new OtpError(404, 'DISTRIBUTOR_NOT_FOUND', 'Distributor account not found.');
         const data = snapshot.data(); const previousStatus = statusOf(data);
+        if (data.accountActionHoldIntentId) throw new OtpError(409, 'ACCOUNT_ACTION_PENDING',
+          'Finish or reconcile the pending account action first.');
         if (data.role !== 'distributor' || !expected[action].includes(previousStatus)) throw new OtpError(409, 'INVALID_STATUS_TRANSITION', 'This distributor status cannot be changed.');
         const now = new Date(); const nextStatus = action === 'approve' || action === 'reactivate' ? 'active' : action === 'deactivate' ? 'inactive' : 'rejected';
         let branch = null;

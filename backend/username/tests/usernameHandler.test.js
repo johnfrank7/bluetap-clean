@@ -198,6 +198,7 @@ test('public login business outcomes retain production CORS through the HTTP ser
     { name: 'unfinished onboarding authenticates for status routing', role: 'requester', profile: { registrationCompleted: false }, status: 200 },
     { name: 'inactive account cannot mint a custom token', role: 'requester', profile: { accountStatus: 'inactive' }, status: 403, code: 'ACCOUNT_DISABLED' },
     { name: 'suspended account cannot mint a custom token', role: 'requester', profile: { accountStatus: 'suspended' }, status: 403, code: 'ACCOUNT_SUSPENDED' },
+    { name: 'pending account action cannot mint a custom token', role: 'requester', profile: { accountStatus: 'active', accountActionHoldIntentId: 'intent-a' }, status: 403, code: 'ACCOUNT_ACTION_PENDING' },
     { name: 'terminated account cannot mint a custom token', role: 'requester', profile: { accountStatus: 'terminated' }, status: 403, code: 'ACCOUNT_TERMINATED' },
     { name: 'unknown username', unknown: true, status: 401, code: 'INVALID_CREDENTIALS' },
     { name: 'unknown email', email: true, missingEmail: true, status: 401, code: 'INVALID_CREDENTIALS' },

@@ -4,7 +4,7 @@ const { historyId, historyIsReadable, historyRecord } = require('./chatHistory')
 const { getFirebaseAdmin } = require('../firebase/firebaseAdmin');
 const { canonicalAccountStatus } = require('../auth/accountStatus');
 const { assertChatSendAllowed } = require('../moderation/moderationService');
-const { verifiedIdentity } = require('../auth/authorization');
+const { verifiedIdentity, requireVerifiedOperationalEmail } = require('../auth/authorization');
 const { applyCors } = require('../utils/cors');
 const { OtpError } = require('../utils/otpError');
 const { getAssignmentVersion, getBranchMembershipVersion } = require('../utils/relationshipEpochs');
@@ -101,6 +101,9 @@ function requireOnlyFields(body, allowed) {
 }
 
 function chatAccountError(profile = {}) {
+  if (profile.accountActionHoldIntentId) {
+    throw new OtpError(403, 'CHAT_ACCOUNT_ACTION_PENDING', 'An account access change is pending.');
+  }
   const status = canonicalAccountStatus(profile);
   if (status === 'active') return;
   const reason = {
@@ -122,12 +125,14 @@ function requireChatProfile(profile, uid, expectedRole = '') {
   return { ...profile, uid: clean(uid) };
 }
 
-async function verifyChatIdentity(req, auth) {
+async function verifyChatIdentity(req, auth, db) {
   const decoded = await verifiedIdentity(req, auth);
   if (typeof auth.getUser === 'function') {
     const account = await auth.getUser(decoded.uid).catch(() => null);
     if (!account || account.disabled === true) throw new OtpError(403, 'CHAT_ACCOUNT_INACTIVE', 'This account is inactive.');
   }
+  const profile = await db.collection('users').doc(decoded.uid).get();
+  if (profile.exists) requireVerifiedOperationalEmail(profile.data() || {}, decoded);
   return decoded;
 }
 
@@ -1147,7 +1152,7 @@ function createChatHandler(mode, getAdmin = getFirebaseAdmin, dependencies = {})
     if (!allowed.includes(req.method)) return res.status(405).json({ error: { reason: 'method-not-allowed', message: `Use ${allowed.join(' or ')}.` } });
     try {
       const { auth, db } = getAdmin();
-      const decoded = await verifyChatIdentity(req, auth);
+      const decoded = await verifyChatIdentity(req, auth, db);
       const timestamp = now();
       if (mode === 'conversations') {
         if (req.method === 'GET') {

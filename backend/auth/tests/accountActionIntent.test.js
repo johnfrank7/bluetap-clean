@@ -7,15 +7,16 @@ const { actionIdentity, authorizeAccountActionIntent, canonicalRequest,
 
 const NOW = new Date('2026-10-25T00:00:00Z');
 const request = (action = 'suspend', clientMutationId = 'mutation-1234', targetUid = 'requester-a') =>
-  ({ source: 'admin_account', action, targetUid, clientMutationId });
+  ({ source: 'admin_account', action, targetUid, clientMutationId,
+    ...(['suspend', 'terminate'].includes(action) ? { reason: 'Reviewed account safety incident.' } : {}) });
 const clone = (value) => structuredClone(value);
 
 function fixture() {
   const records = new Map([
     ['users/admin-a', { role: 'admin', accountStatus: 'active' }],
-    ['users/requester-a', { role: 'requester', accountStatus: 'active' }],
-    ['users/requester-b', { role: 'requester', accountStatus: 'active' }],
-    ['users/manager-a', { role: 'manager', accountStatus: 'inactive', managerStatus: 'active', branchId: 'branch-a' }],
+    ['users/requester-a', { role: 'requester', accountStatus: 'active', email: 'requester-a@example.test' }],
+    ['users/requester-b', { role: 'requester', accountStatus: 'active', email: 'requester-b@example.test' }],
+    ['users/manager-a', { role: 'manager', accountStatus: 'inactive', managerStatus: 'active', branchId: 'branch-a', email: 'manager-a@example.test' }],
     ['branches/branch-a', { status: 'active' }],
   ]);
   const calls = [];
@@ -29,8 +30,10 @@ function fixture() {
     },
     async updateUser() { throw Error('Auth mutation must not run'); },
     async revokeRefreshTokens() { throw Error('Auth mutation must not run'); },
+    async getUser(uid) { return { uid, email: `${uid}@example.test`, emailVerified: true }; },
   };
-  const db = { collection(name) { return { doc(id) { return { id, path: `${name}/${id}` }; } }; },
+  const db = { collection(name) { return { doc(id) { const path = `${name}/${id}`;
+    return { id, path, get: async () => ({ exists: records.has(path), data: () => clone(records.get(path)) }) }; } }; },
     async runTransaction(callback) {
       const work = new Map([...records].map(([key, value]) => [key, clone(value)]));
       let written = false;
@@ -59,6 +62,7 @@ test('canonical requests are strict, deterministic and exclude client-derived au
   assert.equal(actionIdentity('admin-a', normalized).length, 64);
   for (const bad of [request('warn'), request('suspend', 'short'), request('suspend', 'mutation-1234', '../other'),
     { ...request(), actorUid: 'admin-a' }, { ...request(), authorized: true },
+    { ...request(), reason: 'too brief' }, { ...request(), reason: undefined },
     { ...request(), source: 'chat_report', caseRef: 'case-a' }]) {
     assert.throws(() => canonicalRequest(bad), (error) => error.reason === 'ACCOUNT_ACTION_REQUEST_INVALID');
   }
@@ -85,6 +89,8 @@ test('transaction creates one durable authorized intent and stable account reser
     state: 'reserved', createdAt: NOW, updatedAt: NOW });
   assert.deepEqual(f.calls, [['verify', 'admin', true]]);
   assert.equal(f.records.get('users/requester-a').accountStatus, 'active');
+  assert.equal(f.records.get('users/requester-a').accountActionHoldIntentId, id);
+  assert.equal(f.records.get('accountAccessHolds/requester-a').intentId, id);
 });
 
 test('exact replay is read-only; changed payload and conflicting target action are rejected', async () => {
@@ -94,6 +100,8 @@ test('exact replay is read-only; changed payload and conflicting target action a
   assert.equal((await f.authorize()).created, false);
   assert.deepEqual([...f.records], before);
   await assert.rejects(f.authorize(request('terminate')),
+    (error) => error.reason === 'ACCOUNT_ACTION_MUTATION_CONFLICT');
+  await assert.rejects(f.authorize({ ...request(), reason: 'Different reviewed factual reason.' }),
     (error) => error.reason === 'ACCOUNT_ACTION_MUTATION_CONFLICT');
   await assert.rejects(f.authorize(request('terminate', 'second-mutation')),
     (error) => error.reason === 'ACCOUNT_ACTION_RESERVED');
@@ -114,6 +122,8 @@ test('forged actor, forged target, missing trusted authority and rejected transi
   await assert.rejects(f.authorize(request('suspend', 'mutation-1234', 'admin-a')),
     (error) => error.reason === 'ACCOUNT_ACTION_SELF_DENIED');
   assert.equal([...f.records.keys()].some((key) => key.startsWith('accountAction')), false);
+  assert.equal(f.records.has('accountAccessHolds/requester-a'), false);
+  assert.equal(f.records.get('users/requester-a').accountActionHoldIntentId, undefined);
 });
 
 test('uncommitted transaction leaves no intent; malformed replay fails closed', async () => {
@@ -155,7 +165,7 @@ test('lease expiry preserves reservation, requires reconciliation and rejects st
 
 test('Firestore rules explicitly deny client access to intents and reservations', () => {
   const rules = readFileSync(resolve(__dirname, '..', '..', '..', 'firestore.rules'), 'utf8');
-  for (const name of ['accountActionIntents', 'accountActionReservations']) {
+  for (const name of ['accountActionIntents', 'accountActionReservations', 'accountAccessHolds']) {
     assert.match(rules, new RegExp(`match /${name}/\\{document=\\*\\*\\} \\{ allow read, write: if false; \\}`));
   }
 });

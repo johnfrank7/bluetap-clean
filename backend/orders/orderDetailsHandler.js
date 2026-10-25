@@ -1,4 +1,4 @@
-const { verifiedIdentity } = require('../auth/authorization');
+const { verifiedIdentity, requireVerifiedOperationalEmail } = require('../auth/authorization');
 const { requireActiveAccount } = require('../auth/accountStatus');
 const { applyCors } = require('../utils/cors');
 const { OtpError } = require('../utils/otpError');
@@ -25,6 +25,7 @@ function createOrderDetailsHandler(getAdmin = getFirebaseAdmin) {
       }
       const profile = userDoc.data() || {};
       requireActiveAccount(profile);
+      requireVerifiedOperationalEmail(profile, decoded);
 
       const params = new URL(req.url, 'http://localhost').searchParams;
       const orderId = clean(params.get('orderId') || params.get('requestId') || params.get('id'));

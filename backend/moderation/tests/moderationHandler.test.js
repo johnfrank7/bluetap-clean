@@ -160,7 +160,7 @@ test('Manager escalation preserves the case for Admin without creating a user re
   assert.equal(f.records.has('orderingRestrictions/requester-a'), false);
 });
 
-test('Admin platform restrictions and canonical account termination are explicit, audited, and retry-safe', async () => {
+test('Admin platform restrictions remain available while unverified account requests are denied', async () => {
   const platform = fixture();
   await apply(platform, 'admin', {
     reportId: 'report-a', action: 'suspend_platform_ordering', durationDays: 30,
@@ -170,40 +170,34 @@ test('Admin platform restrictions and canonical account termination are explicit
 
   const terminated = fixture();
   const body = { reportId: 'report-a', action: 'terminate_account', reason: 'Severe reviewed abuse', clientMutationId: 'terminate-1' };
-  await apply(terminated, 'admin', body);
-  const retry = await apply(terminated, 'admin', body);
-  assert.equal(retry.created, false);
-  assert.equal(terminated.records.get('users/requester-a').accountStatus, 'terminated');
-  assert.deepEqual(terminated.authCalls, [
-    ['updateUser', 'requester-a', { disabled: true }],
-    ['revokeRefreshTokens', 'requester-a'],
-  ]);
-  assert.equal([...terminated.records.keys()].filter((key) => key.startsWith('moderationActions/')).length, 1);
-  assert.equal([...terminated.records.keys()].filter((key) => key.startsWith('adminAuditLogs/')).length, 1);
+  await assert.rejects(apply(terminated, 'admin', body),
+    (error) => error.reason === 'AUTHENTICATION_REQUIRED');
+  assert.equal(terminated.records.get('users/requester-a').accountStatus, 'active');
+  assert.deepEqual(terminated.authCalls, []);
+  assert.equal([...terminated.records.keys()].filter((key) => key.startsWith('moderationActions/')).length, 0);
 });
 
-test('Admin account suspension uses canonical state, disables Auth, revokes sessions, and creates a safe notice', async () => {
+test('chat-case suspension without verified Admin identity has no side effects', async () => {
   const f = fixture();
-  await apply(f, 'admin', { reportId: 'report-a', action: 'suspend_account', reason: 'Reviewed safety concern', clientMutationId: 'suspend-1' });
-  assert.equal(f.records.get('users/requester-a').accountStatus, 'suspended');
-  assert.deepEqual(f.authCalls, [['updateUser', 'requester-a', { disabled: true }], ['revokeRefreshTokens', 'requester-a']]);
-  const notice = f.records.get('moderationNotices/requester-a/items/action-a');
-  assert.equal(notice.type, 'suspend_account');
-  assert.equal('reporterUid' in notice, false);
+  await assert.rejects(apply(f, 'admin', { reportId: 'report-a', action: 'suspend_account', reason: 'Reviewed safety concern', clientMutationId: 'suspend-1' }),
+    (error) => error.reason === 'AUTHENTICATION_REQUIRED');
+  assert.equal(f.records.get('users/requester-a').accountStatus, 'active');
+  assert.deepEqual(f.authCalls, []);
+  assert.equal(f.records.has('moderationNotices/requester-a/items/action-a'), false);
 });
 
-test('Admin reactivation never reactivates a terminated account and preserves history', async () => {
+test('chat-case reactivation remains held for suspended and terminated accounts', async () => {
   const suspended = fixture({ accountStatus: 'suspended' });
-  await apply(suspended, 'admin', {
+  await assert.rejects(apply(suspended, 'admin', {
     reportId: 'report-a', action: 'reactivate', reason: 'Restriction review completed', clientMutationId: 'reactivate-1',
-  });
-  assert.equal(suspended.records.get('users/requester-a').accountStatus, 'active');
-  assert.deepEqual(suspended.authCalls, [['updateUser', 'requester-a', { disabled: false }]]);
+  }), (error) => error.reason === 'MODERATION_ACCOUNT_ACTION_UNAVAILABLE');
+  assert.equal(suspended.records.get('users/requester-a').accountStatus, 'suspended');
+  assert.deepEqual(suspended.authCalls, []);
 
   const terminated = fixture({ accountStatus: 'terminated' });
   await assert.rejects(apply(terminated, 'admin', {
     reportId: 'report-a', action: 'reactivate', reason: 'Not permitted', clientMutationId: 'reactivate-terminated',
-  }), (error) => error.reason === 'ACCOUNT_NOT_REACTIVATABLE');
+  }), (error) => error.reason === 'MODERATION_ACCOUNT_ACTION_UNAVAILABLE');
 });
 
 test('expanded Admin chat review requires a reason, returns at most 20 messages, and writes an audit', async () => {

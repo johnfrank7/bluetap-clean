@@ -6,6 +6,7 @@ const { applyCors } = require('../utils/cors');
 const { getClientIp } = require('../utils/request');
 const firebaseWebConfig = require('../../firebase-web-config.json');
 const { ACCOUNT_STATUS, canonicalAccountStatus } = require('../auth/accountStatus');
+const { isStaging, assertStagingServerEnvironment, STAGING_PROJECT_ID } = require('../config/stagingIsolation');
 
 const genericLogin = () => new OtpError(401, 'invalid-credential', 'Invalid username or password.');
 const mappingError = () => new OtpError(409, 'account-mapping-invalid', 'Your account sign-in setup needs attention. Please contact support.');
@@ -27,6 +28,7 @@ const errorCodes = {
   'too-many-attempts': 'TOO_MANY_ATTEMPTS',
   'account-disabled': 'ACCOUNT_DISABLED',
   'account-suspended': 'ACCOUNT_SUSPENDED',
+  'account-action-pending': 'ACCOUNT_ACTION_PENDING',
   'account-terminated': 'ACCOUNT_TERMINATED',
   'portal-role-mismatch': 'PORTAL_ROLE_MISMATCH',
 };
@@ -41,7 +43,7 @@ const publicProfile = (profile, uid, email) => ({
   mustChangePassword: profile.mustChangePassword === true,
   registrationCompleted: profile.registrationCompleted,
   onboardingStatus: profile.onboardingStatus || null,
-  emailVerificationRequired: profile.emailVerificationRequired === true,
+  emailVerificationRequired: profile.emailVerificationRequired === true || profile.accountSource === 'admin_created',
   faceVerification: profile.faceVerification || null,
   unique_id: profile.unique_id || null,
   managerStatus: profile.managerStatus || null,
@@ -50,24 +52,31 @@ const publicProfile = (profile, uid, email) => ({
 });
 let verifiedWebKey = null;
 async function getPasswordApiKey() {
-  const apiKey = process.env.FIREBASE_WEB_API_KEY || firebaseWebConfig.apiKey;
-  if (!apiKey || (process.env.FIREBASE_PROJECT_ID && process.env.FIREBASE_PROJECT_ID !== firebaseWebConfig.projectId)) {
+  const staging = isStaging();
+  if (staging) assertStagingServerEnvironment();
+  const expectedProject = staging ? STAGING_PROJECT_ID : firebaseWebConfig.projectId;
+  const apiKey = process.env.FIREBASE_WEB_API_KEY || (staging ? '' : firebaseWebConfig.apiKey);
+  if (!apiKey || (process.env.FIREBASE_PROJECT_ID && process.env.FIREBASE_PROJECT_ID !== expectedProject) ||
+      (staging && apiKey === firebaseWebConfig.apiKey)) {
     throw new Error('Firebase project configuration mismatch');
   }
   // An override may be a rotated key, but must still identify this project.
   // Otherwise Firebase can report valid BlueTap credentials as invalid in a
   // different project. Cache only successful configuration verification.
-  if (apiKey !== firebaseWebConfig.apiKey &&
-      (!verifiedWebKey || verifiedWebKey.key !== apiKey || verifiedWebKey.expiresAt <= Date.now())) {
+  const expectedKeyProject = staging ? String(process.env.FIREBASE_PROJECT_NUMBER || '') : null;
+  if ((staging || apiKey !== firebaseWebConfig.apiKey) &&
+      (!verifiedWebKey || verifiedWebKey.key !== apiKey ||
+       verifiedWebKey.project !== expectedKeyProject || verifiedWebKey.expiresAt <= Date.now())) {
     const response = await fetch(`https://identitytoolkit.googleapis.com/v1/projects?key=${encodeURIComponent(apiKey)}`, {
       signal: AbortSignal.timeout(15000),
     });
     const config = await response.json().catch(() => null);
-    if (!response.ok || ![firebaseWebConfig.projectId, firebaseWebConfig.messagingSenderId].includes(String(config?.projectId || ''))) {
+    const allowedProjects = staging ? [expectedKeyProject, STAGING_PROJECT_ID] : [firebaseWebConfig.projectId, firebaseWebConfig.messagingSenderId];
+    if (!response.ok || !allowedProjects.includes(String(config?.projectId || ''))) {
       stage('FIREBASE_CONFIGURATION_FAILED');
       throw new Error('Firebase Web API key project mismatch');
     }
-    verifiedWebKey = { key: apiKey, expiresAt: Date.now() + 5 * 60 * 1000 };
+    verifiedWebKey = { key: apiKey, project: expectedKeyProject, expiresAt: Date.now() + 5 * 60 * 1000 };
   }
   return apiKey;
 }
@@ -369,6 +378,8 @@ function createUsernameHandler(action, getAdmin = getFirebaseAdmin, { now = Date
         }
         if (providerCode === 'USER_DISABLED') {
           const disabledProfile = (await db.collection('users').doc(expectedUid).get()).data() || {};
+          if (disabledProfile.accountActionHoldIntentId) throw new OtpError(403, 'account-action-pending',
+            'An account access change is pending. Please contact BlueTap support.');
           const accountState = canonicalAccountStatus(disabledProfile);
           if (accountState === ACCOUNT_STATUS.SUSPENDED) throw new OtpError(403, 'account-suspended', 'This account is temporarily suspended.');
           if (accountState === ACCOUNT_STATUS.TERMINATED) throw new OtpError(403, 'account-terminated', 'This account has been terminated.');
@@ -396,6 +407,8 @@ function createUsernameHandler(action, getAdmin = getFirebaseAdmin, { now = Date
       stage('PROFILE_CHECK_STARTED');
       const profile = (await db.collection('users').doc(expectedUid).get()).data();
       if (!profile || !['requester', 'distributor', 'admin', 'manager'].includes(profile.role)) throw setupError();
+      if (profile.accountActionHoldIntentId) throw new OtpError(403, 'account-action-pending',
+        'An account access change is pending. Please contact BlueTap support.');
       const accountState = canonicalAccountStatus(profile);
       if (accountState === ACCOUNT_STATUS.SUSPENDED) throw new OtpError(403, 'account-suspended', 'This account is temporarily suspended.');
       if (accountState === ACCOUNT_STATUS.TERMINATED) throw new OtpError(403, 'account-terminated', 'This account has been terminated.');
@@ -453,6 +466,7 @@ function createUsernameHandler(action, getAdmin = getFirebaseAdmin, { now = Date
 }
 
 module.exports = {
+  getPasswordApiKey,
   createUsernameHandler,
   checkUsername,
   checkIpRateLimit,

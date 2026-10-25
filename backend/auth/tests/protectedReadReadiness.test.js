@@ -21,6 +21,8 @@ for (const role of ['requester', 'distributor', 'manager']) {
     for (const accountStatus of ['inactive', 'suspended', 'terminated', 'unknown']) assert.equal(protectedReadReadiness({ ...state, profile: { ...state.profile, accountStatus } }), 'GENUINE_DENIED');
     assert.equal(protectedReadReadiness({ ...state, profile: { ...state.profile, accountStatus: '', status: 'Disabled' } }), 'GENUINE_DENIED');
     assert.equal(protectedReadReadiness({ ...state, profile: { ...state.profile, mustChangePassword: true } }), 'GENUINE_DENIED');
+    assert.equal(protectedReadReadiness({ ...state, profile: { ...state.profile,
+      accountActionHoldIntentId: 'intent-a' } }), 'GENUINE_DENIED');
   });
 }
 for (const role of ['distributor', 'manager']) {

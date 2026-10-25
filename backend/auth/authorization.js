@@ -16,6 +16,15 @@ async function verifiedIdentity(req, auth) {
   }
 }
 
+function requireVerifiedOperationalEmail(profile, decoded) {
+  if (profile.emailVerificationRequired !== true && profile.accountSource !== 'admin_created') return;
+  const canonicalEmail = String(profile.email || '').trim().toLowerCase();
+  const tokenEmail = String(decoded.email || '').trim().toLowerCase();
+  if (!canonicalEmail || tokenEmail !== canonicalEmail || decoded.email_verified !== true) {
+    throw new OtpError(403, 'EMAIL_VERIFICATION_REQUIRED', 'Verify your account email before using BlueTap.');
+  }
+}
+
 async function requireAdmin(req, auth, db) {
   const decoded = await verifiedIdentity(req, auth);
   const profile = await db.collection('users').doc(decoded.uid).get();
@@ -40,6 +49,7 @@ async function requireRequester(req, auth, db) {
     throw new OtpError(403, 'PASSWORD_CHANGE_REQUIRED', 'You must change your temporary password before placing an order.');
   }
   requireActiveAccount(profile, { inactiveMessage: 'This Requester account is inactive.' });
+  requireVerifiedOperationalEmail(profile, decoded);
   return { decoded, profile: { ...profile, uid: decoded.uid } };
 }
 
@@ -59,6 +69,7 @@ async function requireActiveDistributor(req, auth, db) {
   if (!['active', 'approved'].includes(distributorStatus)) {
     throw new OtpError(403, 'DISTRIBUTOR_INACTIVE', 'This Distributor account is not active.');
   }
+  requireVerifiedOperationalEmail(profile, decoded);
   const branchId = String(profile.branchId || '').trim();
   if (!branchId) throw new OtpError(403, 'BRANCH_ACCESS_DENIED', 'This Distributor account is not assigned to a branch.');
   const branchSnapshot = await db.collection('branches').doc(branchId).get();
@@ -87,6 +98,7 @@ async function requireActiveManager(req, auth, db) {
   if (profile.managerStatus !== 'active') {
     throw new OtpError(403, 'MANAGER_INACTIVE', 'This Manager account is inactive. Please contact the BlueTap administrator.');
   }
+  requireVerifiedOperationalEmail(profile, decoded);
   const branchId = String(profile.branchId || '').trim();
   if (!branchId) throw new OtpError(403, 'BRANCH_ACCESS_DENIED', 'This Manager account is not assigned to a branch.');
   const branchSnapshot = await db.collection('branches').doc(branchId).get();
@@ -108,4 +120,4 @@ function requireManagerBranch(managerContext, requestedBranchId) {
   return assigned;
 }
 
-module.exports = { bearerToken, requireActiveDistributor, requireActiveManager, requireAdmin, requireManagerBranch, requireRequester, verifiedIdentity };
+module.exports = { bearerToken, requireActiveDistributor, requireActiveManager, requireAdmin, requireManagerBranch, requireRequester, requireVerifiedOperationalEmail, verifiedIdentity };

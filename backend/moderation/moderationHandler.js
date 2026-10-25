@@ -1,7 +1,10 @@
 const { randomUUID } = require('node:crypto');
 const { getFirebaseAdmin } = require('../firebase/firebaseAdmin');
 const { canonicalAccountStatus, ACCOUNT_STATUS } = require('../auth/accountStatus');
-const { requireActiveManager, requireAdmin, verifiedIdentity } = require('../auth/authorization');
+const { bearerToken, requireActiveManager, requireAdmin, verifiedIdentity } = require('../auth/authorization');
+const { authorizeChatCaseAccountIntent } = require('../auth/accountActionIntentService');
+const { resumePendingIntent } = require('../auth/accountActionExecutor');
+const { assertNoticeTransportConfigured } = require('../auth/accountActionNotice');
 const { applyCors } = require('../utils/cors');
 const { OtpError } = require('../utils/otpError');
 const {
@@ -74,6 +77,7 @@ function safeReport(report = {}, options = {}) {
     updatedAt: isoTimestamp(report.updatedAt),
     reviewedAt: isoTimestamp(report.reviewedAt),
     actionTaken: clean(report.actionTaken, 80) || null,
+    accountActionPending: Boolean(report.pendingAccountActionIntentId),
     escalatedAt: isoTimestamp(report.escalatedAt),
     resolvedAt: isoTimestamp(report.resolvedAt),
     ...(options.evidence ? { evidence: (report.evidenceSnapshot || []).slice(0, 5).map((message) => ({
@@ -203,29 +207,6 @@ function restrictionCollection(scope) {
   return scope.endsWith('_chat') ? 'chatRestrictions' : 'orderingRestrictions';
 }
 
-function accountStatusChanges(profile, action) {
-  const current = canonicalAccountStatus(profile);
-  if (action === 'suspend_account') {
-    if (current !== ACCOUNT_STATUS.ACTIVE) throw new OtpError(409, 'ACCOUNT_NOT_ACTIVE', 'Only an active account can be suspended.');
-    return { accountStatus: ACCOUNT_STATUS.SUSPENDED, ...(profile.role === 'requester' ? { status: 'Suspended' } : {}) };
-  }
-  if (action === 'terminate_account') {
-    return { accountStatus: ACCOUNT_STATUS.TERMINATED, ...(profile.role === 'requester' ? { status: 'Terminated' } : {}) };
-  }
-  if (action === 'reactivate') {
-    if (![ACCOUNT_STATUS.INACTIVE, ACCOUNT_STATUS.SUSPENDED].includes(current)) throw new OtpError(409, 'ACCOUNT_NOT_REACTIVATABLE', 'Only an inactive or suspended account can be reactivated.');
-    return { accountStatus: ACCOUNT_STATUS.ACTIVE, ...(profile.role === 'requester' ? { status: 'Active' } : {}) };
-  }
-  return null;
-}
-
-async function applyAccountAuthState(auth, targetUid, action) {
-  if (!['suspend_account', 'terminate_account', 'reactivate'].includes(action)) return;
-  const disabled = action !== 'reactivate';
-  await auth.updateUser(targetUid, { disabled });
-  if (disabled) await auth.revokeRefreshTokens(targetUid);
-}
-
 function casePayload(report, abuseReview) {
   if (report) return {
     caseType: 'report', caseId: report.id, targetUid: report.reportedUid,
@@ -239,7 +220,8 @@ function casePayload(report, abuseReview) {
   };
 }
 
-async function applyModerationAction({ auth, db, actor, actorRole, actorBranch = null, body, now = new Date(), createActionId = randomUUID }) {
+async function applyModerationAction({ auth, db, actor, actorRole, actorBranch = null, body,
+  idToken, now = new Date(), createActionId = randomUUID, sendEmail, noticeEnv }) {
   const allowed = actorRole === 'manager' ? MANAGER_ACTIONS : ADMIN_ACTIONS;
   const action = clean(body.action, 80).toLowerCase();
   if (!allowed.has(action)) throw new OtpError(403, 'MODERATION_ACTION_DENIED', 'This moderation action is not permitted.');
@@ -258,6 +240,37 @@ async function applyModerationAction({ auth, db, actor, actorRole, actorBranch =
   if (abuseReviewId && HELD_ABUSE_ACCOUNT_ACTIONS.has(action)) {
     throw new OtpError(409, 'ABUSE_ACCOUNT_ACTION_TEMPORARILY_UNAVAILABLE',
       'Ordering-abuse account actions are temporarily unavailable pending security hardening.');
+  }
+  if (action === 'reactivate') {
+    throw new OtpError(409, 'MODERATION_ACCOUNT_ACTION_UNAVAILABLE',
+      'Account reactivation requires safe reconciliation of prior Auth operations.');
+  }
+  if (['suspend_account', 'terminate_account'].includes(action)) {
+    if (!reportId || actorRole !== 'admin' || body.incidentIds !== undefined
+      || body.durationDays !== undefined) {
+      throw new OtpError(400, 'MODERATION_CASE_INVALID', 'Choose a valid chat report account action.');
+    }
+    const authorized = await authorizeChatCaseAccountIntent({ db, auth, idToken, actingUid: actor.uid,
+      request: { reportId, action, reason, privateNote, clientMutationId: mutationId }, now,
+      noticeTransportCheck: () => assertNoticeTransportConfigured(sendEmail, noticeEnv || process.env) });
+    if (authorized.intent.state !== 'applied') {
+      try { await resumePendingIntent({ db, auth, intentId: authorized.intent.id,
+        actingUid: actor.uid, sendEmail }); }
+      catch { /* The durable hold remains; status below never claims success. */ }
+    }
+    const current = await db.collection('accountActionIntents').doc(authorized.intent.id).get();
+    if (!current.exists || current.data()?.source !== 'chat_report') {
+      throw new OtpError(409, 'ACCOUNT_ACTION_INTENT_INVALID', 'The action requires reconciliation.');
+    }
+    const state = current.data()?.state;
+    const applied = state === 'applied';
+    const actionSnap = applied
+      ? await db.collection('moderationActions').doc(`account_${authorized.intent.id}`).get() : null;
+    if (applied && !actionSnap?.exists) {
+      throw new OtpError(409, 'ACCOUNT_ACTION_AUDIT_INVALID', 'The account action requires reconciliation.');
+    }
+    return { created: authorized.created, accountAction: { id: authorized.intent.id,
+      state, pending: !applied }, ...(applied ? { action: safeAction(withId(actionSnap)) } : {}) };
   }
   const punitiveAbuse = Boolean(abuseReviewId && ABUSE_PUNITIVE_ACTIONS.has(action));
   if (!punitiveAbuse && body.incidentIds !== undefined) {
@@ -309,8 +322,6 @@ async function applyModerationAction({ auth, db, actor, actorRole, actorBranch =
     throw new OtpError(409, 'ORDERING_TARGET_INVALID', 'Platform ordering restrictions apply only to Requesters.');
   }
 
-  const accountChanges = accountStatusChanges(targetProfile, action);
-  if (accountChanges) await applyAccountAuthState(auth, source.targetUid, action);
   const actionId = createActionId();
   const startsAt = now;
   const endsAt = duration ? new Date(timeOf(now) + duration * DAY_MS) : null;
@@ -327,6 +338,9 @@ async function applyModerationAction({ auth, db, actor, actorRole, actorBranch =
     const latestCaseRef = reportId ? db.collection('chatReports').doc(reportId) : db.collection('orderAbuseReviews').doc(abuseReviewId);
     const latestCase = await tx.get(latestCaseRef);
     if (!latestCase.exists) throw new OtpError(404, 'MODERATION_CASE_NOT_FOUND', 'The moderation case was not found.');
+    if (latestCase.data()?.pendingAccountActionIntentId) {
+      throw new OtpError(409, 'MODERATION_CASE_ACTION_PENDING', 'Finish the pending account action first.');
+    }
     const latestStatus = clean(latestCase.data()?.status || (reportId ? '' : 'open'), 24);
     if (reportId && !['open', 'escalated'].includes(latestStatus)) throw new OtpError(409, 'REPORT_NOT_ACTIONABLE', 'This report has already been resolved.');
     if (abuseReviewId && latestStatus === 'resolved') throw new OtpError(409, 'ABUSE_REVIEW_NOT_ACTIONABLE', 'This review has already been resolved.');
@@ -403,19 +417,6 @@ async function applyModerationAction({ auth, db, actor, actorRole, actorBranch =
     tx.create(actionRef, actionRecord);
     tx.create(mutationRef, { actorUid, actionId, payloadHash, createdAt: now });
     if (restrictionRef) tx.set(restrictionRef, restrictionProjection);
-    if (accountChanges) {
-      tx.update(db.collection('users').doc(source.targetUid), { ...accountChanges, updatedAt: now, updatedBy: actorUid });
-      tx.set(db.collection('adminAuditLogs').doc(), {
-        action: action === 'suspend_account' ? 'ACCOUNT_SUSPENDED' : action === 'terminate_account' ? 'ACCOUNT_TERMINATED' : 'ACCOUNT_REACTIVATED',
-        actorUid,
-        targetUid: source.targetUid,
-        role: targetProfile.role,
-        before: { accountStatus: canonicalAccountStatus(targetProfile) },
-        after: { accountStatus: accountChanges.accountStatus },
-        createdAt: now,
-      });
-    }
-
     const remainsActionable = action === 'escalate' || (actorRole === 'manager' && action === 'warn');
     const nextStatus = action === 'escalate' ? 'escalated' : remainsActionable ? latestStatus : 'resolved';
     tx.update(latestCaseRef, {
@@ -466,8 +467,39 @@ function createModerationHandler(role, getAdmin = getFirebaseAdmin, dependencies
       const actorProfile = role === 'manager' ? actor.profile : (await db.collection('users').doc(actor.uid).get()).data() || {};
       const actorValue = role === 'manager' ? actor : { uid: actor.uid, ...actorProfile, profile: actorProfile };
       if (req.method === 'POST') {
-        const result = await applyModerationAction({ auth, db, actor: actorValue, actorRole: role, actorBranch: actor.branch || null, body: bodyOf(req), now: now(), createActionId });
-        return res.status(result.created ? 201 : 200).json(result);
+        const body = bodyOf(req);
+        if (role === 'admin' && body.action === 'retryChatAccountAction') {
+          const reportId = clean(body.reportId, 128);
+          if (!reportId || Object.keys(body).some((key) => !['action', 'reportId'].includes(key))) {
+            throw new OtpError(400, 'MODERATION_CASE_INVALID', 'Choose a valid chat report.');
+          }
+          const report = await db.collection('chatReports').doc(reportId).get();
+          const intentId = report.data()?.pendingAccountActionIntentId;
+          if (!report.exists || !/^[a-f0-9]{64}$/.test(intentId || '')) {
+            throw new OtpError(404, 'ACCOUNT_ACTION_NOT_FOUND', 'No pending account action was found.');
+          }
+          const intent = await db.collection('accountActionIntents').doc(intentId).get();
+          if (!intent.exists || intent.data()?.source !== 'chat_report'
+            || intent.data()?.caseRef?.id !== reportId) {
+            throw new OtpError(409, 'ACCOUNT_ACTION_INTENT_INVALID', 'The pending action requires review.');
+          }
+          try { await resumePendingIntent({ db, auth, intentId, actingUid: actor.uid,
+            sendEmail: dependencies.sendEmail }); }
+          catch { /* Preserve the pending state for another authorized attempt. */ }
+          const latest = await db.collection('accountActionIntents').doc(intentId).get();
+          if (!latest.exists || latest.data()?.source !== 'chat_report') {
+            throw new OtpError(409, 'ACCOUNT_ACTION_INTENT_INVALID', 'The action requires reconciliation.');
+          }
+          return res.status(latest.data()?.state === 'applied' ? 200 : 202).json({ accountAction: {
+            id: intentId, state: latest.data()?.state,
+            pending: latest.data()?.state !== 'applied',
+          } });
+        }
+        const result = await applyModerationAction({ auth, db, actor: actorValue, actorRole: role,
+          actorBranch: actor.branch || null, body, idToken: bearerToken(req), now: now(),
+          createActionId, sendEmail: dependencies.sendEmail,
+          noticeEnv: dependencies.noticeEnv });
+        return res.status(result.accountAction?.pending ? 202 : result.created ? 201 : 200).json(result);
       }
       const params = paramsOf(req, `/api/${role}/moderation`);
       const kind = clean(params.get('kind') || 'reports', 24);

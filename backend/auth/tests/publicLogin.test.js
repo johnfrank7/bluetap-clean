@@ -14,6 +14,22 @@ function loadService(file, context, expose) {
   return vm.runInNewContext(`${source}\n${expose}`, context);
 }
 
+test('Admin-created roles enter existing OTP verification after required password change', () => {
+  const auth = { currentUser: { emailVerified: false } };
+  const destination = loadService('services/authSession.js', { auth }, 'getPostAuthenticationDestination');
+  for (const role of ['manager', 'requester', 'distributor']) {
+    const profile = { role, accountSource: 'admin_created', registrationCompleted: true,
+      faceVerification: { required: false, status: 'not_required' },
+      distributorStatus: 'active', branchId: 'branch-1' };
+    assert.equal(destination(profile), '/email-verification');
+    assert.equal(destination({ ...profile, mustChangePassword: true }), '/required-password-change');
+    auth.currentUser.emailVerified = true;
+    assert.equal(destination(profile), role === 'manager' ? '/manager/dashboard'
+      : role === 'requester' ? '/requester/r_dashboard' : '/distributor/d_dashboard');
+    auth.currentUser.emailVerified = false;
+  }
+});
+
 test('public error mapping never guesses a privileged account from a generic error', () => {
   for (const code of ['INVALID_CREDENTIALS', 'username/invalid-credential', 'auth/wrong-password']) {
     assert.equal(getPublicLoginErrorMessage({ code }), 'Invalid username or password.');

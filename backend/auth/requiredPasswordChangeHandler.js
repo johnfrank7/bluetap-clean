@@ -32,6 +32,9 @@ function createRequiredPasswordChangeHandler(getAdmin = getFirebaseAdmin, now = 
       const profileRef = db.collection('users').doc(decoded.uid);
       const profileSnapshot = await profileRef.get();
       const profile = profileSnapshot.data() || {};
+      if (profile.accountActionHoldIntentId) {
+        throw new OtpError(403, 'ACCOUNT_ACTION_PENDING', 'An account access change is pending.');
+      }
       if (!profileSnapshot.exists || !['admin', 'manager', 'requester', 'distributor'].includes(profile.role)) {
         throw new OtpError(403, 'ACCOUNT_REQUIRED', 'A BlueTap account is required.');
       }
@@ -51,7 +54,7 @@ function createRequiredPasswordChangeHandler(getAdmin = getFirebaseAdmin, now = 
         await auth.revokeRefreshTokens(decoded.uid);
       }
       await db.collection('adminAuditLogs').doc().set({ action: 'FORCED_PASSWORD_CHANGE_COMPLETED', targetUid: decoded.uid, role: profile.role, timestamp: changedAt });
-      return res.status(200).json({ changed: true, profile: { uid: decoded.uid, role: profile.role, email: profile.email || '', distributorStatus: profile.distributorStatus || profile.approvalStatus || profile.status || 'approved', approvalStatus: profile.distributorStatus || profile.approvalStatus || profile.status || 'approved', branchId: profile.branchId || null, mustChangePassword: false, registrationCompleted: profile.registrationCompleted !== false, onboardingStatus: profile.onboardingStatus || 'complete', faceVerification: profile.faceVerification || null } });
+      return res.status(200).json({ changed: true, profile: { uid: decoded.uid, role: profile.role, email: profile.email || '', distributorStatus: profile.distributorStatus || profile.approvalStatus || profile.status || 'approved', approvalStatus: profile.distributorStatus || profile.approvalStatus || profile.status || 'approved', branchId: profile.branchId || null, mustChangePassword: false, emailVerificationRequired: profile.emailVerificationRequired === true || profile.accountSource === 'admin_created', registrationCompleted: profile.registrationCompleted !== false, onboardingStatus: profile.onboardingStatus || 'complete', faceVerification: profile.faceVerification || null } });
     } catch (error) {
       const known = error instanceof OtpError;
       return res.status(known ? error.status : 500).json({ error: {

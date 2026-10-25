@@ -24,6 +24,7 @@ const bodyOf = (req) => { if (req.body && typeof req.body === 'object') return r
 const digest = (secret, ...values) => createHmac('sha256', secret).update(JSON.stringify(values)).digest('hex');
 const millis = (value) => value?.toMillis?.() || (value instanceof Date ? value.getTime() : Number(value) || 0);
 const activeAccount = (profile = {}) => {
+  if (profile.accountActionHoldIntentId) return false;
   if (profile.role === 'manager') return profile.managerStatus === 'active';
   if (profile.role === 'distributor') return ['approved', 'active'].includes(String(profile.distributorStatus || profile.approvalStatus || profile.status || '').toLowerCase());
   return !['inactive', 'disabled'].includes(String(profile.accountStatus || profile.status || 'active').toLowerCase());

@@ -6,8 +6,11 @@ import { useBlueTapTheme } from './BlueTapTheme';
 export default function AccountAccessState({ state = 'inactive', onBack }) {
   const { colors } = useBlueTapTheme();
   const terminated = state === 'terminated';
-  const title = terminated ? 'Account terminated' : state === 'suspended' ? 'Account temporarily suspended' : 'Account unavailable';
-  const message = terminated
+  const pending = state === 'pending';
+  const title = pending ? 'Account access change pending' : terminated ? 'Account terminated' : state === 'suspended' ? 'Account temporarily suspended' : 'Account unavailable';
+  const message = pending
+    ? 'Your account access is temporarily on hold while BlueTap completes a security action. Contact BlueTap support for help.'
+    : terminated
     ? 'This BlueTap account has been terminated and can no longer access ordering, delivery, or messaging services.'
     : state === 'suspended'
       ? 'This BlueTap account is temporarily suspended. Access will remain unavailable until an Administrator reactivates it.'

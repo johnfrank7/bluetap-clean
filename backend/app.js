@@ -4,6 +4,7 @@ const { routes } = require('./routes');
 const { faceUpstreamConfigStatus } = require('./verification/renderFaceClient');
 const { emailProviderConfigStatus } = require('./email/emailProvider');
 const { applyCors } = require('./utils/cors');
+const { assertStagingServerEnvironment } = require('./config/stagingIsolation');
 
 const MAX_REQUEST_BYTES = 5 * 1024 * 1024;
 const MAX_PRODUCT_IMAGE_REQUEST_BYTES = Math.ceil(MAX_REQUEST_BYTES * 4 / 3) + 64 * 1024;
@@ -82,6 +83,7 @@ function createRequestListener(routeMap = routes) {
 }
 
 function createAppServer(routeMap = routes) {
+  assertStagingServerEnvironment();
   const server = http.createServer(createRequestListener(routeMap));
   server.requestTimeout = 70_000;
   server.headersTimeout = 75_000;

@@ -23,7 +23,7 @@ const ACTIONS = {
   admin: [
     ['dismiss', 'Dismiss'], ['warn', 'Warn'], ['suspend_platform_chat', 'Restrict platform chat'],
     ['suspend_platform_ordering', 'Restrict platform ordering'], ['suspend_account', 'Suspend account'],
-    ['terminate_account', 'Terminate account'], ['reactivate', 'Reactivate account'],
+    ['terminate_account', 'Terminate account'],
   ],
 };
 const RESTRICTIONS = new Set(['suspend_branch_chat', 'suspend_branch_ordering', 'suspend_platform_chat', 'suspend_platform_ordering']);
@@ -52,6 +52,8 @@ export default function ModerationWorkspace({ role }) {
   const [expanded, setExpanded] = React.useState(null);
   const [confirming, setConfirming] = React.useState(false);
   const [selectedGrounds, setSelectedGrounds] = React.useState([]);
+  const pendingAccountSubmission = React.useRef(null);
+  const submitting = React.useRef(false);
   const activityRevision = useModerationActivitySignal(role);
 
   const refresh = React.useCallback(async () => {
@@ -73,24 +75,67 @@ export default function ModerationWorkspace({ role }) {
   const submitAction = () => {
     if (!action) return setError('Choose a moderation action.');
     if (action !== 'dismiss' && !reason.trim()) return setError('A user-safe reason is required.');
+    if (['suspend_account', 'terminate_account'].includes(action) && reason.trim().length < 20) {
+      return setError('Describe the factual reason in at least 20 characters.');
+    }
     if (kind === 'abuse' && ABUSE_PUNITIVE_ACTIONS.has(action) && !selectedGrounds.length) {
       return setError('Select at least one incident. The server will verify its eligibility.');
     }
     setConfirming(true);
   };
   const confirmAction = async () => {
+    if (submitting.current) return;
+    submitting.current = true;
     setConfirming(false);
     setSaving(true); setError('');
     try {
-      await applyModerationAction(role, {
+      const accountAction = role === 'admin' && kind === 'reports'
+        && ['suspend_account', 'terminate_account'].includes(action);
+      const proposed = {
         ...(kind === 'reports' ? { reportId: selected.id } : { abuseReviewId: selected.id }),
-        action, reason: reason.trim(), privateNote: privateNote.trim(), clientMutationId: newMutationId(),
+        action, reason: reason.trim(), privateNote: privateNote.trim(),
         ...(kind === 'abuse' && ABUSE_PUNITIVE_ACTIONS.has(action) ? { incidentIds: selectedGrounds } : {}),
         ...(RESTRICTIONS.has(action) ? { durationDays: Number(durationDays) } : {}),
-      });
+      };
+      const pending = pendingAccountSubmission.current;
+      if (accountAction && pending?.reportId === selected.id
+        && (pending.action !== action || pending.reason !== proposed.reason
+          || pending.privateNote !== proposed.privateNote)) {
+        setError('Finish the pending account action before changing its reason or decision.');
+        return;
+      }
+      const submission = accountAction && pending?.reportId === selected.id
+        ? pending : { ...proposed, clientMutationId: newMutationId() };
+      if (accountAction) pendingAccountSubmission.current = submission;
+      const result = await applyModerationAction(role, submission);
+      if (result.accountAction?.pending) {
+        setSelected((current) => current?.id === selected.id
+          ? { ...current, accountActionPending: true } : current);
+        setError('Account access is held while Firebase Auth is reconciled. Retry this exact decision shortly.');
+        return;
+      }
+      if (accountAction) pendingAccountSubmission.current = null;
       await refresh();
-    } catch (saveError) { setError(saveError.message); }
-    finally { setSaving(false); }
+    } catch (saveError) {
+      if (saveError.status >= 400 && saveError.status < 500) pendingAccountSubmission.current = null;
+      setError(saveError.message);
+    }
+    finally { submitting.current = false; setSaving(false); }
+  };
+  const retryAccountAction = async () => {
+    if (!selected?.id || submitting.current) return;
+    submitting.current = true;
+    setSaving(true); setError('');
+    try {
+      const result = await applyModerationAction('admin', { action: 'retryChatAccountAction', reportId: selected.id });
+      if (result.accountAction?.pending) {
+        setError('The account action is still pending reconciliation. Account access remains held.');
+      } else {
+        pendingAccountSubmission.current = null;
+        await refresh();
+      }
+    } catch (retryError) { setError(retryError.message); }
+    finally { submitting.current = false; setSaving(false); }
   };
   const expandReview = async () => {
     if (!reason.trim()) return setError('Enter a reason before expanding chat context.');
@@ -150,7 +195,8 @@ export default function ModerationWorkspace({ role }) {
             })}
             {role === 'admin' && <Text style={styles.metaStrong}>Account suspension and termination from ordering-abuse cases are temporarily unavailable pending security hardening.</Text>}
           </View>}
-          <View style={styles.section}><Text style={styles.sectionLabel}>DECISION</Text><View style={styles.actionGrid}>{ACTIONS[role].filter(([value]) => kind === 'reports' || ABUSE_ACTIONS.has(value)).map(([value, label]) => <Pressable accessibilityRole="button" accessibilityState={{ selected: action === value }} key={value} onPress={() => setAction(value)} style={[styles.action, action === value && styles.actionSelected, ['terminate_account', 'suspend_account'].includes(value) && styles.dangerAction]}><Text style={[styles.actionText, action === value && styles.actionTextSelected]}>{label}</Text></Pressable>)}</View>{RESTRICTIONS.has(action) && <View style={styles.durations}>{durations.map((days) => <Pressable key={days} onPress={() => setDurationDays(String(days))} style={[styles.duration, durationDays === String(days) && styles.actionSelected]}><Text style={styles.actionText}>{days} day{days === 1 ? '' : 's'}</Text></Pressable>)}</View>}<TextInput accessibilityLabel="User-safe moderation reason" placeholder="Reason shown in the audit record" placeholderTextColor={colors.placeholder} value={reason} onChangeText={(value) => setReason(value.slice(0, 1000))} multiline style={styles.input} /><TextInput accessibilityLabel="Private moderator note" placeholder="Private moderator note (never shown to the user)" placeholderTextColor={colors.placeholder} value={privateNote} onChangeText={(value) => setPrivateNote(value.slice(0, 1000))} multiline style={styles.input} /><Pressable disabled={saving} onPress={submitAction} style={[styles.primaryButton, saving && { opacity: .6 }]}><Text style={styles.primaryButtonText}>{saving ? 'Saving…' : 'Apply decision'}</Text></Pressable></View>
+          {role === 'admin' && kind === 'reports' && selected.accountActionPending && <View style={styles.section}><Text style={styles.sectionLabel}>ACCOUNT ACTION PENDING</Text><Text style={styles.metaStrong}>Account access remains held until Firebase Auth and the case are reconciled.</Text><Pressable accessibilityRole="button" accessibilityLabel="Retry pending account action" disabled={saving} onPress={retryAccountAction} style={styles.outlineButton}><Text style={styles.outlineButtonText}>{saving ? 'Checking…' : 'Retry reconciliation'}</Text></Pressable></View>}
+          {!selected.accountActionPending && <View style={styles.section}><Text style={styles.sectionLabel}>DECISION</Text><View style={styles.actionGrid}>{ACTIONS[role].filter(([value]) => kind === 'reports' || ABUSE_ACTIONS.has(value)).map(([value, label]) => <Pressable accessibilityRole="button" accessibilityState={{ selected: action === value }} key={value} onPress={() => setAction(value)} style={[styles.action, action === value && styles.actionSelected, ['terminate_account', 'suspend_account'].includes(value) && styles.dangerAction]}><Text style={[styles.actionText, action === value && styles.actionTextSelected]}>{label}</Text></Pressable>)}</View>{RESTRICTIONS.has(action) && <View style={styles.durations}>{durations.map((days) => <Pressable key={days} onPress={() => setDurationDays(String(days))} style={[styles.duration, durationDays === String(days) && styles.actionSelected]}><Text style={styles.actionText}>{days} day{days === 1 ? '' : 's'}</Text></Pressable>)}</View>}<TextInput accessibilityLabel="User-safe moderation reason" placeholder="Reason shown in the audit record" placeholderTextColor={colors.placeholder} value={reason} onChangeText={(value) => setReason(value.slice(0, 1000))} multiline style={styles.input} /><TextInput accessibilityLabel="Private moderator note" placeholder="Private moderator note (never shown to the user)" placeholderTextColor={colors.placeholder} value={privateNote} onChangeText={(value) => setPrivateNote(value.slice(0, 1000))} multiline style={styles.input} /><Pressable disabled={saving} onPress={submitAction} style={[styles.primaryButton, saving && { opacity: .6 }]}><Text style={styles.primaryButtonText}>{saving ? 'Saving…' : 'Apply decision'}</Text></Pressable></View>}
         </>}
       </View>}
     </View>

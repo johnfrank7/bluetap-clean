@@ -31,6 +31,8 @@ test('legacy accountStatus fallback preserves safe existing role behavior', () =
 
 test('active accounts pass while suspended and terminated remain distinguishable', () => {
   assert.equal(requireActiveAccount({ accountStatus: 'active' }), 'active');
+  assert.throws(() => requireActiveAccount({ accountStatus: 'active', accountActionHoldIntentId: 'intent-a' }),
+    (error) => error.reason === 'ACCOUNT_ACTION_PENDING');
   assert.throws(() => requireActiveAccount({ accountStatus: 'inactive' }), (error) => error.reason === 'ACCOUNT_INACTIVE');
   assert.throws(() => requireActiveAccount({ accountStatus: 'suspended' }), (error) => error.reason === 'ACCOUNT_SUSPENDED');
   assert.throws(() => requireActiveAccount({ accountStatus: 'terminated' }), (error) => error.reason === 'ACCOUNT_TERMINATED');
@@ -41,4 +43,7 @@ test('shared backend role guards reject terminated and suspended profiles', asyn
   const dbFor = (profile) => ({ collection: () => ({ doc: () => ({ get: async () => ({ exists: true, data: () => profile }) }) }) });
   await assert.rejects(requireRequester({ headers: { authorization: 'Bearer token' } }, auth, dbFor({ role: 'requester', accountStatus: 'terminated' })), (error) => error.reason === 'ACCOUNT_TERMINATED');
   await assert.rejects(requireAdmin({ headers: { authorization: 'Bearer token' } }, auth, dbFor({ role: 'admin', accountStatus: 'suspended' })), (error) => error.reason === 'ACCOUNT_SUSPENDED');
+  await assert.rejects(requireRequester({ headers: { authorization: 'Bearer token' } }, auth,
+    dbFor({ role: 'requester', accountStatus: 'active', accountActionHoldIntentId: 'intent-a' })),
+  (error) => error.reason === 'ACCOUNT_ACTION_PENDING');
 });
