@@ -60,16 +60,28 @@ export function RoleNotificationProvider({ role, children }) {
   const baseEvents = React.useMemo(() => [
     ...getRoleOrderNotifications(roleData.orders || [], role),
     ...getChatFollowupNotifications(chat.conversations || [], role),
-    ...moderation.notices.map((notice) => ({
-      id: `moderation:${notice.id}`, kind: 'moderation', noticeId: notice.id,
-      status: notice.type === 'warn' ? 'warning' : notice.type === 'restore_branch_access' ? 'restored' : 'restricted',
-      at: notice.createdAt?.toDate?.() || new Date(notice.createdAt || Date.now()),
-      message: notice.type === 'warn'
-        ? `${notice.title}: review your BlueTap conduct notice.`
-        : notice.type === 'restore_branch_access'
-          ? `Branch access restored${notice.branchName ? ` for ${notice.branchName}` : ''}.`
-          : `${notice.title}${notice.branchName ? ` for ${notice.branchName}` : ''}${notice.reasonLabel ? ` (${notice.reasonLabel})` : ''}.`,
-    })),
+    ...moderation.notices.flatMap((notice) => {
+      const appeal = role === 'requester' && ['delivery_appeal_submitted', 'delivery_appeal_resolved'].includes(notice.type);
+      if (appeal) {
+        if (!/^[a-f0-9]{64}$/.test(notice.attemptId || '') || typeof notice.orderId !== 'string' || !notice.orderId
+          || notice.orderId.includes('/') || !Number.isFinite(Date.parse(notice.createdAt))) return [];
+        return [{ id: `moderation:${notice.id}`, kind: notice.type, status: notice.type,
+          orderId: notice.orderId, attemptId: notice.attemptId,
+          title: notice.title, message: notice.message,
+          at: new Date(notice.createdAt) }];
+      }
+      if (notice.type?.startsWith('delivery_appeal_')) return [];
+      return [{
+        id: `moderation:${notice.id}`, kind: 'moderation', noticeId: notice.id,
+        status: notice.type === 'warn' ? 'warning' : notice.type === 'restore_branch_access' ? 'restored' : 'restricted',
+        at: notice.createdAt?.toDate?.() || new Date(notice.createdAt || Date.now()),
+        message: notice.type === 'warn'
+          ? `${notice.title}: review your BlueTap conduct notice.`
+          : notice.type === 'restore_branch_access'
+            ? `Branch access restored${notice.branchName ? ` for ${notice.branchName}` : ''}.`
+            : `${notice.title}${notice.branchName ? ` for ${notice.branchName}` : ''}${notice.reasonLabel ? ` (${notice.reasonLabel})` : ''}.`,
+      }];
+    }),
   ].sort((left, right) => right.at.getTime() - left.at.getTime()).slice(0, 150), [chat.conversations, moderation.notices, role, roleData.orders]);
   const allEvents = React.useMemo(() => combineLoadedNotifications(baseEvents, reportFeed.events, completionFeed.events),
     [baseEvents, reportFeed.events, completionFeed.events]);

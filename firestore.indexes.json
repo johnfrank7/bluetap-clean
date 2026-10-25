@@ -148,6 +148,14 @@
       ]
     },
     {
+      "collectionGroup": "deliveryAttempts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "appealState", "order": "ASCENDING" },
+        { "fieldPath": "appeal.submittedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "orderAbuseReviews",
       "queryScope": "COLLECTION",
       "fields": [

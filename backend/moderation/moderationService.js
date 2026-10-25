@@ -250,9 +250,14 @@ function noticeForAction({ actionId, action, scope, category, branchId, branchNa
 }
 
 function safeNotice(id, notice = {}) {
+  const type = clean(notice.type, 60);
+  const appealNotice = ['delivery_appeal_submitted', 'delivery_appeal_resolved'].includes(type)
+    && /^[a-f0-9]{64}$/.test(notice.attemptId || '')
+    && typeof notice.orderId === 'string' && notice.orderId.length > 0
+    && notice.orderId.length <= 128 && !notice.orderId.includes('/');
   return {
     id,
-    type: clean(notice.type, 60),
+    type,
     title: clean(notice.title, 160),
     category: clean(notice.category, 80),
     scope: clean(notice.scope, 40),
@@ -263,6 +268,11 @@ function safeNotice(id, notice = {}) {
     createdAt: isoTimestamp(notice.createdAt),
     acknowledgedAt: isoTimestamp(notice.acknowledgedAt),
     seenAt: isoTimestamp(notice.seenAt),
+    ...(appealNotice ? {
+      attemptId: notice.attemptId,
+      orderId: notice.orderId,
+      message: clean(notice.message, 180),
+    } : {}),
   };
 }
 

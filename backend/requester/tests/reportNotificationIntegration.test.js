@@ -189,7 +189,7 @@ test('report styling is neutral in both themes and Requester UI navigates only w
   assert.match(screen, /Load older reports/);
   assert.match(screen, /Seen status is saved on this device/);
   assert.match(screen, /loadOlderCompletions/);
-  assert.match(screen, /\['delivery_report', 'delivery_review_completed'\]\.includes\(entry\.item\.kind\)/);
+  assert.match(screen, /\['delivery_report', 'delivery_review_completed', 'delivery_appeal_submitted', 'delivery_appeal_resolved'\]\.includes\(entry\.item\.kind\)/);
   assert.match(header, /loaded unseen/);
   assert.ok(!screen.includes('reportedReasonNote'));
   assert.ok(!screen.includes('clientMutationId'));

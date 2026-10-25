@@ -73,7 +73,8 @@ export default function RequesterNotification() {
   };
 
   useEffect(() => {
-    if (ready) markSeen(events.filter((event) => !['delivery_report', 'delivery_review_completed'].includes(event.kind)).map((event) => event.id));
+    if (ready) markSeen(events.filter((event) => !['delivery_report', 'delivery_review_completed',
+      'delivery_appeal_submitted', 'delivery_appeal_resolved'].includes(event.kind)).map((event) => event.id));
   }, [events, markSeen, ready]);
   useEffect(() => {
     const orderId = Array.isArray(params.orderId) ? params.orderId[0] : params.orderId;
@@ -146,7 +147,7 @@ export default function RequesterNotification() {
             {notificationEntries.map((entry, index) => (
               <AnimatedPresenceItem key={entry.id} phase={entry.phase} delay={Math.min(index * 30, 120)}>
               <NotificationCard
-                accessibilityLabel={['delivery_report', 'delivery_review_completed'].includes(entry.item.kind)
+                accessibilityLabel={['delivery_report', 'delivery_review_completed', 'delivery_appeal_submitted', 'delivery_appeal_resolved'].includes(entry.item.kind)
                   ? `${entry.item.title}. ${entry.item.message} ${entry.item.reviewLabel || ''}. Tap to view this report.`
                   : entry.item.message}
                 colors={colors}
@@ -155,9 +156,10 @@ export default function RequesterNotification() {
                 time={formatNotificationTime(entry.item.at)}
                 message={entry.item.message}
                 metadata={entry.item.kind === 'delivery_report' ? `${entry.item.reviewLabel || 'Delivery report'} · Tap to review`
-                  : entry.item.kind === 'delivery_review_completed' ? 'Review complete · Tap for details' : undefined}
+                  : entry.item.kind === 'delivery_review_completed' ? 'Review complete · Tap for details'
+                    : entry.item.kind?.startsWith('delivery_appeal_') ? 'Delivery appeal · Tap for details' : undefined}
                 onPress={() => {
-                  if (['delivery_report', 'delivery_review_completed'].includes(entry.item.kind)) {
+                  if (['delivery_report', 'delivery_review_completed', 'delivery_appeal_submitted', 'delivery_appeal_resolved'].includes(entry.item.kind)) {
                     const target = reportNotificationTarget(entry.item);
                     if (!target) return;
                     markSeen([entry.item.id]);

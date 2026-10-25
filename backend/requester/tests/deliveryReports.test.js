@@ -206,8 +206,10 @@ test('DTO redacts refusal interaction, raw legacy notes, private identity, mutat
   assert.equal(detail.body.report.requesterResponseStatus, 'submitted');
   assert.deepEqual(detail.body.report.requesterResponse, { explanation: 'my own factual response', submittedAt: date(22).toISOString() });
   assert.deepEqual(detail.body.report.contactAttempts, []);
+  assert.equal(detail.body.report.appeal, null);
+  assert.equal(detail.body.report.effectiveResponsibility, null);
   assert.deepEqual(Object.keys(detail.body.report).sort(), [
-    'attemptId', 'contactAttempts', 'orderId', 'attemptNumber', 'reportReceivedAt',
+    'appeal', 'attemptId', 'contactAttempts', 'effectiveResponsibility', 'orderId', 'attemptNumber', 'reportReceivedAt',
     'reportedReasonCode', 'reportedReasonLabel', 'reportedStatus', 'requesterResponse', 'requesterResponseStatus',
     'responseDeadlineAt', 'responseWindowOpen', 'reviewState',
   ].sort());

@@ -82,6 +82,8 @@ const notificationSeverity = (status, dark = false) => {
   const palette = dark ? DARK_NOTIFICATION_SEVERITIES : NOTIFICATION_SEVERITIES;
   if (normalized === 'delivery_report') return palette.info;
   if (normalized === 'delivery_review_completed') return palette.delivery;
+  if (normalized === 'delivery_appeal_submitted') return palette.info;
+  if (normalized === 'delivery_appeal_resolved') return palette.delivery;
   if (SUCCESS_STATUSES.has(normalized)) return palette.success;
   if (DELIVERY_STATUSES.has(normalized)) return palette.delivery;
   if (RESTRICTED_STATUSES.has(normalized)) return palette.restricted;
@@ -94,6 +96,8 @@ const compactNotificationStatus = (status) => {
   const normalized = normalizeNotificationStatus(status);
   if (normalized === 'delivery_report') return 'Delivery report';
   if (normalized === 'delivery_review_completed') return 'Review complete';
+  if (normalized === 'delivery_appeal_submitted') return 'Appeal submitted';
+  if (normalized === 'delivery_appeal_resolved') return 'Appeal resolved';
   if (normalized === 'restored') return 'Restored';
   if (SUCCESS_STATUSES.has(normalized)) return 'Delivered';
   if (DELIVERY_STATUSES.has(normalized)) return 'In transit';

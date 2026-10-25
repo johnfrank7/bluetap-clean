@@ -10,6 +10,7 @@ import {
 import { auth } from '../firebase';
 
 const {
+  appealReasonError,
   canSubmitResponse,
   explanationError,
   normalizeExplanation,
@@ -25,7 +26,7 @@ const displayTime = (value) => {
     ? date.toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' }) : 'Time unavailable';
 };
 
-export default function RequesterDeliveryReportDialog({ visible, orderId, targetAttemptId = '', ownerUid = '', onClose, responseRegistry }) {
+export default function RequesterDeliveryReportDialog({ visible, orderId, targetAttemptId = '', ownerUid = '', onClose, responseRegistry, appealRegistry }) {
   const { colors, isDark } = useBlueTapTheme();
   const accent = isDark ? colors.primaryLight : colors.primaryAction;
   const [reports, setReports] = React.useState([]);
@@ -40,6 +41,11 @@ export default function RequesterDeliveryReportDialog({ visible, orderId, target
   const [submitError, setSubmitError] = React.useState('');
   const [success, setSuccess] = React.useState('');
   const [submitting, setSubmitting] = React.useState(false);
+  const [showAppealForm, setShowAppealForm] = React.useState(false);
+  const [appealDraft, setAppealDraft] = React.useState('');
+  const [appealFieldError, setAppealFieldError] = React.useState('');
+  const [appealError, setAppealError] = React.useState('');
+  const [submittingAppeal, setSubmittingAppeal] = React.useState(false);
   const [, setFlowRevision] = React.useState(0);
   const activeRef = React.useRef(false);
   const requestEpochRef = React.useRef(0);
@@ -71,13 +77,17 @@ export default function RequesterDeliveryReportDialog({ visible, orderId, target
       const result = await fetchRequesterDeliveryReports(orderId);
       if (!activeRef.current || requestEpochRef.current !== epoch || auth.currentUser?.uid !== requestOwnerUid) return;
       const next = (result.reports || []).map(reportViewModel).filter(Boolean);
-      const pendingId = responseRegistry.pendingAttemptId(auth.currentUser?.uid, orderId);
-      if (pendingId && !next.some((item) => item.attemptId === pendingId)) {
-        const pendingResult = await fetchRequesterDeliveryReport(pendingId, orderId);
-        if (!activeRef.current || requestEpochRef.current !== epoch || auth.currentUser?.uid !== requestOwnerUid) return;
-        const pendingReport = reportViewModel(pendingResult.report);
-        if (pendingReport) next.unshift(pendingReport);
+      const pendingIds = [responseRegistry.pendingAttemptId(requestOwnerUid, orderId),
+        appealRegistry.pendingAttemptId(requestOwnerUid, orderId)].filter(Boolean);
+      for (const pendingId of pendingIds) {
+        if (!next.some((item) => item.attemptId === pendingId)) {
+          const pendingResult = await fetchRequesterDeliveryReport(pendingId, orderId);
+          if (!activeRef.current || requestEpochRef.current !== epoch || auth.currentUser?.uid !== requestOwnerUid) return;
+          const pendingReport = reportViewModel(pendingResult.report);
+          if (pendingReport) next.unshift(pendingReport);
+        }
       }
+      const pendingId = pendingIds[0] || '';
       const nextSelectedId = next.some((item) => item.attemptId === pendingId) ? pendingId : next[0]?.attemptId || '';
       const selectedSummary = next.find((item) => item.attemptId === nextSelectedId);
       if (selectedSummary?.reviewState === 'resolved' && !selectedSummary.decisionReason) {
@@ -103,7 +113,7 @@ export default function RequesterDeliveryReportDialog({ visible, orderId, target
         if (activeRef.current) setLoading(false);
       }
     }
-  }, [orderId, ownerUid, responseRegistry, targetAttemptId]);
+  }, [orderId, ownerUid, responseRegistry, appealRegistry, targetAttemptId]);
 
   React.useEffect(() => {
     if (!visible || !orderId) return undefined;
@@ -119,6 +129,11 @@ export default function RequesterDeliveryReportDialog({ visible, orderId, target
     setSubmitError('');
     setSuccess('');
     setSubmitting(false);
+    setShowAppealForm(false);
+    setAppealDraft('');
+    setAppealFieldError('');
+    setAppealError('');
+    setSubmittingAppeal(false);
     setFlowRevision((current) => current + 1);
     loadFirstPage();
     return () => { activeRef.current = false; requestEpochRef.current += 1; selectionRef.current += 1; };
@@ -130,6 +145,11 @@ export default function RequesterDeliveryReportDialog({ visible, orderId, target
   const displayState = reportDisplayState({ loading, error: loadError, reports: visibleReports });
   const flow = visible && sessionCurrent
     ? responseRegistry.get(ownerUid, orderId, selectedId) : null;
+  const appealFlow = visible && sessionCurrent
+    ? appealRegistry.get(ownerUid, orderId, selectedId) : null;
+  const appealFlowState = appealFlow?.getState();
+  const appealPending = Boolean(appealFlowState?.pending);
+  const appealInFlight = Boolean(appealFlowState?.inFlight);
   const currentFlowState = flow?.getState();
   const pending = Boolean(currentFlowState?.pending);
   const inFlight = Boolean(currentFlowState?.inFlight);
@@ -157,6 +177,24 @@ export default function RequesterDeliveryReportDialog({ visible, orderId, target
     if (visible && currentFlowState?.pending) setDraft(currentFlowState.pending.explanation);
   }, [visible, selectedId, currentFlowState?.pending?.explanation]);
 
+  React.useEffect(() => {
+    if (!visible || !appealFlow) return undefined;
+    const applyState = (state) => {
+      if (!activeRef.current || selectedIdRef.current !== selectedId) return;
+      setFlowRevision((current) => current + 1);
+      if (state.pending) {
+        setAppealDraft(state.pending.appealReason);
+        setShowAppealForm(true);
+      }
+      if (state.confirmedAppeal) {
+        setReports((current) => current.map((item) => item.attemptId === selectedId
+          ? { ...item, appeal: state.confirmedAppeal } : item));
+      }
+    };
+    applyState(appealFlow.getState());
+    return appealFlow.subscribe(applyState);
+  }, [visible, appealFlow, selectedId]);
+
   const selectReport = async (attemptId) => {
     if (attemptId === selectedId) return;
     selectionRef.current += 1;
@@ -167,6 +205,11 @@ export default function RequesterDeliveryReportDialog({ visible, orderId, target
     setFieldError('');
     setSubmitError('');
     setSuccess('');
+    setShowAppealForm(false);
+    setAppealDraft('');
+    setAppealFieldError('');
+    setAppealError('');
+    setSubmittingAppeal(false);
     const sequence = selectionRef.current;
     const epoch = requestEpochRef.current;
     const requestOwnerUid = auth.currentUser?.uid;
@@ -254,6 +297,48 @@ export default function RequesterDeliveryReportDialog({ visible, orderId, target
     }
   };
 
+  const submitAppeal = async () => {
+    if (!selected || !appealFlow || appealInFlight) return;
+    if (!appealPending) {
+      const validation = appealReasonError(appealDraft);
+      if (validation) { setAppealFieldError(validation); return; }
+    }
+    setAppealFieldError('');
+    setAppealError('');
+    setSubmittingAppeal(true);
+    const epoch = requestEpochRef.current;
+    const selection = selectionRef.current;
+    try {
+      const res = await appealFlow.submit(selected.orderId, selected.attemptId, appealDraft);
+      if (res.ignored) return;
+      if (!activeRef.current || requestEpochRef.current !== epoch || selectionRef.current !== selection) return;
+      setReports((current) => current.map((item) => item.attemptId === selected.attemptId ? {
+        ...item,
+        appeal: res.appeal,
+      } : item));
+      setShowAppealForm(false);
+      setSuccess('Your appeal has been submitted to Administration.');
+    } catch (err) {
+      if (!activeRef.current || requestEpochRef.current !== epoch || selectionRef.current !== selection) return;
+      if (err.status === 409) {
+        setAppealError('This appeal conflicts with an existing submission or decision. Refresh the report.');
+        setShowAppealForm(false);
+        setSubmitError('This delivery review already has an appeal or decision. The latest report is being loaded.');
+        try {
+          const fresh = await fetchRequesterDeliveryReport(selected.attemptId, orderId);
+          if (activeRef.current && requestEpochRef.current === epoch && selectionRef.current === selection)
+            setReports((current) => current.map((item) => item.attemptId === selected.attemptId ? reportViewModel(fresh.report) : item));
+        } catch { /* Keep the confirmed conflict visible. */ }
+      } else if (err.uncertain || appealFlow.hasPending()) {
+        setAppealError('The result is not confirmed. Retry sends the same appeal with its original submission ID.');
+      } else setAppealError(err.message || 'Failed to submit appeal. Please retry.');
+    } finally {
+      if (activeRef.current && requestEpochRef.current === epoch && selectionRef.current === selection) {
+        setSubmittingAppeal(false);
+      }
+    }
+  };
+
   const onConfirm = () => {
     if (!sessionCurrent) { onClose?.(); return; }
     if (loadError && !reports.length) { loadFirstPage(); return; }
@@ -313,6 +398,88 @@ export default function RequesterDeliveryReportDialog({ visible, orderId, target
               <Text style={[styles.muted, { color: colors.textSecondary }]}>Decided: {displayTime(selected.decidedAt)}</Text>
               <Text style={[styles.muted, { color: colors.textSecondary }]}>This review records a finding; it does not by itself create an account warning or restriction.</Text>
             </View>}
+            {selected.reviewState === 'resolved' && selected.appeal && <View style={[styles.appealCard, { backgroundColor: selected.appeal.state === 'overturned' ? colors.successSoft : colors.surfaceAlt, borderColor: colors.border }]}>
+              <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>Delivery Review Appeal</Text>
+              <Text style={[styles.status, { color: selected.appeal.state === 'overturned' ? colors.success : selected.appeal.state === 'upheld' ? colors.danger : colors.primary }]}>
+                {selected.appeal.state === 'submitted' ? 'Appeal pending Admin review'
+                  : selected.appeal.state === 'overturned' ? 'Appeal overturned by Admin'
+                  : 'Appeal upheld by Admin'}
+              </Text>
+              <Text style={[styles.bodyText, { color: colors.textPrimary }]}>Your appeal reason: {selected.appeal.appealReason}</Text>
+              <Text style={[styles.muted, { color: colors.textSecondary }]}>Submitted: {displayTime(selected.appeal.submittedAt)}</Text>
+              {selected.appeal.state !== 'submitted' && !!selected.appeal.resolutionReason && (
+                <View style={{ marginTop: 8 }}>
+                  <Text style={[styles.bodyText, { fontWeight: '700', color: colors.textPrimary }]}>Admin resolution reason:</Text>
+                  <Text style={[styles.bodyText, { color: colors.textPrimary }]}>{selected.appeal.resolutionReason}</Text>
+                  {selected.appeal.state === 'overturned' && !!selected.appeal.overturnedResponsibility && (
+                    <Text style={[styles.muted, { color: colors.textSecondary }]}>
+                      Updated outcome: {responsibilityLabel(selected.appeal.overturnedResponsibility)}
+                    </Text>
+                  )}
+                  <Text style={[styles.muted, { color: colors.textSecondary }]}>Resolved: {displayTime(selected.appeal.resolvedAt)}</Text>
+                </View>
+              )}
+            </View>}
+            {selected.reviewState === 'resolved' && !selected.appeal && !showAppealForm && !appealPending && (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Appeal this review decision"
+                style={[styles.appealButton, { backgroundColor: colors.surfaceAlt, borderColor: colors.primary }]}
+                onPress={() => { setShowAppealForm(true); setAppealDraft(''); setAppealFieldError(''); setAppealError(''); }}
+              >
+                <Text style={[styles.appealButtonText, { color: colors.primary }]}>Appeal this review</Text>
+              </Pressable>
+            )}
+            {selected.reviewState === 'resolved' && (!selected.appeal || appealPending) && (showAppealForm || appealPending) && (
+              <View style={[styles.appealFormCard, { backgroundColor: colors.surfaceAlt, borderColor: colors.border }]}>
+                <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>Appeal delivery review decision</Text>
+                <Text style={[styles.muted, { color: colors.textSecondary }]}>
+                  If you dispute the Manager's delivery review outcome, submit a factual explanation to BlueTap Administration (10 to 1,000 characters). You can only submit one appeal per attempt.
+                </Text>
+                <TextInput
+                  accessibilityLabel="Factual appeal reason"
+                  accessibilityHint="Enter 10 to 1000 characters"
+                  multiline
+                  maxLength={2000}
+                  editable={!submittingAppeal && !appealPending}
+                  value={appealDraft}
+                  onChangeText={(val) => { setAppealDraft(val); setAppealFieldError(''); }}
+                  placeholder="Explain why this decision should be reviewed..."
+                  placeholderTextColor={colors.textSecondary}
+                  textAlignVertical="top"
+                  style={[styles.input, { color: colors.textPrimary, backgroundColor: colors.input || colors.surface, borderColor: appealFieldError ? colors.danger : colors.border }]}
+                />
+                <Text style={[styles.muted, { color: colors.textSecondary }]}>
+                  {Array.from(normalizeExplanation(appealDraft)).length}/1000 characters
+                </Text>
+                {!!appealFieldError && <Text accessibilityRole="alert" style={[styles.error, { color: colors.danger }]}>{appealFieldError}</Text>}
+                {!!appealError && <Text accessibilityRole="alert" style={[styles.error, { color: colors.danger }]}>{appealError}</Text>}
+                <View style={styles.appealActionRow}>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Cancel appeal submission"
+                    disabled={submittingAppeal || appealInFlight}
+                    style={[styles.appealCancelButton, { borderColor: colors.border }]}
+                    onPress={() => setShowAppealForm(false)}
+                  >
+                    <Text style={[styles.appealActionText, { color: colors.textSecondary }]}>Cancel</Text>
+                  </Pressable>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Submit appeal to Admin"
+                    disabled={submittingAppeal || appealInFlight}
+                    style={[styles.appealSubmitButton, { backgroundColor: colors.primary }]}
+                    onPress={submitAppeal}
+                  >
+                    {submittingAppeal ? (
+                      <ActivityIndicator color="#fff" size="small" />
+                    ) : (
+                      <Text style={[styles.appealSubmitText, { color: colors.buttonText || '#fff' }]}>{appealPending ? 'Retry original appeal' : 'Submit appeal'}</Text>
+                    )}
+                  </Pressable>
+                </View>
+              </View>
+            )}
             {selected.contactAttempts.length > 0 && <View style={styles.contacts}>
               <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>Reported contact attempts</Text>
               {selected.contactAttempts.map((entry, index) => <View key={`${selected.attemptId}-contact-${index}`} style={styles.contactRow}>
@@ -382,4 +549,13 @@ const styles = StyleSheet.create({
   responseCard: { marginTop: 16, borderWidth: 1, borderRadius: 14, padding: 14 },
   form: { marginTop: 16 },
   input: { marginTop: 12, minHeight: 110, maxHeight: 180, borderWidth: 1, borderRadius: 12, padding: 12, fontSize: 14, lineHeight: 20 },
+  appealCard: { marginTop: 14, borderWidth: 1, borderRadius: 12, padding: 12, gap: 4 },
+  appealButton: { marginTop: 12, minHeight: 40, borderWidth: 1, borderRadius: 10, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 16 },
+  appealButtonText: { fontSize: 13, fontWeight: '700' },
+  appealFormCard: { marginTop: 14, borderWidth: 1, borderRadius: 12, padding: 14, gap: 6 },
+  appealActionRow: { flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 12 },
+  appealCancelButton: { minHeight: 38, paddingHorizontal: 14, borderWidth: 1, borderRadius: 8, justifyContent: 'center', alignItems: 'center' },
+  appealSubmitButton: { minHeight: 38, paddingHorizontal: 16, borderRadius: 8, justifyContent: 'center', alignItems: 'center' },
+  appealActionText: { fontSize: 13, fontWeight: '600' },
+  appealSubmitText: { fontSize: 13, fontWeight: '700' },
 });

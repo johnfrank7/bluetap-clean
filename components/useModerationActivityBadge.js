@@ -1,5 +1,6 @@
 import React from 'react';
 import { loadModerationCases } from '../services/moderationApi';
+import { fetchAdminAppeals } from '../services/adminDeliveryAppeals';
 import { subscribeModerationActivity } from '../services/moderationRealtime';
 import { useManagerRealtimeData } from './ManagerRealtimeData';
 
@@ -19,8 +20,9 @@ export default function useModerationActivityBadge(role) {
   const revision = useModerationActivitySignal(role);
   React.useEffect(() => {
     let active = true;
-    loadModerationCases(role, { status: 'active', limit: 50 })
-      .then((result) => { if (active) setCount((result.reports || []).length); })
+    Promise.all([loadModerationCases(role, { status: 'active', limit: 50 }),
+      role === 'admin' ? fetchAdminAppeals({ status: 'pending', limit: 25 }).catch(() => null) : Promise.resolve(null)])
+      .then(([result, appeals]) => { if (active) setCount((result.reports || []).length + (appeals?.appeals || []).length); })
       .catch(() => { if (active) setCount(0); });
     return () => { active = false; };
   }, [revision, role]);

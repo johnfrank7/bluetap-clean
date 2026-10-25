@@ -7,6 +7,8 @@ const { applyModerationAction } = require('../moderationHandler');
 const { hashId } = require('../moderationService');
 const { attemptIdFor } = require('../../delivery/deliveryAttemptService');
 const { decisionEventIdFor } = require('../../delivery/deliveryReviewPolicy');
+const { submitRequesterAppeal } = require('../../delivery/requesterDeliveryAppealService');
+const { resolveAdminAppeal } = require('../../delivery/adminDeliveryAppealService');
 
 const host = process.env.FIRESTORE_EMULATOR_HOST;
 
@@ -135,5 +137,48 @@ test('concurrent decision and moderation cannot commit an unverified ground', { 
       assert.equal((await decisionRef.get()).exists, true);
       assert.equal((await attemptRef.get()).data().responsibility, 'requester_responsible');
     }
+  } finally { await deleteApp(app); }
+});
+
+test('pending and overturned appeals cannot become future punitive delivery grounds', { skip: !host }, async () => {
+  const app = initializeApp({ projectId: 'demo-bluetap' }, `appeal-ground-${randomUUID()}`);
+  const db = getFirestore(app);
+  try {
+    const record = await seed(db, randomUUID());
+    const adminUid = `appeal-admin-${randomUUID()}`;
+    await db.collection('users').doc(adminUid).set({ role: 'admin', accountStatus: 'active' });
+    const appeal = await submitRequesterAppeal(db, { uid: record.requesterUid }, {
+      attemptId: record.attemptId, orderId: record.orderId,
+      appealReason: 'I dispute this responsibility finding based on the delivery evidence.',
+      clientMutationId: 'appeal-ground-submission-1',
+    }, () => new Date('2026-10-04T01:00:00Z'));
+    assert.equal(appeal.created, true);
+    const manager = { decoded: { uid: record.managerUid }, profile: { publicUid: 'Man001' },
+      branch: { id: record.branchId, name: 'BlueTap A' } };
+    const tryWarning = (mutationId, actionId) => applyModerationAction({ db,
+      auth: { updateUser: async () => { throw new Error('Auth must not run'); } },
+      actor: manager, actorRole: 'manager', actorBranch: manager.branch,
+      body: { abuseReviewId: record.reviewId, action: 'warn', incidentIds: [record.incidentId],
+        reason: 'Verified case-specific evidence', clientMutationId: mutationId },
+      now: new Date('2026-10-05T00:00:00Z'), createActionId: () => actionId,
+    });
+    await assert.rejects(tryWarning('pending-appeal-warning', 'pending-appeal-action'),
+      (error) => error.reason === 'MODERATION_GROUND_INELIGIBLE');
+    assert.equal((await db.collection('moderationActions').doc('pending-appeal-action').get()).exists, false);
+    const resolved = await resolveAdminAppeal(db, { uid: adminUid }, {
+      attemptId: record.attemptId, resolution: 'overturned',
+      overturnedResponsibility: 'provider_responsible',
+      resolutionReason: 'The factual evidence does not establish requester responsibility.',
+      clientMutationId: 'appeal-ground-resolution-1',
+    }, () => new Date('2026-10-04T02:00:00Z'));
+    assert.equal(resolved.created, true);
+    assert.equal((await db.collection('deliveryAttempts').doc(record.attemptId).get()).data().responsibility,
+      'requester_responsible');
+    assert.equal((await db.collection('deliveryAttempts').doc(record.attemptId).get()).data().effectiveResponsibility,
+      'provider_responsible');
+    await assert.rejects(tryWarning('overturned-appeal-warning', 'overturned-appeal-action'),
+      (error) => error.reason === 'MODERATION_GROUND_INELIGIBLE');
+    assert.equal((await db.collection('moderationActions').doc('overturned-appeal-action').get()).exists, false);
+    assert.equal((await db.collection('orderingRestrictions').doc(record.requesterUid).get()).exists, false);
   } finally { await deleteApp(app); }
 });

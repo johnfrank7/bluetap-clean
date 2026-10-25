@@ -47,12 +47,15 @@ import {
   isHistoryRequesterOrderStatus,
 } from '../../constants/requesterOrderStatus';
 
-const { createReportModalHandoff, createRequesterResponseRegistry, reportRouteTarget } = require('../../services/requesterDeliveryReportFlow');
+const { createReportModalHandoff, createRequesterResponseRegistry, createRequesterAppealRegistry,
+  reportRouteTarget } = require('../../services/requesterDeliveryReportFlow');
+const { submitRequesterAppeal } = require('../../services/requesterDeliveryAppeals');
 // Keep unresolved retries for this app process even if the Requests screen remounts.
 const requesterResponseRegistry = createRequesterResponseRegistry({
   send: submitRequesterDeliveryResponse,
   readReport: async (orderId, attemptId) => (await fetchRequesterDeliveryReport(attemptId, orderId)).report,
 });
+const requesterAppealRegistry = createRequesterAppealRegistry({ send: submitRequesterAppeal });
 
 const BLUE = BLUETAP_COLORS.primary;
 const BLUE_LIGHT = BLUETAP_COLORS.primarySoft;
@@ -784,6 +787,7 @@ export default function RequesterRequests() {
               ownerUid={reportOwnerUid}
               onClose={() => { setReportOrderId(''); setReportTargetAttemptId(''); }}
               responseRegistry={requesterResponseRegistry}
+              appealRegistry={requesterAppealRegistry}
             />
 
             <RequesterEditOrderModal

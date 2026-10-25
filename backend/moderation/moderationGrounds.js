@@ -2,6 +2,8 @@ const { OtpError } = require('../utils/otpError');
 const { attemptIdFor } = require('../delivery/deliveryAttemptService');
 const { decisionEventIdFor } = require('../delivery/deliveryReviewPolicy');
 const { decisionFromEvent } = require('../delivery/requesterDeliveryReportService');
+const { appealSubmissionEventIdFor, appealResolutionEventIdFor,
+  canonicalAppealSubmission, canonicalAppealResolution } = require('../delivery/deliveryAppealPolicy');
 const { cancellationConcern, hashId, timeOf } = require('./moderationService');
 
 const MAX_GROUNDS = 5;
@@ -67,13 +69,25 @@ async function validatedGroundsInTransaction(tx, db, reviewId, review, incidentI
       || incident.reportingBranchId !== review.branchId || incident.sourceEventId !== `${attemptId}_outcome`) throw invalid();
     const attemptSnapshot = await tx.get(db.collection('deliveryAttempts').doc(attemptId));
     const attempt = attemptSnapshot.exists ? attemptSnapshot.data() || {} : null;
+    const effectiveResponsibility = attempt?.effectiveResponsibility || attempt?.responsibility;
     if (!attempt || !Number.isSafeInteger(attempt.attemptNumber) || attempt.attemptNumber < 1
       || attemptId !== attemptIdFor(orderId, attempt.attemptNumber) || attempt.orderId !== orderId
       || attempt.requesterUid !== review.requesterUid || attempt.branchId !== review.branchId
       || attempt.outcome !== 'failed' || attempt.reviewState !== 'resolved'
       || attempt.responsibility !== 'requester_responsible'
+      || effectiveResponsibility !== 'requester_responsible'
+      || (attempt.appeal != null || attempt.appealState != null)
+        && (attempt.appealState !== 'upheld' || attempt.appeal?.state !== 'upheld')
       || attempt.reportedReasonCode !== incident.category
       || !serverTime(attempt.reportReceivedAt) || serverTime(attempt.reportReceivedAt) !== serverTime(incident.at)) throw invalid();
+    if (attempt.appeal != null || attempt.appealState != null) {
+      const submissionSnapshot = await tx.get(db.collection('deliveryAttemptEvents').doc(appealSubmissionEventIdFor(attemptId)));
+      const resolutionSnapshot = await tx.get(db.collection('deliveryAttemptEvents').doc(appealResolutionEventIdFor(attemptId)));
+      try {
+        canonicalAppealSubmission(attemptId, attempt, submissionSnapshot.exists ? submissionSnapshot.data() || {} : null);
+        canonicalAppealResolution(attemptId, attempt, resolutionSnapshot.exists ? resolutionSnapshot.data() || {} : null);
+      } catch { throw invalid(); }
+    }
     const failedSnapshot = await tx.get(db.collection('deliveryAttemptEvents').doc(incident.sourceEventId));
     const failed = failedSnapshot.exists ? failedSnapshot.data() || {} : null;
     if (!failed || failed.schemaVersion !== 1 || failed.kind !== 'ATTEMPT_FAILED'

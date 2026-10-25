@@ -136,6 +136,16 @@ function safeReport(id, attempt, { decision = null, detail = false, now = new Da
     responseWindowOpen,
     ...(decision ? { responsibility: decision.responsibility, decidedAt: decision.decidedAt,
       ...(detail ? { decisionReason: decision.decisionReason } : {}) } : {}),
+    effectiveResponsibility: attempt.effectiveResponsibility || (decision ? decision.responsibility : null),
+    appeal: attempt.appeal ? {
+      state: attempt.appeal.state || 'submitted',
+      appealReason: attempt.appeal.appealReason || '',
+      submittedAt: isoTime(attempt.appeal.submittedAt),
+      resolution: attempt.appeal.resolution || null,
+      resolutionReason: attempt.appeal.resolutionReason || null,
+      overturnedResponsibility: attempt.appeal.overturnedResponsibility || null,
+      resolvedAt: isoTime(attempt.appeal.resolvedAt),
+    } : null,
     requesterResponseStatus: ownResponse ? 'submitted' : 'not_submitted',
     requesterResponse: ownResponse
       ? { explanation: response.explanation, submittedAt: isoTime(response.submittedAt) }
@@ -145,10 +155,23 @@ function safeReport(id, attempt, { decision = null, detail = false, now = new Da
 
 async function projectedReport(db, id, attempt, detail, now) {
   if (attempt.reviewState === 'reported') {
-    if (attempt.managerDecision != null || attempt.responsibility != null && attempt.responsibility !== 'undetermined') throw notFound();
+    if (attempt.managerDecision != null || attempt.responsibility != null && attempt.responsibility !== 'undetermined'
+      || attempt.appeal != null || attempt.appealState != null || attempt.effectiveResponsibility != null) throw notFound();
     return safeReport(id, attempt, { detail, now });
   }
   const decision = await verifiedDecision(db, id, attempt);
+  if (attempt.appeal != null || attempt.appealState != null) {
+    const { appealSubmissionEventIdFor, appealResolutionEventIdFor,
+      canonicalAppealSubmission, canonicalAppealResolution } = require('./deliveryAppealPolicy');
+    const [submission, resolution] = await Promise.all([
+      db.collection('deliveryAttemptEvents').doc(appealSubmissionEventIdFor(id)).get(),
+      db.collection('deliveryAttemptEvents').doc(appealResolutionEventIdFor(id)).get(),
+    ]);
+    canonicalAppealSubmission(id, attempt, submission.exists ? submission.data() || {} : null);
+    canonicalAppealResolution(id, attempt, resolution.exists ? resolution.data() || {} : null);
+  } else if (attempt.effectiveResponsibility != null && attempt.effectiveResponsibility !== decision.responsibility) {
+    throw notFound();
+  }
   return safeReport(id, attempt, { decision, detail, now });
 }
 

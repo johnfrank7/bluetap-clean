@@ -10,6 +10,13 @@ function explanationError(value) {
     ? '' : 'Enter a factual explanation of 10 to 500 characters.';
 }
 
+function appealReasonError(value) {
+  const text = normalizeExplanation(value);
+  const length = Array.from(text).length;
+  return length >= 10 && length <= 1000 && /[\p{L}\p{N}]/u.test(text)
+    ? '' : 'Enter a factual appeal reason of 10 to 1000 characters.';
+}
+
 const RESPONSIBILITY_LABELS = Object.freeze({
   requester_responsible: 'Requester responsibility',
   provider_responsible: 'Provider responsibility',
@@ -32,6 +39,16 @@ function reportViewModel(report) {
     responsibility: report.reviewState === 'resolved' ? report.responsibility : null,
     decisionReason: report.reviewState === 'resolved' ? report.decisionReason || null : null,
     decidedAt: report.reviewState === 'resolved' ? report.decidedAt || null : null,
+    effectiveResponsibility: report.effectiveResponsibility || (report.reviewState === 'resolved' ? report.responsibility : null),
+    appeal: report.appeal ? {
+      state: report.appeal.state,
+      appealReason: report.appeal.appealReason,
+      submittedAt: report.appeal.submittedAt,
+      resolution: report.appeal.resolution || null,
+      resolutionReason: report.appeal.resolutionReason || null,
+      overturnedResponsibility: report.appeal.overturnedResponsibility || null,
+      resolvedAt: report.appeal.resolvedAt || null,
+    } : null,
     requesterResponseStatus: report.requesterResponseStatus,
     requesterResponse: report.requesterResponse ? {
       explanation: report.requesterResponse.explanation,
@@ -56,7 +73,11 @@ function reportNotificationTarget(event) {
     && event.id === `delivery-report:${event.attemptId}`;
   const completion = event?.kind === 'delivery_review_completed' && event.status === 'delivery_review_completed'
     && event.id === `delivery-review:${event.attemptId}_manager_decision_v1`;
-  if ((!original && !completion) || !validReportOrderId(event.orderId)
+  const appealSubmitted = event?.kind === 'delivery_appeal_submitted' && event.status === 'delivery_appeal_submitted'
+    && event.id === `moderation:appeal_sub_${event.attemptId}`;
+  const appealResolved = event?.kind === 'delivery_appeal_resolved' && event.status === 'delivery_appeal_resolved'
+    && event.id === `moderation:appeal_res_${event.attemptId}`;
+  if ((!original && !completion && !appealSubmitted && !appealResolved) || !validReportOrderId(event.orderId)
     || !validReportAttemptId(event.attemptId)) return null;
   return { orderId: event.orderId, attemptId: event.attemptId };
 }
@@ -228,7 +249,94 @@ function createRequesterResponseRegistry({ send, readReport, makeId = createMuta
   };
 }
 
-module.exports = { canSubmitResponse, createMutationId, createReportModalHandoff, createRequesterResponseFlow,
-  createRequesterResponseRegistry, exactReportViewModel, explanationError, loadExactReport,
+function createRequesterAppealFlow({ send, makeId = createMutationId }) {
+  let pending = null;
+  let inFlight = false;
+  let confirmedAppeal = null;
+  let terminalConflict = false;
+  const listeners = new Set();
+  const state = () => ({ pending: pending ? { appealReason: pending.appealReason,
+    uncertain: pending.uncertain } : null, inFlight, confirmedAppeal, terminalConflict });
+  const notify = () => { for (const listener of listeners) listener(state()); };
+  return {
+    getState: state,
+    hasPending: () => Boolean(pending),
+    subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
+    async submit(orderId, attemptId, draft) {
+      if (inFlight) return { ignored: true };
+      if (!pending) {
+        const validation = appealReasonError(draft);
+        if (validation) {
+          const error = new Error(validation);
+          error.code = 'APPEAL_INVALID';
+          throw error;
+        }
+        const payload = Object.freeze({ orderId, attemptId, appealReason: normalizeExplanation(draft),
+          clientMutationId: makeId() });
+        pending = { payload, appealReason: payload.appealReason, uncertain: false };
+      } else if (pending.payload.orderId !== orderId || pending.payload.attemptId !== attemptId
+        || normalizeExplanation(draft) !== pending.appealReason) {
+        const error = new Error('Finish retrying the unchanged pending appeal before editing it.');
+        error.status = 409;
+        throw error;
+      }
+      terminalConflict = false;
+      inFlight = true;
+      notify();
+      try {
+        const result = await send(pending.payload);
+        const appeal = result?.appeal;
+        if (appeal?.attemptId !== attemptId || appeal.orderId !== orderId
+          || appeal.appealReason !== pending.appealReason
+          || !['submitted', 'upheld', 'overturned'].includes(appeal.state)
+          || !Number.isFinite(Date.parse(appeal.submittedAt))) {
+          const error = new Error('The appeal result could not be confirmed. Retry the same submission.');
+          error.uncertain = true;
+          throw error;
+        }
+        confirmedAppeal = appeal;
+        pending = null;
+        return { appeal };
+      } catch (error) {
+        if (pending) {
+          if (error.uncertain || error.status >= 500 || error.status === undefined && error.code !== 'APPEAL_INVALID') {
+            pending.uncertain = true;
+          } else {
+            pending = null;
+            terminalConflict = error.status === 409;
+          }
+        }
+        throw error;
+      } finally {
+        inFlight = false;
+        notify();
+      }
+    },
+  };
+}
+
+function createRequesterAppealRegistry({ send, makeId = createMutationId }) {
+  const flows = new Map();
+  const key = (uid, orderId, attemptId) => JSON.stringify([uid, orderId, attemptId]);
+  return {
+    get(uid, orderId, attemptId) {
+      if (!uid || !orderId || !attemptId) return null;
+      const id = key(uid, orderId, attemptId);
+      if (!flows.has(id)) flows.set(id, createRequesterAppealFlow({ send, makeId }));
+      return flows.get(id);
+    },
+    pendingAttemptId(uid, orderId) {
+      for (const [id, flow] of flows) {
+        const [owner, order, attemptId] = JSON.parse(id);
+        if (owner === uid && order === orderId && flow.hasPending()) return attemptId;
+      }
+      return '';
+    },
+  };
+}
+
+module.exports = { appealReasonError, canSubmitResponse, createMutationId, createReportModalHandoff, createRequesterResponseFlow,
+  createRequesterResponseRegistry, createRequesterAppealFlow, createRequesterAppealRegistry,
+  exactReportViewModel, explanationError, loadExactReport,
   normalizeExplanation, reportDisplayState, reportNotificationTarget, reportRouteTarget,
   reportViewModel, responsibilityLabel };

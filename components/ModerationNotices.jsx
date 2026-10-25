@@ -17,12 +17,15 @@ function NoticeDetailModal({ notice, onClose, onAcknowledge }) {
   const { colors } = useBlueTapTheme();
   if (!notice) return null;
   const restriction = notice.type?.startsWith('suspend_');
+  const appealNotice = notice.type?.startsWith('delivery_appeal_');
   return <Modal visible transparent animationType="fade" onRequestClose={onClose}>
     <View style={[styles.modalBackdrop, { backgroundColor: colors.overlay || 'rgba(2, 16, 31, .62)' }]}>
       <View accessibilityViewIsModal style={[styles.modal, { backgroundColor: colors.surface, borderColor: colors.border }]}>
         <Text style={[styles.modalEyebrow, { color: colors.warning }]}>REPORTS &amp; SAFETY</Text>
         <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>{notice.title || 'BlueTap safety notice'}</Text>
-        <Text style={[styles.modalBody, { color: colors.textSecondary }]}>{restriction
+        <Text style={[styles.modalBody, { color: colors.textSecondary }]}>{appealNotice
+          ? 'Open the delivery report from Notifications to review the appeal and its current status.'
+          : restriction
           ? `This ${categoryLabel(notice.scope)} restriction${notice.branchName ? ` applies to ${notice.branchName}` : ' applies across BlueTap'}${notice.endsAt ? ` until ${new Date(notice.endsAt).toLocaleString()}` : ' until restored by branch management'}. ${notice.reasonLabel ? `Reason: ${notice.reasonLabel}.` : ''}`
           : notice.type === 'restore_branch_access'
             ? `Your access to ${notice.branchName || 'the branch'} has been restored. You may now resume orders and communications.`
@@ -49,7 +52,8 @@ export function ModerationNoticeProvider({ children }) {
   React.useEffect(() => subscribeModerationActivity({ role: 'user', onChange: refresh }), [refresh]);
   React.useEffect(() => {
     if (selectedId) return;
-    const unseen = notices.find((notice) => !notice.seenAt && !shown.current.has(notice.id));
+    const unseen = notices.find((notice) => !notice.type?.startsWith('delivery_appeal_')
+      && !notice.seenAt && !shown.current.has(notice.id));
     if (!unseen) return;
     shown.current.add(unseen.id);
     setSelectedId(unseen.id);

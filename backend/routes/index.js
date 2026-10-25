@@ -26,7 +26,9 @@ const { createAdminDashboardOverviewHandler } = require('../admin/dashboardOverv
 const { createAdminProductsHandler } = require('../admin/productManagementHandler');
 const { createAdminDispatchOverrideHandler } = require('../admin/adminDispatchOverrideHandler');
 const { createRequesterCatalogHandler, createRequesterOrdersHandler } = require('../requester/orderingHandler');
+const { createAdminDeliveryAppealsHandler } = require('../admin/deliveryAppealsHandler');
 const { createRequesterDeliveryReportsHandler } = require('../requester/deliveryReportsHandler');
+const { createRequesterDeliveryAppealsHandler } = require('../requester/deliveryAppealsHandler');
 const { createOrderDetailsHandler } = require('../orders/orderDetailsHandler');
 const { createChatConversationsHandler, createChatMessagesHandler, createChatReadStateHandler } = require('../chat/chatHandler');
 const { createChatReportsHandler } = require('../chat/reportHandler');
@@ -65,7 +67,9 @@ const routes = new Map([
   ['/api/admin/dispatch-override', createAdminDispatchOverrideHandler()],
   ['/api/requester/catalog', createRequesterCatalogHandler()],
   ['/api/requester/orders', createRequesterOrdersHandler()],
+  ['/api/admin/delivery-appeals', createAdminDeliveryAppealsHandler()],
   ['/api/requester/delivery-reports', createRequesterDeliveryReportsHandler()],
+  ['/api/requester/delivery-appeals', createRequesterDeliveryAppealsHandler()],
   ['/api/manager/context', createManagerContextHandler()],
   ['/api/manager/delivery-reviews', createManagerDeliveryReviewsHandler()],
   ['/api/manager/workspace', createManagerWorkspaceHandler()],
