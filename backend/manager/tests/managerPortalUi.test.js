@@ -147,8 +147,8 @@ test('Requests and Exceptions expose responsive branch-authorized detail maps wi
   assert.doesNotMatch(requests, /Firebase UID|requesterUid/);
   assert.match(requests, /notificationTargetCard/);
   assert.match(requests, /contentScrollRef\.current\?\.scrollTo/);
-  assert.match(requests, /setTargetHighlighted\(false\), 6000/);
-  assert.match(requests, /width < 430 \? '48%' : 138/);
+  assert.match(requests, /setTargetHighlighted\(false\), TARGET_HIGHLIGHT_DURATION_MS/);
+  assert.match(requests, /minWidth:\s*width\s*<\s*440\s*\?\s*0\s*:\s*70/);
 });
 
 test('Manager responsive surfaces stack actions and preserve wide tables with horizontal scrolling', () => {
