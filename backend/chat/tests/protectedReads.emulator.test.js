@@ -198,6 +198,7 @@ test('Firestore authorization enforces canonical chat relationships', { skip: !h
         'orderAbuseReviews/review',
         'deliveryAttempts/attempt',
         'deliveryAttemptEvents/event',
+        'deliveryPenaltyEvents/event',
         'chatMessageRevisions/revision',
         'chatRestrictions/r1',
         'orderingRestrictions/r1',
@@ -211,6 +212,8 @@ test('Firestore authorization enforces canonical chat relationships', { skip: !h
         await denied(setDoc(doc(r1, path), { forged: true }));
         await denied(setDoc(doc(m1, path), { forged: true }));
       }
+      await denied(getDoc(doc(a1, 'deliveryPenaltyEvents/event')));
+      await denied(setDoc(doc(a1, 'deliveryPenaltyEvents/event'), { forged: true }));
     });
 
     await t.test('requester_branch direct reads are denied to participants and other branches', async () => {

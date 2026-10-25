@@ -86,6 +86,28 @@ async function assertChatSendAllowed(reader, db, uid, branchId, now = Date.now()
 
 async function assertOrderingAllowed(reader, db, uid, branchId, now = Date.now()) {
   const { data } = await restrictionRecord(reader, db, 'orderingRestrictions', uid);
+  const penalty = data.deliveryPenalty;
+  if (penalty?.state === 'active' && penalty.schemaVersion === 1
+    && /^[a-f0-9]{64}$/.test(penalty.eventId || '')
+    && Array.isArray(penalty.supportingAttemptIds)
+    && penalty.supportingAttemptIds.length === 3
+    && new Set(penalty.supportingAttemptIds).size === 3
+    && penalty.supportingAttemptIds.every((id) => /^[a-f0-9]{64}$/.test(id))
+    && timeOf(penalty.endsAt) > timeOf(now)) {
+    const evidenceSnapshot = await reader.get(db.collection('deliveryPenaltyEvents').doc(penalty.eventId));
+    const evidence = evidenceSnapshot.exists ? evidenceSnapshot.data() || {} : null;
+    if (!evidence || evidence.kind !== 'FIRST_VERIFIED_DELIVERY_ORDERING_RESTRICTION'
+      || evidence.requesterUid !== uid || timeOf(evidence.startsAt) !== timeOf(penalty.startsAt)
+      || timeOf(evidence.endsAt) !== timeOf(penalty.endsAt)
+      || JSON.stringify(evidence.supportingAttemptIds) !== JSON.stringify(penalty.supportingAttemptIds)) {
+      throw new OtpError(403, 'DELIVERY_PENALTY_EVIDENCE_UNAVAILABLE',
+        'Ordering is temporarily unavailable while this delivery restriction is reviewed.',
+        { scope: 'platform_ordering', endsAt: penalty.endsAt });
+    }
+    throw new OtpError(403, 'VERIFIED_DELIVERY_ORDERING_RESTRICTED',
+      'New orders are temporarily unavailable after three verified failed deliveries. You can still review and appeal the findings.',
+      { scope: 'platform_ordering', endsAt: penalty.endsAt });
+  }
   const platform = restrictionPlatform(data, now);
   if (platform) throw new OtpError(403, 'ORDERING_SUSPENDED', 'You cannot place new BlueTap orders while this restriction is active.', { scope: 'platform_ordering', endsAt: platform.endsAt });
   const branch = restrictionBranch(data, branchId, now);
@@ -103,6 +125,7 @@ function nextRestrictionProjection(current = {}, restriction, now) {
     schemaVersion: 1,
     platform,
     branches,
+    ...(current.deliveryPenalty ? { deliveryPenalty: current.deliveryPenalty } : {}),
     nextExpiryAt: expiries.length ? new Date(Math.min(...expiries)) : null,
     updatedAt: now,
   };
@@ -260,6 +283,8 @@ function safeNotice(id, notice = {}) {
     type,
     title: clean(notice.title, 160),
     category: clean(notice.category, 80),
+    ...(notice.category === 'verified_failed_delivery'
+      ? { reasonLabel: 'Three verified requester-attributable failed deliveries' } : {}),
     scope: clean(notice.scope, 40),
     branchId: clean(notice.branchId, 128) || null,
     branchName: clean(notice.branchName, 160) || null,

@@ -4,6 +4,8 @@ const { applyCors } = require('../utils/cors');
 const { OtpError } = require('../utils/otpError');
 const {
   getAdminAppealDetail,
+  getAdminDeliveryPenaltyDetail,
+  listAdminDeliveryPenaltyReviews,
   listAdminAppeals,
   resolveAdminAppeal,
 } = require('../delivery/adminDeliveryAppealService');
@@ -17,11 +19,13 @@ function bodyOf(req) {
 function queryOptions(req) {
   const params = new URL(req.url || '/api/admin/delivery-appeals', 'http://localhost').searchParams;
   const attemptId = params.get('attemptId') || '';
+  const penaltyRequesterUid = params.get('penaltyRequesterUid') || '';
+  const penaltyReviews = params.get('penaltyReviews') === '1';
   const status = params.get('status') || 'pending';
   const cursor = params.get('cursor') || '';
   const limit = params.get('limit') ? Number(params.get('limit')) : 20;
 
-  return { attemptId, status, cursor, limit };
+  return { attemptId, penaltyRequesterUid, penaltyReviews, status, cursor, limit };
 }
 
 function createAdminDeliveryAppealsHandler(getAdmin = getFirebaseAdmin, now = () => new Date()) {
@@ -39,7 +43,15 @@ function createAdminDeliveryAppealsHandler(getAdmin = getFirebaseAdmin, now = ()
         const result = await resolveAdminAppeal(db, admin, bodyOf(req), now);
         return res.status(200).json(result);
       }
-      const { attemptId, status, cursor, limit } = queryOptions(req);
+      const { attemptId, penaltyRequesterUid, penaltyReviews, status, cursor, limit } = queryOptions(req);
+      if (penaltyReviews) {
+        const result = await listAdminDeliveryPenaltyReviews(db, admin, { cursor });
+        return res.status(200).json(result);
+      }
+      if (penaltyRequesterUid) {
+        const result = await getAdminDeliveryPenaltyDetail(db, admin, penaltyRequesterUid);
+        return res.status(200).json({ deliveryPenalty: result });
+      }
       if (attemptId) {
         const result = await getAdminAppealDetail(db, admin, attemptId);
         return res.status(200).json(result);

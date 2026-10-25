@@ -2,6 +2,7 @@ const { OtpError } = require('../utils/otpError');
 const { requireActiveAccount } = require('../auth/accountStatus');
 const { validatedReview, revisionFor, RESPONSE_WINDOW_MS } = require('./managerDeliveryReviewService');
 const { DECISION_EVENT_KIND, DECISION_RESPONSIBILITIES, decisionEventIdFor } = require('./deliveryReviewPolicy');
+const { prepareFirstPenalty, stagePenaltyWrites } = require('./deliveryPenaltyService');
 
 const EVENT_KIND = DECISION_EVENT_KIND;
 const RESPONSIBILITIES = DECISION_RESPONSIBILITIES;
@@ -124,9 +125,20 @@ async function submitManagerDecision(db, manager, body, now = () => new Date()) 
       responsibility: input.responsibility, decisionReason: input.decisionReason,
       expectedRevision: input.expectedRevision, clientMutationId: input.clientMutationId,
       createdAt: decidedAt };
+    const penalty = input.responsibility === 'requester_responsible'
+      ? await prepareFirstPenalty({ tx, db, requesterUid: attempt.requesterUid, now: decidedAt,
+        overlay: { attemptId: input.attemptId,
+          attempt: { ...attempt, reviewState: 'resolved', responsibility: input.responsibility,
+            managerDecision }, managerEvent: event } })
+      : { writes: [] };
     tx.update(attemptRef, { reviewState: 'resolved', responsibility: input.responsibility,
       managerDecision, updatedAt: decidedAt });
     tx.create(eventRef, event);
+    stagePenaltyWrites(tx, penalty.writes);
+    tx.set(db.collection('moderationActivity').doc(`user_${attempt.requesterUid}`),
+      { updatedAt: decidedAt }, { merge: true });
+    if (penalty.adminReviewFlagged) tx.set(db.collection('moderationActivity').doc('admin'),
+      { updatedAt: decidedAt }, { merge: true });
     return resultOf(event);
   });
 }

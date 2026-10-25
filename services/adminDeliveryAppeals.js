@@ -54,6 +54,14 @@ export function fetchAdminAppealDetail(attemptId) {
   return request(`${PATH}?attemptId=${encodeURIComponent(attemptId)}`);
 }
 
+export function fetchAdminDeliveryPenalty(requesterUid) {
+  return request(`${PATH}?penaltyRequesterUid=${encodeURIComponent(requesterUid)}`);
+}
+
+export function fetchAdminDeliveryPenaltyReviews(cursor = '') {
+  return request(`${PATH}?penaltyReviews=1${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`);
+}
+
 export function resolveAdminAppeal({ attemptId, resolution, resolutionReason, overturnedResponsibility = null, clientMutationId }) {
   const body = { attemptId, resolution, resolutionReason, clientMutationId };
   if (resolution === 'overturned' && overturnedResponsibility) {

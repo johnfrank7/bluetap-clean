@@ -3,6 +3,9 @@ const { requireActiveAccount } = require('../auth/accountStatus');
 const { FieldPath } = require('firebase-admin/firestore');
 const { decisionEventIdFor } = require('./deliveryReviewPolicy');
 const { safeReport } = require('./requesterDeliveryReportService');
+const { currentVerifiedStreak, penaltyEventIdFor, secondReviewIdFor, safePenaltyStatus,
+  prepareAppealPenaltyTransition, prepareFirstPenalty,
+  stagePenaltyWrites } = require('./deliveryPenaltyService');
 const {
   APPEAL_RESOLUTION_EVENT_KIND,
   appealSubmissionEventIdFor,
@@ -202,9 +205,9 @@ async function getAdminAppealDetail(db, admin, attemptId) {
   const attemptSnapshot = await db.collection('deliveryAttempts').doc(attemptId).get();
   if (!attemptSnapshot.exists) throw notFound();
   const { attempt, order: orderData } = await readVerifiedAppeal(db, attemptSnapshot);
-
   return {
-    appeal: serializeAppealItem(attemptSnapshot.id, attempt, { detail: true }),
+    appeal: { ...serializeAppealItem(attemptSnapshot.id, attempt, { detail: true }),
+      requesterUid: attempt.requesterUid },
     order: {
       id: attempt.orderId,
       branchId: orderData.branchId,
@@ -213,6 +216,77 @@ async function getAdminAppealDetail(db, admin, attemptId) {
       createdAt: dateOf(orderData.createdAt)?.toISOString() || null,
     },
   };
+}
+
+async function getAdminDeliveryPenaltyDetail(db, admin, requesterUid, now = new Date()) {
+  if (!validId(requesterUid)) throw notFound('Invalid Requester identity.');
+  const adminUid = admin.uid || admin.decoded?.uid;
+  const adminSnapshot = await db.collection('users').doc(adminUid).get();
+  const adminProfile = adminSnapshot.data() || {};
+  if (!adminSnapshot.exists || adminProfile.role !== 'admin') {
+    throw new OtpError(403, 'FORBIDDEN', 'Admin access required.');
+  }
+  requireActiveAccount(adminProfile);
+  const requesterSnapshot = await db.collection('users').doc(requesterUid).get();
+  if (!requesterSnapshot.exists || requesterSnapshot.data()?.role !== 'requester') throw notFound();
+  const [restriction, streak, first, second, audit] = await Promise.all([
+    db.collection('orderingRestrictions').doc(requesterUid).get(),
+    currentVerifiedStreak({ get: (ref) => ref.get() }, db, requesterUid),
+    db.collection('deliveryPenaltyEvents').doc(penaltyEventIdFor(requesterUid)).get(),
+    db.collection('deliveryPenaltyEvents').doc(secondReviewIdFor(requesterUid)).get(),
+    db.collection('deliveryPenaltyEvents').where('requesterUid', '==', requesterUid).limit(16).get(),
+  ]);
+  const firstData = first.exists && first.data()?.requesterUid === requesterUid
+    && first.data()?.kind === 'FIRST_VERIFIED_DELIVERY_ORDERING_RESTRICTION'
+    ? first.data() : null;
+  const secondData = second.exists && second.data()?.requesterUid === requesterUid
+    && second.data()?.firstPenaltyEventId === penaltyEventIdFor(requesterUid)
+    ? second.data() : null;
+  const supportingAttemptIds = firstData?.supportingAttemptIds?.filter(validAttemptId).slice(0, 3) || [];
+  const attempts = await Promise.all(supportingAttemptIds.map((id) => db.collection('deliveryAttempts').doc(id).get()));
+  return { requesterUid, ...safePenaltyStatus(restriction.data() || {}, streak, now),
+    supportingIncidents: attempts.map((item) => {
+      const attempt = item.data() || {};
+      return { attemptId: item.id, orderId: validId(attempt.orderId) ? attempt.orderId : null,
+        reportedReasonCode: String(attempt.reportedReasonCode || '').slice(0, 60),
+        managerResponsibility: attempt.managerDecision?.responsibility || null,
+        effectiveResponsibility: attempt.effectiveResponsibility || attempt.responsibility || null,
+        appealState: attempt.appealState || null };
+    }),
+    adminReviewFlag: Boolean(secondData?.kind === 'SECOND_VERIFIED_DELIVERY_STREAK_FOR_ADMIN_REVIEW'),
+    secondReviewAttemptIds: secondData?.supportingAttemptIds?.filter(validAttemptId).slice(0, 3) || [],
+    audit: (audit.docs || []).filter((item) => item.id === penaltyEventIdFor(requesterUid)
+      || item.data()?.penaltyEventId === penaltyEventIdFor(requesterUid)
+      || item.id === secondReviewIdFor(requesterUid))
+      .map((item) => ({ kind: String(item.data()?.kind || '').slice(0, 80),
+        state: String(item.data()?.state || '').slice(0, 24) || null,
+        attemptId: validAttemptId(item.data()?.attemptId) ? item.data().attemptId : null,
+        createdAt: dateOf(item.data()?.createdAt)?.toISOString() || null })),
+  };
+}
+
+async function listAdminDeliveryPenaltyReviews(db, admin, { cursor = '' } = {}) {
+  const adminUid = admin.uid || admin.decoded?.uid;
+  const adminSnapshot = await db.collection('users').doc(adminUid).get();
+  if (!adminSnapshot.exists || adminSnapshot.data()?.role !== 'admin') {
+    throw new OtpError(403, 'FORBIDDEN', 'Admin access required.');
+  }
+  requireActiveAccount(adminSnapshot.data() || {});
+  if (cursor && !validAttemptId(cursor)) {
+    throw new OtpError(400, 'DELIVERY_PENALTY_CURSOR_INVALID', 'The review cursor is invalid.');
+  }
+  let query = db.collection('deliveryPenaltyEvents')
+    .where('kind', '==', 'SECOND_VERIFIED_DELIVERY_STREAK_FOR_ADMIN_REVIEW')
+    .orderBy(FieldPath.documentId()).limit(26);
+  if (cursor) query = query.startAfter(cursor);
+  const result = await query.get();
+  const docs = (result.docs || []).slice(0, 25);
+  return { reviews: docs.map((item) => ({ requesterUid: validId(item.data()?.requesterUid)
+    && item.id === secondReviewIdFor(item.data().requesterUid)
+    && item.data()?.firstPenaltyEventId === penaltyEventIdFor(item.data().requesterUid)
+    ? item.data().requesterUid : null, createdAt: dateOf(item.data()?.createdAt)?.toISOString() || null,
+  })).filter((item) => item.requesterUid),
+  nextCursor: (result.docs || []).length > 25 ? docs[docs.length - 1].id : null };
 }
 
 async function resolveAdminAppeal(db, admin, body, now = () => new Date()) {
@@ -337,6 +411,16 @@ async function resolveAdminAppeal(db, admin, body, now = () => new Date()) {
       createdAt: resolvedAt,
     };
 
+    const penalty = input.resolution === 'upheld'
+      ? await prepareFirstPenalty({ tx, db, requesterUid: attempt.requesterUid, now: resolvedAt,
+        overlay: { attemptId: input.attemptId,
+          attempt: { ...attempt, appeal: appealUpdate, appealState: input.resolution,
+            effectiveResponsibility }, resolutionEvent: eventRecord } })
+      : { writes: [] };
+    const penaltyTransition = await prepareAppealPenaltyTransition({ tx, db,
+      requesterUid: attempt.requesterUid, attemptId: input.attemptId,
+      appealState: input.resolution, now: resolvedAt });
+
     tx.update(attemptRef, {
       appeal: appealUpdate,
       appealState: input.resolution,
@@ -348,6 +432,8 @@ async function resolveAdminAppeal(db, admin, body, now = () => new Date()) {
     tx.set(requesterActivityRef, { updatedAt: resolvedAt }, { merge: true });
     tx.set(adminActivityRef, { updatedAt: resolvedAt }, { merge: true });
     tx.create(auditRef, auditRecord);
+    stagePenaltyWrites(tx, penalty.writes);
+    stagePenaltyWrites(tx, penaltyTransition);
 
     return {
       created: true,
@@ -362,6 +448,8 @@ async function resolveAdminAppeal(db, admin, body, now = () => new Date()) {
 
 module.exports = {
   getAdminAppealDetail,
+  getAdminDeliveryPenaltyDetail,
+  listAdminDeliveryPenaltyReviews,
   listAdminAppeals,
   normalizeResolutionInput,
   resolveAdminAppeal,

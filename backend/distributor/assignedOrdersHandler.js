@@ -30,9 +30,11 @@ async function updateOrder(db, orderId, prepare) {
       const { update, moderationWrite, attemptWrites, replay } = await prepare(current, tx);
       if (replay) return replay;
       let activeOrderGuard = null;
+      let completedRequesterUid = '';
       if (statusOf(update) === 'delivered') {
         const requesterUid = clean(current.requesterUid || current.requester_id, 128);
         if (requesterUid) {
+          completedRequesterUid = requesterUid;
           const guardRef = db.collection('requesterActiveOrders').doc(requesterUid);
           const guard = await tx.get(guardRef);
           if (guard.exists && guard.data()?.orderId === orderId) activeOrderGuard = guardRef;
@@ -49,6 +51,8 @@ async function updateOrder(db, orderId, prepare) {
       if (moderationWrite) tx.set(moderationWrite.ref, moderationWrite.data, { merge: true });
       stageDeliveryAttemptWrites(tx, attemptWrites);
       tx.update(ref, update);
+      if (completedRequesterUid) tx.set(db.collection('moderationActivity').doc(`user_${completedRequesterUid}`),
+        { updatedAt: update.updatedAt || new Date() }, { merge: true });
       if (activeOrderGuard) tx.delete(activeOrderGuard);
       return { ...current, ...update };
     });

@@ -163,7 +163,9 @@ test('real transaction resolves a transferred report once and exact replay is re
     assert.equal((await f.completionCall('/api/requester/delivery-reports?feed=review-completions', 'm1')).statusCode, 403);
     assert.equal((await f.db.collection('requests').doc(f.ids.order).get()).updateTime.toMillis(), beforeOrder);
     assert.equal((await f.db.collection('deliveryAttemptEvents').where('attemptId', '==', f.ids.attempt).get()).size, 1);
-    assert.deepEqual(await fixtureSafetySnapshot(f.db, f.ids), beforeSafety);
+    const afterSafety = await fixtureSafetySnapshot(f.db, f.ids);
+    assert.equal(afterSafety.requesterActivity.data.updatedAt.toMillis(), deadline.getTime());
+    assert.deepEqual({ ...afterSafety, requesterActivity: beforeSafety.requesterActivity }, beforeSafety);
     assert.deepEqual(f.authMutations, []);
   } finally { await deleteApp(f.app); }
 });

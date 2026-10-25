@@ -2,7 +2,8 @@ import React from 'react';
 import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { useAdminTheme } from './AdminTheme';
 import { useModerationActivitySignal } from './useModerationActivityBadge';
-import { fetchAdminAppeals, fetchAdminAppealDetail, resolveAdminAppeal } from '../services/adminDeliveryAppeals';
+import { fetchAdminAppeals, fetchAdminAppealDetail, fetchAdminDeliveryPenalty,
+  fetchAdminDeliveryPenaltyReviews, resolveAdminAppeal } from '../services/adminDeliveryAppeals';
 
 const REPLACEMENTS = [
   ['provider_responsible', 'Provider responsible'], ['shared', 'Shared responsibility'],
@@ -28,6 +29,12 @@ export default function AdminDeliveryAppealsWorkspace({ targetAttemptId = '' }) 
   const [detailLoading, setDetailLoading] = React.useState(false);
   const [error, setError] = React.useState('');
   const [search, setSearch] = React.useState('');
+  const [penaltyUid, setPenaltyUid] = React.useState('');
+  const [penaltyDetail, setPenaltyDetail] = React.useState(null);
+  const [penaltyLoading, setPenaltyLoading] = React.useState(false);
+  const [reviewFlags, setReviewFlags] = React.useState([]);
+  const [reviewCursor, setReviewCursor] = React.useState(null);
+  const [reviewLoading, setReviewLoading] = React.useState(false);
   const [resolution, setResolution] = React.useState('');
   const [replacement, setReplacement] = React.useState('');
   const [reason, setReason] = React.useState('');
@@ -36,6 +43,8 @@ export default function AdminDeliveryAppealsWorkspace({ targetAttemptId = '' }) 
   const [uncertain, setUncertain] = React.useState(false);
   const listEpoch = React.useRef(0);
   const detailEpoch = React.useRef(0);
+  const penaltyEpoch = React.useRef(0);
+  const reviewEpoch = React.useRef(0);
   const busy = React.useRef(false);
   const pending = React.useRef(null);
 
@@ -62,7 +71,10 @@ export default function AdminDeliveryAppealsWorkspace({ targetAttemptId = '' }) 
     }
     try {
       const result = await fetchAdminAppealDetail(attemptId);
-      if (epoch === detailEpoch.current && result?.appeal?.attemptId === attemptId) setDetail(result);
+      if (epoch === detailEpoch.current && result?.appeal?.attemptId === attemptId) {
+        setDetail(result);
+        if (result.appeal.requesterUid) setPenaltyUid(result.appeal.requesterUid);
+      }
       else if (epoch === detailEpoch.current) setError('The appeal detail did not match the selected case.');
     } catch (cause) { if (epoch === detailEpoch.current) setError(cause.message || 'Appeal details are unavailable.'); }
     finally { if (epoch === detailEpoch.current) setDetailLoading(false); }
@@ -75,6 +87,34 @@ export default function AdminDeliveryAppealsWorkspace({ targetAttemptId = '' }) 
     const term = search.trim();
     if (/^[a-f0-9]{64}$/.test(term)) { openDetail(term); return; }
     setError('Enter the full delivery attempt ID to open an exact case, or use the bounded queue below.');
+  };
+  const searchPenalty = async (uid = penaltyUid) => {
+    const target = String(uid || '').trim();
+    if (!target || target.length > 128 || target.includes('/')) {
+      setError('Enter a valid Requester account ID to inspect delivery ordering status.');
+      return;
+    }
+    const epoch = ++penaltyEpoch.current;
+    setPenaltyUid(target); setPenaltyDetail(null); setPenaltyLoading(true); setError('');
+    try {
+      const result = await fetchAdminDeliveryPenalty(target);
+      if (epoch === penaltyEpoch.current && result?.deliveryPenalty?.requesterUid === target)
+        setPenaltyDetail(result.deliveryPenalty);
+      else if (epoch === penaltyEpoch.current) setError('The penalty status did not match the selected Requester.');
+    } catch (cause) { if (epoch === penaltyEpoch.current) setError(cause.message || 'Delivery status is unavailable.'); }
+    finally { if (epoch === penaltyEpoch.current) setPenaltyLoading(false); }
+  };
+  const loadReviewFlags = async (nextCursor = '') => {
+    const epoch = nextCursor ? reviewEpoch.current : ++reviewEpoch.current;
+    setReviewLoading(true); setError('');
+    try {
+      const result = await fetchAdminDeliveryPenaltyReviews(nextCursor);
+      if (epoch !== reviewEpoch.current) return;
+      setReviewFlags((current) => nextCursor ? [...current, ...(result.reviews || []).filter((item) =>
+        !current.some((known) => known.requesterUid === item.requesterUid))] : result.reviews || []);
+      setReviewCursor(result.nextCursor || null);
+    } catch (cause) { if (epoch === reviewEpoch.current) setError(cause.message || 'Admin review flags are unavailable.'); }
+    finally { if (epoch === reviewEpoch.current) setReviewLoading(false); }
   };
   const propose = () => {
     if (!detail || detail.appeal.appeal.state !== 'submitted') return;
@@ -123,6 +163,44 @@ export default function AdminDeliveryAppealsWorkspace({ targetAttemptId = '' }) 
   const appeal = detail?.appeal;
   const pendingHere = pending.current?.attemptId === selected;
   return <View style={styles.root}>
+    <View style={styles.section}>
+      <Text style={styles.heading}>Requester delivery ordering status</Text>
+      <Pressable accessibilityRole="button" accessibilityLabel="Load second-streak Admin review flags"
+        disabled={reviewLoading} onPress={() => loadReviewFlags()} style={styles.action}>
+        <Text style={styles.actionText}>{reviewLoading ? 'Loading…' : 'Load Admin review flags'}</Text>
+      </Pressable>
+      {reviewFlags.map((item) => <Pressable key={item.requesterUid} accessibilityRole="button"
+        accessibilityLabel={`Inspect delivery status for Requester ${item.requesterUid}`}
+        onPress={() => searchPenalty(item.requesterUid)} style={styles.case}>
+        <Text style={styles.body}>Requester {item.requesterUid} · flagged {dateLabel(item.createdAt)}</Text>
+      </Pressable>)}
+      {!!reviewCursor && <Pressable accessibilityRole="button" accessibilityLabel="Load more delivery review flags"
+        disabled={reviewLoading} onPress={() => loadReviewFlags(reviewCursor)} style={styles.action}>
+        <Text style={styles.actionText}>Load more flags</Text>
+      </Pressable>}
+      <View style={styles.searchRow}>
+        <TextInput accessibilityLabel="Requester account ID for verified delivery status" value={penaltyUid}
+          onChangeText={setPenaltyUid} onSubmitEditing={() => searchPenalty()}
+          placeholder="Requester account ID" placeholderTextColor={colors.placeholder} style={styles.searchInput} />
+        <Pressable accessibilityRole="button" accessibilityLabel="Inspect Requester delivery status"
+          disabled={penaltyLoading} onPress={() => searchPenalty()} style={styles.action}>
+          <Text style={styles.actionText}>{penaltyLoading ? 'Loading…' : 'Inspect'}</Text>
+        </Pressable>
+      </View>
+      {!!penaltyDetail && <View>
+        <Text style={styles.body}>Verified streak: {penaltyDetail.verifiedStreak == null ? 'Unavailable' : penaltyDetail.verifiedStreak} of 3</Text>
+        <Text style={styles.body}>Ordering restriction: {penaltyDetail.restriction?.state || 'None'}</Text>
+        {!!penaltyDetail.restriction && <Text style={styles.body}>Started {dateLabel(penaltyDetail.restriction.startsAt)} · Original expiry {dateLabel(penaltyDetail.restriction.endsAt)}</Text>}
+        {penaltyDetail.adminReviewFlag && <Text style={styles.body}>A second distinct verified streak is flagged for Admin review. No second automatic restriction was applied.</Text>}
+        {(penaltyDetail.supportingIncidents || []).map((item) => <Text key={item.attemptId} style={styles.muted}>
+          Attempt {item.attemptId} · {item.reportedReasonCode} · effective {item.effectiveResponsibility || 'undetermined'} · appeal {item.appealState || 'none'}
+        </Text>)}
+        {(penaltyDetail.secondReviewAttemptIds || []).map((id) => <Text key={id} style={styles.muted}>Second-streak review attempt: {id}</Text>)}
+        {(penaltyDetail.audit || []).map((item, index) => <Text key={`${item.kind}-${index}`} style={styles.muted}>
+          {item.kind} · {item.state || 'recorded'} · {dateLabel(item.createdAt)}
+        </Text>)}
+      </View>}
+    </View>
     <View style={styles.filters}>{[['pending', 'Pending'], ['resolved', 'Resolved'], ['all', 'All']].map(([value, label]) =>
       <Pressable key={value} accessibilityRole="button" accessibilityState={{ selected: status === value }}
         onPress={() => setStatus(value)} style={[styles.choice, status === value && styles.selectedChoice]}>

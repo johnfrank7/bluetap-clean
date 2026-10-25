@@ -2,6 +2,7 @@ const { OtpError } = require('../utils/otpError');
 const { requireActiveAccount } = require('../auth/accountStatus');
 const { attemptIdFor } = require('./deliveryAttemptService');
 const { decisionEventIdFor } = require('./deliveryReviewPolicy');
+const { prepareAppealPenaltyTransition, stagePenaltyWrites } = require('./deliveryPenaltyService');
 const {
   APPEAL_SUBMISSION_EVENT_KIND,
   appealSubmissionEventIdFor,
@@ -176,6 +177,9 @@ async function submitRequesterAppeal(db, requester, body, now = () => new Date()
       createdAt: submittedAt,
     };
 
+    const penaltyWrites = await prepareAppealPenaltyTransition({ tx, db, requesterUid,
+      attemptId: input.attemptId, appealState: 'submitted', now: submittedAt });
+
     tx.update(attemptRef, {
       appeal: appealRecord,
       appealState: 'submitted',
@@ -186,6 +190,7 @@ async function submitRequesterAppeal(db, requester, body, now = () => new Date()
     tx.create(noticeRef, noticeRecord);
     tx.set(requesterActivityRef, { updatedAt: submittedAt }, { merge: true });
     tx.set(adminActivityRef, { updatedAt: submittedAt }, { merge: true });
+    stagePenaltyWrites(tx, penaltyWrites);
 
     return {
       created: true,

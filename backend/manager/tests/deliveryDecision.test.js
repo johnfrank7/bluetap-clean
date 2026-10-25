@@ -32,17 +32,36 @@ function fixture(now = () => deadline) {
   const snapshot = (path) => ({ id: path.split('/').pop(), exists: records.has(path),
     data: () => records.get(path), updateTime: { seconds: 1792500000 + (versions.get(path) || 0), nanoseconds: 10 } });
   const db = {
-    collection(name) { return { doc(id) { const path = `${name}/${id}`; return { path, get: async () => snapshot(path) }; } }; },
+    collection(name) {
+      const query = (filters = [], sortField = '', sortDirection = 'asc', cap = Infinity) => ({
+        where(field, operator, value) { assert.equal(operator, '=='); return query([...filters, [field, value]], sortField, sortDirection, cap); },
+        orderBy(field, direction) { return query(filters, field, direction, cap); },
+        limit(count) { return query(filters, sortField, sortDirection, count); },
+        async get() {
+          const docs = [...records.keys()].filter((path) => path.startsWith(`${name}/`))
+            .filter((path) => filters.every(([field, value]) => records.get(path)?.[field] === value))
+            .sort((left, right) => {
+              const a = records.get(left)?.[sortField]?.getTime?.() || 0;
+              const b = records.get(right)?.[sortField]?.getTime?.() || 0;
+              return sortDirection === 'desc' ? b - a : a - b;
+            }).slice(0, cap).map(snapshot);
+          return { docs };
+        },
+      });
+      return { doc(id) { const path = `${name}/${id}`; return { path, get: async () => snapshot(path) }; },
+        where: (...args) => query().where(...args) };
+    },
     async runTransaction(run) {
       const pending = [];
       const result = await run({
-        get: async (ref) => { if (pending.length) throw new Error('Transaction read after write.'); return snapshot(ref.path); },
+        get: async (ref) => { if (pending.length) throw new Error('Transaction read after write.'); return ref.path ? snapshot(ref.path) : ref.get(); },
         update: (ref, data) => pending.push(['update', ref.path, data]),
         create: (ref, data) => pending.push(['create', ref.path, data]),
+        set: (ref, data, options) => pending.push(['set', ref.path, data, options]),
       });
       for (const [method, path] of pending) if (method === 'create' && records.has(path)) throw new Error('Duplicate event.');
-      for (const [method, path, data] of pending) {
-        records.set(path, method === 'update' ? { ...records.get(path), ...data } : data);
+      for (const [method, path, data, options] of pending) {
+        records.set(path, method === 'update' || options?.merge ? { ...records.get(path), ...data } : data);
         versions.set(path, (versions.get(path) || 0) + 1);
         writes.push([method, path]);
       }
@@ -97,8 +116,8 @@ test('all four outcomes resolve atomically, preserve source records, and never c
     assert.equal(event.clientMutationId, body.clientMutationId);
     assert.equal(f.records.get(`requests/${f.orderId}`), orderBefore);
     assert.equal(f.records.get('users/m1'), managerBefore);
-    assert.equal(f.writes.length, 2);
-    assert.deepEqual(f.writes.map((entry) => entry[1]), [`deliveryAttempts/${f.attemptId}`, f.eventPath]);
+    assert.equal(f.writes.length, 3);
+    assert.deepEqual(f.writes.map((entry) => entry[1]), [`deliveryAttempts/${f.attemptId}`, f.eventPath, 'moderationActivity/user_r1']);
     assert.ok(!JSON.stringify(result.body).includes(body.clientMutationId));
     const detail = await f.call('GET');
     assert.equal(detail.body.review.reviewState, 'resolved');
@@ -116,12 +135,12 @@ test('exact replay is read-only; changed payload, mutation, and revision conflic
   assert.equal(replay.statusCode, 200);
   assert.deepEqual(replay.body, first.body);
   assert.equal(f.versions.get(`deliveryAttempts/${f.attemptId}`), version);
-  assert.equal(f.writes.length, 2);
+  assert.equal(f.writes.length, 3);
   for (const changed of [
     { responsibility: 'shared' }, { decisionReason: 'A different factual explanation was supplied.' },
     { clientMutationId: 'decision_002' }, { expectedRevision: 'a'.repeat(43) },
   ]) assert.equal((await f.call('POST', { ...body, ...changed })).statusCode, 409);
-  assert.equal(f.writes.length, 2);
+  assert.equal(f.writes.length, 3);
 });
 
 test('response timing is enforced, including the exact 72-hour boundary', async () => {

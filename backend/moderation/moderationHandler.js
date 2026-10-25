@@ -22,6 +22,7 @@ const {
   timeOf,
 } = require('./moderationService');
 const { selectedIncidentIds, validatedGroundsInTransaction } = require('./moderationGrounds');
+const { currentVerifiedStreak, safePenaltyStatus } = require('../delivery/deliveryPenaltyService');
 
 const MANAGER_ACTIONS = new Set(['dismiss', 'warn', 'suspend_branch_chat', 'suspend_branch_ordering', 'escalate']);
 const ADMIN_ACTIONS = new Set(['dismiss', 'warn', 'suspend_platform_chat', 'suspend_platform_ordering', 'suspend_account', 'terminate_account', 'reactivate']);
@@ -569,7 +570,18 @@ function createModerationNoticesHandler(getAdmin = getFirebaseAdmin, dependencie
       const collection = db.collection('moderationNotices').doc(decoded.uid).collection('items');
       if (req.method === 'GET') {
         const snapshot = await collection.orderBy('createdAt', 'desc').limit(50).get();
-        return res.status(200).json({ notices: (snapshot.docs || []).map((item) => safeNotice(item.id, item.data() || {})) });
+        const notices = (snapshot.docs || []).map((item) => safeNotice(item.id, item.data() || {}));
+        if (profile.role !== 'requester') return res.status(200).json({ notices });
+        const restriction = await db.collection('orderingRestrictions').doc(decoded.uid).get();
+        let streak;
+        try { streak = await currentVerifiedStreak({ get: (ref) => ref.get() }, db, decoded.uid); }
+        catch (error) {
+          if (error.code !== 9 && error.code !== 'failed-precondition'
+            && !/requires an index/i.test(String(error.message || ''))) throw error;
+          streak = { complete: false };
+        }
+        return res.status(200).json({ notices,
+          deliveryStatus: safePenaltyStatus(restriction.data() || {}, streak, now()) });
       }
       const body = bodyOf(req);
       const noticeId = clean(body.noticeId, 128);

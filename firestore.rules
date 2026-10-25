@@ -234,6 +234,7 @@ service cloud.firestore {
     match /orderAbuseReviews/{document=**} { allow read, write: if false; }
     match /deliveryAttempts/{document=**} { allow read, write: if false; }
     match /deliveryAttemptEvents/{document=**} { allow read, write: if false; }
+    match /deliveryPenaltyEvents/{document=**} { allow read, write: if false; }
     match /chatRestrictions/{document=**} { allow read, write: if false; }
     match /orderingRestrictions/{document=**} { allow read, write: if false; }
     match /chatReportRateLimits/{document=**} { allow read, write: if false; }
