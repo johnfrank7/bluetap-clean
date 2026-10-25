@@ -48,11 +48,12 @@ const formatTime = (value) => {
   return new Date(timestamp).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 };
 
-export default function ChatMessageBubble({ message, own, receipt, colors, onRetry, onReport, onEdit, onDelete, onReply }) {
+export default function ChatMessageBubble({ message, own, receipt, colors, onRetry, onReport, onEdit, onDelete, onReply, desktopMenuOpen = false, onToggleDesktopMenu }) {
   const [menuOpen, setMenuOpen] = React.useState(false);
   const [hovered, setHovered] = React.useState(false);
   const [focused, setFocused] = React.useState(false);
   const groupRef = React.useRef(null);
+  const buttonRef = React.useRef(null);
   const finePointer = useFinePointer();
   const useActionSheet = Platform.OS !== 'web' || !finePointer;
   const deleted = Boolean(message.deletedAt);
@@ -61,24 +62,8 @@ export default function ChatMessageBubble({ message, own, receipt, colors, onRet
   const replyable = Boolean(onReply && message.id && !deleted);
   const actions = chatModel.messageActionNames({ own, withinWindow, reportable, replyable });
   const hasOptions = actions.length > 0;
-  const buttonVisible = chatModel.messageActionTriggerVisible({ hovered, focused, menuOpen });
+  const buttonVisible = chatModel.messageActionTriggerVisible({ hovered, focused, menuOpen: menuOpen || desktopMenuOpen });
   const failure = chatModel.messageFailurePresentation(message.errorCode);
-
-  React.useEffect(() => {
-    if (!menuOpen || useActionSheet || Platform.OS !== 'web' || typeof document === 'undefined') return undefined;
-    const closeOutside = (event) => {
-      const node = groupRef.current;
-      const eventPath = event.composedPath?.() || [];
-      if (!eventPath.includes(node) && !node?.contains?.(event.target)) setMenuOpen(false);
-    };
-    const closeOnEscape = (event) => { if (event.key === 'Escape') setMenuOpen(false); };
-    document.addEventListener('mousedown', closeOutside);
-    document.addEventListener('keydown', closeOnEscape);
-    return () => {
-      document.removeEventListener('mousedown', closeOutside);
-      document.removeEventListener('keydown', closeOnEscape);
-    };
-  }, [menuOpen, useActionSheet]);
 
   const chooseAction = (action) => {
     setMenuOpen(false);
@@ -88,28 +73,28 @@ export default function ChatMessageBubble({ message, own, receipt, colors, onRet
     else if (action === 'Report') onReport?.(message);
   };
 
-  const desktopControl = !useActionSheet && hasOptions ? (
+  const toggleActions = () => {
+    if (useActionSheet) setMenuOpen((open) => !open);
+    else onToggleDesktopMenu?.({ message, actions, own, anchorRef: buttonRef, onChoose: chooseAction });
+  };
+
+  const actionControl = hasOptions ? (
     <View style={styles.actionSlot}>
       <Pressable
+        ref={buttonRef}
         accessibilityRole="button"
         accessibilityLabel="More message actions"
+        accessibilityState={{ expanded: useActionSheet ? menuOpen : desktopMenuOpen }}
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}
-        onPress={() => setMenuOpen((open) => !open)}
-        pointerEvents={buttonVisible ? 'auto' : 'none'}
-        style={[styles.menuButton, !buttonVisible && styles.menuButtonHidden]}
+        onPress={(event) => {
+          event?.stopPropagation?.();
+          toggleActions();
+        }}
+        style={[styles.menuButton, !useActionSheet && !buttonVisible && styles.menuButtonHidden]}
       >
-        <Text style={[styles.menuGlyph, { color: colors.textSecondary }]}>{'\u2022\u2022\u2022'}</Text>
+        <Text style={[styles.menuGlyph, { color: colors.textSecondary }]}>{'\u22EE'}</Text>
       </Pressable>
-      {menuOpen && (
-        <View style={[styles.menu, own ? styles.outgoingMenu : styles.incomingMenu, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-          {actions.map((action) => (
-            <Pressable key={action} accessibilityRole="button" accessibilityLabel={`${action} message`} onPress={() => chooseAction(action)} style={styles.menuItem}>
-              <Text style={[styles.menuText, { color: action === 'Edit' ? colors.textPrimary : colors.danger }]}>{action === 'Report' ? 'Report this message' : action}</Text>
-            </Pressable>
-          ))}
-        </View>
-      )}
     </View>
   ) : null;
 
@@ -191,7 +176,7 @@ export default function ChatMessageBubble({ message, own, receipt, colors, onRet
       style={[styles.row, own ? styles.outgoingRow : styles.incomingRow]}
     >
       <View style={[styles.messageGroup, own ? styles.outgoingGroup : styles.incomingGroup]}>
-        {own && desktopControl}
+        {own && actionControl}
         <View style={styles.bubbleContainer} {...panResponder.panHandlers}>
           {replyable && (
             <Animated.View
@@ -214,7 +199,7 @@ export default function ChatMessageBubble({ message, own, receipt, colors, onRet
             <Pressable
               accessibilityRole="text"
               accessibilityActions={hasOptions ? [{ name: 'activate', label: 'More message actions' }] : undefined}
-              onAccessibilityAction={(event) => { if (event.nativeEvent.actionName === 'activate' && hasOptions) setMenuOpen(true); }}
+              onAccessibilityAction={(event) => { if (event.nativeEvent.actionName === 'activate' && hasOptions) toggleActions(); }}
               delayLongPress={500}
               onLongPress={useActionSheet && hasOptions ? () => setMenuOpen(true) : undefined}
               onContextMenu={useActionSheet && hasOptions ? (event) => { event?.preventDefault?.(); setMenuOpen(true); } : undefined}
@@ -250,7 +235,7 @@ export default function ChatMessageBubble({ message, own, receipt, colors, onRet
             </Pressable>
           </Animated.View>
         </View>
-        {!own && desktopControl}
+        {!own && actionControl}
       </View>
       <Modal visible={useActionSheet && menuOpen} transparent animationType="fade" onRequestClose={() => setMenuOpen(false)}>
         <View style={styles.sheetBackdrop}>
@@ -276,7 +261,7 @@ const styles = StyleSheet.create({
   row: { width: '100%', marginVertical: 4 },
   outgoingRow: { alignItems: 'flex-end' },
   incomingRow: { alignItems: 'flex-start' },
-  messageGroup: { maxWidth: '92%', minWidth: 0, flexDirection: 'row', alignItems: 'center' },
+  messageGroup: { maxWidth: '82%', minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 4 },
   outgoingGroup: { justifyContent: 'flex-end' },
   incomingGroup: { justifyContent: 'flex-start' },
   bubbleContainer: {
@@ -337,6 +322,8 @@ const styles = StyleSheet.create({
     }),
   },
   replyQuote: {
+    minWidth: 0,
+    maxWidth: '100%',
     borderLeftWidth: 3,
     borderRadius: 6,
     paddingHorizontal: 8,
@@ -344,15 +331,22 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   replySender: {
+    minWidth: 0,
+    flexShrink: 1,
     fontSize: 11,
     fontWeight: '800',
     marginBottom: 1,
+    ...Platform.select({ web: { overflowWrap: 'anywhere' }, default: {} }),
   },
   replySnippet: {
+    minWidth: 0,
+    flexShrink: 1,
     fontSize: 12,
     lineHeight: 16,
+    ...Platform.select({ web: { overflowWrap: 'anywhere' }, default: {} }),
   },
   body: {
+    minWidth: 0,
     fontSize: 14,
     lineHeight: 20,
     flexShrink: 1,
@@ -368,15 +362,10 @@ const styles = StyleSheet.create({
     }),
   },
   deleted: { fontStyle: 'italic', opacity: .78 },
-  actionSlot: { width: 34, height: 34, flexShrink: 0, position: 'relative', alignItems: 'center', justifyContent: 'center' },
-  menuButton: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+  actionSlot: { width: 36, height: 40, flexShrink: 0, alignItems: 'center', justifyContent: 'center' },
+  menuButton: { width: 36, height: 40, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
   menuButtonHidden: { opacity: 0 },
-  menuGlyph: { fontSize: 15, fontWeight: '900', letterSpacing: 1 },
-  menu: { position: 'absolute', top: 32, minWidth: 144, borderWidth: 1, borderRadius: 10, zIndex: 20, paddingVertical: 4, shadowColor: '#000', shadowOpacity: .16, shadowRadius: 8, elevation: 8 },
-  outgoingMenu: { right: 0 },
-  incomingMenu: { left: 0 },
-  menuItem: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 12 },
-  menuText: { fontSize: 12, fontWeight: '800' },
+  menuGlyph: { fontSize: 20, fontWeight: '900' },
   meta: { flexDirection: 'row', flexWrap: 'nowrap', alignItems: 'center', justifyContent: 'flex-end', alignSelf: 'stretch', gap: 4, marginTop: 3 },
   time: { flexShrink: 0, fontSize: 10, lineHeight: 13, fontWeight: '600' },
   retry: { fontSize: 11, fontWeight: '800', marginTop: 5, textDecorationLine: 'underline' },

@@ -10,6 +10,19 @@ const ONGOING_ASSIGNED_STATUSES = new Set([
   'out_for_delivery',
   'delivery_failed',
 ]);
+const ACTIVE_DELIVERY_STATUSES = new Set([
+  'out_for_delivery',
+]);
+const FAILED_DELIVERY_STATUSES = new Set([
+  'delivery_failed',
+]);
+const SCHEDULED_ONGOING_STATUSES = new Set([
+  'distributor_assigned',
+  'assigned',
+  'accepted',
+  'scheduled',
+  'rescheduled',
+]);
 const COMPLETED_ORDER_STATUSES = new Set([
   'delivered',
   'cancelled',
@@ -81,6 +94,21 @@ const isOngoingAssignedOrder = (order, branchId = '') => {
   return ONGOING_ASSIGNED_STATUSES.has(statusOf(order?.status));
 };
 
+const isActiveDeliveryOrder = (order, branchId = '') => {
+  if (!isOngoingAssignedOrder(order, branchId)) return false;
+  return ACTIVE_DELIVERY_STATUSES.has(statusOf(order?.status));
+};
+
+const isScheduledOngoingOrder = (order, branchId = '') => {
+  if (!isOngoingAssignedOrder(order, branchId)) return false;
+  return SCHEDULED_ONGOING_STATUSES.has(statusOf(order?.status));
+};
+
+const isFailedOngoingOrder = (order, branchId = '') => {
+  if (!isOngoingAssignedOrder(order, branchId)) return false;
+  return FAILED_DELIVERY_STATUSES.has(statusOf(order?.status));
+};
+
 const isCompletedManagerOrder = (order) => COMPLETED_ORDER_STATUSES.has(statusOf(order?.status));
 
 const isPendingManagerOrder = (order) => {
@@ -96,6 +124,42 @@ const compareOngoingOrders = (left, right) => {
   if (timeDiff !== 0) return timeDiff;
   return String(left?.id || '').localeCompare(String(right?.id || ''));
 };
+
+function splitOngoingManagerOrders(orders = [], branchId = '') {
+  const seenIds = new Set();
+  const activeDeliveries = [];
+  const scheduledOrders = [];
+  const failedDeliveries = [];
+  const sorted = (Array.isArray(orders) ? orders : [])
+    .filter((order) => isOngoingAssignedOrder(order, branchId))
+    .sort(compareOngoingOrders);
+
+  for (const order of sorted) {
+    const idKey = String(order?.id || order?.requestId || '').trim();
+    if (idKey) {
+      if (seenIds.has(idKey)) continue;
+      seenIds.add(idKey);
+    }
+    const status = statusOf(order?.status);
+    if (ACTIVE_DELIVERY_STATUSES.has(status)) {
+      activeDeliveries.push(order);
+    } else if (SCHEDULED_ONGOING_STATUSES.has(status)) {
+      scheduledOrders.push(order);
+    } else if (FAILED_DELIVERY_STATUSES.has(status)) {
+      failedDeliveries.push(order);
+    }
+  }
+
+  return {
+    activeDeliveries,
+    scheduledOrders,
+    failedDeliveries,
+    activeDeliveriesCount: activeDeliveries.length,
+    scheduledCount: scheduledOrders.length,
+    failedDeliveriesCount: failedDeliveries.length,
+    ongoingCount: activeDeliveries.length + scheduledOrders.length + failedDeliveries.length,
+  };
+}
 
 function getOngoingDeliveryProgress(order = {}) {
   const status = statusOf(order?.status);
@@ -115,6 +179,7 @@ function getOngoingDeliveryProgress(order = {}) {
       })),
     };
   }
+  const isDelivered = status === 'delivered';
   let activeStepIndex = -1;
   if (status === 'distributor_assigned' || status === 'assigned' || status === 'accepted') {
     activeStepIndex = 0;
@@ -122,7 +187,7 @@ function getOngoingDeliveryProgress(order = {}) {
     activeStepIndex = 1;
   } else if (status === 'out_for_delivery') {
     activeStepIndex = 2;
-  } else if (status === 'delivered') {
+  } else if (isDelivered) {
     activeStepIndex = 3;
   }
   const linearSupported = activeStepIndex >= 0;
@@ -134,9 +199,9 @@ function getOngoingDeliveryProgress(order = {}) {
     steps: ONGOING_PROGRESS_STEPS.map((label, index) => ({
       key: label.toLowerCase().replace(/\s+/g, '_'),
       label,
-      completed: linearSupported && activeStepIndex > index,
-      current: linearSupported && activeStepIndex === index,
-      upcoming: !linearSupported || activeStepIndex < index,
+      completed: linearSupported && (isDelivered || activeStepIndex > index),
+      current: linearSupported && !isDelivered && activeStepIndex === index,
+      upcoming: !linearSupported || (!isDelivered && activeStepIndex < index),
     })),
   };
 }
@@ -145,7 +210,12 @@ function getManagerQueues(orders = [], incomingTransfers = [], branchId = '') {
   const owned = orders.filter((order) => belongsToBranch(order, branchId));
   const transfers = incomingTransfers.filter((order) =>
     statusOf(order.status) === 'branch_transfer_pending' && order.transferToBranchId === branchId);
-  const ongoing = owned.filter((order) => isOngoingAssignedOrder(order, branchId)).sort(compareOngoingOrders);
+  const ongoingSplit = splitOngoingManagerOrders(owned, branchId);
+  const ongoing = [
+    ...ongoingSplit.activeDeliveries,
+    ...ongoingSplit.failedDeliveries,
+    ...ongoingSplit.scheduledOrders,
+  ];
   const pendingOrders = owned.filter(isPendingManagerOrder);
   const completed = owned
     .filter(isCompletedManagerOrder)
@@ -156,12 +226,18 @@ function getManagerQueues(orders = [], incomingTransfers = [], branchId = '') {
     dispatch: owned.filter(needsDispatch).sort(compareDispatchPriority),
     editable: owned.filter(canEdit),
     ongoing,
+    activeDeliveries: ongoingSplit.activeDeliveries,
+    scheduledOrders: ongoingSplit.scheduledOrders,
+    failedDeliveries: ongoingSplit.failedDeliveries,
     pendingOrders,
     completed,
     incomingTransfers: transfers,
     requestsCount: owned.filter((order) => needsReview(order) || needsException(order)).length + transfers.length,
     dispatchCount: owned.filter(needsDispatch).length,
     ongoingCount: ongoing.length,
+    activeDeliveriesCount: ongoingSplit.activeDeliveriesCount,
+    scheduledCount: ongoingSplit.scheduledCount,
+    failedDeliveriesCount: ongoingSplit.failedDeliveriesCount,
   };
 }
 
@@ -283,6 +359,9 @@ module.exports = {
   DISPATCH_STATUS,
   EDITABLE_STATUSES,
   ONGOING_ASSIGNED_STATUSES,
+  ACTIVE_DELIVERY_STATUSES,
+  FAILED_DELIVERY_STATUSES,
+  SCHEDULED_ONGOING_STATUSES,
   COMPLETED_ORDER_STATUSES,
   PENDING_ORDER_STATUSES,
   ONGOING_PROGRESS_STEPS,
@@ -294,9 +373,13 @@ module.exports = {
   compareDispatchPriority,
   canEdit,
   isOngoingAssignedOrder,
+  isActiveDeliveryOrder,
+  isScheduledOngoingOrder,
+  isFailedOngoingOrder,
   isCompletedManagerOrder,
   isPendingManagerOrder,
   compareOngoingOrders,
+  splitOngoingManagerOrders,
   getOngoingDeliveryProgress,
   getManagerQueues,
   toManagerOrder,

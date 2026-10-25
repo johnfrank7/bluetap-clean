@@ -50,8 +50,8 @@ export default function NotificationCard({
           <SoftStatusBadge status={status} label={compactNotificationStatus(status)} dark={dark} compact numberOfLines={1} />
           <Text numberOfLines={1} style={[styles.time, narrow && styles.timeNarrow, { color: colors.textSecondary || colors.muted }]}>{time}</Text>
         </View>
-        <Text style={[styles.message, { color: colors.textPrimary || colors.text }]}>{message}</Text>
-        {!!metadata && <Text numberOfLines={layout.metadataLines} style={[styles.metadata, { color: colors.textSecondary || colors.muted }]}>{metadata}</Text>}
+        <Text numberOfLines={2} ellipsizeMode="tail" style={[styles.message, { color: colors.textPrimary || colors.text }]}>{message}</Text>
+        {!!metadata && <Text numberOfLines={layout.metadataLines} ellipsizeMode="tail" style={[styles.metadata, { color: colors.textSecondary || colors.muted }]}>{metadata}</Text>}
       </View>
       <Text accessibilityElementsHidden importantForAccessibility="no" style={[styles.chevron, { color: colors.primary }]}>›</Text>
     </TouchableOpacity>

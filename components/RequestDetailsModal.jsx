@@ -315,13 +315,26 @@ export default function RequestDetailsModal({
 
               <View style={styles.totalsCard}>
                 <View style={styles.totalRow}>
-                  <Text style={styles.totalLabel}>Subtotal</Text>
+                  <Text style={styles.totalLabel}>Products Subtotal</Text>
                   <Text style={styles.totalValue}>{formatAmount(activeRequest?.subtotal ?? activeRequest?.subtotalAtOrder ?? products.reduce((sum, item) => sum + Number(item.subtotal || 0), 0))}</Text>
                 </View>
                 <View style={styles.totalRow}>
                   <Text style={styles.totalLabel}>Delivery Fee</Text>
                   <Text style={styles.totalValue}>{formatAmount(activeRequest?.deliveryFee ?? activeRequest?.deliveryFeeAtOrder ?? 0)}</Text>
                 </View>
+                {Number(activeRequest?.discountAmount ?? activeRequest?.discount ?? 0) > 0 && (
+                  <View style={styles.totalRow}>
+                    <View style={styles.totalLabelWrap}>
+                      <Text style={styles.totalLabel}>Discount</Text>
+                      {!!activeRequest?.discountReason && (
+                        <Text style={styles.feeDetailSubtext}>{activeRequest.discountReason}</Text>
+                      )}
+                    </View>
+                    <Text style={[styles.totalValue, styles.discountValue]}>
+                      -{formatAmount(activeRequest?.discountAmount ?? activeRequest?.discount)}
+                    </Text>
+                  </View>
+                )}
                 <View style={[styles.totalRow, styles.grandTotalRow]}>
                   <Text style={styles.grandTotalLabel}>Grand Total</Text>
                   <Text style={styles.grandTotalValue}>{formatAmount(activeRequest?.grandTotal ?? activeRequest?.grandTotalAmount ?? activeRequest?.total_cost ?? activeRequest?.totalAtOrder ?? activeRequest?.totalAmount)}</Text>
@@ -597,6 +610,19 @@ const styles = createPortalStyleSheet({
     backgroundColor: '#F8FCFF',
     paddingHorizontal: 12,
     marginTop: 12,
+  },
+  totalLabelWrap: {
+    flex: 1,
+    minWidth: 0,
+  },
+  feeDetailSubtext: {
+    color: TEXT_MUTED,
+    fontSize: 10,
+    marginTop: 2,
+  },
+  discountValue: {
+    color: '#16A34A',
+    fontWeight: '800',
   },
   totalRow: {
     minHeight: 42,

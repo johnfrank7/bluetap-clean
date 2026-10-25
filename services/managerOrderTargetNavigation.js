@@ -9,6 +9,109 @@ const {
 } = require('./managerOperational');
 
 const TARGET_HIGHLIGHT_DURATION_MS = 2800;
+const DASHBOARD_SECTION_DURATION_MS = 300;
+const DASHBOARD_SECTION_STAGGER_MS = 60;
+const DASHBOARD_SECTION_TRANSLATE_Y = 8;
+
+const completedEntranceSessions = new Set();
+
+function normalizeSessionKey(sessionKey = 'default') {
+  const normalized = String(sessionKey || 'default').trim();
+  return normalized || 'default';
+}
+
+function hasCompletedDashboardEntrance(sessionKey = 'default') {
+  return completedEntranceSessions.has(normalizeSessionKey(sessionKey));
+}
+
+function markDashboardEntranceCompleted(sessionKey = 'default') {
+  const key = normalizeSessionKey(sessionKey);
+  completedEntranceSessions.add(key);
+  return true;
+}
+
+function resetDashboardEntranceForTests() {
+  completedEntranceSessions.clear();
+}
+
+function getDashboardEntranceMotion({
+  sectionIndex = 0,
+  reduceMotion = false,
+  alreadyCompleted = false,
+} = {}) {
+  const shouldAnimate = !reduceMotion && !alreadyCompleted;
+  const safeIndex = Math.max(0, Number(sectionIndex) || 0);
+  return {
+    shouldAnimate,
+    initialOpacity: shouldAnimate ? 0 : 1,
+    initialTranslateY: shouldAnimate ? DASHBOARD_SECTION_TRANSLATE_Y : 0,
+    durationMs: shouldAnimate ? DASHBOARD_SECTION_DURATION_MS : 0,
+    delayMs: shouldAnimate ? safeIndex * DASHBOARD_SECTION_STAGGER_MS : 0,
+  };
+}
+
+function extractCanonicalOrderId(orderOrId) {
+  if (typeof orderOrId === 'string' || typeof orderOrId === 'number') {
+    return String(orderOrId).trim();
+  }
+  if (!orderOrId || typeof orderOrId !== 'object') return '';
+  return String(orderOrId.id || orderOrId.orderId || orderOrId.requestId || '').trim();
+}
+
+function buildManagerOrderTargetRoute(orderOrId, extraParams = {}) {
+  const orderId = extractCanonicalOrderId(orderOrId);
+  if (!orderId) return '/manager/request';
+  const params = { orderId };
+  if (extraParams && typeof extraParams === 'object') {
+    for (const [key, value] of Object.entries(extraParams)) {
+      if (value !== undefined && value !== null && String(value).trim() !== '') {
+        params[key] = String(value).trim();
+      }
+    }
+  }
+  return {
+    pathname: '/manager/request',
+    params,
+  };
+}
+
+function resolveNotificationNavigationTarget(event = {}) {
+  if (!event || typeof event !== 'object' || event.navigable === false) {
+    return {
+      type: 'modal',
+      eventId: event?.id || null,
+      orderId: '',
+      target: null,
+    };
+  }
+  const orderId = String(event.orderId || '').trim();
+  if (orderId) {
+    return {
+      type: 'order',
+      eventId: event.id || null,
+      orderId,
+      target: {
+        pathname: '/manager/request',
+        params: { orderId },
+      },
+    };
+  }
+  const path = String(event.path || '').trim();
+  if (path && path.startsWith('/manager/')) {
+    return {
+      type: 'route',
+      eventId: event.id || null,
+      orderId: '',
+      target: path,
+    };
+  }
+  return {
+    type: 'modal',
+    eventId: event.id || null,
+    orderId: '',
+    target: null,
+  };
+}
 
 function matchesOrderIdentifier(order = {}, requestedOrderId = '') {
   const target = String(requestedOrderId || '').trim();
@@ -211,6 +314,17 @@ function resolveManagerOrderTarget(
 
 module.exports = {
   TARGET_HIGHLIGHT_DURATION_MS,
+  DASHBOARD_SECTION_DURATION_MS,
+  DASHBOARD_SECTION_STAGGER_MS,
+  DASHBOARD_SECTION_TRANSLATE_Y,
+  hasCompletedDashboardEntrance,
+  markDashboardEntranceCompleted,
+  resetDashboardEntranceForTests,
+  getDashboardEntranceMotion,
+  extractCanonicalOrderId,
+  buildManagerOrderTargetRoute,
+  resolveNotificationNavigationTarget,
   matchesOrderIdentifier,
+  classifyManagerOrderSection,
   resolveManagerOrderTarget,
 };

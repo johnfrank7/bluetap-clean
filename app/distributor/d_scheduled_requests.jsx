@@ -377,12 +377,21 @@ export default function DistributorScheduledRequests() {
               </View>
             )}
 
-            {loading ? (
+            {!!error && scheduledPresentation.length > 0 && (
+              <View style={styles.actionErrorCard}>
+                <Text style={styles.actionErrorText}>{error}</Text>
+                <TouchableOpacity onPress={refresh} style={{ marginTop: 6 }}>
+                  <Text style={[styles.secondaryActionText, { color: colors.primary || BLUE }]}>Tap to retry sync</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+
+            {loading && scheduledPresentation.length === 0 ? (
               <View style={styles.emptyCard}>
                 <ActivityIndicator color={BLUE} />
                 <Text style={styles.emptyText}>Loading assigned schedule...</Text>
               </View>
-            ) : error ? (
+            ) : error && scheduledPresentation.length === 0 ? (
               <View style={styles.emptyCard}>
                 <Text style={styles.emptyTitle}>Schedule unavailable.</Text>
                 <Text style={styles.emptyText}>{error}</Text>
@@ -773,6 +782,7 @@ const styles = createPortalStyleSheet({
   dialogCard: {
     width: '100%',
     maxWidth: 440,
+    maxHeight: '90%',
     backgroundColor: BLUETAP_COLORS.surface,
     borderRadius: 16,
     borderWidth: 1,
@@ -816,7 +826,7 @@ const styles = createPortalStyleSheet({
     marginTop: 16,
   },
   dialogCancelBtn: {
-    minHeight: 38,
+    minHeight: 44,
     paddingHorizontal: 14,
     borderRadius: 8,
     borderWidth: 1,
@@ -831,7 +841,7 @@ const styles = createPortalStyleSheet({
     fontWeight: '700',
   },
   dialogDangerBtn: {
-    minHeight: 38,
+    minHeight: 44,
     paddingHorizontal: 16,
     borderRadius: 8,
     backgroundColor: BLUETAP_COLORS.danger,
@@ -844,7 +854,7 @@ const styles = createPortalStyleSheet({
     fontWeight: 'bold',
   },
   dialogSuccessBtn: {
-    minHeight: 38,
+    minHeight: 44,
     paddingHorizontal: 16,
     borderRadius: 8,
     backgroundColor: BLUETAP_COLORS.primary,

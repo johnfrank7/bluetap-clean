@@ -124,9 +124,13 @@ test('message bubbles remain content-sized and wrap long text on shared web/mobi
   assert.match(bubbleSource, /incomingRow: \{ alignItems: 'flex-start' \}/);
   assert.match(bubbleSource, /ref=\{groupRef\}[\s\S]{0,300}style=\{\[styles\.row/);
   assert.match(bubbleSource, /row: \{ width: '100%'/);
-  assert.match(bubbleSource, /\{own && desktopControl\}[\s\S]*styles\.bubble[\s\S]*\{!own && desktopControl\}/);
+  assert.match(bubbleSource, /\{own && actionControl\}[\s\S]*styles\.bubble[\s\S]*\{!own && actionControl\}/);
+  assert.match(bubbleSource, /messageGroup: \{ maxWidth: '82%'/);
+  assert.match(bubbleSource, /actionSlot: \{ width: 36, height: 40/);
   assert.match(bubbleSource, /maxWidth: '100%'/);
   assert.match(bubbleSource, /minWidth: 72/);
+  assert.match(bubbleSource, /replyQuote: \{[\s\S]*?maxWidth: '100%'/);
+  assert.match(bubbleSource, /numberOfLines=\{2\}/);
   assert.match(bubbleSource, /flexWrap: 'nowrap'/);
   assert.match(bubbleSource, /overflowWrap: 'anywhere'/);
   assert.match(bubbleSource, /receipt/);

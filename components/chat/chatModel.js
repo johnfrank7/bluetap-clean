@@ -163,6 +163,25 @@ function messageActionTriggerVisible({ hovered = false, focused = false, menuOpe
   return Boolean(hovered || focused || menuOpen);
 }
 
+function positionMessageMenu({ anchor, viewport, root, own = false, actionCount = 1 }) {
+  const gap = 6;
+  const edge = 8;
+  const width = Math.min(152, Math.max(0, viewport.width - edge * 2));
+  const menuHeight = actionCount * 44 + 8;
+  const maxHeight = Math.max(0, viewport.height - edge * 2);
+  const height = Math.min(menuHeight, maxHeight);
+  const desiredLeft = own ? anchor.x + anchor.width - width : anchor.x;
+  const left = Math.max(viewport.x + edge, Math.min(desiredLeft, viewport.x + viewport.width - width - edge));
+  const below = anchor.y + anchor.height + gap;
+  const above = anchor.y - menuHeight - gap;
+  const top = below + height <= viewport.y + viewport.height - edge
+    ? below
+    : above >= viewport.y + edge
+      ? above
+      : Math.max(viewport.y + edge, Math.min(below, viewport.y + viewport.height - height - edge));
+  return { left: left - root.x, top: top - root.y, width, maxHeight };
+}
+
 function orderIdOf(order) {
   if (!order || typeof order !== 'object') return '';
   const source = clean(order.sourceId);
@@ -268,6 +287,7 @@ module.exports = {
   mergeMessages,
   messageActionNames,
   messageActionTriggerVisible,
+  positionMessageMenu,
   normalizeChatIntent,
   orderIdOf,
   principalFor,

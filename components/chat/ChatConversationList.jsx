@@ -50,7 +50,7 @@ function ConversationRow({ colors, conversation, onPress, role }) {
             <Text style={[styles.name, { color: colors.textPrimary }, conversation.unreadCount > 0 && styles.unreadName]} numberOfLines={1}>{conversation.displayName}</Text>
             {!!roleLabel && <RoleBadge colors={colors} role={roleLabel} compact numberOfLines={1} style={styles.roleBadge} />}
             {!roleLabel && !!conversation.orderStatus && <SoftStatusBadge status={conversation.orderStatus} compact numberOfLines={1} style={styles.statusBadge} />}
-            {!roleLabel && !conversation.orderStatus && generalInquiry && <SoftStatusBadge status="pending" label="General inquiry" compact numberOfLines={1} style={styles.statusBadge} />}
+            {!roleLabel && !conversation.orderStatus && generalInquiry && <SoftStatusBadge status="general_inquiry" label="General inquiry" compact numberOfLines={1} style={styles.statusBadge} />}
           </View>
           <View style={styles.rowMeta}>
             {conversation.unreadCount > 0 && <View style={[styles.badge, { backgroundColor: colors.danger }]}><Text style={styles.badgeText}>{conversation.unreadLabel}</Text></View>}

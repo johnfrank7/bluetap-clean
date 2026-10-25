@@ -37,7 +37,24 @@ export default function ManagerAnalyticsPage() {
 
   const requesterCount = branchRequesters.length;
   const distributorCount = users.filter((user) => String(user.role || '').toLowerCase() === 'distributor').length;
+  const barangayRows = React.useMemo(() => {
+    const counts = new Map();
+    [...users.filter((user) => String(user.role || '').toLowerCase() === 'distributor'), ...branchRequesters]
+      .forEach((user) => {
+        const label = String(user.barangay || '').trim();
+        if (!label) return;
+        const key = label.toLocaleLowerCase('en-PH');
+        const current = counts.get(key) || { label, value: 0 };
+        counts.set(key, { ...current, value: current.value + 1 });
+      });
+    const rows = [...counts.values()].sort((a, b) => b.value - a.value || a.label.localeCompare(b.label));
+    return rows.length > 8
+      ? [...rows.slice(0, 8), { label: 'Other barangays', value: rows.slice(8).reduce((sum, row) => sum + row.value, 0) }]
+      : rows;
+  }, [branchRequesters, users]);
   const maxStatus = Math.max(metrics.delivered, metrics.ongoing, metrics.issues, 1);
+  const maxMonth = Math.max(...metrics.trend.map((month) => month.value), 1);
+  const maxBarangay = Math.max(...barangayRows.map((row) => row.value), 1);
   const metricCardResponsiveStyle = width >= 1180
     ? styles.metricCardThreeColumn
     : width >= 680
@@ -102,6 +119,40 @@ export default function ManagerAnalyticsPage() {
                   <AnalyticsMetricCard label="REQUESTERS" value={requesterCount.toLocaleString()} detail="Ordered from this branch" icon="UsersRound" accent={colors.primary} iconBackground={colors.primarySoft} colors={colors} compact style={styles.peopleMetric} />
                   <AnalyticsMetricCard label="DISTRIBUTORS" value={distributorCount.toLocaleString()} detail="Assigned to branch" icon="Truck" accent={colors.primary} iconBackground={colors.primarySoft} colors={colors} compact style={styles.peopleMetric} />
                 </View>
+              </View>
+              <View style={styles.panel}>
+                <Text style={styles.panelTitle}>Delivered units by month</Text>
+                <Text style={styles.secondary}>Last six calendar months · Delivered order snapshots</Text>
+                {metrics.trend.every((month) => month.value === 0) ? (
+                  <Text style={styles.secondary}>No delivered units in this period.</Text>
+                ) : metrics.trend.map((month, index) => (
+                  <View key={`${month.month}-${index}`} style={styles.barRow}>
+                    <View style={styles.barHeader}>
+                      <Text style={styles.barLabel}>{month.month}</Text>
+                      <Text style={styles.barValue}>{month.value.toLocaleString('en-PH')} units</Text>
+                    </View>
+                    <View style={styles.track}>
+                      <View style={[styles.fill, { width: `${month.value / maxMonth * 100}%`, backgroundColor: colors.primary }]} />
+                    </View>
+                  </View>
+                ))}
+              </View>
+              <View style={styles.panel}>
+                <Text style={styles.panelTitle}>Registered users by barangay</Text>
+                <Text style={styles.secondary}>Branch Distributors and Requesters with a recorded barangay</Text>
+                {barangayRows.length === 0 ? (
+                  <Text style={styles.secondary}>No barangay information is recorded for branch users.</Text>
+                ) : barangayRows.map((row) => (
+                  <View key={row.label} style={styles.barRow}>
+                    <View style={styles.barHeader}>
+                      <Text style={styles.barLabel}>{row.label}</Text>
+                      <Text style={styles.barValue}>{row.value.toLocaleString('en-PH')}</Text>
+                    </View>
+                    <View style={styles.track}>
+                      <View style={[styles.fill, { width: `${row.value / maxBarangay * 100}%`, backgroundColor: colors.primary }]} />
+                    </View>
+                  </View>
+                ))}
               </View>
               <View style={[styles.panel, styles.productPanel]}>
                 <Text style={styles.panelTitle}>Delivered product breakdown</Text>

@@ -54,6 +54,8 @@ const ISSUE_STATUSES = new Set([
 ]);
 
 const OVERRIDE_ELIGIBLE_STATUSES = new Set(['awaiting_distributor_assignment', 'distributor_assigned', 'accepted', 'scheduled', 'delivery_failed']);
+const orderContactPhone = (order) => order?.contactNumberSnapshot || order?.deliveryPhoneSnapshot || order?.contact_number || order?.contactNumber || order?.requesterContactNumber || order?.requesterContact || '';
+const orderDistributorName = (order) => order?.assignedDistributorNameSnapshot || order?.distributor_name || order?.assignedDistributorName || order?.distributorNameSnapshot || order?.distributorName || '';
 const PAGE_SIZE = 10;
 const SORT_OPTIONS = [
   { id: 'newest', label: 'Newest first' },
@@ -85,6 +87,18 @@ function RequestsFilterWebStyles({ colors }) {
         button[data-admin-requests-filter-selected="false"]:hover {
           background-color: ${colors.primarySoft};
           border-color: ${colors.primary};
+        }
+        button[data-admin-requests-details="true"] {
+          background-color: ${primary} !important;
+          border-color: ${primary} !important;
+        }
+        button[data-admin-requests-details="true"]:hover,
+        button[data-admin-requests-details="true"]:focus-visible {
+          background-color: ${primaryStrong} !important;
+          border-color: ${primaryStrong} !important;
+        }
+        button[data-admin-requests-details="true"] > div {
+          color: ${colors.onPrimary} !important;
         }
       `,
     },
@@ -323,6 +337,14 @@ export default function AdminRequestsPage() {
     };
   }, [requests]);
 
+  const statusOptions = [
+    { id: 'all', label: 'All Orders', count: counts.total, accent: colors.primary, soft: colors.primarySoft, valueColor: colors.textPrimary },
+    { id: 'actionable', label: 'Pending Review', count: counts.actionable, accent: colors.warning, soft: colors.warningSoft, valueColor: counts.actionable > 0 ? colors.warning : colors.textPrimary },
+    { id: 'active', label: 'In Progress', count: counts.active, accent: colors.primary, soft: colors.primarySoft, valueColor: colors.primary },
+    { id: 'delivered', label: 'Delivered', count: counts.delivered, accent: colors.success, soft: colors.successSoft, valueColor: colors.success },
+    { id: 'issues', label: 'Issues & Cancelled', count: counts.issues, accent: colors.danger, soft: colors.dangerSoft, valueColor: colors.danger },
+  ];
+
   const branchCounts = useMemo(() => {
     const result = new Map();
     requests.forEach((order) => {
@@ -349,10 +371,10 @@ export default function AdminRequestsPage() {
       if (debouncedQuery) {
         const customerName = (r.requesterNameSnapshot || r.requesterName || r.customerName || '').toLowerCase();
         const requestId = (r.requestId || r.id || '').toLowerCase();
-        const phone = (r.deliveryPhoneSnapshot || r.contactNumber || '').toLowerCase();
+        const phone = orderContactPhone(r).toLowerCase();
         const address = (r.deliveryAddressSnapshot || r.address || r.deliveryAddress || '').toLowerCase();
         const branchName = (r.branchNameSnapshot || r.branchName || '').toLowerCase();
-        const distributor = (r.distributorNameSnapshot || r.distributorName || '').toLowerCase();
+        const distributor = orderDistributorName(r).toLowerCase();
 
         const match =
           customerName.includes(debouncedQuery) ||
@@ -451,37 +473,26 @@ export default function AdminRequestsPage() {
       <RequestsFilterWebStyles colors={colors} />
       {/* Metrics Summary Row */}
       <View style={styles.metricsRow}>
-        <View style={styles.metricCard}>
-          <Text style={styles.metricValue}>{counts.total}</Text>
-          <Text style={styles.metricLabel}>Total Orders</Text>
-        </View>
-        <View style={[styles.metricCard, counts.actionable > 0 && { borderColor: colors.warning }]}>
-          <Text style={[styles.metricValue, counts.actionable > 0 && { color: colors.warning }]}>
-            {counts.actionable}
-          </Text>
-          <Text style={styles.metricLabel}>Pending Review</Text>
-        </View>
-        <View style={styles.metricCard}>
-          <Text style={[styles.metricValue, { color: colors.primary }]}>{counts.active}</Text>
-          <Text style={styles.metricLabel}>In Progress</Text>
-        </View>
-        <View style={styles.metricCard}>
-          <Text style={[styles.metricValue, { color: colors.success }]}>{counts.delivered}</Text>
-          <Text style={styles.metricLabel}>Delivered</Text>
-        </View>
+        {statusOptions.map((metric) => {
+          const selected = statusFilter === metric.id;
+          return (
+            <View
+              key={metric.id}
+              dataSet={{ adminRequestsMetricSelected: selected ? 'true' : 'false' }}
+              style={[styles.metricCard, viewportWidth < 360 && styles.metricCardNarrow, selected && styles.metricCardSelected, selected && { borderColor: metric.accent, backgroundColor: metric.soft }]}
+            >
+              <Text style={[styles.metricValue, { color: metric.valueColor }]}>{metric.count}</Text>
+              <Text style={[styles.metricLabel, selected && styles.metricLabelSelected]}>{metric.label}</Text>
+            </View>
+          );
+        })}
       </View>
 
       {/* Main Filter & List Container */}
       <View style={styles.card}>
         {/* Status Tabs */}
         <View style={styles.tabsRow}>
-          {[
-            { id: 'all', label: 'All Orders', count: counts.total },
-            { id: 'actionable', label: 'Pending Review', count: counts.actionable },
-            { id: 'active', label: 'In Progress', count: counts.active },
-            { id: 'delivered', label: 'Delivered', count: counts.delivered },
-            { id: 'issues', label: 'Issues & Cancelled', count: counts.issues },
-          ].map((tab) => {
+          {statusOptions.map((tab) => {
             const selected = statusFilter === tab.id;
             return (
               <Pressable
@@ -678,7 +689,7 @@ export default function AdminRequestsPage() {
               const branchDisplay = order.branchNameSnapshot || order.branchName || order.currentBranchId || 'Unassigned';
               const requesterDisplay = order.requesterNameSnapshot || order.requesterName || order.customerName || 'Customer';
               const orderId = order.requestId || order.id;
-              const rawPhone = order.deliveryPhoneSnapshot || order.contactNumber;
+              const rawPhone = orderContactPhone(order);
               const phoneDisplay = rawPhone ? formatPhilippinePhone(rawPhone) : 'Contact not provided';
 
               return (
@@ -723,7 +734,7 @@ export default function AdminRequestsPage() {
                     <View style={[styles.gridColumn, orderColumnStyle]}>
                       <Text style={styles.fieldLabel}>Dispatch & Schedule</Text>
                       <Text style={styles.fieldValuePrimary}>
-                        {order.distributorNameSnapshot || order.distributorName || 'Not assigned'}
+                        {orderDistributorName(order) || 'Not assigned'}
                       </Text>
                       <Text style={styles.fieldValueSecondary}>
                         {order.scheduledAt
@@ -742,12 +753,11 @@ export default function AdminRequestsPage() {
                     <Pressable
                       accessibilityRole="button"
                       accessibilityLabel={`View details for order ${orderId}`}
+                      dataSet={{ adminRequestsDetails: 'true' }}
                       onPress={() => setSelectedOrder(order)}
                       style={({ hovered, focused, pressed }) => [styles.detailsBtn, (hovered || focused) && styles.detailsBtnHover, pressed && styles.detailsBtnPressed]}
                     >
-                      {({ hovered, focused }) => (
-                        <Text style={[styles.detailsBtnText, (hovered || focused) && styles.detailsBtnTextActive]}>View Details</Text>
-                      )}
+                      <Text style={styles.detailsBtnText}>View Details</Text>
                     </Pressable>
                   </View>
                 </View>
@@ -861,7 +871,7 @@ export default function AdminRequestsPage() {
                   <View style={styles.modalGridItem}>
                     <Text style={styles.modalLabel}>Contact Phone</Text>
                     <Text style={styles.modalValue}>
-                      {formatPhilippinePhone(selectedOrder?.deliveryPhoneSnapshot || selectedOrder?.contactNumber) || 'Not provided'}
+                      {formatPhilippinePhone(orderContactPhone(selectedOrder)) || 'Not provided'}
                     </Text>
                   </View>
                   <View style={styles.modalGridItemFull}>
@@ -903,7 +913,7 @@ export default function AdminRequestsPage() {
                   <View style={styles.modalGridItem}>
                     <Text style={styles.modalLabel}>Assigned Distributor</Text>
                     <Text style={styles.modalValue}>
-                      {selectedOrder?.distributorNameSnapshot || selectedOrder?.distributorName || 'Not assigned'}
+                      {orderDistributorName(selectedOrder) || 'Not assigned'}
                     </Text>
                   </View>
                   <View style={styles.modalGridItem}>
@@ -1253,12 +1263,15 @@ const createStyles = (colors, isMobile = false) =>
     metricCard: {
       flex: 1,
       minWidth: 160,
+      maxWidth: 240,
       backgroundColor: colors.surface,
       borderRadius: 14,
       borderWidth: 1,
       borderColor: colors.border,
       padding: 16,
     },
+    metricCardSelected: { borderWidth: 2 },
+    metricCardNarrow: { maxWidth: '100%' },
     metricValue: {
       fontSize: 26,
       fontWeight: '900',
@@ -1270,6 +1283,7 @@ const createStyles = (colors, isMobile = false) =>
       color: colors.textSecondary,
       marginTop: 4,
     },
+    metricLabelSelected: { color: colors.textPrimary, fontWeight: '800' },
     card: {
       backgroundColor: colors.surface,
       borderRadius: 16,
@@ -1606,20 +1620,19 @@ const createStyles = (colors, isMobile = false) =>
       paddingVertical: 7,
       borderRadius: 8,
       borderWidth: 1,
-      borderColor: colors.primary,
-      backgroundColor: colors.primarySoft,
-      minHeight: 34,
+      borderColor: colors.primaryAction,
+      backgroundColor: colors.primaryAction,
+      minHeight: 44,
       justifyContent: 'center',
       ...Platform.select({ web: { transitionDuration: '140ms', transitionProperty: 'background-color, transform, border-color' }, default: {} }),
     },
-    detailsBtnHover: { backgroundColor: colors.primaryAction, borderColor: colors.primaryAction },
+    detailsBtnHover: { backgroundColor: colors.primaryDeep || colors.primaryAction, borderColor: colors.primaryDeep || colors.primaryAction },
     detailsBtnPressed: { transform: [{ scale: 0.98 }] },
     detailsBtnText: {
-      color: colors.primary,
+      color: colors.onPrimary,
       fontWeight: '800',
       fontSize: 12,
     },
-    detailsBtnTextActive: { color: colors.onPrimary },
     paginationSection: {
       flexDirection: 'row',
       flexWrap: 'wrap',

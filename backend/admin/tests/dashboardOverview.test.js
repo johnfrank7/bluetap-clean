@@ -56,7 +56,7 @@ test('dashboard overview consolidates only lightweight Admin summary data', asyn
   assert.equal(result.body.branches[0].managerCount, 1);
   assert.equal(result.body.security.maxAccountsPerIp, 4);
   assert.equal(result.body.recentActivity.length, 5);
-  assert.deepEqual(result.body.sales, { deliveredOrders: 1, revenue: 140, units: 2, scope: 'Recent 500 orders' });
+  assert.deepEqual(result.body.sales, { totalOrders: 1, deliveredOrders: 1, revenue: 140, units: 2, scope: 'Recent 500 orders' });
   assert.equal(Object.hasOwn(result.body, 'accounts'), false);
 });
 
