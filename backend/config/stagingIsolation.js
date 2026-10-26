@@ -9,7 +9,7 @@ const productionWebConfig = require('../../firebase-web-config.json');
 function isStaging(env = process.env) {
   const appEnv = String(env.APP_ENV || '').trim().toLowerCase();
   const clientEnv = String(env.EXPO_PUBLIC_APP_ENV || '').trim().toLowerCase();
-  if ([appEnv, clientEnv].some((value) => value && !['development', 'staging', 'production'].includes(value))) {
+  if ([appEnv, clientEnv].some((value) => value && !['development', 'staging', 'production', 'local-qa'].includes(value))) {
     throw new Error('Invalid application environment setting.');
   }
   const stagingHost = String(env.RENDER_EXTERNAL_HOSTNAME || '').trim().toLowerCase() === STAGING_RENDER_HOST ||

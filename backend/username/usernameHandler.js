@@ -7,6 +7,7 @@ const { getClientIp } = require('../utils/request');
 const firebaseWebConfig = require('../../firebase-web-config.json');
 const { ACCOUNT_STATUS, canonicalAccountStatus } = require('../auth/accountStatus');
 const { isStaging, assertStagingServerEnvironment, STAGING_PROJECT_ID } = require('../config/stagingIsolation');
+const { assertLocalQaServerEnvironment, LOCAL_QA_WEB_KEY } = require('../config/localQaIsolation');
 
 const genericLogin = () => new OtpError(401, 'invalid-credential', 'Invalid username or password.');
 const mappingError = () => new OtpError(409, 'account-mapping-invalid', 'Your account sign-in setup needs attention. Please contact support.');
@@ -52,6 +53,7 @@ const publicProfile = (profile, uid, email) => ({
 });
 let verifiedWebKey = null;
 async function getPasswordApiKey() {
+  if (assertLocalQaServerEnvironment()) return LOCAL_QA_WEB_KEY;
   const staging = isStaging();
   if (staging) assertStagingServerEnvironment();
   const expectedProject = staging ? STAGING_PROJECT_ID : firebaseWebConfig.projectId;
@@ -349,7 +351,10 @@ function createUsernameHandler(action, getAdmin = getFirebaseAdmin, { now = Date
       // project config so username login cannot fail solely from a missing env.
       const apiKey = await getPasswordApiKey();
       stage('FIREBASE_AUTH_STARTED');
-      const response = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${encodeURIComponent(apiKey)}`, {
+      const authBase = assertLocalQaServerEnvironment()
+        ? `http://${process.env.FIREBASE_AUTH_EMULATOR_HOST}/identitytoolkit.googleapis.com/v1`
+        : 'https://identitytoolkit.googleapis.com/v1';
+      const response = await fetch(`${authBase}/accounts:signInWithPassword?key=${encodeURIComponent(apiKey)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: user.email, password: body.password, returnSecureToken: true }),
