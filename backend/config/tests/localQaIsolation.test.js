@@ -61,7 +61,7 @@ test('local QA browser origin gate rejects production and external origins', () 
   assert.equal(isLocalQaBrowserOrigin('null'), false);
 });
 
-test('local QA API rejects the production web origin before route handling', async (t) => {
+test('local QA API applies its loopback origin policy to preflight and actual requests', async (t) => {
   const keys = { ...serverEnv, ALLOWED_ORIGINS: 'http://127.0.0.1:8082' };
   const original = Object.fromEntries(Object.keys(keys).map((key) => [key, process.env[key]]));
   for (const [key, value] of Object.entries(keys)) process.env[key] = value;
@@ -74,11 +74,17 @@ test('local QA API rejects the production web origin before route handling', asy
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   t.after(() => new Promise((resolve) => server.close(resolve)));
   const url = `http://127.0.0.1:${server.address().port}/health`;
-  const external = await fetch(url, { headers: { Origin: 'https://bluetap-beta.vercel.app' } });
-  assert.equal(external.status, 403);
-  assert.equal(external.headers.get('access-control-allow-origin'), null);
-  const local = await fetch(url, { headers: { Origin: 'http://127.0.0.1:8082' } });
-  assert.equal(local.status, 200);
+  for (const method of ['OPTIONS', 'GET']) {
+    const headers = { Origin: 'https://bluetap-beta.vercel.app' };
+    if (method === 'OPTIONS') headers['Access-Control-Request-Method'] = 'GET';
+    const external = await fetch(url, { method, headers });
+    assert.equal(external.status, 403);
+    assert.equal(external.headers.get('access-control-allow-origin'), null);
+    headers.Origin = 'http://127.0.0.1:8082';
+    const local = await fetch(url, { method, headers });
+    assert.equal(local.status, method === 'OPTIONS' ? 204 : 200);
+    assert.equal(local.headers.get('access-control-allow-origin'), headers.Origin);
+  }
 });
 
 test('local QA web configuration and backend URL cannot fall back to production or staging', () => {

@@ -1,3 +1,7 @@
+const { isStaging } = require('../config/stagingIsolation');
+
+const STAGING_WEB_ORIGIN = 'https://bluetap-staging-web.vercel.app';
+
 const DEFAULT_DEVELOPMENT_ORIGINS = new Set([
   'http://localhost:19006',
   'http://localhost:8081',
@@ -32,6 +36,9 @@ function isSameOrigin(req, origin) {
 function isAllowedOrigin(req, origin, env = process.env) {
   if (!origin) return true;
   const normalized = String(origin).replace(/\/+$/, '');
+  if (isStaging(env)) {
+    return normalized === STAGING_WEB_ORIGIN && configuredOrigins(env).has(STAGING_WEB_ORIGIN);
+  }
   if (isSameOrigin(req, normalized)) return true;
   if (TRUSTED_PRODUCTION_ORIGINS.has(normalized)) return true;
   if (configuredOrigins(env).has(normalized)) return true;
