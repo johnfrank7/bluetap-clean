@@ -169,6 +169,9 @@ export default function EmailVerificationPage() {
         }
         if (!profile) throw lastError || new Error('Your finalized profile is not available yet.');
         const destination = getPostAuthenticationDestination(profile);
+        if (destination === '/email-verification') {
+          return false;
+        }
         if (!rootNavigationState?.key) {
           setPendingDestination(destination);
           setMessage('Finishing your account setup...');
@@ -199,8 +202,8 @@ export default function EmailVerificationPage() {
         if (!registration) await reload(account);
         const currentUser = auth.currentUser || account;
         if (!registration && currentUser.emailVerified) {
-          await continueAfterVerification(currentUser);
-          return { alreadyVerified: true };
+          const continued = await continueAfterVerification(currentUser);
+          if (continued) return { alreadyVerified: true };
         }
 
         const currentDraft = registration ? getPendingRegistration() : null;
@@ -282,8 +285,8 @@ export default function EmailVerificationPage() {
         await reload(currentUser);
         const refreshedUser = auth.currentUser || currentUser;
         if (refreshedUser.emailVerified) {
-          await continueAfterVerification(refreshedUser);
-          return;
+          const continued = await continueAfterVerification(refreshedUser);
+          if (continued) return;
         }
       } catch (error) {
         console.log('Email OTP initial refresh error:', error.message);

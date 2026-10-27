@@ -307,11 +307,16 @@ export default function LoginPage() {
   const finishSuccessfulLogin = (profile) => {
     const role = normalizeRole(profile?.role || profile);
 
+    const isSplitUnverifiedProfile =
+      profile?.emailOtpVerification?.status === 'reconciliation-failed' ||
+      profile?.emailOtpVerification?.profileSynced === false ||
+      (profile?.emailVerified === false && profile?.emailOtpVerification?.status !== 'not_required');
+
     if (
       (role === 'manager' || role === 'requester' || role === 'distributor') &&
       profile?.mustChangePassword !== true &&
       requiresEmailVerification(profile) &&
-      !auth.currentUser?.emailVerified
+      (!auth.currentUser?.emailVerified || isSplitUnverifiedProfile)
     ) {
       clearAllAuthSessions();
       setLoading(false);

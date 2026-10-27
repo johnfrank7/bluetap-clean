@@ -24,6 +24,8 @@ test('Admin-created roles enter existing OTP verification after required passwor
     assert.equal(destination(profile), '/email-verification');
     assert.equal(destination({ ...profile, mustChangePassword: true }), '/required-password-change');
     auth.currentUser.emailVerified = true;
+    assert.equal(destination({ ...profile, emailVerified: false }), '/email-verification');
+    assert.equal(destination({ ...profile, emailOtpVerification: { status: 'reconciliation-failed', profileSynced: false } }), '/email-verification');
     assert.equal(destination(profile), role === 'manager' ? '/manager/dashboard'
       : role === 'requester' ? '/requester/r_dashboard' : '/distributor/d_dashboard');
     auth.currentUser.emailVerified = false;
@@ -44,6 +46,7 @@ test('existing accounts follow their own email requirement, including disabled r
     assert.equal(destination(profile), home);
     assert.equal(destination({ ...profile, emailVerificationRequired: true }), '/email-verification');
     auth.currentUser.emailVerified = true;
+    assert.equal(destination({ ...profile, emailVerificationRequired: true, emailVerified: false }), '/email-verification');
     assert.equal(destination({ ...profile, emailVerificationRequired: true }), home);
     auth.currentUser.emailVerified = false;
   }
@@ -53,10 +56,11 @@ test('public login handoff skips OTP for verified and OTP-disabled accounts with
   const page = readFileSync(resolve(root, 'app/login.jsx'), 'utf8');
   const helpers = page.slice(page.indexOf('const normalizeApprovalStatus'), page.indexOf('const BASE_SCROLL_PADDING_BOTTOM'));
   const submit = page.slice(page.indexOf('  const finishSuccessfulLogin'), page.indexOf('  const confirmRestartIncompleteRegistration'));
-  for (const [required, verified, expected] of [
-    [false, false, '/requester/r_dashboard'],
-    [true, true, '/requester/r_dashboard'],
-    [true, false, '/email-verification'],
+  for (const [required, verified, profileEmailVerified, expected] of [
+    [false, false, false, '/requester/r_dashboard'],
+    [true, true, true, '/requester/r_dashboard'],
+    [true, false, false, '/email-verification'],
+    [true, true, false, '/email-verification'],
   ]) {
     const events = [];
     const auth = { currentUser: { uid: 'account-1', emailVerified: verified } };
@@ -67,7 +71,7 @@ test('public login handoff skips OTP for verified and OTP-disabled accounts with
       saveRoleSession: () => events.push('session'), getPostAuthenticationDestination: destination,
       console: { info: () => {} },
     });
-    handoff({ role: 'requester', emailVerificationRequired: required, registrationCompleted: true,
+    handoff({ role: 'requester', emailVerificationRequired: required, emailVerified: profileEmailVerified, registrationCompleted: true,
       faceVerification: { required: false, status: 'not_required' } });
     assert.equal(events.at(-1), expected);
     assert.equal(events.includes('session'), expected !== '/email-verification');

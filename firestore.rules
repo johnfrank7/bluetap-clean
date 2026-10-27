@@ -16,16 +16,31 @@ service cloud.firestore {
         || currentUser().get('approvalStatus', '') in ['inactive', 'disabled', 'suspended', 'terminated'];
     }
 
+    function hasInterruptedOtpReconciliation() {
+      return (currentUser().get('emailVerified', true) == false
+          && currentUser().get('emailOtpVerification', {}).get('status', '') != 'not_required')
+        || currentUser().get('emailOtpVerification', {}).get('status', '') == 'reconciliation-failed'
+        || currentUser().get('emailOtpVerification', {}).get('profileSynced', true) == false
+        || (exists(/databases/$(database)/documents/emailOtpVerifications/$(request.auth.uid))
+          && (get(/databases/$(database)/documents/emailOtpVerifications/$(request.auth.uid)).data.get('status', '') == 'reconciliation-failed'
+            || get(/databases/$(database)/documents/emailOtpVerifications/$(request.auth.uid)).data.get('profileSynced', true) == false));
+    }
+
+    function hasVerifiedOperationalEmail() {
+      return (currentUser().get('emailVerificationRequired', false) != true
+          && currentUser().get('accountSource', '') != 'admin_created')
+        || (request.auth.token.get('email_verified', false) == true
+          && request.auth.token.get('email', '').lower() == currentUser().get('email', '').lower()
+          && !hasInterruptedOtpReconciliation());
+    }
+
     // Canonical accountStatus is authoritative when present. Legacy profiles
     // without it remain compatible unless an existing field explicitly blocks
     // the account. Unknown explicit values fail closed.
     function hasActiveGlobalAccount() {
       return signedIn()
         && currentUser().get('accountActionHoldIntentId', '') == ''
-        && ((currentUser().get('emailVerificationRequired', false) != true
-            && currentUser().get('accountSource', '') != 'admin_created')
-          || (request.auth.token.get('email_verified', false) == true
-            && request.auth.token.get('email', '').lower() == currentUser().get('email', '').lower()))
+        && hasVerifiedOperationalEmail()
         && (currentUser().get('accountStatus', '') == 'active'
           || (currentUser().get('accountStatus', '') == '' && !legacyAccountStateBlocked()));
     }
@@ -291,6 +306,7 @@ service cloud.firestore {
       // server-owned and cannot be elevated by a client update.
       allow update: if request.auth != null && request.auth.uid == uid
         && resource.data.get('accountActionHoldIntentId', '') == ''
+        && hasVerifiedOperationalEmail()
         && !request.resource.data.diff(resource.data).affectedKeys().hasAny([
           'uid', 'email', 'role', 'accountSource', 'verificationSource', 'status', 'distributorStatus', 'approvalStatus', 'accountStatus',
           'accountActionHoldIntentId',
