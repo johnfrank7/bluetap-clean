@@ -273,12 +273,14 @@ function createAdminAccountsHandler(getAdmin = getFirebaseAdmin, dependencies = 
         let publicUid = null;
         let createdProfile = null;
         await db.runTransaction(async (tx) => {
-          publicUid = await generateNextPublicUid(tx, db, role);
-          if (usernameNormalized) {
-            const ref = db.collection('usernames').doc(usernameNormalized);
-            const existing = await tx.get(ref);
+          const usernameRef = usernameNormalized ? db.collection('usernames').doc(usernameNormalized) : null;
+          if (usernameRef) {
+            const existing = await tx.get(usernameRef);
             if (existing.exists) throw new OtpError(409, 'USERNAME_ALREADY_IN_USE', 'This username is already in use.');
-            tx.create(ref, { uid: user.uid, createdAt: now });
+          }
+          publicUid = await generateNextPublicUid(tx, db, role);
+          if (usernameRef) {
+            tx.create(usernameRef, { uid: user.uid, createdAt: now });
           }
           createdProfile = {
             uid: user.uid, email, publicUid, displayUid: publicUid, unique_id: publicUid,

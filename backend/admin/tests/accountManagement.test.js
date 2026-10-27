@@ -184,7 +184,28 @@ function managementFixture() {
     ['manager-1', { uid: 'manager-1', email: 'manny@example.test', emailVerified: true, customClaims: { manager: true }, metadata: {} }],
     ['distributor-1', { uid: 'distributor-1', email: 'dina@example.test', emailVerified: true, customClaims: {}, metadata: {} }],
   ]);
-  const db = { collection, runTransaction: async (run) => run({ get: async (ref) => snapshot(ref.path), create(ref, data) { records.set(ref.path, data); }, update(ref, data) { records.set(ref.path, { ...records.get(ref.path), ...data }); }, set(ref, data) { records.set(ref.path, data); }, delete(ref) { records.delete(ref.path); } }) };
+  const db = { collection, runTransaction: async (run) => {
+    let hasWritten = false;
+    const staged = [];
+    const result = await run({
+      get: async (ref) => {
+        if (hasWritten) throw new Error('Firestore transactions require all reads to be executed before all writes.');
+        return snapshot(ref.path);
+      },
+      create(ref, data) {
+        hasWritten = true;
+        staged.push(() => {
+          if (records.has(ref.path)) throw new Error(`Document already exists: ${ref.path}`);
+          records.set(ref.path, data);
+        });
+      },
+      update(ref, data) { hasWritten = true; staged.push(() => records.set(ref.path, { ...records.get(ref.path), ...data })); },
+      set(ref, data, options) { hasWritten = true; staged.push(() => records.set(ref.path, options?.merge ? { ...records.get(ref.path), ...data } : data)); },
+      delete(ref) { hasWritten = true; staged.push(() => records.delete(ref.path)); },
+    });
+    staged.forEach((apply) => apply());
+    return result;
+  } };
   const auth = {
     verifyIdToken: async (token) => token === 'admin-token' ? { uid: 'admin-1', admin: true, role: 'admin' } : { uid: 'manager-1', manager: true, role: 'manager' },
     getUser: async (uid) => authUsers.get(uid), getUserByEmail: async (email) => { const user = [...authUsers.values()].find((item) => item.email === email); if (!user) throw Object.assign(new Error('not found'), { code: 'auth/user-not-found' }); return user; }, listUsers: async () => ({ users: [...authUsers.values()] }),
@@ -378,3 +399,178 @@ test('backfillLegacyUids is idempotent, converts legacy hyphenated UIDs, and doe
   assert.equal(fixture.records.get('users/legacy-manager').publicUid, 'Man009');
   assert.equal(fixture.records.get('users/requester-duplicate-oldest').publicUid, 'Req005');
 });
+
+test('Admin account creation enforces Firestore read-before-write, rejects duplicate usernames, and leaves no partial state on transaction failure', async () => {
+  const fixture = managementFixture();
+  const handler = accountHandler(fixture);
+
+  const distRes = await call(handler, 'POST', 'admin-token', {
+    role: 'distributor', fullName: 'Dist One', email: 'dist1@example.test',
+    username: 'dist_one', temporaryPassword: 'SafePassword2026', branchId: 'north',
+  });
+  assert.equal(distRes.statusCode, 201);
+  assert.equal(distRes.body.account.publicUid, 'Dis001');
+  assert.equal(fixture.records.get('usernames/dist_one')?.uid, distRes.body.account.uid);
+
+  const reqRes = await call(handler, 'POST', 'admin-token', {
+    role: 'requester', fullName: 'Req One', email: 'req1@example.test',
+    username: 'req_one', temporaryPassword: 'SafePassword2026',
+  });
+  assert.equal(reqRes.statusCode, 201);
+  assert.equal(reqRes.body.account.publicUid, 'Req001');
+  assert.equal(fixture.records.get('usernames/req_one')?.uid, reqRes.body.account.uid);
+
+  const mgrRes = await call(handler, 'POST', 'admin-token', {
+    role: 'manager', fullName: 'Mgr One', email: 'mgr1@example.test',
+    temporaryPassword: 'SafePassword2026', branchId: 'north',
+  });
+  assert.equal(mgrRes.statusCode, 201);
+  assert.equal(mgrRes.body.account.publicUid, 'Man001');
+
+  const authCountBeforeDup = fixture.authUsers.size;
+  const dupPrecheck = await call(handler, 'POST', 'admin-token', {
+    role: 'requester', fullName: 'Req Dup', email: 'reqdup@example.test',
+    username: 'req_one', temporaryPassword: 'SafePassword2026',
+  });
+  assert.equal(dupPrecheck.statusCode, 409);
+  assert.equal(dupPrecheck.body.error.reason, 'USERNAME_ALREADY_IN_USE');
+  assert.equal(fixture.authUsers.size, authCountBeforeDup);
+  assert.equal(fixture.records.get('accountCounters/requester')?.lastNumber, 1);
+
+  // Simulate a concurrent username claim racing between pre-check and transaction execution
+  const { auth, db } = fixture.getAdmin();
+  const originalRunTransaction = db.runTransaction;
+  db.runTransaction = async (run) => {
+    fixture.records.set('usernames/raced_user', { uid: 'concurrent-owner' });
+    return originalRunTransaction(run);
+  };
+  const raced = await call(handler, 'POST', 'admin-token', {
+    role: 'distributor', fullName: 'Raced Dist', email: 'raced@example.test',
+    username: 'raced_user', temporaryPassword: 'SafePassword2026', branchId: 'north',
+  });
+  db.runTransaction = originalRunTransaction;
+  assert.equal(raced.statusCode, 409);
+  assert.equal(raced.body.error.reason, 'USERNAME_ALREADY_IN_USE');
+  assert.equal([...fixture.authUsers.values()].some((u) => u.email === 'raced@example.test'), false);
+  assert.equal([...fixture.records.values()].some((d) => d?.email === 'raced@example.test'), false);
+  assert.equal(fixture.records.get('usernames/raced_user')?.uid, 'concurrent-owner');
+  assert.equal(fixture.records.get('accountCounters/distributor')?.lastNumber, 1);
+});
+
+const emulatorReady = Boolean(
+  process.env.FIRESTORE_EMULATOR_HOST &&
+  process.env.FIREBASE_AUTH_EMULATOR_HOST &&
+  (!process.env.GCLOUD_PROJECT || process.env.GCLOUD_PROJECT === 'demo-bluetap')
+);
+
+test('real Auth and Firestore emulators provision Admin-created Distributor, Requester, and Manager accounts atomically and reject duplicate usernames without partial records',
+  { skip: !emulatorReady }, async () => {
+    const { randomUUID } = require('node:crypto');
+    const { initializeApp, deleteApp } = require('firebase-admin/app');
+    const { getAuth } = require('firebase-admin/auth');
+    const { getFirestore } = require('firebase-admin/firestore');
+    const suffix = randomUUID().slice(0, 8);
+    const projectId = 'demo-bluetap';
+    const app = initializeApp({ projectId }, `admin-create-tx-${suffix}`);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+    const adminUid = `admin-${suffix}`;
+    const branchId = `branch-${suffix}`;
+    try {
+      await db.collection('users').doc(adminUid).set({ uid: adminUid, role: 'admin', email: `admin-${suffix}@example.test`, accountStatus: 'active' });
+      await db.collection('branches').doc(branchId).set({ name: 'North Emulator Branch', code: 'NEB', status: 'active' });
+      const authFacade = {
+        verifyIdToken: async (token) => token === 'admin-token' ? { uid: adminUid, admin: true, role: 'admin', email: `admin-${suffix}@example.test` } : Promise.reject(new Error('invalid token')),
+        getUser: (uid) => auth.getUser(uid),
+        getUserByEmail: (email) => auth.getUserByEmail(email),
+        listUsers: (max) => auth.listUsers(max),
+        createUser: (props) => auth.createUser(props),
+        deleteUser: (uid) => auth.deleteUser(uid),
+        setCustomUserClaims: (uid, claims) => auth.setCustomUserClaims(uid, claims),
+        updateUser: (uid, props) => auth.updateUser(uid, props),
+        revokeRefreshTokens: (uid) => auth.revokeRefreshTokens(uid),
+      };
+      const handler = createAdminAccountsHandler(() => ({ auth: authFacade, db }), {
+        sendEmail: async () => ({ provider: 'test', providerStatus: 200 }),
+      });
+
+      // 1. Admin-created Distributor (with username)
+      const distUsername = `dist_${suffix}`.slice(0, 20);
+      const distEmail = `dist-${suffix}@example.test`;
+      const distRes = await call(handler, 'POST', 'admin-token', {
+        role: 'distributor', fullName: 'Emulator Distributor', email: distEmail,
+        username: distUsername, temporaryPassword: 'SafePassword2026', branchId,
+      });
+      assert.equal(distRes.statusCode, 201);
+      const distUid = distRes.body.account.uid;
+      assert.match(distRes.body.account.publicUid, /^Dis\d{3,}$/);
+      assert.equal((await auth.getUser(distUid)).emailVerified, false);
+      assert.equal((await db.collection('usernames').doc(distUsername).get()).data()?.uid, distUid);
+      assert.equal((await db.collection('users').doc(distUid).get()).data()?.accountSource, 'admin_created');
+
+      // 2. Admin-created Requester (with username)
+      const reqUsername = `req_${suffix}`.slice(0, 20);
+      const reqEmail = `req-${suffix}@example.test`;
+      const reqRes = await call(handler, 'POST', 'admin-token', {
+        role: 'requester', fullName: 'Emulator Requester', email: reqEmail,
+        username: reqUsername, temporaryPassword: 'SafePassword2026',
+      });
+      assert.equal(reqRes.statusCode, 201);
+      const reqUid = reqRes.body.account.uid;
+      assert.match(reqRes.body.account.publicUid, /^Req\d{3,}$/);
+      assert.equal((await auth.getUser(reqUid)).emailVerified, false);
+      assert.equal((await db.collection('usernames').doc(reqUsername).get()).data()?.uid, reqUid);
+      assert.equal((await db.collection('users').doc(reqUid).get()).data()?.accountSource, 'admin_created');
+
+      // 3. Admin-created Manager (without username)
+      const mgrEmail = `mgr-${suffix}@example.test`;
+      const mgrRes = await call(handler, 'POST', 'admin-token', {
+        role: 'manager', fullName: 'Emulator Manager', email: mgrEmail,
+        temporaryPassword: 'SafePassword2026', branchId,
+      });
+      assert.equal(mgrRes.statusCode, 201);
+      const mgrUid = mgrRes.body.account.uid;
+      assert.match(mgrRes.body.account.publicUid, /^Man\d{3,}$/);
+      const mgrAuthUser = await auth.getUser(mgrUid);
+      assert.equal(mgrAuthUser.emailVerified, false);
+      assert.equal(mgrAuthUser.customClaims?.manager, true);
+      assert.equal((await db.collection('users').doc(mgrUid).get()).data()?.accountSource, 'admin_created');
+
+      // 4. Duplicate username rejection (pre-check and in-transaction race) + rollback verification
+      const dupEmail = `dup-${suffix}@example.test`;
+      const dupRes = await call(handler, 'POST', 'admin-token', {
+        role: 'distributor', fullName: 'Duplicate Distributor', email: dupEmail,
+        username: distUsername, temporaryPassword: 'SafePassword2026', branchId,
+      });
+      assert.equal(dupRes.statusCode, 409);
+      assert.equal(dupRes.body.error.reason, 'USERNAME_ALREADY_IN_USE');
+      await assert.rejects(auth.getUserByEmail(dupEmail), (err) => err.code === 'auth/user-not-found');
+      assert.equal((await db.collection('usernames').doc(distUsername).get()).data()?.uid, distUid);
+
+      // In-transaction race: claim username right before db.runTransaction runs
+      const racedUsername = `race_${suffix}`.slice(0, 20);
+      const racedEmail = `race-${suffix}@example.test`;
+      const counterBeforeRace = (await db.collection('accountCounters').doc('requester').get()).data()?.lastNumber;
+      const realRunTransaction = db.runTransaction.bind(db);
+      db.runTransaction = async (updateFn) => {
+        await db.collection('usernames').doc(racedUsername).set({ uid: 'existing-race-winner', createdAt: new Date() });
+        return realRunTransaction(updateFn);
+      };
+      try {
+        const raceRes = await call(handler, 'POST', 'admin-token', {
+          role: 'requester', fullName: 'Raced Requester', email: racedEmail,
+          username: racedUsername, temporaryPassword: 'SafePassword2026',
+        });
+        assert.equal(raceRes.statusCode, 409);
+        assert.equal(raceRes.body.error.reason, 'USERNAME_ALREADY_IN_USE');
+      } finally {
+        db.runTransaction = realRunTransaction;
+      }
+      await assert.rejects(auth.getUserByEmail(racedEmail), (err) => err.code === 'auth/user-not-found');
+      assert.equal((await db.collection(' users'.trim()).where('email', '==', racedEmail).get()).empty, true);
+      assert.equal((await db.collection('usernames').doc(racedUsername).get()).data()?.uid, 'existing-race-winner');
+      assert.equal((await db.collection('accountCounters').doc('requester').get()).data()?.lastNumber, counterBeforeRace);
+    } finally {
+      await deleteApp(app);
+    }
+  });
