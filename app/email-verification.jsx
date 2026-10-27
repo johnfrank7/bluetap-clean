@@ -56,6 +56,18 @@ const getOtpError = (error) => {
   if (reason === 'provider-unavailable') {
     return 'Unable to send verification email. Please try again.';
   }
+  if (reason === 'EMAIL_TRANSPORT_NOT_CONFIGURED' || reason === 'OTP_SECRET_MISSING') {
+    return 'Email verification is not configured for this environment. Please contact BlueTap support.';
+  }
+  if (reason === 'EMAIL_TRANSPORT_AUTH_FAILED' || reason === 'EMAIL_SENDER_NOT_VERIFIED') {
+    return 'Email verification is temporarily unavailable. Please contact BlueTap support.';
+  }
+  if (reason === 'EMAIL_SEND_RATE_LIMITED') {
+    return 'Email delivery is busy. Please try again shortly.';
+  }
+  if (reason === 'EMAIL_SEND_FAILED') {
+    return 'Unable to send verification email. Please try again.';
+  }
   if (reason === 'no-active-code') return 'Please request a new verification code.';
   if (['registration-expired', 'invalid-registration', 'account-exists', 'username-taken', 'face-capture-required'].includes(reason)) return error.message;
   if (['face-service-preparing', 'FACE_SERVICE_PREPARING'].includes(reason)) {

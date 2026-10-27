@@ -30,6 +30,65 @@ test('Admin-created roles enter existing OTP verification after required passwor
   }
 });
 
+test('existing accounts follow their own email requirement, including disabled registration OTP', () => {
+  const auth = { currentUser: { emailVerified: false } };
+  const destination = loadService('services/authSession.js', { auth }, 'getPostAuthenticationDestination');
+  for (const [role, home] of [
+    ['requester', '/requester/r_dashboard'],
+    ['distributor', '/distributor/d_dashboard'],
+    ['manager', '/manager/dashboard'],
+  ]) {
+    const profile = { role, registrationCompleted: true, distributorStatus: 'active',
+      branchId: 'branch-1', faceVerification: { required: false, status: 'not_required' } };
+    assert.equal(destination({ ...profile, emailVerificationRequired: false }), home);
+    assert.equal(destination(profile), home);
+    assert.equal(destination({ ...profile, emailVerificationRequired: true }), '/email-verification');
+    auth.currentUser.emailVerified = true;
+    assert.equal(destination({ ...profile, emailVerificationRequired: true }), home);
+    auth.currentUser.emailVerified = false;
+  }
+});
+
+test('public login handoff skips OTP for verified and OTP-disabled accounts without bypassing required email', () => {
+  const page = readFileSync(resolve(root, 'app/login.jsx'), 'utf8');
+  const helpers = page.slice(page.indexOf('const normalizeApprovalStatus'), page.indexOf('const BASE_SCROLL_PADDING_BOTTOM'));
+  const submit = page.slice(page.indexOf('  const finishSuccessfulLogin'), page.indexOf('  const confirmRestartIncompleteRegistration'));
+  for (const [required, verified, expected] of [
+    [false, false, '/requester/r_dashboard'],
+    [true, true, '/requester/r_dashboard'],
+    [true, false, '/email-verification'],
+  ]) {
+    const events = [];
+    const auth = { currentUser: { uid: 'account-1', emailVerified: verified } };
+    const destination = loadService('services/authSession.js', { auth }, 'getPostAuthenticationDestination');
+    const handoff = vm.runInNewContext(`${helpers}\n${submit}\nfinishSuccessfulLogin`, {
+      auth, clearAllAuthSessions: () => events.push('clear'),
+      setLoading: () => {}, router: { replace: (path) => events.push(path) },
+      saveRoleSession: () => events.push('session'), getPostAuthenticationDestination: destination,
+      console: { info: () => {} },
+    });
+    handoff({ role: 'requester', emailVerificationRequired: required, registrationCompleted: true,
+      faceVerification: { required: false, status: 'not_required' } });
+    assert.equal(events.at(-1), expected);
+    assert.equal(events.includes('session'), expected !== '/email-verification');
+  }
+});
+
+test('email verification explains local mail configuration and delivery failures accurately', () => {
+  const page = readFileSync(resolve(root, 'app/email-verification.jsx'), 'utf8');
+  const helper = page.slice(page.indexOf('const getOtpError ='), page.indexOf('export default function EmailVerificationPage'));
+  const getOtpError = vm.runInNewContext(`${helper}\ngetOtpError`, {});
+  for (const reason of ['EMAIL_TRANSPORT_NOT_CONFIGURED', 'OTP_SECRET_MISSING']) {
+    assert.match(getOtpError({ details: { reason } }), /not configured for this environment/);
+  }
+  for (const reason of ['EMAIL_TRANSPORT_AUTH_FAILED', 'EMAIL_SENDER_NOT_VERIFIED']) {
+    assert.match(getOtpError({ details: { reason } }), /contact BlueTap support/);
+  }
+  assert.match(getOtpError({ details: { reason: 'EMAIL_SEND_RATE_LIMITED' } }), /try again shortly/);
+  assert.match(getOtpError({ details: { reason: 'EMAIL_SEND_FAILED' } }), /try again/);
+  assert.match(getOtpError({ details: { reason: 'incorrect-code' } }), /incorrect/);
+});
+
 test('public error mapping never guesses a privileged account from a generic error', () => {
   for (const code of ['INVALID_CREDENTIALS', 'username/invalid-credential', 'auth/wrong-password']) {
     assert.equal(getPublicLoginErrorMessage({ code }), 'Invalid username or password.');

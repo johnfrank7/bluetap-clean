@@ -6,7 +6,16 @@ const request = async (body) => {
   try {
     const response = await fetch(getApiUrl('/api/auth/password-recovery'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: controller.signal });
     const data = await response.json().catch(() => null);
-    if (!response.ok) { const error = new Error(data?.error?.message || 'Password recovery is temporarily unavailable. Please try again.'); error.code = data?.error?.code || 'RECOVERY_UNAVAILABLE'; error.retryAfterSeconds = data?.error?.retryAfterSeconds; throw error; }
+    if (!response.ok) {
+      const code = data?.error?.code || 'RECOVERY_UNAVAILABLE';
+      const message = code === 'MAIL_PROVIDER_CONFIG_MISSING'
+        ? 'Password recovery email is unavailable in this environment. Please contact BlueTap support.'
+        : data?.error?.message || 'Password recovery is temporarily unavailable. Please try again.';
+      const error = new Error(message);
+      error.code = code;
+      error.retryAfterSeconds = data?.error?.retryAfterSeconds;
+      throw error;
+    }
     return data || {};
   } catch (error) {
     if (error.code) throw error;
