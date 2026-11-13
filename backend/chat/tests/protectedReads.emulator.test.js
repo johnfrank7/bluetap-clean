@@ -155,7 +155,7 @@ test('Firestore authorization enforces canonical chat relationships', { skip: !h
     const m3 = client('m3', { role: 'manager' });
     const a1 = client('a1', { admin: true });
 
-    await t.test('Admin-created accounts can read their profile for OTP but cannot use protected data until Auth email matches and is verified', async () => {
+    await t.test('Admin-created accounts can read their profile for OTP, while raw products are denied to unverified, mismatched, and verified requesters, and allowed to authorized Admin', async () => {
       const uid = 'admin-created-email-gate';
       const email = 'created@example.test';
       await seed(`users/${uid}`, { role: 'requester', accountStatus: 'active',
@@ -163,12 +163,13 @@ test('Firestore authorization enforces canonical chat relationships', { skip: !h
       await seed('products/email-gate-probe', { name: 'Test product' });
       const unverified = client(uid, { email, email_verified: false });
       const mismatched = client(uid, { email: 'other@example.test', email_verified: true });
-      const verified = client(uid, { email, email_verified: true });
+      const verifiedRequester = client(uid, { email, email_verified: true });
       assert.equal((await getDoc(doc(unverified, `users/${uid}`))).exists(), true);
       await denied(getDoc(doc(unverified, 'products/email-gate-probe')));
       await denied(getDoc(doc(mismatched, 'products/email-gate-probe')));
+      await denied(getDoc(doc(verifiedRequester, 'products/email-gate-probe')));
       await denied(setDoc(doc(unverified, `users/${uid}`), { accountSource: 'public_registration' }, { merge: true }));
-      assert.equal((await getDoc(doc(verified, 'products/email-gate-probe'))).exists(), true);
+      assert.equal((await getDoc(doc(a1, 'products/email-gate-probe'))).exists(), true);
     });
 
     await t.test('private order, activity, and moderation reads remain scoped', async () => {
