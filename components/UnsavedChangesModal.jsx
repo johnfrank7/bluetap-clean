@@ -1,24 +1,30 @@
 import React from 'react';
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
-import { useAdminTheme } from './AdminTheme';
+import { useOptionalAdminTheme } from './AdminTheme';
+import { useBlueTapTheme } from './BlueTapTheme';
 
 export default function UnsavedChangesModal({
   visible,
   onContinueEditing,
   onDiscardAndLeave,
+  onSaveAndLeave,
+  saving = false,
+  error = '',
   title = 'You have unfinished changes.',
-  message = 'If you leave now, any changes you made will be lost. Do you want to continue editing or discard your changes?',
+  message,
   discardLabel = 'Discard Changes and Leave',
-  continueLabel = 'Keep Editing',
+  continueLabel = onSaveAndLeave ? 'Continue Editing' : 'Keep Editing',
 }) {
-  const { colors } = useAdminTheme();
+  const adminTheme = useOptionalAdminTheme();
+  const portalTheme = useBlueTapTheme();
+  const colors = adminTheme?.colors || portalTheme.colors;
 
   return (
     <Modal
       visible={visible}
       transparent
       animationType="fade"
-      onRequestClose={onContinueEditing}
+      onRequestClose={saving ? undefined : onContinueEditing}
     >
       <View style={[styles.backdrop, { backgroundColor: colors.overlay }]}>
         <View
@@ -35,16 +41,20 @@ export default function UnsavedChangesModal({
             <Text style={[styles.iconText, { color: colors.warning }]}>⚠</Text>
           </View>
           <Text style={[styles.title, { color: colors.textPrimary }]}>{title}</Text>
-          <Text style={[styles.body, { color: colors.textSecondary }]}>{message}</Text>
+          <Text style={[styles.body, { color: colors.textSecondary }]}>{message || (onSaveAndLeave ? 'Save your changes, discard them, or continue editing.' : 'Discard your changes or continue editing.')}</Text>
+          {!!error && <Text accessibilityRole="alert" style={[styles.error, { color: colors.danger }]}>{error}</Text>}
           <View style={styles.actions}>
+            {onSaveAndLeave && <Pressable accessibilityRole="button" accessibilityLabel="Keep Changes" disabled={saving} onPress={onSaveAndLeave} style={[styles.continueButton, { backgroundColor: colors.primaryAction }, saving && styles.disabled]}><Text style={[styles.continueText, { color: colors.onPrimary }]}>{saving ? 'Saving…' : 'Keep Changes'}</Text></Pressable>}
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={discardLabel}
               onPress={onDiscardAndLeave}
+              disabled={saving}
               style={({ pressed }) => [
                 styles.discardButton,
                 { borderColor: colors.danger, backgroundColor: colors.dangerSoft },
                 pressed && { opacity: 0.8 },
+                saving && styles.disabled,
               ]}
             >
               <Text style={[styles.discardText, { color: colors.danger }]}>
@@ -55,13 +65,15 @@ export default function UnsavedChangesModal({
               accessibilityRole="button"
               accessibilityLabel={continueLabel}
               onPress={onContinueEditing}
+              disabled={saving}
               style={({ pressed }) => [
                 styles.continueButton,
-                { backgroundColor: colors.primaryAction },
+                { backgroundColor: colors.surfaceAlt, borderWidth: 1, borderColor: colors.border },
                 pressed && { opacity: 0.88 },
+                saving && styles.disabled,
               ]}
             >
-              <Text style={[styles.continueText, { color: colors.onPrimary }]}>
+              <Text style={[styles.continueText, { color: colors.textPrimary }]}>
                 {continueLabel}
               </Text>
             </Pressable>
@@ -115,13 +127,11 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   actions: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'flex-end',
+    flexDirection: 'column',
     gap: 10,
   },
   discardButton: {
-    minHeight: 42,
+    minHeight: 44,
     paddingHorizontal: 14,
     borderRadius: 10,
     borderWidth: 1,
@@ -133,7 +143,7 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   continueButton: {
-    minHeight: 42,
+    minHeight: 44,
     paddingHorizontal: 16,
     borderRadius: 10,
     justifyContent: 'center',
@@ -143,4 +153,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '900',
   },
+  error: { fontSize: 13, marginBottom: 12 },
+  disabled: { opacity: 0.65 },
 });

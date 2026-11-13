@@ -2,6 +2,7 @@ const { randomUUID } = require('node:crypto');
 const { publishChatActivity } = require('./chatActivity');
 const { historyId, historyIsReadable, historyRecord } = require('./chatHistory');
 const { getFirebaseAdmin } = require('../firebase/firebaseAdmin');
+const { resolveRequesterName } = require('../orders/requesterIdentity');
 const { canonicalAccountStatus } = require('../auth/accountStatus');
 const { assertChatSendAllowed } = require('../moderation/moderationService');
 const { verifiedIdentity, requireVerifiedOperationalEmail } = require('../auth/authorization');
@@ -10,6 +11,7 @@ const { OtpError } = require('../utils/otpError');
 const { getAssignmentVersion, getBranchMembershipVersion } = require('../utils/relationshipEpochs');
 const {
   CONVERSATION_TYPES,
+  FAILED_DELIVERY_CHAT_GRACE_MS,
   TERMINAL_ORDER_STATUSES,
   assertCanonicalConversationParticipants,
   authorizeBranchCoordination,
@@ -36,7 +38,7 @@ const {
   hasActiveAuthorityReason,
   normalizeAuthorityReasons,
 } = require('./conversationService');
-const { isAccessExpired, participantAccessProjection } = require('./conversationLifecycleService');
+const { POST_ORDER_FOLLOWUP_DAYS, isAccessExpired, participantAccessProjection } = require('./conversationLifecycleService');
 const {
   advanceParticipantReadState,
   applyMessageToParticipantState,
@@ -229,11 +231,11 @@ function safeOrderContext(order = {}, requester = {}) {
     orderId,
     requestId: reference,
     publicOrderReference: reference,
-    requesterName: clean(order.requesterNameSnapshot || order.requester_name || profileDisplayName(requester), 160),
+    requesterName: resolveRequesterName(order, requester),
     status: normalizedStatus(order.status),
     ...(Number.isFinite(total) ? { totalAtOrder: total } : {}),
     currentBranchName: clean(order.currentBranchNameSnapshot || order.branchNameSnapshot || order.water_station, 160),
-    ...(order.distributorChatGraceUntil ? { distributorChatGraceUntil: order.distributorChatGraceUntil } : {}),
+    ...((normalizedStatus(order.status) === 'delivery_failed' ? (failedDeliveryChatEndsAt(order) || order.distributorChatGraceUntil) : order.distributorChatGraceUntil) ? { distributorChatGraceUntil: normalizedStatus(order.status) === 'delivery_failed' ? (failedDeliveryChatEndsAt(order) || order.distributorChatGraceUntil) : order.distributorChatGraceUntil } : {}),
     ...(order.deliveryFailedAt || order.delivery_failed_at ? { deliveryFailedAt: order.deliveryFailedAt || order.delivery_failed_at } : {}),
   };
 }
@@ -352,6 +354,7 @@ async function resolveConversationIntent(tx, db, callerUid, callerClaims, body, 
         order,
         assignmentVersion,
         now,
+        mode: 'read',
       });
     } catch (error) {
       if (error instanceof OtpError && ['INVALID_ASSIGNMENT_VERSION', 'CHAT_ASSIGNMENT_VERSION_STALE'].includes(error.reason)) {
@@ -361,6 +364,7 @@ async function resolveConversationIntent(tx, db, callerUid, callerClaims, body, 
     }
     return {
       type,
+      order,
       authority: { ...authority, branchId },
       authorityReasons: {},
       createdBy,
@@ -443,6 +447,9 @@ async function resolveOrCreateConversation({ db, callerUid, callerClaims, body, 
         if (resolved.reason === AUTHORITY_REASONS.POST_ORDER_FOLLOWUP) {
           throw new OtpError(409, 'CHAT_READ_ONLY', 'Completed delivery history is read-only.');
         }
+        if (resolved.type === CONVERSATION_TYPES.REQUESTER_DISTRIBUTOR && resolved.authority?.sendExpired) {
+          throw new OtpError(403, 'CHAT_ASSIGNMENT_NOT_WRITABLE', 'The failed-delivery messaging window has ended.');
+        }
         const conversationId = createConversationId();
         conversationRef = db.collection('chatConversations').doc(conversationId);
         const foundation = { ...buildConversationFoundation({ ...resolved, now }), ...(resolved.presentation || {}) };
@@ -482,9 +489,29 @@ async function resolveOrCreateConversation({ db, callerUid, callerClaims, body, 
       conversation = { ...conversation, authorityReasons, status, accessEndsAt, readAccessEndsAt: accessEndsAt, ...projection, ...(resolved.presentation || {}), updatedAt: now };
     } else if (!created) {
       const directAssignment = resolved.type === CONVERSATION_TYPES.REQUESTER_DISTRIBUTOR;
-      const status = directAssignment ? CONVERSATION_STATUS.ACTIVE : conversation.status;
-      const accessEndsAt = directAssignment ? (resolved.authority.accessEndsAt || null) : conversation.accessEndsAt;
-      const accessFields = directAssignment ? { accessEndsAt, readAccessEndsAt: accessEndsAt } : {};
+      const existingDeadline = timeOf(conversation.accessEndsAt);
+      const resolvedDeadline = timeOf(resolved.authority.accessEndsAt);
+      const accessEndsAt = directAssignment
+        ? (existingDeadline > 0 && resolvedDeadline > 0
+          ? (existingDeadline <= resolvedDeadline ? conversation.accessEndsAt : resolved.authority.accessEndsAt)
+          : (resolved.authority.accessEndsAt || (normalizedStatus(resolved.order?.status) === 'delivery_failed' ? conversation.accessEndsAt : null) || null))
+        : conversation.accessEndsAt;
+      const directSendExpired = directAssignment
+        && normalizedStatus(resolved.order?.status) === 'delivery_failed'
+        && (Boolean(resolved.authority?.sendExpired) || isAccessExpired(accessEndsAt, now));
+      if (directSendExpired && !hasFailedDeliveryHistoricalRead(conversation, resolved.order, timeOf(accessEndsAt), timeOf(now))) {
+        throw new OtpError(403, 'CHAT_NOT_AUTHORIZED', 'Historical conversation access has ended.');
+      }
+      const status = directAssignment
+        ? (directSendExpired ? CONVERSATION_STATUS.READ_ONLY : CONVERSATION_STATUS.ACTIVE)
+        : conversation.status;
+      const accessFields = directAssignment
+        ? {
+          accessEndsAt,
+          readAccessEndsAt: accessEndsAt,
+          ...(accessEndsAt ? { lifecycleReason: 'delivery_failed_grace' } : {}),
+        }
+        : {};
       const projection = participantAccessProjection(conversation, status === CONVERSATION_STATUS.ACTIVE ? 'active' : 'read_only');
       tx.update(conversationRef, { status, ...accessFields, ...projection, ...(resolved.presentation || {}), updatedAt: now });
       conversation = { ...conversation, status, ...accessFields, ...projection, ...(resolved.presentation || {}), updatedAt: now };
@@ -496,9 +523,30 @@ async function resolveOrCreateConversation({ db, callerUid, callerClaims, body, 
   });
 }
 
+const FAILED_DELIVERY_HISTORICAL_READ_MS = POST_ORDER_FOLLOWUP_DAYS * 24 * 60 * 60 * 1000;
+
 function hasBoundedHistoricalRead(conversation, nowMs) {
   return conversation.status === CONVERSATION_STATUS.READ_ONLY &&
     timeOf(conversation.readAccessEndsAt || conversation.accessEndsAt) > nowMs;
+}
+
+function hasFailedDeliveryHistoricalRead(conversation, order, trustedGraceEndsAt, nowMs) {
+  if (!conversation || conversation.status === CONVERSATION_STATUS.CLOSED || conversation.retentionExpired === true) return false;
+  if (!trustedGraceEndsAt || trustedGraceEndsAt <= 0) return false;
+  const retentionExpiresAt = timeOf(conversation.retentionExpiresAt);
+  if (retentionExpiresAt > 0 && retentionExpiresAt <= nowMs) return false;
+  const graceDerivedFailedAt = trustedGraceEndsAt - FAILED_DELIVERY_CHAT_GRACE_MS;
+  const orderFailedAt = timeOf(order?.firstDeliveryFailedAt || order?.initialDeliveryFailedAt || order?.deliveryFailedAt || order?.delivery_failed_at);
+  const failedAt = orderFailedAt > 0 && graceDerivedFailedAt > 0
+    ? Math.min(orderFailedAt, graceDerivedFailedAt)
+    : (graceDerivedFailedAt > 0 ? graceDerivedFailedAt : orderFailedAt);
+  if (failedAt <= 0 || nowMs >= failedAt + FAILED_DELIVERY_HISTORICAL_READ_MS) return false;
+  const storedAccessEndsAt = timeOf(conversation.accessEndsAt);
+  const storedReadEndsAt = timeOf(conversation.readAccessEndsAt);
+  if (storedReadEndsAt > 0 && storedReadEndsAt !== storedAccessEndsAt && storedReadEndsAt !== trustedGraceEndsAt && storedReadEndsAt <= nowMs) {
+    return false;
+  }
+  return true;
 }
 
 function reasonOrderIds(conversation, reason) {
@@ -539,7 +587,8 @@ async function authorizeConversation(tx, db, conversation, callerUid, callerClai
     await assertChatSendAllowed(tx, db, callerUid, branchContextId, nowMs);
   }
   if (conversation.status === CONVERSATION_STATUS.CLOSED) throw new OtpError(409, 'CHAT_CLOSED', 'This conversation is closed.');
-  if (isAccessExpired(conversation.accessEndsAt, nowMs) || (conversation.status === CONVERSATION_STATUS.READ_ONLY && !hasBoundedHistoricalRead(conversation, nowMs))) {
+  if ((mode === 'send' || conversation.type !== CONVERSATION_TYPES.REQUESTER_DISTRIBUTOR) &&
+    (isAccessExpired(conversation.accessEndsAt, nowMs) || (conversation.status === CONVERSATION_STATUS.READ_ONLY && !hasBoundedHistoricalRead(conversation, nowMs)))) {
     throw new OtpError(mode === 'send' ? 409 : 403, mode === 'send' ? 'CHAT_READ_ONLY' : 'CHAT_NOT_AUTHORIZED', 'Conversation access has ended.');
   }
   let principal;
@@ -599,27 +648,38 @@ async function authorizeConversation(tx, db, conversation, callerUid, callerClai
       if (error instanceof OtpError) throw new OtpError(409, 'CHAT_STALE_ASSIGNMENT', 'The Distributor assignment has changed.');
       throw error;
     }
-    if (!current) {
-      if (!(mode === 'read' && hasBoundedHistoricalRead(conversation, nowMs))) {
-        throw new OtpError(409, 'CHAT_STALE_ASSIGNMENT', 'The Distributor assignment has changed.');
-      }
-    }
     const status = normalizedStatus(order.status);
+    if (!current) {
+      throw new OtpError(409, 'CHAT_STALE_ASSIGNMENT', 'The Distributor assignment has changed.');
+    }
+    if (status !== 'delivery_failed' && (isAccessExpired(conversation.accessEndsAt, nowMs) || (conversation.status === CONVERSATION_STATUS.READ_ONLY && !hasBoundedHistoricalRead(conversation, nowMs)))) {
+      throw new OtpError(mode === 'send' ? 409 : 403, mode === 'send' ? 'CHAT_READ_ONLY' : 'CHAT_NOT_AUTHORIZED', 'Conversation access has ended.');
+    }
     const deliveredHistoricalReadActive = ['delivered', 'completed'].includes(status)
       && hasBoundedHistoricalRead(conversation, nowMs);
     if (mode === 'send' && ['delivered', 'completed'].includes(status)) {
       throw new OtpError(409, 'CHAT_READ_ONLY', 'Delivery completion ended messaging for this conversation.');
     }
     if (status === 'delivery_failed') {
-      const trustedGraceEndsAt = timeOf(failedDeliveryChatEndsAt(order));
-      if (!trustedGraceEndsAt || trustedGraceEndsAt <= nowMs) {
+      const storedGraceEndsAt = timeOf(conversation.accessEndsAt);
+      const orderGraceEndsAt = timeOf(failedDeliveryChatEndsAt(order));
+      const trustedGraceEndsAt = storedGraceEndsAt > 0 && orderGraceEndsAt > 0
+        ? Math.min(storedGraceEndsAt, orderGraceEndsAt)
+        : (orderGraceEndsAt || storedGraceEndsAt);
+      if (!trustedGraceEndsAt) {
         throw new OtpError(mode === 'send' ? 409 : 403, mode === 'send' ? 'CHAT_READ_ONLY' : 'CHAT_NOT_AUTHORIZED', 'The failed-delivery messaging window has ended.');
+      }
+      if (mode === 'send' && trustedGraceEndsAt <= nowMs) {
+        throw new OtpError(409, 'CHAT_READ_ONLY', 'The failed-delivery messaging window has ended.');
+      }
+      if (mode === 'read' && trustedGraceEndsAt <= nowMs && !hasFailedDeliveryHistoricalRead(conversation, order, trustedGraceEndsAt, nowMs)) {
+        throw new OtpError(403, 'CHAT_NOT_AUTHORIZED', 'Historical conversation access has ended.');
       }
     }
     if (mode === 'send' && TERMINAL_ORDER_STATUSES.has(status)) {
       throw new OtpError(409, 'CHAT_READ_ONLY', 'This conversation is read-only.');
     }
-    if (mode === 'read' && TERMINAL_ORDER_STATUSES.has(status) && !deliveredHistoricalReadActive && !hasBoundedHistoricalRead(conversation, nowMs)) {
+    if (mode === 'read' && TERMINAL_ORDER_STATUSES.has(status) && !deliveredHistoricalReadActive) {
       throw new OtpError(403, 'CHAT_NOT_AUTHORIZED', 'Historical conversation access has ended.');
     }
     if (caller.role === 'distributor') senderBranchId = branchId;
@@ -867,10 +927,18 @@ async function mutateMessage({ db, callerUid, callerClaims, body, now, operation
     if (conversation.type === CONVERSATION_TYPES.REQUESTER_DISTRIBUTOR && conversation.status !== CONVERSATION_STATUS.ACTIVE) {
       throw new OtpError(409, 'CHAT_READ_ONLY', 'Completed delivery history is read-only.');
     }
-    if (message.orderId) {
-      const messageOrder = await readAuthoritativeOrder(tx, db, message.orderId);
-      if (['delivered', 'completed'].includes(normalizedStatus(messageOrder.status))) {
+    const targetOrderId = clean(message.orderId || (conversation.type === CONVERSATION_TYPES.REQUESTER_DISTRIBUTOR ? conversation.orderId : ''), 128);
+    if (targetOrderId) {
+      const messageOrder = await readAuthoritativeOrder(tx, db, targetOrderId);
+      const messageOrderStatus = normalizedStatus(messageOrder.status);
+      if (['delivered', 'completed'].includes(messageOrderStatus)) {
         throw new OtpError(409, 'CHAT_READ_ONLY', 'Completed delivery history is read-only.');
+      }
+      if (conversation.type === CONVERSATION_TYPES.REQUESTER_DISTRIBUTOR && messageOrderStatus === 'delivery_failed') {
+        const trustedGraceEndsAt = timeOf(failedDeliveryChatEndsAt(messageOrder));
+        if (!trustedGraceEndsAt || trustedGraceEndsAt <= timeOf(now) || isAccessExpired(conversation.accessEndsAt, timeOf(now))) {
+          throw new OtpError(409, 'CHAT_READ_ONLY', 'The failed-delivery messaging window has ended.');
+        }
       }
     }
     if (clean(message.senderUid, 128) !== callerUid) throw new OtpError(403, 'CHAT_MESSAGE_MUTATION_DENIED', 'Only the original sender may change this message.');
@@ -974,6 +1042,9 @@ async function listMessages({ db, callerUid, callerClaims, conversationId, page,
         if (!orderSnapshot.exists || ['delivered', 'completed'].includes(normalizedStatus(orderSnapshot.data()?.status))) deliveredIds.add(orderId);
       }
       messages = candidates.filter((message) => !deliveredIds.has(clean(message.orderId, 128)));
+    } else if (conversation.type === CONVERSATION_TYPES.REQUESTER_DISTRIBUTOR) {
+      const expectedOrderId = clean(conversation.orderId, 128);
+      messages = candidates.filter((message) => !message.orderId || clean(message.orderId, 128) === expectedOrderId);
     }
     return {
       messages,
@@ -1084,8 +1155,24 @@ async function listConversations({ db, callerUid, callerClaims, now }) {
       .where('status', '==', CONVERSATION_STATUS.ACTIVE)
       .orderBy('updatedAt', 'desc').limit(50);
     const snapshot = await tx.get(query);
+    const docs = [...(snapshot.docs || [])];
+    if (!manager) {
+      const readOnlyQuery = db.collection('chatConversations')
+        .where('participantUserUids', 'array-contains', callerUid)
+        .where('status', '==', CONVERSATION_STATUS.READ_ONLY)
+        .orderBy('updatedAt', 'desc').limit(50);
+      const readOnlySnapshot = await tx.get(readOnlyQuery);
+      const seenIds = new Set(docs.map((doc) => doc.id));
+      for (const doc of readOnlySnapshot.docs || []) {
+        if (!seenIds.has(doc.id) && clean(doc.data()?.type) === CONVERSATION_TYPES.REQUESTER_DISTRIBUTOR) {
+          seenIds.add(doc.id);
+          docs.push(doc);
+        }
+      }
+      docs.sort((left, right) => timeOf(right.data()?.updatedAt) - timeOf(left.data()?.updatedAt));
+    }
     const conversations = [];
-    for (const item of snapshot.docs) {
+    for (const item of docs.slice(0, 50)) {
       const conversation = withId(item);
       try {
         const authorization = await authorizeConversation(tx, db, conversation, callerUid, callerClaims, 'read', timeOf(now));
@@ -1116,7 +1203,25 @@ async function listConversations({ db, callerUid, callerClaims, now }) {
           }
           conversations.push({ ...conversation, ...presentation, lastMessagePreview: activePreview,
             branchNameSnapshot: branchSnapshot.exists ? clean(branchSnapshot.data()?.name, 160) : '' });
-        } else conversations.push({ ...conversation, ...presentation });
+        } else {
+          const isFailedDelivery = conversation.type === CONVERSATION_TYPES.REQUESTER_DISTRIBUTOR
+            && normalizedStatus(presentation.orderContext?.status) === 'delivery_failed';
+          const failedDeadline = isFailedDelivery
+            ? (presentation.orderContext?.distributorChatGraceUntil || conversation.accessEndsAt || null)
+            : null;
+          const failedExpired = Boolean(failedDeadline && timeOf(failedDeadline) <= timeOf(now));
+          conversations.push(failedExpired
+            ? {
+              ...conversation,
+              ...presentation,
+              status: CONVERSATION_STATUS.READ_ONLY,
+              accessEndsAt: conversation.accessEndsAt || failedDeadline,
+              readAccessEndsAt: conversation.readAccessEndsAt || failedDeadline,
+              lifecycleReason: conversation.lifecycleReason || 'delivery_failed_grace',
+              ...participantAccessProjection(conversation, 'read_only'),
+            }
+            : { ...conversation, ...presentation });
+        }
       } catch (error) {
         if (!(error instanceof OtpError) || ![403, 404, 409].includes(error.status)) throw error;
       }

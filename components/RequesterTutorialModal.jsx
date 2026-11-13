@@ -17,6 +17,9 @@ import BlueTapIcon from './BlueTapIcon';
 
 export const TUTORIAL_SEEN_KEY = 'bluetap:requester:tutorial_seen';
 
+export const useRequesterTour = () => ({ active: false, ready: true, target: null, startTour: () => {} });
+export const useRequesterTourTarget = () => null;
+
 export const getTutorialSeenKey = (userId) => {
   if (!userId || typeof userId !== 'string' || !userId.trim()) {
     return TUTORIAL_SEEN_KEY;

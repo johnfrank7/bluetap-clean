@@ -64,7 +64,7 @@ function authorityIsComplete(type, authority = {}) {
   return true;
 }
 
-function terminalOrderContext(order = {}) {
+function terminalOrderContext(order = {}, graceOverride = null) {
   const status = normalizedStatus(order.status);
   if (!['delivery_failed', 'delivered', 'completed', 'cancelled', 'canceled', 'rejected', 'declined', 'declined_outside_service_area'].includes(status)) return null;
   const productSummary = Array.isArray(order.items)
@@ -73,6 +73,9 @@ function terminalOrderContext(order = {}) {
       quantity: Number.isFinite(Number(item.quantity)) ? Number(item.quantity) : 0,
     }))
     : [];
+  const effectiveGraceUntil = status === 'delivery_failed'
+    ? (graceOverride || failedDeliveryChatEndsAt(order))
+    : null;
   return {
     orderId: orderIdOf(order),
     publicOrderReference: clean(order.requestId || order.request_id).slice(0, 80),
@@ -81,7 +84,7 @@ function terminalOrderContext(order = {}) {
     finalStatus: status,
     branchDisplayName: clean(order.currentBranchNameSnapshot || order.branchNameSnapshot || order.water_station).slice(0, 160),
     deliveryDate: order.deliveredAt || order.delivered_at || null,
-    ...(status === 'delivery_failed' && failedDeliveryChatEndsAt(order) ? { distributorChatGraceUntil: failedDeliveryChatEndsAt(order) } : {}),
+    ...(effectiveGraceUntil ? { distributorChatGraceUntil: effectiveGraceUntil } : {}),
     totalSnapshot: Number.isFinite(Number(order.totalAtOrder ?? order.total_cost)) ? Number(order.totalAtOrder ?? order.total_cost) : null,
   };
 }
@@ -122,23 +125,34 @@ function reasonDeadline(authorityReasons, now) {
   return deadlines.length ? new Date(Math.max(...deadlines)) : now;
 }
 
-function applyTransition(conversation, transition, after, now) {
+function applyTransition(conversation, transition, after, now, before = {}) {
   const reason = clean(transition.reason || transition.authorityReason || 'relationship_changed');
+  const preservePriorFailedGrace = reason === 'delivery_failed_grace'
+    && conversation.lifecycleReason === 'delivery_failed_grace'
+    && normalizedStatus(before?.status) === 'delivery_failed'
+    && timeOf(conversation.accessEndsAt) > 0;
+  const effectiveTransitionAccessEndsAt = preservePriorFailedGrace
+    && (!transition.accessEndsAt || timeOf(conversation.accessEndsAt) <= timeOf(transition.accessEndsAt))
+    ? conversation.accessEndsAt
+    : transition.accessEndsAt;
+
   if (transition.action === 'read_only') {
-    const accessEndsAt = transition.accessEndsAt || now;
+    const accessEndsAt = effectiveTransitionAccessEndsAt || now;
+    const orderContext = terminalOrderContext(after, reason === 'delivery_failed_grace' ? accessEndsAt : null);
     return {
       ...conversation,
       status: CONVERSATION_STATUS.READ_ONLY,
       accessEndsAt,
       readAccessEndsAt: accessEndsAt,
       lifecycleReason: reason,
-      ...(terminalOrderContext(after) ? { orderContext: terminalOrderContext(after) } : {}),
+      ...(orderContext ? { orderContext } : {}),
       ...participantAccessProjection(conversation, 'read_only'),
       updatedAt: now,
     };
   }
   if (transition.action === 'eligible') {
-    const accessEndsAt = transition.accessEndsAt || null;
+    const accessEndsAt = effectiveTransitionAccessEndsAt || null;
+    const orderContext = terminalOrderContext(after, reason === 'delivery_failed_grace' ? accessEndsAt : null);
     return {
       ...conversation,
       status: CONVERSATION_STATUS.ACTIVE,
@@ -147,7 +161,7 @@ function applyTransition(conversation, transition, after, now) {
       lifecycleReason: reason,
       closedAt: null,
       closedReason: null,
-      ...(terminalOrderContext(after) ? { orderContext: terminalOrderContext(after) } : {}),
+      ...(orderContext ? { orderContext } : {}),
       ...participantAccessProjection(conversation, 'active'),
       updatedAt: now,
     };
@@ -190,12 +204,22 @@ function applyTransition(conversation, transition, after, now) {
 async function reconcileOrderLifecycleInTransaction({ tx, db, before = {}, after = {}, event, now = new Date() }) {
   if (!tx || !db) throw new OtpError(500, 'CHAT_RECONCILIATION_REQUIRED', 'Chat lifecycle reconciliation requires a transaction.');
   const timestamp = now instanceof Date ? now : new Date(timeOf(now));
+  const beforeStatus = normalizedStatus(before.status);
   const afterStatus = normalizedStatus(after.status);
+  const sameFailureAssignment = beforeStatus === 'delivery_failed'
+    && afterStatus === 'delivery_failed'
+    && clean(before.assignedDistributorUid || before.distributor_id) === clean(after.assignedDistributorUid || after.distributor_id)
+    && orderAssignmentVersion(before) === orderAssignmentVersion(after);
+  const priorFailedGrace = sameFailureAssignment ? failedDeliveryChatEndsAt(before) : null;
+  const nextFailedGrace = afterStatus === 'delivery_failed' ? failedDeliveryChatEndsAt(after) : null;
+  const effectiveFailedGrace = timeOf(priorFailedGrace) > 0 && (timeOf(nextFailedGrace) <= 0 || timeOf(priorFailedGrace) <= timeOf(nextFailedGrace))
+    ? priorFailedGrace
+    : nextFailedGrace;
   const accessEndsAt = ['delivered', 'completed'].includes(afterStatus)
     ? (after.chatAccessEndsAt || after.postOrderChatAccessEndsAt || postOrderAccessEndsAt(after.deliveredAt || after.delivered_at || timestamp))
     : afterStatus === 'delivery_failed'
-      ? failedDeliveryChatEndsAt(after)
-    : null;
+      ? effectiveFailedGrace
+      : null;
   const plan = reconcileOrderAuthorityTransition({ before, after, event, accessEndsAt, now: timeOf(timestamp) });
   const loaded = new Map();
   for (const transition of plan.transitions) {
@@ -226,7 +250,7 @@ async function reconcileOrderLifecycleInTransaction({ tx, db, before = {}, after
     const hash = authorityKeyHash(type, transition.authority);
     const entry = loaded.get(hash);
     if (!entry) continue;
-    entry.conversation = applyTransition(entry.conversation, transition, after, timestamp);
+    entry.conversation = applyTransition(entry.conversation, transition, after, timestamp, before);
     entry.changed = true;
   }
   for (const entry of loaded.values()) {

@@ -12,18 +12,20 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { StatusBar } from 'expo-status-bar';
-import { useRouter } from 'expo-router';
+import { useNavigation, useRouter } from 'expo-router';
+import { usePreventRemove } from '@react-navigation/native';
 import { Image as ExpoImage } from 'expo-image';
 import useSingleFlightNavigation from '../../components/useSingleFlightNavigation';
 import useUnsavedChangesGuard from '../../components/useUnsavedChangesGuard';
 
 import { auth, db } from '../../firebase';
-import { doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
+import { doc, getDoc, runTransaction, serverTimestamp } from 'firebase/firestore';
 import { findLocalUserForAuthRole, saveLocalUser } from '../../localUsers';
 import { normalizeRole, signOutAndClearSessions } from '../../services/authSession';
 import { getProfileUniqueId } from '../../services/uniqueIds';
@@ -35,10 +37,12 @@ import BlueTapBrandMark from '../../components/BlueTapBrandMark';
 import PortalSwipeContainer, { REQUESTER_TABS } from '../../components/PortalSwipeContainer';
 import TopToastFeedback from '../../components/TopToastFeedback';
 import ChangePasswordModal from '../../components/ChangePasswordModal';
-import RequesterTutorialModal from '../../components/RequesterTutorialModal';
+import ProfileAvatar from '../../components/ProfileAvatar';
+import RequesterTutorialModal, { useRequesterTour } from '../../components/RequesterTutorialModal';
 import { getAssistantVisibility, setAssistantVisibility } from '../../services/assistant/assistantStorage';
 import { USER_PORTAL_BOTTOM_CONTENT_INSET, USER_PORTAL_LAYOUT } from '../../constants/userPortalLayout';
 import { BLUETAP_COLORS } from '../../constants/bluetapTheme';
+const { profileDraftsDiffer } = require('../../services/profileDraftComparison');
 
 const BLUE = BLUETAP_COLORS.primary;
 const BLUE_LIGHT = BLUETAP_COLORS.primarySoft;
@@ -127,10 +131,16 @@ const ProfileField = memo(function ProfileField({
 });
 
 export default function ProfilePage() {
+  const { startTour } = useRequesterTour();
   const { colors, isDark } = useBlueTapTheme();
+  const { width } = useWindowDimensions();
   const router = useRouter();
+  const navigation = useNavigation();
+  const editBaseline = useRef(null);
+  const saveInFlight = useRef(false);
   const { replaceOnce } = useSingleFlightNavigation();
   const editFadeAnim = useRef(new Animated.Value(0)).current;
+  const assistantChanged = useRef(false);
   const initialProfile = cachedRequesterProfileUid === auth.currentUser?.uid
     ? cachedRequesterProfile
     : null;
@@ -138,6 +148,7 @@ export default function ProfilePage() {
   const [userData, setUserData] = useState(initialProfile);
   const [editingProfile, setEditingProfile] = useState(false);
   const [savingProfile, setSavingProfile] = useState(false);
+  const [logoutRequested, setLogoutRequested] = useState(false);
   const [toast, setToast] = useState({ visible: false, message: '', type: 'success' });
   const [changePasswordVisible, setChangePasswordVisible] = useState(false);
   const [assistantVisible, setAssistantVisible] = useState(true);
@@ -145,8 +156,8 @@ export default function ProfilePage() {
 
   useEffect(() => {
     let isMounted = true;
-    getAssistantVisibility().then((visible) => {
-      if (isMounted) setAssistantVisible(visible);
+    getAssistantVisibility('requester').then((visible) => {
+      if (isMounted && !assistantChanged.current) setAssistantVisible(visible);
     });
     return () => {
       isMounted = false;
@@ -154,8 +165,9 @@ export default function ProfilePage() {
   }, []);
 
   const handleToggleAssistant = async (value) => {
+    assistantChanged.current = true;
     setAssistantVisible(value);
-    await setAssistantVisibility(value);
+    await setAssistantVisibility(value, 'requester');
   };
   const [profileDraft, setProfileDraft] = useState(() =>
     buildProfileDraft(initialProfile || {})
@@ -264,15 +276,27 @@ export default function ProfilePage() {
     [userData]
   );
 
-  const handleLogout = async () => {
+  const completeLogout = async () => {
     await signOutAndClearSessions();
     router.replace('/login');
   };
 
+  const handleLogout = () => {
+    setEditingProfile(false);
+    setLogoutRequested(true);
+  };
+
+  useEffect(() => {
+    if (!logoutRequested || editingProfile || savingProfile) return;
+    setLogoutRequested(false);
+    completeLogout();
+  }, [logoutRequested, editingProfile, savingProfile]);
+
   const openProfileEditor = () => {
     if (loading || savingProfile) return;
 
-    setProfileDraft(buildProfileDraft(userData || {}));
+    editBaseline.current = buildProfileDraft(userData || {});
+    setProfileDraft(editBaseline.current);
     setEditingProfile(true);
   };
 
@@ -283,20 +307,21 @@ export default function ProfilePage() {
     setEditingProfile(false);
   };
 
-  const initialDraft = useMemo(() => buildProfileDraft(userData || {}), [userData]);
+  const initialDraft = editBaseline.current || buildProfileDraft(userData || {});
   const isProfileDirty = useMemo(() => {
     if (!editingProfile) return false;
-    return (
-      profileDraft.fullName.trim() !== initialDraft.fullName.trim() ||
-      profileDraft.phone.trim() !== initialDraft.phone.trim() ||
-      profileDraft.address.trim() !== initialDraft.address.trim()
-    );
+    return profileDraftsDiffer(profileDraft, initialDraft, normalizePhilippinePhone);
   }, [editingProfile, profileDraft, initialDraft]);
 
   const { confirmLeave, UnsavedModal } = useUnsavedChangesGuard({
     isDirty: isProfileDirty,
     isSubmitting: savingProfile,
     onDiscard: cancelProfileEdit,
+    onSave: saveProfileChanges,
+    navigationManaged: true,
+  });
+  usePreventRemove(isProfileDirty || savingProfile, ({ data }) => {
+    confirmLeave(() => navigation.dispatch(data.action));
   });
 
   const updateProfileDraft = (field, value) => {
@@ -306,8 +331,8 @@ export default function ProfilePage() {
     }));
   };
 
-  const saveProfileChanges = async () => {
-    if (savingProfile) return;
+  async function saveProfileChanges() {
+    if (saveInFlight.current) return false;
 
     const uid = userData?.uid || auth.currentUser?.uid || '';
     const fullName = profileDraft.fullName.trim();
@@ -316,18 +341,18 @@ export default function ProfilePage() {
 
     if (!uid) {
       Alert.alert('Profile not saved', 'Please log in again before editing your profile.');
-      return;
+      return false;
     }
 
     if (!fullName) {
       Alert.alert('Missing name', 'Full name cannot be empty.');
-      return;
+      return false;
     }
 
     const normalizedPhone = normalizePhilippinePhone(phone);
     if (!normalizedPhone) {
       Alert.alert('Invalid Contact Number', 'Please enter a valid Philippine mobile number (e.g. 09XXXXXXXXX or +639XXXXXXXXX).');
-      return;
+      return false;
     }
 
     const nameParts = splitFullName(fullName);
@@ -344,39 +369,36 @@ export default function ProfilePage() {
     };
 
     try {
+      if (!auth.currentUser || auth.currentUser.uid !== uid) throw new Error('Please sign in again before saving.');
+      saveInFlight.current = true;
       setSavingProfile(true);
+      await runTransaction(db, async (transaction) => {
+        const ref = doc(db, 'users', uid);
+        const snapshot = await transaction.get(ref);
+        if (!snapshot.exists()) throw new Error('Profile is no longer available.');
+        const current = buildProfileDraft(snapshot.data());
+        const baseline = editBaseline.current;
+        if (!baseline || ['fullName', 'phone', 'address'].some((key) => String(current[key] || '').trim() !== String(baseline[key] || '').trim())) {
+          throw new Error('Your profile changed elsewhere. Discard this edit and reopen it before saving.');
+        }
+        transaction.set(ref, { ...profileUpdate, updatedAt: serverTimestamp() }, { merge: true });
+      });
       saveLocalUser(nextProfile);
       cacheProfile(nextProfile);
       setUserData(nextProfile);
 
-      if (auth.currentUser?.uid) {
-        try {
-          await setDoc(
-            doc(db, 'users', auth.currentUser.uid),
-            {
-              ...profileUpdate,
-              updatedAt: serverTimestamp(),
-            },
-            { merge: true }
-          );
-        } catch (error) {
-          console.log('Requester profile save error:', error.message);
-          Alert.alert(
-            'Saved locally',
-            'Your profile was updated on this device, but Firebase did not accept the update.'
-          );
-        }
-      }
-
       setEditingProfile(false);
       setToast({ visible: true, message: 'Profile updated successfully.', type: 'success' });
+      return true;
     } catch (error) {
       console.log('Requester profile edit error:', error.message);
       setToast({ visible: true, message: error.message || 'Profile could not be saved.', type: 'error' });
+      return false;
     } finally {
+      saveInFlight.current = false;
       setSavingProfile(false);
     }
-  };
+  }
 
   return (
     <LinearGradient
@@ -424,7 +446,7 @@ export default function ProfilePage() {
             {!loading && userData && (
               <View style={styles.identityCard}>
                 <View style={styles.identityAvatar}>
-                  <Text style={styles.identityInitials}>{profileDisplay.fullName.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('').toUpperCase() || 'BT'}</Text>
+                  <ProfileAvatar name={profileDisplay.fullName} uri={userData?.profilePhotoRemoved ? '' : (userData?.profilePhotoUrl || userData?.photoURL || userData?.avatarUrl)} initialsStyle={styles.identityInitials} />
                 </View>
                 <View style={styles.identityCopy}>
                   <Text style={styles.identityName} numberOfLines={1}>{profileDisplay.fullName}</Text>
@@ -532,7 +554,7 @@ export default function ProfilePage() {
             </View>
             <View style={styles.infoDivider} />
 
-            <View style={styles.settingRow}>
+            <View style={[styles.settingRow, width < 768 && styles.floatingActionClearance]}>
               <View style={styles.settingTextWrap}>
                 <Text style={styles.settingLabel}>Account Password</Text>
                 <Text style={styles.settingSubtitle}>Update your password for security</Text>
@@ -540,6 +562,7 @@ export default function ProfilePage() {
               <TouchableOpacity
                 accessibilityRole="button"
                 accessibilityLabel="Change Password"
+                dataSet={{ bluetapCta: 'true' }}
                 onPress={() => setChangePasswordVisible(true)}
                 style={styles.changePasswordButton}
               >
@@ -549,7 +572,7 @@ export default function ProfilePage() {
 
             <View style={styles.settingDivider} />
 
-            <View style={styles.settingRow}>
+            <View style={[styles.settingRow, width < 768 && styles.floatingActionClearance]}>
               <View style={styles.settingTextWrap}>
                 <Text style={styles.settingLabel}>BlueTap Assistant</Text>
                 <Text style={styles.settingSubtitle}>Show assistant quick access shortcut</Text>
@@ -566,7 +589,7 @@ export default function ProfilePage() {
 
             <View style={styles.settingDivider} />
 
-            <View style={styles.settingRow}>
+            <View style={[styles.settingRow, width < 768 && styles.floatingActionClearance]}>
               <View style={styles.settingTextWrap}>
                 <Text style={styles.settingLabel}>How to Use BlueTap</Text>
                 <Text style={styles.settingSubtitle}>Revisit the 5-step Requester onboarding guide</Text>
@@ -574,7 +597,8 @@ export default function ProfilePage() {
               <TouchableOpacity
                 accessibilityRole="button"
                 accessibilityLabel="How to Use BlueTap"
-                onPress={() => setTutorialVisible(true)}
+                dataSet={{ bluetapCta: 'true' }}
+                onPress={() => confirmLeave(() => setTutorialVisible(true))}
                 style={styles.changePasswordButton}
               >
                 <Text style={styles.changePasswordButtonText}>View Guide</Text>
@@ -582,8 +606,7 @@ export default function ProfilePage() {
             </View>
           </View>
 
-          {assistantVisible && (
-            <View style={styles.helpCard}>
+            <View style={[styles.helpCard, width < 768 && styles.floatingActionClearance]}>
               <Pressable style={({ hovered, pressed }) => [styles.helpRow, hovered && styles.helpRowHovered, pressed && styles.helpRowPressed]} onPress={() => replaceOnce('/requester/bluetap_AI')} accessibilityRole="button" accessibilityLabel="Open BlueTap Assistant">
                 <View style={styles.helpTextBlock}>
                   <Text style={styles.helpTitle}>BlueTap Assistant</Text>
@@ -595,8 +618,8 @@ export default function ProfilePage() {
                 </View>
               </Pressable>
             </View>
-          )}
 
+          <View style={width < 768 && styles.floatingActionClearance}>
           <TouchableOpacity
             activeOpacity={0.85}
             style={styles.logoutButton}
@@ -604,6 +627,7 @@ export default function ProfilePage() {
             disabled={savingProfile}
             accessibilityRole="button"
             accessibilityLabel="Log out of your account"
+            dataSet={!isDark ? { bluetapCta: 'true' } : undefined}
           >
             <ExpoImage
               source={LOGOUT_ICON}
@@ -615,6 +639,7 @@ export default function ProfilePage() {
             />
             <Text style={styles.logoutText}>Logout</Text>
           </TouchableOpacity>
+          </View>
 
           </ScrollView>
         </View>
@@ -691,7 +716,7 @@ const styles = createPortalStyleSheet({
     marginBottom: 2,
   },
   identityCard: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 14, padding: 12, borderRadius: 16, backgroundColor: BLUE_LIGHT },
-  identityAvatar: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center', backgroundColor: BLUE },
+  identityAvatar: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center', backgroundColor: BLUE, overflow: 'hidden' },
   identityInitials: { color: '#FFFFFF', fontSize: 16, fontWeight: '900' },
   identityCopy: { flex: 1, minWidth: 0 },
   identityName: { color: TEXT_DARK, fontSize: 16, fontWeight: '900' },
@@ -798,14 +823,19 @@ const styles = createPortalStyleSheet({
   },
   settingRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingVertical: 10,
     gap: 12,
   },
+  floatingActionClearance: {
+    // Keep profile actions clear of the 54px floating portal controls.
+    marginRight: 56,
+  },
   settingTextWrap: {
     flex: 1,
-    minWidth: 0,
+    minWidth: 150,
   },
   settingLabel: {
     fontSize: 14,
@@ -823,7 +853,7 @@ const styles = createPortalStyleSheet({
     marginVertical: 4,
   },
   changePasswordButton: {
-    minHeight: 38,
+    minHeight: 44,
     paddingHorizontal: 14,
     borderRadius: 8,
     backgroundColor: BLUE,

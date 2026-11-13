@@ -9,6 +9,7 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -107,6 +108,7 @@ const ScheduledRequestCard = ({
   onViewDetails,
   processing,
   actionsDisabled = false,
+  floatingClearance = false,
 }) => {
   const statusNorm = normalizeDistributorOrderStatus(request.status);
   const isDeliveryFailed = statusNorm === 'delivery failed';
@@ -175,7 +177,7 @@ const ScheduledRequestCard = ({
         )}
       </View>
 
-      <View style={styles.cardActionsRow}>
+      <View style={[styles.cardActionsRow, floatingClearance && styles.cardActionsFloatingClearance]}>
         <TouchableOpacity
           activeOpacity={0.8}
           disabled={actionsDisabled}
@@ -215,6 +217,7 @@ const ScheduledRequestCard = ({
 
 export default function DistributorScheduledRequests() {
   const { colors, isDark } = useBlueTapTheme();
+  const { width } = useWindowDimensions();
   const router = useRouter();
   const params = useLocalSearchParams();
   const openedParamRef = React.useRef('');
@@ -400,6 +403,7 @@ export default function DistributorScheduledRequests() {
                   request={entry.item}
                   actionsDisabled={entry.actionsDisabled}
                   processing={processingRequestId === entry.id}
+                  floatingClearance={width < 768}
                   onAdvance={advanceDelivery}
                   onOpenRescheduleModal={(req) => {
                     if (!isComplete) {
@@ -666,6 +670,10 @@ const styles = createPortalStyleSheet({
     gap: 8,
     marginTop: 14,
     justifyContent: 'flex-end',
+  },
+  cardActionsFloatingClearance: {
+    // Keep the action row clear of the 54px floating portal controls.
+    marginRight: 56,
   },
   secondaryActionButton: {
     minHeight: 38,

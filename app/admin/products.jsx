@@ -859,7 +859,7 @@ export default function AdminProductsPage() {
           </ScrollView>
         </View>
       </Modal>
-      <AdminBundlePromotionModal product={promotionProduct} branches={branches} colors={colors} onClose={() => setPromotionProduct(null)} onSaved={async (result) => { setPromotionProduct(null); try { await productsState.refresh({ force: true }); } catch { /* The draft was already saved; refresh can be retried. */ } showToast(result === 'updated' ? 'Promotion draft updated successfully.' : 'Promotion draft saved successfully.', 'success'); }} />
+      <AdminBundlePromotionModal product={promotionProduct} branches={branches} colors={colors} onClose={() => setPromotionProduct(null)} onSaved={async (result) => { setPromotionProduct(null); try { await productsState.refresh({ force: true }); } catch { /* The draft was already saved; refresh can be retried. */ } showToast(result === 'published' || result === 'publish' ? 'Promotion published.' : result === 'disable' ? 'Promotion disabled.' : result === 'updated' ? 'Promotion draft updated successfully.' : 'Promotion draft saved successfully.', 'success'); }} />
       <UnsavedModal />
     </AdminShell>
   );

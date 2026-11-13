@@ -15,13 +15,14 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useNavigation, useRouter } from 'expo-router';
+import { usePreventRemove } from '@react-navigation/native';
 import { Image as ExpoImage } from 'expo-image';
 import useSingleFlightNavigation from '../../components/useSingleFlightNavigation';
 import useUnsavedChangesGuard from '../../components/useUnsavedChangesGuard';
 
 import { auth, db } from '../../firebase';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { doc, getDoc, runTransaction } from 'firebase/firestore';
 import { findLocalUserForAuthRole, saveLocalUser } from '../../localUsers';
 import { normalizeRole, signOutAndClearSessions } from '../../services/authSession';
 import { getProfileUniqueId } from '../../services/uniqueIds';
@@ -35,6 +36,7 @@ import { createPortalStyleSheet,
 import BlueTapBrandMark from '../../components/BlueTapBrandMark';
 import TopToastFeedback from '../../components/TopToastFeedback';
 import ChangePasswordModal from '../../components/ChangePasswordModal';
+import ProfileAvatar from '../../components/ProfileAvatar';
 import { getAssistantVisibility, setAssistantVisibility } from '../../services/assistant/assistantStorage';
 import { USER_PORTAL_BOTTOM_CONTENT_INSET, USER_PORTAL_LAYOUT } from '../../constants/userPortalLayout';
 import { BLUETAP_COLORS } from '../../constants/bluetapTheme';
@@ -47,6 +49,7 @@ const TEXT_DARK = BLUETAP_COLORS.textPrimary;
 const USE_NATIVE_DRIVER = Platform.OS !== 'web';
 
 const LOGOUT_ICON = require('../../assets/icons/sidebar/log-out.svg');
+const { profileDraftsDiffer } = require('../../services/profileDraftComparison');
 
 const getProfileObject = (profile) => profile || {};
 
@@ -217,10 +220,14 @@ const ProfileField = memo(function ProfileField({
 });
 
 export default function DistributorProfilePage() {
-  const { colors } = useBlueTapTheme();
+  const { colors, isDark } = useBlueTapTheme();
   const router = useRouter();
+  const navigation = useNavigation();
+  const editBaseline = useRef(null);
+  const saveInFlight = useRef(false);
   const { replaceOnce } = useSingleFlightNavigation();
   const editFadeAnim = useRef(new Animated.Value(0)).current;
+  const assistantChanged = useRef(false);
   const toastAnim = useRef(new Animated.Value(0)).current;
   const toastTimerRef = useRef(null);
   const [loading, setLoading] = useState(true);
@@ -230,6 +237,7 @@ export default function DistributorProfilePage() {
   const [resolvedBranchName, setResolvedBranchName] = useState('');
   const [editingProfile, setEditingProfile] = useState(false);
   const [savingProfile, setSavingProfile] = useState(false);
+  const [logoutRequested, setLogoutRequested] = useState(false);
   const [profileDraft, setProfileDraft] = useState(() => buildProfileDraft());
   const [toast, setToast] = useState({ visible: false, message: '', type: 'success' });
   const [changePasswordVisible, setChangePasswordVisible] = useState(false);
@@ -237,8 +245,8 @@ export default function DistributorProfilePage() {
 
   useEffect(() => {
     let isMounted = true;
-    getAssistantVisibility().then((visible) => {
-      if (isMounted) setAssistantVisible(visible);
+    getAssistantVisibility('distributor').then((visible) => {
+      if (isMounted && !assistantChanged.current) setAssistantVisible(visible);
     });
     return () => {
       isMounted = false;
@@ -246,8 +254,9 @@ export default function DistributorProfilePage() {
   }, []);
 
   const handleToggleAssistant = async (value) => {
+    assistantChanged.current = true;
     setAssistantVisible(value);
-    await setAssistantVisibility(value);
+    await setAssistantVisibility(value, 'distributor');
   };
 
 
@@ -269,7 +278,6 @@ export default function DistributorProfilePage() {
         const nextProfile = buildProfileData(localProfile, user);
         setUserData(nextProfile);
         setProfileDraft(buildProfileDraft(nextProfile));
-        setLoading(false);
       }
 
       if (!user) {
@@ -390,7 +398,8 @@ export default function DistributorProfilePage() {
   const openProfileEditor = () => {
     if (loading || savingProfile) return;
 
-    setProfileDraft(buildProfileDraft(userData || {}));
+    editBaseline.current = buildProfileDraft(userData || {});
+    setProfileDraft(editBaseline.current);
     setEditingProfile(true);
   };
 
@@ -401,13 +410,13 @@ export default function DistributorProfilePage() {
     setEditingProfile(false);
   };
 
-  const initialProfileDraft = useMemo(() => buildProfileDraft(userData || {}), [userData]);
+  const initialProfileDraft = editBaseline.current || buildProfileDraft(userData || {});
   const isProfileDirty = useMemo(() => {
     if (!editingProfile) return false;
-    return (
-      (profileDraft.fullName || '').trim() !== (initialProfileDraft.fullName || '').trim() ||
-      (profileDraft.contactNumber || '').trim() !== (initialProfileDraft.contactNumber || '').trim() ||
-      (profileDraft.address || '').trim() !== (initialProfileDraft.address || '').trim()
+    return profileDraftsDiffer(
+      { ...profileDraft, phone: profileDraft.contactNumber },
+      { ...initialProfileDraft, phone: initialProfileDraft.contactNumber },
+      normalizePhilippinePhone
     );
   }, [editingProfile, profileDraft, initialProfileDraft]);
 
@@ -415,10 +424,15 @@ export default function DistributorProfilePage() {
     isDirty: isProfileDirty,
     isSubmitting: savingProfile,
     onDiscard: cancelProfileEdit,
+    onSave: saveProfileChanges,
+    navigationManaged: true,
+  });
+  usePreventRemove(isProfileDirty || savingProfile, ({ data }) => {
+    confirmLeave(() => navigation.dispatch(data.action));
   });
 
-  const saveProfileChanges = async () => {
-    if (savingProfile) return;
+  async function saveProfileChanges() {
+    if (saveInFlight.current) return false;
 
     const uid = userData?.uid || auth.currentUser?.uid || '';
     const fullName = (profileDraft.fullName || '').trim();
@@ -427,72 +441,78 @@ export default function DistributorProfilePage() {
 
     if (!uid) {
       Alert.alert('Profile not saved', 'Please log in again before editing your profile.');
-      return;
+      return false;
     }
 
     if (!fullName) {
       Alert.alert('Missing full name', 'Full name cannot be empty.');
-      return;
+      return false;
     }
 
     if (!contactNumber) {
       Alert.alert('Missing contact number', 'Contact number cannot be empty.');
-      return;
+      return false;
     }
 
     const normalizedPhone = normalizePhilippinePhone(contactNumber);
     if (!normalizedPhone) {
       Alert.alert('Invalid Contact Number', 'Please enter a valid Philippine mobile number (e.g. 09XXXXXXXXX or +639XXXXXXXXX).');
-      return;
+      return false;
     }
 
     if (!address) {
       Alert.alert('Missing address', 'Complete address cannot be empty.');
-      return;
+      return false;
     }
 
-    const { updates, localUpdates } = buildChangedProfileUpdate(userData || {}, {
-      fullName,
-      contactNumber: normalizedPhone,
-      address,
-    });
-    const hasChanges = Object.keys(updates).length > 0;
-
     try {
+      if (!auth.currentUser || auth.currentUser.uid !== uid) throw new Error('Please sign in again before saving.');
+      saveInFlight.current = true;
       setSavingProfile(true);
-
-      if (hasChanges && auth.currentUser?.uid) {
-        await setDoc(doc(db, 'users', auth.currentUser.uid), updates, {
-          merge: true,
-        });
-      }
-
-      const nextProfile = {
-        ...(userData || {}),
-        ...localUpdates,
-        uid,
-        email: profileDisplay.email,
-      };
+      const nextProfile = await runTransaction(db, async (transaction) => {
+        const ref = doc(db, 'users', uid);
+        const snapshot = await transaction.get(ref);
+        if (!snapshot.exists()) throw new Error('Profile is no longer available.');
+        const current = snapshot.data();
+        const currentDraft = buildProfileDraft(current);
+        const baseline = editBaseline.current;
+        if (!baseline || ['fullName', 'contactNumber', 'address'].some((key) => String(currentDraft[key] || '').trim() !== String(baseline[key] || '').trim())) {
+          throw new Error('Your profile changed elsewhere. Discard this edit and reopen it before saving.');
+        }
+        const { updates, localUpdates } = buildChangedProfileUpdate(current, { fullName, contactNumber: normalizedPhone, address });
+        if (Object.keys(updates).length) transaction.set(ref, updates, { merge: true });
+        return { ...current, ...localUpdates, uid, email: profileDisplay.email };
+      });
 
       saveLocalUser(nextProfile);
       setUserData(nextProfile);
       setProfileDraft(buildProfileDraft(nextProfile));
       setEditingProfile(false);
       setToast({ visible: true, message: 'Profile updated successfully.', type: 'success' });
+      return true;
     } catch (error) {
       console.log('Distributor profile save error:', error.message);
       setToast({ visible: true, message: error.message || 'Profile could not be saved.', type: 'error' });
+      return false;
     } finally {
+      saveInFlight.current = false;
       setSavingProfile(false);
     }
+  }
+
+  const handleLogout = () => {
+    setEditingProfile(false);
+    setLogoutRequested(true);
   };
-
-  const handleLogout = async () => {
-    if (savingProfile) return;
-
+  const completeLogout = async () => {
     await signOutAndClearSessions();
     router.replace('/login');
   };
+  useEffect(() => {
+    if (!logoutRequested || editingProfile || savingProfile) return;
+    setLogoutRequested(false);
+    completeLogout();
+  }, [logoutRequested, editingProfile, savingProfile, router]);
 
   return (
     <DistributorPortalBackground>
@@ -529,7 +549,7 @@ export default function DistributorProfilePage() {
             {!loading && userData && (
               <View style={styles.identityCard}>
                 <View style={styles.identityAvatar}>
-                  <Text style={styles.identityInitials}>{profileDisplay.fullName.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('').toUpperCase() || 'BT'}</Text>
+                  <ProfileAvatar name={profileDisplay.fullName} uri={userData?.profilePhotoRemoved ? '' : (userData?.profilePhotoUrl || userData?.photoURL || userData?.avatarUrl)} initialsStyle={styles.identityInitials} />
                 </View>
                 <View style={styles.identityCopy}>
                   <Text style={styles.identityName} numberOfLines={1}>{profileDisplay.fullName}</Text>
@@ -668,6 +688,7 @@ export default function DistributorProfilePage() {
               <TouchableOpacity
                 accessibilityRole="button"
                 accessibilityLabel="Change Password"
+                dataSet={{ bluetapCta: 'true' }}
                 onPress={() => setChangePasswordVisible(true)}
                 style={styles.changePasswordButton}
               >
@@ -693,7 +714,6 @@ export default function DistributorProfilePage() {
             </View>
           </View>
 
-          {assistantVisible && (
             <View style={styles.helpCard}>
               <Pressable style={({ hovered, pressed }) => [styles.helpRow, hovered && styles.helpRowHovered, pressed && styles.helpRowPressed]} onPress={() => replaceOnce('/distributor/bluetap_AI')} accessibilityRole="button" accessibilityLabel="Open BlueTap Assistant">
                 <View style={styles.helpTextBlock}>
@@ -706,7 +726,6 @@ export default function DistributorProfilePage() {
                 </View>
               </Pressable>
             </View>
-          )}
 
           <TouchableOpacity
             activeOpacity={0.85}
@@ -715,6 +734,7 @@ export default function DistributorProfilePage() {
             disabled={savingProfile}
             accessibilityRole="button"
             accessibilityLabel="Log out of your account"
+            dataSet={!isDark ? { bluetapCta: 'true' } : undefined}
           >
             <ExpoImage
               source={LOGOUT_ICON}
@@ -803,7 +823,7 @@ const styles = createPortalStyleSheet({
     marginBottom: 2,
   },
   identityCard: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 14, padding: 12, borderRadius: 16, backgroundColor: BLUE_LIGHT },
-  identityAvatar: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center', backgroundColor: BLUE },
+  identityAvatar: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center', backgroundColor: BLUE, overflow: 'hidden' },
   identityInitials: { color: '#FFFFFF', fontSize: 16, fontWeight: '900' },
   identityCopy: { flex: 1, minWidth: 0 },
   identityName: { color: TEXT_DARK, fontSize: 16, fontWeight: '900' },
@@ -920,6 +940,7 @@ const styles = createPortalStyleSheet({
   },
   settingRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingVertical: 10,
@@ -927,7 +948,7 @@ const styles = createPortalStyleSheet({
   },
   settingTextWrap: {
     flex: 1,
-    minWidth: 0,
+    minWidth: 150,
   },
   settingLabel: {
     fontSize: 14,
@@ -945,7 +966,7 @@ const styles = createPortalStyleSheet({
     marginVertical: 4,
   },
   changePasswordButton: {
-    minHeight: 38,
+    minHeight: 44,
     paddingHorizontal: 14,
     borderRadius: 8,
     backgroundColor: BLUE,
