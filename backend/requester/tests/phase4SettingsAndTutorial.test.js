@@ -149,10 +149,11 @@ test('ChangePasswordModal securely enforces reauthentication and sanitizes error
 
   assert.match(modal, /EmailAuthProvider\.credential\(currentUser\.email, currentPassword\)/);
   assert.match(modal, /reauthenticateWithCredential\(currentUser, credential\)/);
-  assert.match(modal, /updatePassword\(currentUser, newPassword\)/);
-  assert.match(modal, /console\.warn\('Change password error code:', err\?\.code \|\| 'unknown'\)/);
+  assert.doesNotMatch(modal, /updatePassword\(currentUser, newPassword\)/);
+  assert.match(modal, /passwordChangeOtp\(currentUser, 'request'\)/);
+  assert.match(modal, /passwordChangeOtp\(auth\.currentUser, 'confirm'/);
   assert.doesNotMatch(modal, /console\.warn\('Change password error:', err\)/);
-  assert.match(modal, /setErrorMessage\('Failed to change password\. Please try again\.'\)/);
+  assert.match(modal, /result\.changed !== true/);
 });
 
 test('Requester tutorial has Requester-only visibility and is absent from Distributor, Manager, and Admin shells', () => {

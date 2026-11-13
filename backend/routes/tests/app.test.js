@@ -28,6 +28,7 @@ const EXPECTED_ROUTES = [
   '/api/auth/complete-required-password-change',
   '/api/auth/create-registration-session',
   '/api/auth/login-with-username',
+  '/api/auth/password-change-otp',
   '/api/auth/password-recovery',
   '/api/auth/registration-branches',
   '/api/auth/registration-policy',
