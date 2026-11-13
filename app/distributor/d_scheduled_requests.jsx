@@ -62,19 +62,13 @@ const TIME_SLOTS = [
 const getAmountNumber = (amount) =>
   Number(String(amount || '').replace(/[^\d.]/g, '')) || 0;
 
-const getQuantityNumber = (quantity) => {
-  const match = String(quantity || '').match(/\d+(\.\d+)?/);
-  return Number(match?.[0] || 0);
-};
-
 const getDetailsRequestData = (request) => {
   if (!request) return null;
 
   const totalAmount = getAmountNumber(request.amountDue);
-  const quantity = getQuantityNumber(request.quantity);
-  const unitPrice = quantity > 0 ? totalAmount / quantity : totalAmount;
 
   return {
+    pricingDetailsSource: request.pricingDetailsSource || request,
     requestId: request.id,
     status: request.status || 'Scheduled',
     orderDate: 'Not set',
@@ -99,15 +93,9 @@ const getDetailsRequestData = (request) => {
     failureReasonCode: request.failureReasonCode,
     failureReasonLabel: request.failureReasonLabel,
     failureReasonNote: request.failureReasonNote,
-    items: [
-      {
-        id: request.id,
-        productName: request.productName,
-        quantity: request.quantity,
-        unitPrice,
-        subtotal: totalAmount,
-      },
-    ],
+    items: request.items?.length ? request.items : [{ id: request.id, productName: request.productName, quantity: request.quantity }],
+    subtotalAtOrder: request.subtotalAtOrder,
+    deliveryFeeAtOrder: request.deliveryFeeAtOrder,
     grandTotalAmount: totalAmount,
   };
 };

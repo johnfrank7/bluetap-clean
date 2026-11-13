@@ -64,12 +64,15 @@ test('Manager Shell and SidebarIcon include unified Settings navigation', () => 
 
 test('RequestDetailsModal provides an itemized breakdown of products, delivery fee, and grand total', () => {
   const modal = read('components', 'RequestDetailsModal.jsx');
+  const pricing = read('components', 'SavedOrderPricing.jsx');
+  const projection = read('services', 'savedOrderPricing.js');
 
-  assert.match(modal, /Products Subtotal/);
-  assert.match(modal, /Delivery Fee/);
-  assert.match(modal, /Grand Total/);
-  assert.match(modal, /discountAmount/);
-  assert.match(modal, /formatAmount/);
+  assert.match(modal, /<SavedOrderPricing order=\{request\}/);
+  assert.match(pricing, /Regular product subtotal/);
+  assert.match(pricing, /Delivery fee/);
+  assert.match(pricing, /Final payable total/);
+  assert.match(projection, /discountAmount/);
+  assert.match(pricing, /formatCurrency/);
 });
 
 test('Distributor scheduled requests decouples network errors from empty list presentation', () => {

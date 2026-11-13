@@ -1,5 +1,5 @@
 const { getFirebaseAdmin } = require('../firebase/firebaseAdmin');
-const { randomUUID } = require('node:crypto');
+const { randomUUID, createHash } = require('node:crypto');
 const { requireActiveManager, requireManagerBranch } = require('../auth/authorization');
 const { canonicalAccountStatus } = require('../auth/accountStatus');
 const { applyCors } = require('../utils/cors');
@@ -8,11 +8,15 @@ const { assignmentVersionForTransition } = require('../utils/relationshipEpochs'
 const { reconcileOrderLifecycleInTransaction } = require('../chat/conversationLifecycleService');
 const { effectiveDeliveryDays, isAllowedDeliveryDate, productLimit, productDeliveryDays, limitViolations } = require('../../services/productOrderPolicy');
 const { calculateOrderTotal } = require('../../services/deliveryPricing');
+const { isMaterialEdit, savedPricingSnapshot, validateLegacyEditPricing, validateSavedPromotion, pricePromotionalEdit, assertPromotionalQuote } = require('../pricing/orderEditPricing');
+const { promotionCapability } = require('../pricing/promotionCapability');
+const { safeProduct } = require('../admin/productManagementHandler');
 
 const AWAITING_ASSIGNMENT = 'awaiting_distributor_assignment';
 const DISTRIBUTOR_ASSIGNED = 'distributor_assigned';
 const TRANSFER_PENDING = 'branch_transfer_pending';
 const MANAGER_OPERATIONAL_EVENTS = 'managerOperationalEvents';
+const firestoreVersion = (value) => value && Number.isInteger(value.seconds) && Number.isInteger(value.nanoseconds) ? `${value.seconds}:${value.nanoseconds}` : null;
 const ACTIVE_ASSIGNMENT_STATUSES = new Set([DISTRIBUTOR_ASSIGNED, 'accepted', 'scheduled', 'out_for_delivery', 'delivery_failed']);
 const MANAGER_VISIBLE_STATUSES = new Set([AWAITING_ASSIGNMENT, 'pending', 'manager_approval_pending', DISTRIBUTOR_ASSIGNED, 'accepted', 'scheduled', 'out_for_delivery', 'delivery_failed', TRANSFER_PENDING]);
 const clean = (value, max = 240) => String(value || '').trim().slice(0, max);
@@ -32,6 +36,21 @@ const isEligibleManager = (data = {}, branchId = '') => data.role === 'manager'
   && data.mustChangePassword !== true;
 const activeBranch = (data = {}) => data.status === 'active' && safeNumber(data.latitude) !== null && safeNumber(data.longitude) !== null;
 const history = (source) => Array.isArray(source) ? source : [];
+const managerEditRevision = (snapshot) => {
+  if (!snapshot?.exists) return null;
+  return firestoreVersion(snapshot.updateTime) || createHash('sha256').update(JSON.stringify(snapshot.data())).digest('hex');
+};
+const managerEditIntentHash = (items, body) => createHash('sha256').update(JSON.stringify({
+  items,
+  container: body.container === undefined ? null : clean(body.container, 80),
+  notes: body.notes === undefined && body.specialInstructions === undefined ? null : clean(body.notes ?? body.specialInstructions, 500),
+})).digest('hex');
+const requireCurrentManager = (actor, branch, manager) => {
+  const profile = actor.data() || {};
+  if (!actor.exists || !branch.exists || branch.data()?.status !== 'active' || !isEligibleManager(profile, manager.branch.id) || profile.accountActionHoldIntentId) {
+    throw new OtpError(403, 'BRANCH_ACCESS_DENIED', 'Manager access to this branch has changed.');
+  }
+};
 
 function bodyOf(req) {
   if (req.body && typeof req.body === 'object') return req.body;
@@ -81,6 +100,7 @@ function safeOrder(id, data = {}, branchNames = new Map()) {
     items: Array.isArray(data.items) ? data.items.map((item) => ({
       productId: clean(item.productId || item.product_id || item.id, 128),
       productNameSnapshot: clean(item.productNameSnapshot || item.product_name || item.name, 160),
+      ...(item.containerTypeSnapshot || item.containerType || item.container_type ? { containerTypeSnapshot: clean(item.containerTypeSnapshot || item.containerType || item.container_type, 80) } : {}),
       quantity: Number(item.quantity) || 0,
       unitPriceAtOrder: safeNumber(item.unitPriceAtOrder ?? item.unitPrice ?? item.product_price ?? item.price) || 0,
       totalAtOrder: safeNumber(item.totalAtOrder ?? item.line_total) || 0,
@@ -88,6 +108,9 @@ function safeOrder(id, data = {}, branchNames = new Map()) {
     })) : [],
     totalAtOrder: safeNumber(data.totalAtOrder ?? data.total_cost) || 0,
     subtotalAtOrder: safeNumber(data.subtotalAtOrder ?? data.subtotal) || 0,
+    ...(safeNumber(data.discountAmount ?? data.discount) !== null ? { discountAmount: safeNumber(data.discountAmount ?? data.discount) } : {}),
+    ...(data.discountReason ? { discountReason: clean(data.discountReason, 240) } : {}),
+    ...(data.pricingSnapshot && typeof data.pricingSnapshot === 'object' ? { pricingSnapshot: data.pricingSnapshot } : {}),
     deliveryFeeAtOrder: safeNumber(data.deliveryFeeAtOrder ?? data.deliveryFee) || 0,
     expectedDeliveryDate: clean(data.expectedDeliveryDate || data.delivery_date, 80),
     scheduledAt: data.scheduledAt || data.scheduled_at || null,
@@ -260,7 +283,8 @@ async function updateOrder(db, orderId, prepare) {
       const snapshot = await tx.get(ref);
       if (!snapshot.exists) throw new OtpError(404, 'ORDER_NOT_FOUND', 'The order was not found.');
       const current = snapshot.data() || {};
-      const prepared = await prepare(current);
+      const prepared = await prepare(current, tx, snapshot);
+      if (prepared?.replay) return prepared.replay;
       const update = prepared?.orderUpdate || prepared;
       const sideEffects = prepared?.sideEffects || [];
       const deleteIfOrderMatches = prepared?.deleteIfOrderMatches || [];
@@ -285,6 +309,7 @@ async function updateOrder(db, orderId, prepare) {
         event: lifecycleEvent,
         now: update.updatedAt || new Date(),
       });
+      if (prepared?.proposalUpdate) tx.update(prepared.proposalUpdate.ref, prepared.proposalUpdate.data);
       tx.update(ref, update);
       for (const sideEffect of newSideEffects) tx.set(sideEffect.ref, sideEffect.data);
       for (const guardRef of guardsToDelete) tx.delete(guardRef);
@@ -306,7 +331,8 @@ function responseError(res, error) {
   } });
 }
 
-function createManagerDispatchHandler(getAdmin = getFirebaseAdmin) {
+function createManagerDispatchHandler(getAdmin = getFirebaseAdmin, options = {}) {
+  const promotionPricing = promotionCapability(getAdmin, options).enabled;
   return async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     if (!applyCors(req, res)) return;
@@ -340,7 +366,7 @@ function createManagerDispatchHandler(getAdmin = getFirebaseAdmin) {
       const body = bodyOf(req);
       const orderId = clean(body.orderId, 128);
       const action = clean(body.action, 48).toLowerCase();
-      if (!orderId || !['accept-order', 'reject-order', 'assign-distributor', 'reassign-distributor', 'request-transfer', 'accept-transfer', 'decline-transfer', 'edit-order'].includes(action)) {
+      if (!orderId || !['accept-order', 'reject-order', 'assign-distributor', 'reassign-distributor', 'request-transfer', 'accept-transfer', 'decline-transfer', 'edit-order', 'quote-edit'].includes(action)) {
         throw new OtpError(400, 'INVALID_DISPATCH_ACTION', 'Choose a valid order dispatch action.');
       }
       const requestedOrderSnapshot = await db.collection('requests').doc(orderId).get();
@@ -416,7 +442,7 @@ function createManagerDispatchHandler(getAdmin = getFirebaseAdmin) {
             assignmentHistory: [...history(current.assignmentHistory), entry],
           });
         });
-      } else if (action === 'edit-order') {
+      } else if (action === 'edit-order' || action === 'quote-edit') {
         const rawItems = Array.isArray(body.items) && body.items.length ? body.items : null;
         if (!rawItems || rawItems.length > 20) {
           throw new OtpError(400, 'INVALID_ORDER_ITEMS', 'Provide between 1 and 20 order items.');
@@ -429,19 +455,83 @@ function createManagerDispatchHandler(getAdmin = getFirebaseAdmin) {
           }
           return { productId, quantity };
         });
+        if (new Set(submittedItems.map((item) => item.productId)).size !== submittedItems.length) throw new OtpError(400, 'DUPLICATE_ORDER_PRODUCT', 'Combine each product into a single order line.');
 
         const EDITABLE_STATUSES = new Set(['awaiting_distributor_assignment', 'distributor_assigned', 'accepted', 'scheduled']);
+        if (action === 'edit-order' && body.quoteId) {
+          if (typeof body.quoteId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(body.quoteId)) throw new OtpError(400, 'INVALID_EDIT_QUOTE', 'Request a new price quote.');
+          const quoteRef = db.collection('managerEditQuotes').doc(body.quoteId);
+          const intentHash = managerEditIntentHash(submittedItems, body);
+          result = await updateOrder(db, orderId, async (current, tx, orderSnapshot) => {
+            requireOwningManager(manager, current);
+            const [quoteSnapshot, actor, branch] = await Promise.all([tx.get(quoteRef), tx.get(db.collection('users').doc(manager.decoded.uid)), tx.get(db.collection('branches').doc(managerBranchId))]);
+            requireCurrentManager(actor, branch, manager);
+            const quote = quoteSnapshot.data() || {};
+            if (!quoteSnapshot.exists || quote.orderId !== orderId || quote.managerUid !== manager.decoded.uid || quote.branchId !== managerBranchId || quote.intentHash !== intentHash) throw new OtpError(409, 'INVALID_EDIT_QUOTE', 'This quote does not match the proposed changes.');
+            if (quote.applied === true) return { replay: current };
+            const expiry = typeof quote.expiresAt?.toMillis === 'function' ? quote.expiresAt.toMillis() : new Date(quote.expiresAt).getTime();
+            if (!Number.isFinite(expiry) || Date.now() >= expiry || !EDITABLE_STATUSES.has(clean(current.status, 80).toLowerCase()) || managerEditRevision(orderSnapshot) !== quote.orderRevision || managerEditRevision(branch) !== quote.branchRevision) throw new OtpError(409, 'EDIT_QUOTE_STALE', 'The quote expired or the order or branch changed. Request a new quote.');
+            const productSnapshots = await Promise.all(quote.dependencies.map((entry) => tx.get(db.collection('products').doc(entry.id))));
+            if (productSnapshots.some((snapshot, index) => managerEditRevision(snapshot) !== quote.dependencies[index].revision)) throw new OtpError(409, 'EDIT_QUOTE_STALE', 'Product pricing changed. Request a new quote.');
+            if (quote.pricingSnapshot) {
+              if (quote.promotionPricing !== promotionPricing) throw new OtpError(409, 'EDIT_QUOTE_STALE', 'Promotional pricing changed. Request a new quote.');
+              validateSavedPromotion(current, managerBranchId);
+              assertPromotionalQuote(quote, productSnapshots, managerBranchId, quote.container ?? current.container, current.deliveryFeeAtOrder, { promotionPricing });
+            }
+            if (current.scheduledAt && !isAllowedDeliveryDate(current.scheduledAt, quote.effectiveDays)) throw new OtpError(409, 'PRODUCT_DELIVERY_DAY_UNAVAILABLE', 'The current schedule is not valid for these products.');
+            const trustedItems = quote.items;
+            const quantity = trustedItems.reduce((sum, item) => sum + item.quantity, 0);
+            const changes = {
+              items: trustedItems, effectiveDeliveryDaysSnapshot: quote.effectiveDays, productLimitViolations: limitViolations(trustedItems),
+              productId: trustedItems[0]?.productId || '', product_id: trustedItems[0]?.productId || '',
+              productNameSnapshot: trustedItems.map((item) => item.productNameSnapshot).join(', '), product_name: trustedItems.map((item) => item.productNameSnapshot).join(', '),
+              unitPriceAtOrder: trustedItems[0]?.unitPriceAtOrder || 0, product_price: trustedItems[0]?.unitPriceAtOrder || 0,
+              quantity, total_quantity: quantity, subtotalAtOrder: quote.subtotalAtOrder, totalAtOrder: quote.totalAtOrder, total_cost: quote.totalAtOrder,
+              ...(quote.pricingSnapshot ? { pricingSnapshot: quote.pricingSnapshot, discountAmount: quote.discountAmount } : {}),
+              ...(quote.pricingSnapshot && current.discount != null ? { discount: quote.discountAmount } : {}),
+              ...(quote.pricingSnapshot && current.subtotal != null ? { subtotal: quote.subtotalAtOrder } : {}),
+              ...(quote.notes !== null ? { notes: quote.notes, specialInstructions: quote.notes } : {}), ...(quote.container !== null ? { container: quote.container } : {}),
+            };
+            const previousPricing = savedPricingSnapshot(current);
+            const newPricing = savedPricingSnapshot({ ...current, ...changes });
+            const editEntry = { event: 'ORDER_EDITED', managerUid: manager.decoded.uid, editedAt: now, quoteId: body.quoteId, previousItems: current.items || [], previousTotal: current.totalAtOrder ?? current.total_cost ?? null, newItems: trustedItems, newTotal: quote.totalAtOrder, previousPricing, newPricing };
+            return { proposalUpdate: { ref: quoteRef, data: { applied: true, appliedAt: now } }, orderUpdate: updateWithEvent(current, 'ORDER_EDITED', manager.decoded.uid, managerBranchId, now, { ...changes, editHistory: [...history(current.editHistory), editEntry] }) };
+          });
+          return res.status(200).json({ order: safeOrder(orderId, result, branchNames) });
+        }
         const currentCheckStatus = clean(requestedOrder.status, 80).toLowerCase();
         if (!EDITABLE_STATUSES.has(currentCheckStatus)) {
           throw new OtpError(409, 'ORDER_NOT_EDITABLE', 'Orders can only be edited before delivery begins.');
         }
 
+        if (!isMaterialEdit(requestedOrder, submittedItems, body.container)) {
+          if (action === 'quote-edit') return res.status(200).json({ requiresConfirmation: false });
+          result = await updateOrder(db, orderId, async (current, tx, orderSnapshot) => {
+            requireOwningManager(manager, current);
+            if (!EDITABLE_STATUSES.has(clean(current.status, 80).toLowerCase()) || isMaterialEdit(current, submittedItems, body.container)
+              || (requestedOrderSnapshot.updateTime && orderSnapshot.updateTime && !requestedOrderSnapshot.updateTime.isEqual(orderSnapshot.updateTime))) {
+              throw new OtpError(409, 'ORDER_NOT_EDITABLE', 'This order changed. Refresh before editing.');
+            }
+            const notes = body.notes !== undefined ? clean(body.notes, 500) : (body.specialInstructions !== undefined ? clean(body.specialInstructions, 500) : current.notes || '');
+            const pricing = savedPricingSnapshot(current);
+            return updateWithEvent(current, 'ORDER_NOTES_EDITED', manager.decoded.uid, managerBranchId, now, {
+              notes, specialInstructions: notes,
+              editHistory: [...history(current.editHistory), { event: 'ORDER_NOTES_EDITED', managerUid: manager.decoded.uid, editedAt: now, previousPricing: pricing, newPricing: pricing }],
+            });
+          });
+          return res.status(200).json({ order: safeOrder(orderId, result, branchNames) });
+        }
+        if (action !== 'quote-edit') throw new OtpError(409, 'EDIT_QUOTE_REQUIRED', 'Review and confirm a current price quote before changing the order.');
+        if (requestedOrder.initialBranchId && clean(requestedOrder.initialBranchId, 128) !== managerBranchId) throw new OtpError(409, 'EDIT_TRANSFER_PRICING_REVIEW_REQUIRED', 'Transferred order pricing requires review before changing its items.');
+
+        const productSnapshots = [];
         const items = await Promise.all(submittedItems.map(async (item) => {
           const snapshot = await db.collection('products').doc(item.productId).get();
+          productSnapshots.push({ id: item.productId, snapshot });
           if (!snapshot.exists) throw new OtpError(404, 'PRODUCT_NOT_FOUND', 'A selected product no longer exists.');
           const productData = snapshot.data() || {};
           const active = productData.active !== false && productData.is_active !== false && productData.archived !== true;
-          const price = safeNumber(productData.price);
+          const price = safeProduct(snapshot.id, productData).price;
           const branchIds = Array.isArray(productData.branchIds)
             ? productData.branchIds
             : productData.branchId ? [productData.branchId] : [];
@@ -462,54 +552,42 @@ function createManagerDispatchHandler(getAdmin = getFirebaseAdmin) {
             deliveryDaysSnapshot: productDeliveryDays(productData.deliveryDays),
           };
         }));
-        const quantity = items.reduce((sum, item) => sum + item.quantity, 0);
-        const subtotalAtOrder = Math.round(items.reduce((sum, item) => sum + item.totalAtOrder, 0) * 100) / 100;
+        let subtotalAtOrder = Math.round(items.reduce((sum, item) => sum + item.totalAtOrder, 0) * 100) / 100;
         const effectiveDays = effectiveDeliveryDays(items);
         const notes = body.notes !== undefined ? clean(body.notes, 500) : (body.specialInstructions !== undefined ? clean(body.specialInstructions, 500) : undefined);
         const container = body.container !== undefined ? clean(body.container, 80) : undefined;
-
-        result = await updateOrder(db, orderId, async (current) => {
-          requireOwningManager(manager, current);
-          const status = clean(current.status, 80).toLowerCase();
-          if (!EDITABLE_STATUSES.has(status)) {
-            throw new OtpError(409, 'ORDER_NOT_EDITABLE', 'Orders can only be edited before delivery begins.');
-          }
-          if (current.scheduledAt && !isAllowedDeliveryDate(current.scheduledAt, effectiveDays)) throw new OtpError(409, 'PRODUCT_DELIVERY_DAY_UNAVAILABLE', 'The current schedule is not valid for these products. Reschedule before changing the items.');
-          const currentDeliveryFee = typeof current.deliveryFeeAtOrder === 'number'
-            ? current.deliveryFeeAtOrder
-            : (typeof current.deliveryFee === 'number' ? current.deliveryFee : 0);
-          const newTotal = calculateOrderTotal(subtotalAtOrder, currentDeliveryFee);
-          const editEntry = {
-            event: 'ORDER_EDITED',
-            managerUid: manager.decoded.uid,
-            editedAt: now,
-            previousItems: current.items || [],
-            previousTotal: current.totalAtOrder ?? current.total_cost ?? 0,
-            newItems: items,
-            newTotal,
-            ...(notes !== undefined ? { notes } : {}),
-            ...(container !== undefined ? { container } : {}),
-          };
-          return updateWithEvent(current, 'ORDER_EDITED', manager.decoded.uid, managerBranchId, now, {
-            items,
-            effectiveDeliveryDaysSnapshot: effectiveDays,
-            productLimitViolations: limitViolations(items),
-            productId: items[0]?.productId || '',
-            product_id: items[0]?.productId || '',
-            productNameSnapshot: items.map((item) => item.productNameSnapshot).join(', '),
-            product_name: items.map((item) => item.productNameSnapshot).join(', '),
-            unitPriceAtOrder: items[0]?.unitPriceAtOrder || 0,
-            product_price: items[0]?.unitPriceAtOrder || 0,
-            quantity,
-            total_quantity: quantity,
-            subtotalAtOrder,
-            totalAtOrder: newTotal,
-            total_cost: newTotal,
-            ...(notes !== undefined ? { notes, specialInstructions: notes } : {}),
-            ...(container !== undefined ? { container } : {}),
-            editHistory: [...history(current.editHistory), editEntry],
-          });
+        const oldTotal = requestedOrder.totalAtOrder ?? requestedOrder.total_cost;
+        const oldFee = requestedOrder.deliveryFeeAtOrder ?? requestedOrder.deliveryFee;
+        const oldDiscount = requestedOrder.discountAmount ?? requestedOrder.discount;
+        if (oldTotal == null || oldFee == null || !Number.isFinite(Number(oldTotal)) || Number(oldTotal) < 0 || !Number.isFinite(Number(oldFee)) || Number(oldFee) < 0 || (!requestedOrder.pricingSnapshot && oldDiscount != null && (!Number.isFinite(Number(oldDiscount)) || Number(oldDiscount) !== 0))) throw new OtpError(409, 'EDIT_PRICING_UNAVAILABLE', 'Saved order pricing requires branch review before changing this order.');
+        let promoted;
+        if (requestedOrder.pricingSnapshot) {
+          validateSavedPromotion(requestedOrder, managerBranchId);
+          promoted = pricePromotionalEdit(items, productSnapshots.map(({ snapshot }) => snapshot), managerBranchId, container ?? requestedOrder.container, requestedOrder.deliveryFeeAtOrder, { promotionPricing });
+          items.splice(0, items.length, ...promoted.items);
+          subtotalAtOrder = promoted.subtotalAtOrder;
+        } else validateLegacyEditPricing(requestedOrder);
+        const branchRef = db.collection('branches').doc(managerBranchId);
+        const branchSnapshot = await branchRef.get();
+        const quoteRef = db.collection('managerEditQuotes').doc();
+        const dependencies = productSnapshots.map(({ id, snapshot }) => ({ id, revision: managerEditRevision(snapshot) }));
+        const totalAtOrder = promoted ? promoted.totalAtOrder : calculateOrderTotal(subtotalAtOrder, Number(oldFee));
+        const before = savedPricingSnapshot(requestedOrder);
+        const after = savedPricingSnapshot({ ...requestedOrder, items, subtotalAtOrder, totalAtOrder, ...(promoted ? { pricingSnapshot: promoted.pricingSnapshot, discountAmount: promoted.discountAmount } : {}) });
+        const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+        await db.runTransaction(async (tx) => {
+          const [latest, actor, branch, ...products] = await Promise.all([
+            tx.get(db.collection('requests').doc(orderId)), tx.get(db.collection('users').doc(manager.decoded.uid)), tx.get(branchRef),
+            ...dependencies.map((entry) => tx.get(db.collection('products').doc(entry.id))),
+          ]);
+          requireCurrentManager(actor, branch, manager);
+          requireOwningManager(manager, latest.data() || {});
+          if (!latest.exists || !EDITABLE_STATUSES.has(clean(latest.data()?.status, 80).toLowerCase()) || managerEditRevision(latest) !== managerEditRevision(requestedOrderSnapshot) || managerEditRevision(branch) !== managerEditRevision(branchSnapshot) || products.some((product, index) => managerEditRevision(product) !== dependencies[index].revision)) throw new OtpError(409, 'EDIT_QUOTE_STALE', 'The order or pricing changed. Request a new quote.');
+          if (promoted) assertPromotionalQuote(promoted, products, managerBranchId, container ?? requestedOrder.container, requestedOrder.deliveryFeeAtOrder, { promotionPricing });
+          if (latest.data()?.scheduledAt && !isAllowedDeliveryDate(latest.data().scheduledAt, effectiveDays)) throw new OtpError(409, 'PRODUCT_DELIVERY_DAY_UNAVAILABLE', 'The current schedule is not valid for these products. Reschedule before changing the items.');
+          tx.set(quoteRef, { orderId, managerUid: manager.decoded.uid, branchId: managerBranchId, orderRevision: managerEditRevision(latest), branchRevision: managerEditRevision(branch), dependencies, intentHash: managerEditIntentHash(submittedItems, body), items, effectiveDays, subtotalAtOrder, totalAtOrder, ...(promoted ? { pricingSnapshot: promoted.pricingSnapshot, discountAmount: promoted.discountAmount, promotionPricing } : {}), notes: notes ?? null, container: container ?? null, expiresAt, applied: false });
         });
+        return res.status(200).json({ requiresConfirmation: true, quoteId: quoteRef.id, expiresAt: expiresAt.toISOString(), before, after });
       } else if (action === 'request-transfer') {
         const targetBranchId = clean(body.targetBranchId, 128);
         const targetBranch = branches.find((branch) => branch.id === targetBranchId);

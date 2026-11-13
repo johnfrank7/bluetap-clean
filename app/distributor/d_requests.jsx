@@ -138,11 +138,6 @@ const getAmountNumber = (amount) => {
   return Number.isFinite(parsedAmount) ? parsedAmount : undefined;
 };
 
-const getQuantityNumber = (quantity) => {
-  const match = String(quantity || '').match(/\d+(\.\d+)?/);
-  return Number(match?.[0] || 0);
-};
-
 const getDetailsRequestData = (request) => {
   if (!request) return null;
 
@@ -151,14 +146,6 @@ const getDetailsRequestData = (request) => {
   const totalAmount = getAmountNumber(
     request.totalAmount ?? request.total_amount ?? request.total_cost
   );
-  const productPrice = getAmountNumber(
-    request.productPrice ?? request.product_price ?? request.price
-  );
-  const quantity = getQuantityNumber(request.quantity);
-  const unitPrice =
-    productPrice ?? (quantity > 0 && totalAmount !== undefined
-      ? totalAmount / quantity
-      : undefined);
   const distributorName = isPending
     ? ''
     : request.distributor || request.distributor_name || '';
@@ -167,6 +154,7 @@ const getDetailsRequestData = (request) => {
     : request.distributorId || request.distributor_unique_id || '';
 
   return {
+    pricingDetailsSource: request.pricingDetailsSource || request,
     requestId: request.id,
     status,
     orderDate: 'Not set',
@@ -187,15 +175,9 @@ const getDetailsRequestData = (request) => {
     deliveryLocation: request.deliveryLocation,
     branchLocation: request.branchLocation,
     branchId: request.branchId,
-    items: [
-      {
-        id: request.id,
-        productName: request.productName || request.product_name,
-        quantity: request.quantity,
-        unitPrice,
-        subtotal: totalAmount,
-      },
-    ],
+    items: request.items?.length ? request.items : [{ id: request.id, productName: request.productName || request.product_name, quantity: request.quantity }],
+    subtotalAtOrder: request.subtotalAtOrder,
+    deliveryFeeAtOrder: request.deliveryFeeAtOrder,
     grandTotalAmount: totalAmount,
   };
 };

@@ -325,7 +325,7 @@ service cloud.firestore {
     // Catalog mutations are server-only. The backend validates Administrator
     // identity and writes audit records before using the Admin SDK.
     match /products/{productId} {
-      allow read: if hasActiveGlobalAccount();
+      allow read: if isAdmin();
       allow create, update, delete: if false;
     }
 

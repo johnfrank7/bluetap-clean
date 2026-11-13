@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import SavedOrderPricing from '../../components/SavedOrderPricing';
 import { useLocalSearchParams } from 'expo-router';
 import {
   ActivityIndicator,
@@ -17,6 +18,7 @@ import {
 import {
   decideOutsideRadiusOrder,
   dispatchManagerOrder,
+  quoteManagerOrder,
 } from '../../services/managerOrderApprovals';
 import { subscribeProducts } from '../../services/products';
 import { haversineDistanceKm } from '../../services/location';
@@ -429,6 +431,8 @@ function EditOrderModal({ visible, order, onClose, onDismiss, onSaveSuccess, col
   const [container, setContainer] = useState('');
   const [saving, setSaving] = useState(false);
   const [editError, setEditError] = useState('');
+  const [priceQuote, setPriceQuote] = useState(null);
+  const initializedOrder = useRef(null);
 
   const isEditable = order && EDITABLE_STATUSES.has(order.status);
 
@@ -440,7 +444,12 @@ function EditOrderModal({ visible, order, onClose, onDismiss, onSaveSuccess, col
   }, []);
 
   useEffect(() => {
-    if (order) {
+    if (!visible || !order) {
+      initializedOrder.current = null;
+      return;
+    }
+    if (initializedOrder.current !== order.id) {
+      initializedOrder.current = order.id;
       setItems(
         (order.items || []).map((it) => {
           const found = catalogProducts.find(
@@ -450,15 +459,16 @@ function EditOrderModal({ visible, order, onClose, onDismiss, onSaveSuccess, col
             productId: it.productId || it.product_id || it.id || found?.id || '',
             productNameSnapshot: it.productNameSnapshot || it.product_name || 'Product',
             quantity: Number(it.quantity) || 1,
-            unitPrice: Number(it.quantity) > 0 ? (Number(it.totalAtOrder || 0) / Number(it.quantity)) : 0,
+            unitPrice: Number(it.unitPriceAtOrder ?? it.unitPrice ?? 0),
           };
         })
       );
       setNotes(order.notes || order.specialInstructions || '');
       setContainer(order.container || '');
       setEditError('');
+      setPriceQuote(null);
     }
-  }, [order, catalogProducts]);
+  }, [visible, order, catalogProducts]);
 
   const updateQuantity = (index, delta) => {
     setItems((curr) =>
@@ -507,14 +517,20 @@ function EditOrderModal({ visible, order, onClose, onDismiss, onSaveSuccess, col
     setSaving(true);
     setEditError('');
     try {
-      await dispatchManagerOrder(order.id, 'edit-order', {
+      const payload = {
         items: items.map((it) => ({
           productId: it.productId,
           quantity: it.quantity,
         })),
         notes,
         container,
-      });
+      };
+      const quote = await quoteManagerOrder(order.id, payload);
+      if (quote.requiresConfirmation) {
+        setPriceQuote({ ...quote, payload });
+        return;
+      }
+      await dispatchManagerOrder(order.id, 'edit-order', payload);
       onSaveSuccess?.();
       onClose();
     } catch (err) {
@@ -524,10 +540,26 @@ function EditOrderModal({ visible, order, onClose, onDismiss, onSaveSuccess, col
     }
   };
 
+  const confirmPriceChange = async () => {
+    if (!order || !priceQuote || saving) return;
+    setSaving(true);
+    setEditError('');
+    try {
+      await dispatchManagerOrder(order.id, 'edit-order', { ...priceQuote.payload, quoteId: priceQuote.quoteId });
+      setPriceQuote(null);
+      onSaveSuccess?.();
+      onClose();
+    } catch (err) {
+      setEditError(err.message || 'Unable to confirm the changes.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   if (!order) return null;
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} onDismiss={onDismiss}>
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={() => priceQuote ? setPriceQuote(null) : onClose()} onDismiss={onDismiss}>
       <View style={styles.modalBackdrop}>
         <View accessibilityViewIsModal style={styles.editModalCard}>
           <View style={styles.modalHeaderRow}>
@@ -553,7 +585,6 @@ function EditOrderModal({ visible, order, onClose, onDismiss, onSaveSuccess, col
                   ['Assigned distributor', order.assignedDistributorName || 'Not assigned'],
                   ['Distributor public ID', order.assignedDistributorUniqueId || order.distributorUniqueId || 'Not available'],
                   ['Container type', order.container || 'Not set'],
-                  ['Total', formatAmount(order.totalAtOrder)],
                   ['Requested branch', order.initialBranchName || order.initialBranchNameSnapshot || order.transferFromBranchName || order.currentBranchName || 'Not available'],
                   ['Current branch', order.currentBranchName || order.branchNameSnapshot || 'Not available'],
                   ['Delivery address', order.address || 'Not available'],
@@ -644,6 +675,11 @@ function EditOrderModal({ visible, order, onClose, onDismiss, onSaveSuccess, col
             </View>
 
             <View style={styles.modalSection}>
+              <Text style={styles.modalSectionTitle}>Saved Order Pricing</Text>
+              <SavedOrderPricing order={order} colors={colors} />
+            </View>
+
+            <View style={styles.modalSection}>
               <Text style={styles.modalSectionTitle}>Container & Packaging</Text>
               {isEditable ? (
                 <TextInput
@@ -697,6 +733,25 @@ function EditOrderModal({ visible, order, onClose, onDismiss, onSaveSuccess, col
             ) : null}
           </View>
         </View>
+        {Boolean(priceQuote) && <View style={{ ...StyleSheet.absoluteFillObject, zIndex: 50, elevation: 50, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'center', padding: 18 }}>
+          <View accessibilityViewIsModal style={{ backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1, borderRadius: 16, padding: 18, maxHeight: '90%', width: '100%', maxWidth: 480, alignSelf: 'center' }}>
+            <Text accessibilityRole="header" style={{ color: colors.textPrimary, fontSize: 19, fontWeight: '800', marginBottom: 12 }}>Review Price Changes</Text>
+            <ScrollView style={{ flexGrow: 0, flexShrink: 1 }}>
+              {[['Previous', priceQuote?.before], ['Updated', priceQuote?.after]].map(([label, pricing]) => <View key={label} style={{ marginBottom: 14 }}>
+                <Text style={{ color: colors.textPrimary, fontWeight: '800' }}>{label} total: {pricing?.totalAtOrder == null ? '—' : formatAmount(pricing.totalAtOrder)}</Text>
+                {(pricing?.items || []).map((item, index) => <Text key={`${item.productId || 'item'}-${index}`} style={{ color: colors.textSecondary, marginTop: 4 }}>{item.productNameSnapshot || item.product_name || 'Product'} × {item.quantity} · {item.totalAtOrder == null ? '—' : formatAmount(item.totalAtOrder)}</Text>)}
+                <Text style={{ color: colors.textSecondary, marginTop: 4 }}>Product subtotal: {pricing?.subtotalAtOrder == null ? '—' : formatAmount(pricing.subtotalAtOrder)}</Text>
+                {Boolean(pricing?.pricingSnapshot || Number(pricing?.discountAmount) > 0) && <Text style={{ color: colors.textSecondary }}>Promotional savings: {formatAmount(pricing.discountAmount)}</Text>}
+                <Text style={{ color: colors.textSecondary }}>Delivery fee: {pricing?.deliveryFeeAtOrder == null ? '—' : formatAmount(pricing.deliveryFeeAtOrder)}</Text>
+              </View>)}
+              {!!editError && <Text accessibilityRole="alert" style={{ color: colors.danger, marginBottom: 10 }}>{editError}</Text>}
+            </ScrollView>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
+              <TouchableOpacity accessibilityRole="button" disabled={saving} onPress={() => { setPriceQuote(null); setEditError(''); }} style={[styles.cancelBtn, { flexGrow: 1 }]}><Text style={styles.cancelBtnText}>Keep Editing</Text></TouchableOpacity>
+              <TouchableOpacity accessibilityRole="button" disabled={saving} onPress={confirmPriceChange} style={[styles.saveBtn, { flexGrow: 1 }, saving && styles.actionDisabled]}><Text style={styles.saveBtnText}>{saving ? 'Confirming…' : 'Confirm Changes'}</Text></TouchableOpacity>
+            </View>
+          </View>
+        </View>}
       </View>
     </Modal>
   );

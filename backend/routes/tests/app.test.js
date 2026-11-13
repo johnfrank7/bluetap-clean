@@ -11,6 +11,7 @@ const { getClientIp } = require('../../utils/request');
 const EXPECTED_ROUTES = [
   '/api/admin/accounts',
   '/api/admin/branches',
+  '/api/admin/bundle-promotion-drafts',
   '/api/admin/chat-review',
   '/api/admin/dashboard/overview',
   '/api/admin/delivery-appeals',

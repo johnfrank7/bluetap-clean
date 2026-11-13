@@ -260,6 +260,7 @@ function toManagerOrder(id, data = {}, branchName = '', branchUsers = []) {
     : (data.productNameSnapshot || data.product_name || data.productName || '');
   return {
     ...data,
+    pricingDetailsSource: data,
     id,
     requestId: data.requestId || data.request_id || id,
     requesterName: data.requesterNameSnapshot || data.requesterName || data.requester_name || 'Requester',

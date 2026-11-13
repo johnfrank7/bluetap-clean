@@ -35,8 +35,9 @@ function fixture() {
     ['distributor-a', { disabled: false }], ['distributor-a2', { disabled: false }], ['distributor-b', { disabled: false }], ['distributor-inactive', { disabled: true }],
   ]);
   const snapshot = (path) => ({ id: path.split('/').pop(), exists: records.has(path), data: () => records.get(path) });
+  let autoId = 0;
   const collection = (name) => ({
-    doc(id) { const path = `${name}/${id}`; return { id, path, get: async () => snapshot(path), set: async (data) => records.set(path, data), update: async (data) => records.set(path, { ...records.get(path), ...data }), delete: async () => records.delete(path) }; },
+    doc(id = `generated-${++autoId}`) { const path = `${name}/${id}`; return { id, path, get: async () => snapshot(path), set: async (data) => records.set(path, data), update: async (data) => records.set(path, { ...records.get(path), ...data }), delete: async () => records.delete(path) }; },
     where(field, operator, value) { const docs = () => [...records.entries()].filter(([path, data]) => path.startsWith(`${name}/`) && data[field] === value).map(([path]) => snapshot(path)); return { async get() { return { docs: docs() }; }, limit(count) { return { async get() { return { docs: docs().slice(0, count) }; } }; } }; },
     async get() { return { docs: [...records.keys()].filter((path) => path.startsWith(`${name}/`)).map(snapshot) }; },
   });
@@ -273,16 +274,20 @@ test('Manager assignment requires scheduled delivery time and rejects past sched
 
 test('Manager can edit order items, quantities, notes, and container in pre-delivery window and total is recalculated', async () => {
   const f = fixture(); const handler = createManagerDispatchHandler(f.getAdmin);
-  const editResult = await call(handler, 'PATCH', 'manager-a-token', {
+  f.records.set('requests/order-a', { ...f.records.get('requests/order-a'), items: [{ ...f.records.get('requests/order-a').items[0], unitPriceAtOrder: 35 }], subtotalAtOrder: 70, deliveryFeeAtOrder: 0 });
+  const intent = {
     orderId: 'order-a',
-    action: 'edit-order',
     items: [
       { productId: 'product-1', quantity: 3 },
       { productId: 'product-2', quantity: 1 },
     ],
     notes: 'Please call upon arrival at gate.',
     container: 'Brand new 5-gallon container',
-  });
+  };
+  assert.equal((await call(handler, 'PATCH', 'manager-a-token', { ...intent, action: 'edit-order' })).body.error.reason, 'EDIT_QUOTE_REQUIRED');
+  const quote = await call(handler, 'PATCH', 'manager-a-token', { ...intent, action: 'quote-edit' });
+  assert.equal(quote.statusCode, 200);
+  const editResult = await call(handler, 'PATCH', 'manager-a-token', { ...intent, action: 'edit-order', quoteId: quote.body.quoteId });
   assert.equal(editResult.statusCode, 200);
   assert.equal(editResult.body.order.totalAtOrder, 255); // 35*3 + 150*1 = 255
   assert.equal(editResult.body.order.items.length, 2);
@@ -295,6 +300,19 @@ test('Manager can edit order items, quantities, notes, and container in pre-deli
   assert.equal(saved.editHistory[0].event, 'ORDER_EDITED');
   assert.equal(saved.editHistory[0].previousTotal, 70);
   assert.equal(saved.editHistory[0].newTotal, 255);
+});
+
+test('Manager notes-only edit retains the accepted price after a catalog price change', async () => {
+  const f = fixture(); const handler = createManagerDispatchHandler(f.getAdmin);
+  f.records.set('products/product-1', { ...f.records.get('products/product-1'), price: 90 });
+  const result = await call(handler, 'PATCH', 'manager-a-token', { orderId: 'order-a', action: 'edit-order', items: [{ productId: 'product-1', quantity: 2 }], container: 'Exchange container', notes: 'Ring the bell' });
+  assert.equal(result.statusCode, 200);
+  const order = f.records.get('requests/order-a');
+  assert.equal(order.totalAtOrder, 70);
+  assert.equal(order.items[0].totalAtOrder, 70);
+  assert.equal(order.notes, 'Ring the bell');
+  assert.deepEqual(order.editHistory.at(-1).previousPricing, order.editHistory.at(-1).newPricing);
+  assert.equal(order.editHistory.at(-1).previousPricing.subtotalAtOrder, null);
 });
 
 test('Manager cannot edit order once out for delivery or terminal, and cannot change protected fields', async () => {

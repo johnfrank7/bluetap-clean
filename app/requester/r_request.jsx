@@ -208,6 +208,7 @@ const getTotalAmount = (request) => {
 const getDetailsRequestData = (request) =>
   request
     ? {
+        pricingDetailsSource: request.pricingDetailsSource || request,
         requestId: getRequestId(request),
         status: request.status || 'Pending',
         orderDate: formatDateValue(request.created_at, 'Order date not set'),

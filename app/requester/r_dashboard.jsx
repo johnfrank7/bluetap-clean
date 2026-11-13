@@ -26,20 +26,24 @@ import { useRequesterData } from '../../components/RoleDataProviders';
 import SoftStatusBadge from '../../components/SoftStatusBadge';
 import { createShadow } from '../../components/shadowStyles';
 import ProductCard from '../../components/ProductCard';
+import { PromotionBanner, PromotionPopup } from '../../components/RequesterPromotion';
 import BlueTapEmptyState from '../../components/BlueTapEmptyState';
 import LocalTimeCard from '../../components/LocalTimeCard';
 import PortalSwipeContainer, { PortalSwipeIgnore, REQUESTER_TABS } from '../../components/PortalSwipeContainer';
 import { createPortalStyleSheet, useBlueTapTheme } from '../../components/BlueTapTheme';
 import { useReducedMotionPreference } from '../../components/BlueTapThemeTransition';
 import { RequesterOrderChatActions } from '../../components/chat/ChatOrderActions';
-import { ModerationNoticeBanner } from '../../components/ModerationNotices';
+import { ModerationNoticeBanner, useModerationNotices } from '../../components/ModerationNotices';
+import { useChat } from '../../components/chat/ChatContext';
 import { USER_PORTAL_BOTTOM_CONTENT_INSET, USER_PORTAL_LAYOUT } from '../../constants/userPortalLayout';
 import { BLUETAP_COLORS } from '../../constants/bluetapTheme';
 import {
   isCancellableRequesterOrderStatus,
   normalizeRequesterOrderStatus,
 } from '../../constants/requesterOrderStatus';
-import { getActiveProducts, getCachedActiveProducts } from '../../services/requesterOrdering';
+import { getActiveProducts, getCachedActiveProducts, getRequesterCatalog } from '../../services/requesterOrdering';
+import { rankProviderBranches } from '../../services/location';
+const { eligiblePromotionPreviews, promotionSessionKey, wasPromotionSeen, markPromotionSeen } = require('../../services/promotionPresentation');
 import { useLiveGreeting } from '../../services/liveTime';
 import {
   cancelRequest,
@@ -412,6 +416,8 @@ function TypewriterGreeting({ text, style }) {
 }
 
 export default function RequesterDashboard() {
+  const { panelOpen: chatOpen } = useChat();
+  const { activeRestrictions, loading: noticesLoading, modalOpen: noticeOpen } = useModerationNotices();
   const { colors, isDark } = useBlueTapTheme();
   const router = useRouter(); 
   const productCarouselRef = useRef(null);
@@ -432,6 +438,10 @@ export default function RequesterDashboard() {
   const [detailsRequest, setDetailsRequest] = useState(null);
   const [notification, setNotification] = useState(null);
   const [tutorialVisible, setTutorialVisible] = useState(false);
+  const [tutorialChecked, setTutorialChecked] = useState(false);
+  const [promotionCatalog, setPromotionCatalog] = useState(null);
+  const [promotionVisible, setPromotionVisible] = useState(false);
+  const [promotionClock, setPromotionClock] = useState(Date.now());
   const requesterId = requesterData?.uid || auth.currentUser?.uid;
 
   useEffect(() => {
@@ -439,16 +449,49 @@ export default function RequesterDashboard() {
     const storageKey = getTutorialSeenKey(requesterId);
     AsyncStorage.getItem(storageKey)
       .then((seen) => {
-        if (mounted && seen !== 'true') {
-          setTutorialVisible(true);
+        if (mounted) {
+          if (seen !== 'true') setTutorialVisible(true);
+          setTutorialChecked(true);
         }
       })
-      .catch(() => {});
+      .catch(() => {
+        if (mounted) setTutorialChecked(true);
+      });
     return () => {
       mounted = false;
     };
   }, [requesterId]);
   const [requesterName, setRequesterName] = useState('Requester');
+  useEffect(() => {
+    if (requesterData.readiness !== 'READY') { setPromotionCatalog(null); return undefined; }
+    let live = true;
+    const refresh = (force = false) => getRequesterCatalog({ force }).then((value) => { if (live) setPromotionCatalog(value); }).catch(() => { if (live) setPromotionCatalog(null); });
+    refresh();
+    const timer = setInterval(() => { setPromotionClock(Date.now()); refresh(true); }, 30000);
+    return () => { live = false; clearInterval(timer); };
+  }, [requesterData.readiness, requesterData.uid]);
+  const promotionBranch = React.useMemo(() => rankProviderBranches(promotionCatalog?.branches || [], promotionCatalog?.profile?.defaultDeliveryLocation)[0], [promotionCatalog]);
+  const promotion = React.useMemo(() => eligiblePromotionPreviews(promotionCatalog, promotionBranch?.id, null, promotionClock)[0] || null, [promotionCatalog, promotionBranch?.id, promotionClock]);
+  useEffect(() => {
+    if (!promotion?.endsAt) return undefined;
+    const delay = new Date(promotion.endsAt).getTime() - Date.now();
+    if (!Number.isFinite(delay) || delay > 30000) return undefined;
+    const timer = setTimeout(() => setPromotionClock(Date.now()), Math.max(0, delay + 1));
+    return () => clearTimeout(timer);
+  }, [promotion, promotionClock]);
+  const promotionRestricted = Boolean(promotion && activeRestrictions.some((notice) => notice.scope === 'platform_ordering' || (notice.scope === 'branch_ordering' && (notice.branchId === promotion.branchId || notice.branchName === promotion.branchName))));
+  const promotionBlocked = !tutorialChecked || tutorialVisible || noticeOpen || noticesLoading || chatOpen || viewAllModalVisible || Boolean(detailsRequest || requestToCancel || notification) || requesterData.loading || currentRequestsLoading || Boolean(currentRequestsError) || promotionCatalog?.profile?.complete !== true;
+  const closePromotion = useCallback(() => setPromotionVisible(false), []);
+  useEffect(() => {
+    if (!promotion || promotionBlocked) { setPromotionVisible(false); return; }
+    const key = promotionSessionKey(auth.currentUser, promotion);
+    if (!wasPromotionSeen(key)) { markPromotionSeen(key); setPromotionVisible(true); }
+  }, [promotion, promotionBlocked]);
+  const openPromotionOrder = useCallback(() => {
+    setPromotionVisible(false);
+    if (currentRequests.length) router.push('/requester/r_request');
+    else if (!promotionRestricted) router.push('/requester/requestform');
+  }, [currentRequests.length, promotionRestricted, router]);
   const productCarouselWidth = Math.max(
     1,
     Math.min(windowWidth, REQUESTER_APP_MAX_WIDTH) -
@@ -648,6 +691,7 @@ export default function RequesterDashboard() {
     : null;
   const detailsRequestData = liveDetailsRequest
     ? {
+        pricingDetailsSource: liveDetailsRequest.pricingDetailsSource || liveDetailsRequest,
         requestId: liveDetailsRequest.request_id || liveDetailsRequest.id,
         status: liveDetailsRequest.status || 'Pending',
         orderDate: formatRequestDate(liveDetailsRequest.created_at),
@@ -714,6 +758,8 @@ export default function RequesterDashboard() {
               <LocalTimeCard compact={windowWidth < 430} onBrand={!isDark} />
             </View>
             <ModerationNoticeBanner />
+
+            {Boolean(promotion && !promotionBlocked) && <PromotionBanner offer={promotion} colors={colors} onOpen={() => setPromotionVisible(true)} onOrder={openPromotionOrder} hasActiveOrder={currentRequests.length > 0} restricted={promotionRestricted} checkoutEnabled={promotionCatalog?.promotionCheckoutEnabled === true} />}
 
             <View style={styles.productsSection}>
               {productsLoading ? (
@@ -909,6 +955,7 @@ export default function RequesterDashboard() {
             </View>
 
           </ScrollView>
+          {Boolean(promotion && promotionVisible && !promotionBlocked) && <PromotionPopup offer={promotion} colors={colors} onClose={closePromotion} onOrder={openPromotionOrder} hasActiveOrder={currentRequests.length > 0} restricted={promotionRestricted} checkoutEnabled={promotionCatalog?.promotionCheckoutEnabled === true} />}
 
         </View>
         </PortalSwipeContainer>

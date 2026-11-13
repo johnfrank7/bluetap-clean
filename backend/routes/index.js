@@ -64,6 +64,7 @@ const routes = new Map([
   ['/api/admin/distributors', createAdminDistributorsHandler()],
   ['/api/admin/dashboard/overview', createAdminDashboardOverviewHandler()],
   ['/api/admin/products', createAdminProductsHandler()],
+  ['/api/admin/bundle-promotion-drafts', createAdminProductsHandler(undefined, { promotionDraftOnly: true })],
   ['/api/admin/dispatch-override', createAdminDispatchOverrideHandler()],
   ['/api/requester/catalog', createRequesterCatalogHandler()],
   ['/api/requester/orders', createRequesterOrdersHandler()],

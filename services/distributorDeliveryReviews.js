@@ -1,11 +1,15 @@
 import { auth } from '../firebase';
 import { getApiUrl } from './apiClient';
 import { ensureAuthStateReady } from './authSession';
+import { missingEndpointError, rememberMissingEndpoint } from './unavailableEndpoint';
 
 const PATH = '/api/distributor/delivery-reviews';
 const TIMEOUT_MS = 25000;
 
 async function request(path, expectedUid) {
+  const url = getApiUrl(path);
+  const unavailable = missingEndpointError(url);
+  if (unavailable) throw unavailable;
   await ensureAuthStateReady();
   const user = auth.currentUser;
   if (!user || user.uid !== expectedUid) throw new Error('Distributor session changed. Sign in again.');
@@ -14,15 +18,16 @@ async function request(path, expectedUid) {
   const controller = typeof AbortController === 'function' ? new AbortController() : null;
   const timer = controller ? setTimeout(() => controller.abort(), TIMEOUT_MS) : null;
   try {
-    const response = await fetch(getApiUrl(path), {
+    const response = await fetch(url, {
       headers: { Authorization: `Bearer ${token}` },
       ...(controller ? { signal: controller.signal } : {}),
     });
     if (auth.currentUser?.uid !== expectedUid) throw new Error('Distributor session changed. Sign in again.');
     const result = await response.json().catch(() => null);
+    rememberMissingEndpoint(url, response.status, result);
     if (auth.currentUser?.uid !== expectedUid) throw new Error('Distributor session changed. Sign in again.');
     if (!response.ok || !result || typeof result !== 'object') {
-      const error = new Error(result?.error?.message || 'Delivery reviews are temporarily unavailable.');
+      const error = new Error(missingEndpointError(url)?.message || result?.error?.message || 'Delivery reviews are temporarily unavailable.');
       error.status = response.status;
       throw error;
     }

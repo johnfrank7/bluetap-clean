@@ -13,6 +13,7 @@ import {
   View,
 } from 'react-native';
 import AdminShell from '../../components/AdminShell';
+import SavedOrderPricing from '../../components/SavedOrderPricing';
 import DropdownChevron from '../../components/DropdownChevron';
 import DropdownMenuOverlay from '../../components/DropdownMenuOverlay';
 import { useAdminTheme } from '../../components/AdminTheme';
@@ -109,30 +110,6 @@ const formatAmount = (val) => {
   if (val === undefined || val === null || val === '') return '₱0.00';
   const num = Number(val);
   return isNaN(num) || !Number.isFinite(num) ? 'Unavailable' : `₱${num.toFixed(2)}`;
-};
-
-const formatPriceOrUnavailable = (val) => {
-  if (val === undefined || val === null || val === '') return 'Unavailable';
-  const num = Number(val);
-  return isNaN(num) || !Number.isFinite(num) ? 'Unavailable' : `₱${num.toFixed(2)}`;
-};
-
-const normalizeOrderItem = (item = {}) => {
-  const quantity = Number(item.quantity) || 1;
-  const unitPrice = item.unitPriceAtOrder !== undefined && item.unitPriceAtOrder !== null
-    ? Number(item.unitPriceAtOrder)
-    : (item.unitPrice !== undefined && item.unitPrice !== null ? Number(item.unitPrice) : null);
-  const total = item.totalAtOrder !== undefined && item.totalAtOrder !== null
-    ? Number(item.totalAtOrder)
-    : (item.subtotal !== undefined && item.subtotal !== null
-      ? Number(item.subtotal)
-      : (unitPrice !== null ? unitPrice * quantity : null));
-  return {
-    name: item.productNameSnapshot || item.productName || item.name || 'Product',
-    quantity,
-    unitPrice,
-    total,
-  };
 };
 
 const formatDate = (val) => {
@@ -930,45 +907,7 @@ export default function AdminRequestsPage() {
               {/* Ordered Items Table */}
               <View style={styles.modalSection}>
                 <Text style={styles.modalSectionTitle}>Ordered Items & Charges</Text>
-                {Array.isArray(selectedOrder?.items) && selectedOrder.items.length > 0 ? (
-                  selectedOrder.items.map((rawItem, idx) => {
-                    const item = normalizeOrderItem(rawItem);
-                    return (
-                      <View key={idx} style={styles.itemRow}>
-                        <View style={{ flex: 1 }}>
-                          <Text style={styles.itemName}>
-                            {item.name}
-                          </Text>
-                          <Text style={styles.itemSub}>
-                            {formatPriceOrUnavailable(item.unitPrice)} × {item.quantity}
-                          </Text>
-                        </View>
-                        <Text style={styles.itemTotal}>
-                          {formatPriceOrUnavailable(item.total)}
-                        </Text>
-                      </View>
-                    );
-                  })
-                ) : (
-                  <View style={styles.itemRow}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.itemName}>
-                        {selectedOrder?.productNameSnapshot || selectedOrder?.product || 'Standard Product'}
-                      </Text>
-                      <Text style={styles.itemSub}>Qty: {selectedOrder?.quantity || 1}</Text>
-                    </View>
-                    <Text style={styles.itemTotal}>
-                      {formatAmount(selectedOrder?.totalAtOrder || selectedOrder?.totalAmount)}
-                    </Text>
-                  </View>
-                )}
-
-                <View style={styles.totalRow}>
-                  <Text style={styles.totalLabel}>Total Authoritative Amount</Text>
-                  <Text style={styles.totalValue}>
-                    {formatAmount(selectedOrder?.totalAtOrder || selectedOrder?.totalAmount)}
-                  </Text>
-                </View>
+                <SavedOrderPricing order={selectedOrder} colors={colors} />
               </View>
 
               {/* Container & Notes */}

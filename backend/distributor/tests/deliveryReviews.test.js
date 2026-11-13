@@ -20,6 +20,7 @@ function loadClient(auth, fetch) {
       if (name === '../firebase') return { auth };
       if (name === './apiClient') return { getApiUrl: (path) => `https://backend.test${path}` };
       if (name === './authSession') return { ensureAuthStateReady: async () => {} };
+      if (name === './unavailableEndpoint') return require('../../../services/unavailableEndpoint.js');
       throw new Error(`Unexpected import: ${name}`);
     }, module, module.exports, fetch, AbortController, setTimeout, clearTimeout,
   );

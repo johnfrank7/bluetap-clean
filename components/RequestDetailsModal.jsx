@@ -8,10 +8,11 @@ import {
   View,
 } from 'react-native';
 import SoftStatusBadge from './SoftStatusBadge';
+import SavedOrderPricing from './SavedOrderPricing';
 import { createShadow } from './shadowStyles';
 import { createPortalStyleSheet, useBlueTapTheme } from './BlueTapTheme';
 import { formatDisplayUniqueId } from '../services/uniqueIds';
-import { formatCurrency, normalizeRequestDetails } from '../services/orderNormalizer';
+import { normalizeRequestDetails } from '../services/orderNormalizer';
 const { formatDeliveryFailureReason } = require('../constants/deliveryFailureReasons');
 const { branchMapDataForRequest } = require('./locationMapModel');
 
@@ -22,23 +23,10 @@ const TEXT_MUTED = '#6F8EA8';
 const TEXT_DARK = '#20384D';
 const LazyLocationMap = React.lazy(() => import('./LocationMap'));
 
-const formatAmount = (amount) => formatCurrency(amount);
-
 const displayValue = (value) => {
   if (value === undefined || value === null || value === '') return 'Not set';
   return String(value);
 };
-
-const normalizeAmount = (value) =>
-  value === undefined || value === null || value === '' ? undefined : Number(value);
-
-const normalizeProduct = (item = {}, index) => ({
-  id: item.id || item.product_id || `${item.productName || item.product_name || 'product'}-${index}`,
-  productName: item.productNameSnapshot || item.productName || item.product_name || 'Product',
-  quantity: displayValue(item.quantity),
-  unitPrice: normalizeAmount(item.unitPriceAtOrder ?? item.unitPrice ?? item.product_price ?? item.price),
-  subtotal: normalizeAmount(item.totalAtOrder ?? item.subtotal ?? item.line_total),
-});
 
 export default function RequestDetailsModal({
   visible,
@@ -76,9 +64,6 @@ export default function RequestDetailsModal({
     activeRequest?.distributorPublicUidSnapshot || activeRequest?.distributorUniqueId || activeRequest?.distributor_unique_id,
     'Not assigned'
   );
-  const products = Array.isArray(activeRequest?.items) && activeRequest.items.length
-    ? activeRequest.items.map(normalizeProduct)
-    : [];
   const topRows = [
     [
       { label: 'Request ID', value: requestReference },
@@ -252,94 +237,7 @@ export default function RequestDetailsModal({
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>Ordered Products</Text>
 
-              <View style={styles.productsTable}>
-                {!compact && (
-                  <View style={styles.productHeaderRow}>
-                    <Text style={[styles.productHeaderText, styles.productNameColumn]}>
-                      Product
-                    </Text>
-                    <Text style={styles.productHeaderText}>Quantity</Text>
-                    <Text style={styles.productHeaderText}>Unit Price</Text>
-                    <Text style={styles.productHeaderText}>Subtotal</Text>
-                  </View>
-                )}
-
-                {products.length === 0 ? (
-                  <Text style={styles.emptyText}>No product details available.</Text>
-                ) : (
-                  products.map((item, index) => (
-                    <View
-                      key={item.id || `${item.productName}-${index}`}
-                      style={[
-                        styles.productRow,
-                        compact && styles.compactProductRow,
-                        index > 0 && styles.productRowDivider,
-                      ]}
-                    >
-                      <Text
-                        style={[
-                          styles.productValue,
-                          styles.productNameColumn,
-                          compact && styles.compactProductName,
-                        ]}
-                        numberOfLines={2}
-                      >
-                        {item.productName}
-                      </Text>
-                      {compact ? (
-                        <View style={styles.compactProductMeta}>
-                          <View style={styles.compactProductField}>
-                            <Text style={styles.productMobileLabel}>Quantity</Text>
-                            <Text style={styles.compactProductValue} numberOfLines={1}>{item.quantity}</Text>
-                          </View>
-                          <View style={styles.compactProductField}>
-                            <Text style={styles.productMobileLabel}>Unit Price</Text>
-                            <Text style={styles.compactProductValue} numberOfLines={1}>{formatAmount(item.unitPrice)}</Text>
-                          </View>
-                          <View style={styles.compactProductField}>
-                            <Text style={styles.productMobileLabel}>Subtotal</Text>
-                            <Text style={styles.compactProductValue} numberOfLines={1}>{formatAmount(item.subtotal)}</Text>
-                          </View>
-                        </View>
-                      ) : (
-                        <>
-                          <Text style={styles.productValue} numberOfLines={1}>{item.quantity}</Text>
-                          <Text style={styles.productValue} numberOfLines={1}>{formatAmount(item.unitPrice)}</Text>
-                          <Text style={styles.productValue} numberOfLines={1}>{formatAmount(item.subtotal)}</Text>
-                        </>
-                      )}
-                    </View>
-                  ))
-                )}
-              </View>
-
-              <View style={styles.totalsCard}>
-                <View style={styles.totalRow}>
-                  <Text style={styles.totalLabel}>Products Subtotal</Text>
-                  <Text style={styles.totalValue}>{formatAmount(activeRequest?.subtotal ?? activeRequest?.subtotalAtOrder ?? products.reduce((sum, item) => sum + Number(item.subtotal || 0), 0))}</Text>
-                </View>
-                <View style={styles.totalRow}>
-                  <Text style={styles.totalLabel}>Delivery Fee</Text>
-                  <Text style={styles.totalValue}>{formatAmount(activeRequest?.deliveryFee ?? activeRequest?.deliveryFeeAtOrder ?? 0)}</Text>
-                </View>
-                {Number(activeRequest?.discountAmount ?? activeRequest?.discount ?? 0) > 0 && (
-                  <View style={styles.totalRow}>
-                    <View style={styles.totalLabelWrap}>
-                      <Text style={styles.totalLabel}>Discount</Text>
-                      {!!activeRequest?.discountReason && (
-                        <Text style={styles.feeDetailSubtext}>{activeRequest.discountReason}</Text>
-                      )}
-                    </View>
-                    <Text style={[styles.totalValue, styles.discountValue]}>
-                      -{formatAmount(activeRequest?.discountAmount ?? activeRequest?.discount)}
-                    </Text>
-                  </View>
-                )}
-                <View style={[styles.totalRow, styles.grandTotalRow]}>
-                  <Text style={styles.grandTotalLabel}>Grand Total</Text>
-                  <Text style={styles.grandTotalValue}>{formatAmount(activeRequest?.grandTotal ?? activeRequest?.grandTotalAmount ?? activeRequest?.total_cost ?? activeRequest?.totalAtOrder ?? activeRequest?.totalAmount)}</Text>
-                </View>
-              </View>
+              <SavedOrderPricing order={request} colors={colors} />
 
               {typeof onEdit === 'function' && (
                 <TouchableOpacity
