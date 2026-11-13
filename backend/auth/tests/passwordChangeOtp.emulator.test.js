@@ -8,16 +8,17 @@ const { getAuth: adminAuth } = require('firebase-admin/auth');
 const { getFirestore } = require('firebase-admin/firestore');
 const { createPasswordChangeOtpHandler } = require('../passwordChangeOtpHandler');
 
+const project = process.env.GCLOUD_PROJECT || 'demo-bluetap';
 const enabled = process.env.FIRESTORE_EMULATOR_HOST === '127.0.0.1:8080'
   && process.env.FIREBASE_AUTH_EMULATOR_HOST === '127.0.0.1:9099'
-  && process.env.GCLOUD_PROJECT === 'demo-bluetap';
+  && Boolean(process.env.GCLOUD_PROJECT);
 
 test('isolated Auth and Firestore enforce the password-change OTP before updating the emulator account', { skip: !enabled }, async () => {
   const id = randomUUID();
   const uid = `password-test-${id}`;
   const email = `${uid}@example.test`;
-  const admin = adminApp({ projectId: 'demo-bluetap' }, `password-admin-${id}`);
-  const client = initializeApp({ projectId: 'demo-bluetap', apiKey: 'demo-key' }, `password-client-${id}`);
+  const admin = adminApp({ projectId: project }, `password-admin-${id}`);
+  const client = initializeApp({ projectId: project, apiKey: 'demo-key' }, `password-client-${id}`);
   const auth = getAuth(client);
   connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
   const serverAuth = adminAuth(admin);
