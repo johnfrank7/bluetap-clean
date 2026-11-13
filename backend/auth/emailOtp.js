@@ -91,6 +91,7 @@ function createEmailOtpService({ auth, db, sendEmailOtp, hashSecret, now = Date.
           ...(profile.emailOtpVerification || {}),
           required: profile.emailVerificationRequired === true || profile.accountSource === 'admin_created' || profile.emailOtpVerification?.required === true,
           status: 'verified',
+          profileSynced: true,
         },
         updatedAt: verifiedAt,
       });
