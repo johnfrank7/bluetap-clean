@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
   Alert,
   Modal,
+  Platform,
   useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -21,6 +22,7 @@ import { auth } from '../../firebase';
 import { findLocalUserForAuthRole } from '../../localUsers';
 import RequestDetailsModal from '../../components/RequestDetailsModal';
 import { useRequesterData } from '../../components/RoleDataProviders';
+import { useRequesterTour, useRequesterTourTarget } from '../../components/RequesterTutorialModal';
 import SoftStatusBadge from '../../components/SoftStatusBadge';
 import { createShadow } from '../../components/shadowStyles';
 import ProductCard from '../../components/ProductCard';
@@ -410,6 +412,8 @@ function TypewriterGreeting({ text, style }) {
 }
 
 export default function RequesterDashboard() {
+  const { active: tourActive, target: tourTarget, notifyTourScroll } = useRequesterTour();
+  const productsTourRef = useRequesterTourTarget('home-products');
   const { colors, isDark } = useBlueTapTheme();
   const router = useRouter(); 
   const productCarouselRef = useRef(null);
@@ -680,6 +684,8 @@ export default function RequesterDashboard() {
         <PortalSwipeContainer tabs={REQUESTER_TABS} currentRoute="/requester/r_dashboard">
         <View style={styles.phoneWrapper}>
           <ScrollView
+            onScroll={tourActive && tourTarget === 'home' && Platform.OS !== 'web' ? notifyTourScroll : undefined}
+            scrollEventThrottle={16}
             contentContainerStyle={styles.scrollContent}
             showsVerticalScrollIndicator={false}
           >
@@ -696,7 +702,7 @@ export default function RequesterDashboard() {
             </View>
             <ModerationNoticeBanner />
 
-            <View style={styles.productsSection}>
+            <View ref={productsTourRef} collapsable={false} style={styles.productsSection}>
               {productsLoading ? (
                 <View style={styles.productStateCard}>
                   <ActivityIndicator size="small" color="#187BCD" />

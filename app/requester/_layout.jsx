@@ -8,6 +8,7 @@ import { RequesterDataProvider } from '../../components/RoleDataProviders';
 import ChatDataProvider from '../../components/chat/ChatDataProvider';
 import { RoleNotificationProvider } from '../../components/RoleNotifications';
 import { ModerationNoticeProvider } from '../../components/ModerationNotices';
+import { RequesterTourProvider } from '../../components/RequesterTutorialModal';
 
 export default function RequesterLayout() {
   const pathname = usePathname();
@@ -15,14 +16,14 @@ export default function RequesterLayout() {
   return (
     <RoleGate role="requester">
       <RequesterDataProvider>
-        <ModerationNoticeProvider><ChatDataProvider role="requester">
+        <ModerationNoticeProvider><RequesterTourProvider><ChatDataProvider role="requester">
           <RoleNotificationProvider role="requester">
             <UserPortalShell
               header={assistantOpen ? null : <RequesterHeader />}
               navigation={<RequesterBottomNav />}
             />
           </RoleNotificationProvider>
-        </ChatDataProvider></ModerationNoticeProvider>
+        </ChatDataProvider></RequesterTourProvider></ModerationNoticeProvider>
       </RequesterDataProvider>
     </RoleGate>
   );

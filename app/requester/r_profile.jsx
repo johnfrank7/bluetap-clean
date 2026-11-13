@@ -11,6 +11,7 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -31,6 +32,7 @@ import { createPortalStyleSheet, useBlueTapTheme } from '../../components/BlueTa
 import BlueTapBrandMark from '../../components/BlueTapBrandMark';
 import PortalSwipeContainer, { REQUESTER_TABS } from '../../components/PortalSwipeContainer';
 import TopToastFeedback from '../../components/TopToastFeedback';
+import { useRequesterTour } from '../../components/RequesterTutorialModal';
 import { USER_PORTAL_BOTTOM_CONTENT_INSET, USER_PORTAL_LAYOUT } from '../../constants/userPortalLayout';
 import { BLUETAP_COLORS } from '../../constants/bluetapTheme';
 
@@ -119,6 +121,8 @@ const ProfileField = memo(function ProfileField({
 });
 
 export default function ProfilePage() {
+  const { startTour } = useRequesterTour();
+  const { width } = useWindowDimensions();
   const { colors, isDark } = useBlueTapTheme();
   const router = useRouter();
   const { replaceOnce } = useSingleFlightNavigation();
@@ -500,6 +504,24 @@ export default function ProfilePage() {
             )}
           </View>
 
+          <View style={[styles.settingsSection, width < 768 && styles.floatingActionClearance]}>
+            <View style={styles.settingRow}>
+              <View style={styles.settingTextWrap}>
+                <Text style={styles.settingLabel}>How to Use BlueTap</Text>
+                <Text style={styles.settingSubtitle}>Take a guided tour of water ordering, delivery requests, and support.</Text>
+              </View>
+              <TouchableOpacity
+                accessibilityRole="button"
+                accessibilityLabel="Take a guided tour of BlueTap"
+                dataSet={{ bluetapCta: 'true' }}
+                onPress={() => confirmLeave(startTour)}
+                style={styles.changePasswordButton}
+              >
+                <Text style={styles.changePasswordButtonText}>View Guide</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+
           <View style={styles.helpCard}>
             <Pressable style={({ hovered, pressed }) => [styles.helpRow, hovered && styles.helpRowHovered, pressed && styles.helpRowPressed]} onPress={() => replaceOnce('/requester/bluetap_AI')} accessibilityRole="button" accessibilityLabel="Open BlueTap Assistant">
               <View style={styles.helpTextBlock}>
@@ -685,6 +707,59 @@ const styles = createPortalStyleSheet({
   },
   buttonDisabled: {
     opacity: 0.65,
+  },
+  settingsSection: {
+    marginTop: 18,
+    backgroundColor: '#FFFFFF',
+    borderRadius: USER_PORTAL_LAYOUT.cardRadius,
+    borderWidth: 1,
+    borderColor: CARD_BORDER,
+    padding: 16,
+    ...createShadow({
+      color: '#0D47A1',
+      elevation: 6,
+      opacity: 0.1,
+      radius: 10,
+      offset: { width: 0, height: 5 },
+    }),
+  },
+  settingRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+    gap: 12,
+  },
+  floatingActionClearance: {
+    marginRight: 56,
+  },
+  settingTextWrap: {
+    flex: 1,
+    minWidth: 150,
+  },
+  settingLabel: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: TEXT_DARK,
+  },
+  settingSubtitle: {
+    fontSize: 12,
+    color: TEXT_MUTED,
+    marginTop: 2,
+  },
+  changePasswordButton: {
+    minHeight: 44,
+    paddingHorizontal: 14,
+    borderRadius: 8,
+    backgroundColor: BLUE,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  changePasswordButtonText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '800',
   },
   helpCard: {
     marginTop: 22,

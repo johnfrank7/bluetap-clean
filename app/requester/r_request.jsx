@@ -21,6 +21,7 @@ import { findLocalUserForAuthRole } from '../../localUsers';
 import RequestDetailsModal from '../../components/RequestDetailsModal';
 import { useRequesterData } from '../../components/RoleDataProviders';
 import RequesterEditOrderModal from '../../components/RequesterEditOrderModal';
+import { useRequesterTour, useRequesterTourTarget } from '../../components/RequesterTutorialModal';
 import SoftStatusBadge, { normalizeStatus } from '../../components/SoftStatusBadge';
 import { createShadow } from '../../components/shadowStyles';
 import BlueTapEmptyState from '../../components/BlueTapEmptyState';
@@ -353,6 +354,12 @@ const RequestCard = ({
 };
 
 export default function RequesterRequests() {
+  const { active: tourActive, target: tourTarget } = useRequesterTour();
+  const ordersTourRef = useRequesterTourTarget('orders');
+  const historyTabTourRef = useRequesterTourTarget('history-tab');
+  const historyContentTourRef = useRequesterTourTarget('history-content');
+  const addActiveTourRef = useRequesterTourTarget('add-active');
+  const addEmptyTourRef = useRequesterTourTarget('add-empty');
   const { colors, isDark } = useBlueTapTheme();
   const router = useRouter();
   const params = useLocalSearchParams();
@@ -505,6 +512,7 @@ export default function RequesterRequests() {
 
               <View style={[styles.orderTabs, { backgroundColor: colors.surfaceAlt, borderColor: colors.border }]}>
                 <Pressable
+                  ref={ordersTourRef}
                   accessibilityRole="tab"
                   accessibilityState={{ selected: activeTab === ACTIVE_TAB }}
                   onPress={() => setActiveTab(ACTIVE_TAB)}
@@ -527,6 +535,7 @@ export default function RequesterRequests() {
                 </Pressable>
 
                 <Pressable
+                  ref={historyTabTourRef}
                   accessibilityRole="tab"
                   accessibilityState={{ selected: activeTab === HISTORY_TAB }}
                   onPress={() => setActiveTab(HISTORY_TAB)}
@@ -551,6 +560,7 @@ export default function RequesterRequests() {
 
               {isActiveOrdersTab && activeRequests.length > 0 && (
                 <Pressable
+                  ref={addActiveTourRef}
                   style={({ pressed, hovered }) => [styles.addRequestButton, hovered && styles.addRequestHovered, pressed && styles.addRequestPressed]}
                   onPress={() => router.replace('/requester/requestform')}
                 >
@@ -567,6 +577,7 @@ export default function RequesterRequests() {
             </View>
 
             <ScrollView
+              ref={historyContentTourRef}
               contentContainerStyle={styles.scrollContent}
               showsVerticalScrollIndicator={false}
             >
@@ -589,6 +600,7 @@ export default function RequesterRequests() {
                     title="Your next refill starts here!"
                     description="No active orders yet. Order your water in just a few taps."
                     actionLabel="Order Water Now"
+                    actionRef={addEmptyTourRef}
                     onAction={() => router.replace('/requester/requestform')}
                     style={styles.ordersEmptyCard}
                   />
