@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
   Alert,
   Modal,
+  Platform,
   useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -20,9 +21,8 @@ import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from '../../firebase';
 import { findLocalUserForAuthRole } from '../../localUsers';
 import RequestDetailsModal from '../../components/RequestDetailsModal';
-import RequesterTutorialModal, { TUTORIAL_SEEN_KEY, getTutorialSeenKey } from '../../components/RequesterTutorialModal';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRequesterData } from '../../components/RoleDataProviders';
+import { useRequesterTour, useRequesterTourTarget } from '../../components/RequesterTutorialModal';
 import SoftStatusBadge from '../../components/SoftStatusBadge';
 import { createShadow } from '../../components/shadowStyles';
 import ProductCard from '../../components/ProductCard';
@@ -416,8 +416,10 @@ function TypewriterGreeting({ text, style }) {
 }
 
 export default function RequesterDashboard() {
+  const { active: tourActive, completionPending: tourCompletionPending, ready: tourReady, target: tourTarget, notifyTourScroll } = useRequesterTour();
   const { panelOpen: chatOpen } = useChat();
   const { activeRestrictions, loading: noticesLoading, modalOpen: noticeOpen } = useModerationNotices();
+  const productsTourRef = useRequesterTourTarget('home-products');
   const { colors, isDark } = useBlueTapTheme();
   const router = useRouter(); 
   const productCarouselRef = useRef(null);
@@ -437,30 +439,9 @@ export default function RequesterDashboard() {
   const [requestToCancel, setRequestToCancel] = useState(null);
   const [detailsRequest, setDetailsRequest] = useState(null);
   const [notification, setNotification] = useState(null);
-  const [tutorialVisible, setTutorialVisible] = useState(false);
-  const [tutorialChecked, setTutorialChecked] = useState(false);
   const [promotionCatalog, setPromotionCatalog] = useState(null);
   const [promotionVisible, setPromotionVisible] = useState(false);
   const [promotionClock, setPromotionClock] = useState(Date.now());
-  const requesterId = requesterData?.uid || auth.currentUser?.uid;
-
-  useEffect(() => {
-    let mounted = true;
-    const storageKey = getTutorialSeenKey(requesterId);
-    AsyncStorage.getItem(storageKey)
-      .then((seen) => {
-        if (mounted) {
-          if (seen !== 'true') setTutorialVisible(true);
-          setTutorialChecked(true);
-        }
-      })
-      .catch(() => {
-        if (mounted) setTutorialChecked(true);
-      });
-    return () => {
-      mounted = false;
-    };
-  }, [requesterId]);
   const [requesterName, setRequesterName] = useState('Requester');
   useEffect(() => {
     if (requesterData.readiness !== 'READY') { setPromotionCatalog(null); return undefined; }
@@ -480,7 +461,7 @@ export default function RequesterDashboard() {
     return () => clearTimeout(timer);
   }, [promotion, promotionClock]);
   const promotionRestricted = Boolean(promotion && activeRestrictions.some((notice) => notice.scope === 'platform_ordering' || (notice.scope === 'branch_ordering' && (notice.branchId === promotion.branchId || notice.branchName === promotion.branchName))));
-  const promotionBlocked = !tutorialChecked || tutorialVisible || noticeOpen || noticesLoading || chatOpen || viewAllModalVisible || Boolean(detailsRequest || requestToCancel || notification) || requesterData.loading || currentRequestsLoading || Boolean(currentRequestsError) || promotionCatalog?.profile?.complete !== true;
+  const promotionBlocked = !tourReady || tourActive || tourCompletionPending || noticeOpen || noticesLoading || chatOpen || viewAllModalVisible || Boolean(detailsRequest || requestToCancel || notification) || requesterData.loading || currentRequestsLoading || Boolean(currentRequestsError) || promotionCatalog?.profile?.complete !== true;
   const closePromotion = useCallback(() => setPromotionVisible(false), []);
   useEffect(() => {
     if (!promotion || promotionBlocked) { setPromotionVisible(false); return; }
@@ -743,6 +724,8 @@ export default function RequesterDashboard() {
         <PortalSwipeContainer tabs={REQUESTER_TABS} currentRoute="/requester/r_dashboard">
         <View style={styles.phoneWrapper}>
           <ScrollView
+            onScroll={tourActive && tourTarget === 'home' && Platform.OS !== 'web' ? notifyTourScroll : undefined}
+            scrollEventThrottle={16}
             contentContainerStyle={styles.scrollContent}
             showsVerticalScrollIndicator={false}
           >
@@ -761,7 +744,7 @@ export default function RequesterDashboard() {
 
             {Boolean(promotion && !promotionBlocked) && <PromotionBanner offer={promotion} colors={colors} onOpen={() => setPromotionVisible(true)} onOrder={openPromotionOrder} hasActiveOrder={currentRequests.length > 0} restricted={promotionRestricted} checkoutEnabled={promotionCatalog?.promotionCheckoutEnabled === true} />}
 
-            <View style={styles.productsSection}>
+            <View ref={productsTourRef} collapsable={false} style={styles.productsSection}>
               {productsLoading ? (
                 <View style={styles.productStateCard}>
                   <ActivityIndicator size="small" color="#187BCD" />
@@ -1000,12 +983,6 @@ export default function RequesterDashboard() {
           request={detailsRequestData}
           branches={requesterData.branches}
         />
-        <RequesterTutorialModal
-          visible={tutorialVisible}
-          onClose={() => setTutorialVisible(false)}
-          userId={requesterId}
-        />
-
         <Modal visible={!!notification} transparent animationType="fade">
           <View style={styles.modalBackground}>
             <View style={styles.modalContainer}>

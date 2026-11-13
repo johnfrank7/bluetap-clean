@@ -19,6 +19,7 @@ import { buildBuyAgainDraft } from '../../services/buyAgain';
 import { createRequest, subscribeRequesterCurrentRequests } from '../../services/requests';
 import { auth } from '../../firebase';
 import useUnsavedChangesGuard from '../../components/useUnsavedChangesGuard';
+import { useRequesterTour, useRequesterTourTarget } from '../../components/RequesterTutorialModal';
 import {
   normalizeBranchDeliveryPricing,
   calculateDeliveryFee,
@@ -63,10 +64,10 @@ function resolvePublicOrderReference(order = {}) {
   return '';
 }
 
-function Section({ number, title, helper, rightAction, children }) {
+function Section({ number, title, helper, rightAction, children, tourRef, onTourLayout }) {
   useBlueTapTheme();
   return (
-    <View style={styles.section}>
+    <View ref={tourRef} style={styles.section} onLayout={onTourLayout}>
       <View style={styles.sectionHeading}>
         <View style={styles.number}><Text style={styles.numberText}>{number}</Text></View>
         <View style={styles.sectionTitleWrap}>
@@ -87,6 +88,18 @@ function LimitWarning({ items, colors }) {
 }
 
 export default function RequestFormPage() {
+  const { active: tourActive, target: tourTarget, registerLeaveGuard, setOrderBlocked, notifyTourScroll } = useRequesterTour();
+  const locationTourRef = useRequesterTourTarget('order-location');
+  const providerTourRef = useRequesterTourTarget('order-provider');
+  const productsTourRef = useRequesterTourTarget('order-products');
+  const containerTourRef = useRequesterTourTarget('order-container');
+  const reviewTourRef = useRequesterTourTarget('order-review');
+  const [tourLayouts, setTourLayouts] = React.useState({});
+  const recordTourLayout = (key) => (event) => {
+    if (Platform.OS === 'web') return;
+    const y = event.nativeEvent.layout.y;
+    setTourLayouts((previous) => previous[key] === y ? previous : { ...previous, [key]: y });
+  };
   const { colors, isDark } = useBlueTapTheme();
   const { activeRestrictions } = useModerationNotices();
   const router = useRouter(); const params = useLocalSearchParams(); const preferredProductId = firstParam(params.productId); const buyAgainOrderId = firstParam(params.buyAgainOrderId);
@@ -223,6 +236,12 @@ export default function RequestFormPage() {
     return () => clearTimeout(timer);
   }, [validCreateQuote]);
   const scrollViewRef = React.useRef(null);
+  React.useEffect(() => {
+    const y = tourLayouts[tourTarget];
+    if (Platform.OS !== 'web' && tourActive && Number.isFinite(y)) {
+      scrollViewRef.current?.scrollTo?.({ y: Math.max(0, y - 80), animated: false });
+    }
+  }, [tourActive, tourTarget, tourLayouts]);
   const productsScrollRef = React.useRef(null);
   const [canScrollLeft, setCanScrollLeft] = React.useState(false);
   const [canScrollRight, setCanScrollRight] = React.useState(true);
@@ -300,6 +319,8 @@ export default function RequestFormPage() {
     onDiscard: resetDraft,
     onContinueEditing: handleContinueEditing,
   });
+  React.useEffect(() => { registerLeaveGuard(confirmLeave); return () => registerLeaveGuard(null); }, [registerLeaveGuard, confirmLeave]);
+  React.useEffect(() => { setOrderBlocked(hasActiveOrder); return () => setOrderBlocked(false); }, [setOrderBlocked, hasActiveOrder]);
   const leaveRequestForm = () => confirmLeave(() => router.canGoBack?.() ? router.back() : router.replace('/requester/r_dashboard'));
 
   const requestReview = async () => {
@@ -313,7 +334,7 @@ export default function RequestFormPage() {
   };
   const submit = async () => { if(!canReview||submitting) return; if (promotionCheckout && (!validCreateQuote || new Date(validCreateQuote.expiresAt).getTime() <= Date.now())) { setReviewing(false); setCreateQuote(null); setSubmitError('The price quote expired. Review your request again.'); return; } setSubmitting(true); setSubmitError(''); try { await createRequest({branchId:selectedBranch.id,deliveryLocation,container,saveAsDefaultLocation,quoteId:validCreateQuote?.quoteId,items:items.map(({productId,quantity})=>({product_id:productId,quantity}))}); router.replace('/requester/r_request'); } catch(error){ if (promotionCheckout) { setCreateQuote(null); setReviewing(false); getRequesterCatalog({ force: true }).then(setCatalog).catch(() => setCatalog((current) => current ? { ...current, promotionPreviews: [] } : current)); } setSubmitError(error.message); setToast({ visible: true, message: error.message || 'Unable to submit order.', type: 'error' });} finally{setSubmitting(false);} };
 
-  return <LinearGradient colors={isDark?[colors.background,colors.header]:[colors.primary,colors.primaryLight]} style={styles.gradient} start={{x:0,y:0}} end={{x:0,y:1}}><SafeAreaView edges={['left','right','bottom']} style={styles.safe}><TopToastFeedback visible={toast.visible} message={toast.message} type={toast.type} onDismiss={() => setToast((t) => ({ ...t, visible: false }))} /><KeyboardAvoidingView behavior={Platform.OS==='ios'?'padding':undefined} style={styles.flex}><ScrollView ref={scrollViewRef} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
+  return <LinearGradient colors={isDark?[colors.background,colors.header]:[colors.primary,colors.primaryLight]} style={styles.gradient} start={{x:0,y:0}} end={{x:0,y:1}}><SafeAreaView edges={['left','right','bottom']} style={styles.safe}><TopToastFeedback visible={toast.visible} message={toast.message} type={toast.type} onDismiss={() => setToast((t) => ({ ...t, visible: false }))} /><KeyboardAvoidingView behavior={Platform.OS==='ios'?'padding':undefined} style={styles.flex}><ScrollView ref={scrollViewRef} onScroll={tourActive && Platform.OS !== 'web' ? notifyTourScroll : undefined} scrollEventThrottle={16} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
     <View style={styles.pageHeading}>
       <View style={styles.headerTopRow}>
         <Text style={[styles.eyebrow, isDark && { color: colors.primaryLight }]}>NEW REQUEST</Text>
@@ -362,7 +383,7 @@ export default function RequestFormPage() {
         );
       })()}
       {!profileComplete&&<View style={styles.warning}><Text style={styles.warningTitle}>Complete your profile before placing an order.</Text><Text style={styles.warningText}>Your full name, contact number, and complete address are required for delivery.</Text><TouchableOpacity onPress={()=>router.push('/requester/r_profile')} style={styles.linkButton}><Text style={styles.linkText}>Complete profile</Text></TouchableOpacity></View>}
-      <Section number="1" title="Delivery location" helper="BlueTap requests your device GPS location to find nearby stations. Continuous tracking is never enabled.">
+      <Section number="1" title="Delivery location" helper="BlueTap requests your device GPS location to find nearby stations. Continuous tracking is never enabled." tourRef={locationTourRef} onTourLayout={recordTourLayout('order-location')}>
         <TouchableOpacity onPress={useCurrentLocation} disabled={locationState==='loading'} style={styles.primaryButton}><Text style={styles.primaryText}>{locationState==='loading'?(deliveryLocation?'Updating location…':'Finding your location…'):deliveryLocation?'Update current location':'Use my current location'}</Text></TouchableOpacity>
         {!!locationError&&<View style={styles.inlineError}><Text style={styles.inlineErrorText}>{locationError} If GPS is unavailable, retry or tap the map to place the delivery pin manually.</Text><TouchableOpacity accessibilityRole="button" onPress={useCurrentLocation}><Text style={styles.retryText}>Retry</Text></TouchableOpacity></View>}
         <View style={{ marginTop: 12 }}>
@@ -371,7 +392,7 @@ export default function RequestFormPage() {
         {deliveryLocation&&<View style={styles.locationStatus}><Text style={styles.locationStatusTitle}>Delivery location selected</Text><Text style={styles.locationStatusText}>{locationState==='saved'?'Using your saved default delivery location. Nearby providers have been updated.':'Your verified device GPS location is ready. Nearby providers have been updated.'}</Text></View>}
         {deliveryLocation&&<TouchableOpacity onPress={()=>setSaveAsDefaultLocation(!saveAsDefaultLocation)} style={styles.saveDefaultRow}><View style={[styles.checkbox,saveAsDefaultLocation&&styles.checkboxChecked]}>{saveAsDefaultLocation&&<Text style={styles.checkmark}>✓</Text>}</View><Text style={styles.saveDefaultText}>Save as default delivery location</Text></TouchableOpacity>}
       </Section>
-      <Section number="2" title="Select provider branch" helper="Distances are straight-line estimates, not driving distance.">
+      <Section number="2" title="Select provider branch" helper="Distances are straight-line estimates, not driving distance." tourRef={providerTourRef} onTourLayout={recordTourLayout('order-provider')}>
         {!deliveryLocation?<View style={styles.empty}><Text style={styles.emptyTitle}>Choose a delivery location to see nearby BlueTap providers.</Text></View>:rankedBranches.length===0?<View style={styles.empty}><Text style={styles.emptyTitle}>No nearby providers available</Text><Text style={styles.emptyText}>No active Admin-created branch has valid coordinates.</Text></View>:rankedBranches.map((branch,index)=>{
           const restricted=branchOrderingRestriction(branch);
           const restrictionUntil=restricted?.endsAt?formatRestrictionUntil(restricted.endsAt):'';
@@ -391,6 +412,8 @@ export default function RequestFormPage() {
       <Section
         number="3"
         title="Select products"
+        tourRef={productsTourRef}
+        onTourLayout={recordTourLayout('order-products')}
         helper={selectedBranch ? 'Only products available from this provider are shown.' : 'Select a provider to view its catalog.'}
         rightAction={
           selectedBranch && products.length > 1 ? (
@@ -455,8 +478,8 @@ export default function RequestFormPage() {
         )}
         {itemDetails.map((item)=><View key={item.productId} style={styles.itemRow}><View style={styles.itemInfo}><Text style={styles.itemName}>{item.product.product_name}</Text><Text style={styles.itemPrice}>{formatPrice(item.product.price)} each · {formatPrice(item.lineTotal)}</Text></View><View style={styles.quantity}><TouchableOpacity onPress={()=>changeQuantity(item.productId,-1)} style={styles.quantityButton}><Text style={styles.quantityText}>−</Text></TouchableOpacity><Text style={styles.quantityValue}>{item.quantity}</Text><TouchableOpacity onPress={()=>changeQuantity(item.productId,1)} style={styles.quantityButton}><Text style={styles.quantityText}>+</Text></TouchableOpacity></View></View>)}
       </Section>
-      <Section number="4" title="Order details"><View style={styles.choiceRow}>{containers.map((option)=><TouchableOpacity key={option} onPress={()=>setContainer(option)} style={[styles.choice,container===option&&styles.choiceActive]}><Text style={[styles.choiceText,container===option&&styles.choiceTextActive]}>{option}</Text></TouchableOpacity>)}</View></Section>
-      <Section number="5" title="Review request">
+      <Section number="4" title="Order details" tourRef={containerTourRef} onTourLayout={recordTourLayout('order-container')}><View style={styles.choiceRow}>{containers.map((option)=><TouchableOpacity key={option} onPress={()=>setContainer(option)} style={[styles.choice,container===option&&styles.choiceActive]}><Text style={[styles.choiceText,container===option&&styles.choiceTextActive]}>{option}</Text></TouchableOpacity>)}</View></Section>
+      <Section number="5" title="Review request" tourRef={reviewTourRef} onTourLayout={recordTourLayout('order-review')}>
         <LimitWarning items={itemDetails} colors={colors} />
         {promotionOffers.some((offer) => itemDetails.some((item) => item.productId === offer.productId && offer.tiers.some((tier) => tier.quantity === item.quantity))) ? <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 8 }}>{checkoutAvailable ? 'Offers are subject to availability. Review the current price before ordering.' : promotionCheckout ? 'The offer is unavailable. Refresh your request before ordering.' : 'Bundle amounts shown above are previews only. The regular prices below apply at checkout.'}</Text> : null}
         <View style={styles.reviewRow}>

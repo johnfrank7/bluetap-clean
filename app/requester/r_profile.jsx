@@ -38,7 +38,7 @@ import PortalSwipeContainer, { REQUESTER_TABS } from '../../components/PortalSwi
 import TopToastFeedback from '../../components/TopToastFeedback';
 import ChangePasswordModal from '../../components/ChangePasswordModal';
 import ProfileAvatar from '../../components/ProfileAvatar';
-import RequesterTutorialModal, { useRequesterTour } from '../../components/RequesterTutorialModal';
+import { useRequesterTour } from '../../components/RequesterTutorialModal';
 import { getAssistantVisibility, setAssistantVisibility } from '../../services/assistant/assistantStorage';
 import { USER_PORTAL_BOTTOM_CONTENT_INSET, USER_PORTAL_LAYOUT } from '../../constants/userPortalLayout';
 import { BLUETAP_COLORS } from '../../constants/bluetapTheme';
@@ -152,7 +152,6 @@ export default function ProfilePage() {
   const [toast, setToast] = useState({ visible: false, message: '', type: 'success' });
   const [changePasswordVisible, setChangePasswordVisible] = useState(false);
   const [assistantVisible, setAssistantVisible] = useState(true);
-  const [tutorialVisible, setTutorialVisible] = useState(false);
 
   useEffect(() => {
     let isMounted = true;
@@ -598,7 +597,7 @@ export default function ProfilePage() {
                 accessibilityRole="button"
                 accessibilityLabel="How to Use BlueTap"
                 dataSet={{ bluetapCta: 'true' }}
-                onPress={() => confirmLeave(() => setTutorialVisible(true))}
+                onPress={() => confirmLeave(startTour)}
                 style={styles.changePasswordButton}
               >
                 <Text style={styles.changePasswordButtonText}>View Guide</Text>
@@ -645,7 +644,6 @@ export default function ProfilePage() {
         </View>
         </PortalSwipeContainer>
         <ChangePasswordModal visible={changePasswordVisible} onClose={() => setChangePasswordVisible(false)} onSuccess={() => setToast({ visible: true, message: 'Password updated successfully.', type: 'success' })} />
-        <RequesterTutorialModal visible={tutorialVisible} onClose={() => setTutorialVisible(false)} onComplete={() => setTutorialVisible(false)} userId={userData?.uid || auth.currentUser?.uid} />
         <UnsavedModal />
       </SafeAreaView>
     </LinearGradient>
