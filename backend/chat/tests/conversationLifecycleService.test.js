@@ -139,6 +139,18 @@ test('failed delivery grants exactly one hour and rescheduling removes the deadl
   assert.equal(conversation.status, 'active');
   assert.equal(conversation.accessEndsAt.getTime(), graceUntil.getTime());
 
+  const repeatedFailureAt = new Date(failedAt.getTime() + (25 * 60 * 1000));
+  const repeatedFailed = {
+    ...failed,
+    deliveryFailedAt: repeatedFailureAt,
+    distributorChatGraceUntil: new Date(repeatedFailureAt.getTime() + (60 * 60 * 1000)),
+  };
+  await reconcileOrderLifecycleInTransaction({ tx: f.tx, db: f.db, before: failed, after: repeatedFailed, event: 'DELIVERY_FAILED', now: repeatedFailureAt });
+  conversation = f.records.get(`chatConversations/${directId}`);
+  assert.equal(conversation.status, 'active');
+  assert.equal(conversation.accessEndsAt.getTime(), graceUntil.getTime());
+  assert.equal(conversation.orderContext.distributorChatGraceUntil.getTime(), graceUntil.getTime());
+
   const rescheduledAt = new Date('2026-09-30T03:30:00Z');
   const rescheduled = { ...failed, status: 'scheduled', distributorChatGraceUntil: null, rescheduledAt };
   await reconcileOrderLifecycleInTransaction({ tx: f.tx, db: f.db, before: failed, after: rescheduled, event: 'DELIVERY_RESCHEDULED', now: rescheduledAt });

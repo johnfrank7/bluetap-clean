@@ -213,8 +213,19 @@ function reconcileOrderAuthorityTransition({ before = {}, after = {}, event = 'o
   const delivered = ['delivered', 'completed'].includes(afterStatus);
   const terminal = TERMINAL_ORDER_STATUSES.has(afterStatus);
   if (afterStatus === 'delivery_failed' && afterAssignment) {
-    const graceActive = timeOf(accessEndsAt) > Number(now);
-    append({ action: graceActive ? 'eligible' : 'read_only', reason: 'delivery_failed_grace', ...(graceActive ? { accessEndsAt } : {}), authority: afterAssignment });
+    const priorFailedGrace = !assignmentChanged && beforeStatus === 'delivery_failed'
+      ? failedDeliveryChatEndsAt(before)
+      : null;
+    const effectiveAccessEndsAt = timeOf(priorFailedGrace) > 0 && (timeOf(accessEndsAt) <= 0 || timeOf(priorFailedGrace) <= timeOf(accessEndsAt))
+      ? priorFailedGrace
+      : accessEndsAt;
+    const graceActive = timeOf(effectiveAccessEndsAt) > Number(now);
+    append({
+      action: graceActive ? 'eligible' : 'read_only',
+      reason: 'delivery_failed_grace',
+      ...(effectiveAccessEndsAt ? { accessEndsAt: effectiveAccessEndsAt } : {}),
+      authority: afterAssignment,
+    });
   } else if (beforeStatus === 'delivery_failed' && !terminal && afterAssignment) {
     append({ action: 'eligible', reason: clean(event), authority: afterAssignment });
   }

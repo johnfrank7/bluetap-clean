@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { Image } from 'expo-image';
 import AdminShell from '../../components/AdminShell';
+import AdminBundlePromotionModal from '../../components/AdminBundlePromotionModal';
 import { CardSkeleton } from '../../components/AdminSkeleton';
 import { StatusBadge } from '../../components/DashboardUi';
 import { useAdminTheme } from '../../components/AdminTheme';
@@ -36,6 +37,8 @@ const empty = {
   price: '',
   containerType: '',
   size: '',
+  deliveryLoadClassification: 'UNKNOWN',
+  deliveryLoadTouched: false,
   maxQuantityPerRequester: '',
   deliveryDays: [],
   active: true,
@@ -148,6 +151,7 @@ export default function AdminProductsPage() {
   const [page, setPage] = React.useState(1);
   const [modal, setModal] = React.useState(false);
   const [editing, setEditing] = React.useState(null);
+  const [promotionProduct, setPromotionProduct] = React.useState(null);
   const [form, setForm] = React.useState(empty);
   const [saving, setSaving] = React.useState(false);
   const [toast, setToast] = React.useState({ visible: false, message: '', type: 'info' });
@@ -228,6 +232,7 @@ export default function AdminProductsPage() {
     const priceChanged = (form.price || '').trim() !== (initial.price || '').trim();
     const containerChanged = (form.containerType || '').trim() !== (initial.containerType || '').trim();
     const sizeChanged = (form.size || '').trim() !== (initial.size || '').trim();
+    const loadChanged = form.deliveryLoadTouched || form.deliveryLoadClassification !== initial.deliveryLoadClassification;
     const limitChanged =
       String(form.maxQuantityPerRequester ?? '').trim() !==
       String(initial.maxQuantityPerRequester ?? '').trim();
@@ -246,6 +251,7 @@ export default function AdminProductsPage() {
       priceChanged ||
       containerChanged ||
       sizeChanged ||
+      loadChanged ||
       limitChanged ||
       activeChanged ||
       imageChanged ||
@@ -363,6 +369,10 @@ export default function AdminProductsPage() {
         active: form.active,
         branchIds: form.branchIds,
       };
+      if (!editing || form.deliveryLoadTouched || form.deliveryLoadClassification !== initialDraftRef.current?.deliveryLoadClassification) {
+        payload.deliveryLoadClassification = form.deliveryLoadClassification;
+      }
+      const promotionNeedsVerification = Boolean(editing?.bundlePromotion?.commercialEligibility === 'refill_verified' && ['product_name', 'size', 'containerType'].some((field) => payload[field] !== String(editing[field] || '').trim()));
       if (editing) await updateAdminProduct(editing.id, payload, form.imageFile);
       else await createAdminProduct(payload, form.imageFile);
       initialDraftRef.current = null;
@@ -370,7 +380,7 @@ export default function AdminProductsPage() {
       setEditing(null);
       setForm(empty);
       await productsState.refresh({ force: true });
-      showToast('Product saved successfully.', 'success');
+      showToast(promotionNeedsVerification ? 'Product saved. Verify the refill again in its bundle draft.' : 'Product saved successfully.', 'success');
     } catch (error) {
       const err = adminProductErrorMessage(error);
       showToast(err, 'error');
@@ -611,6 +621,9 @@ export default function AdminProductsPage() {
 
                   {/* BOTTOM ACTION AREA */}
                   <View style={styles.cardActions}>
+                    <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Bundle promotions for ${product.product_name}`} onPress={() => setPromotionProduct(product)} style={styles.editAction}>
+                      <Text style={styles.editActionText}>{product.bundlePromotion ? 'Edit bundle draft' : 'Bundle promotions'}</Text>
+                    </TouchableOpacity>
                     <TouchableOpacity
                       accessibilityRole="button"
                       accessibilityLabel={`Edit ${product.product_name}`}
@@ -735,6 +748,21 @@ export default function AdminProductsPage() {
                   ))}
                 </View>
 
+                <Text style={styles.label}>Delivery load classification</Text>
+                <Text style={styles.help}>Select standard only when one ordered unit is one verified 5-gallon container. Other cargo requires loading review. Changing the product name, size or container type clears verification unless you confirm a classification.</Text>
+                <View style={styles.branchChoices}>
+                  {[
+                    ['UNKNOWN', 'Unknown / unverified'],
+                    ['STANDARD_5_GALLON', 'Standard 5-gallon'],
+                    ['OTHER_CARGO', 'Other cargo'],
+                  ].map(([value, label]) => {
+                    const checked = form.deliveryLoadClassification === value;
+                    return <TouchableOpacity key={value} accessibilityRole="radio" accessibilityState={{ checked }} onPress={() => setForm((current) => ({ ...current, deliveryLoadClassification: value, deliveryLoadTouched: true }))} style={[styles.choice, checked && styles.choiceActive]}>
+                      <Text style={[styles.choiceText, checked && styles.choiceTextActive]}>{label}</Text>
+                    </TouchableOpacity>;
+                  })}
+                </View>
+
                 <Text style={styles.label}>Description</Text>
                 <TextInput
                   accessibilityLabel="Description"
@@ -853,6 +881,7 @@ export default function AdminProductsPage() {
           </ScrollView>
         </View>
       </Modal>
+      <AdminBundlePromotionModal product={promotionProduct} branches={branches} colors={colors} onClose={() => setPromotionProduct(null)} onSaved={async (result) => { setPromotionProduct(null); try { await productsState.refresh({ force: true }); } catch { /* The change was already saved; refresh can be retried. */ } showToast(result === 'published' || result === 'publish' ? 'Promotion published.' : result === 'disable' ? 'Promotion disabled.' : result === 'updated' ? 'Promotion draft updated successfully.' : 'Promotion draft saved successfully.', 'success'); }} />
       <UnsavedModal />
     </AdminShell>
   );
@@ -1151,6 +1180,7 @@ const createStyles = (colors, compact, isMobile) =>
     },
     cardActions: {
       flexDirection: 'row',
+      flexWrap: 'wrap',
       justifyContent: 'flex-end',
       gap: 8,
       marginTop: 16,

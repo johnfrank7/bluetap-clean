@@ -278,6 +278,8 @@ service cloud.firestore {
       allow create, update, delete: if false;
     }
     match /requesterActiveOrders/{document=**} { allow read, write: if false; }
+    match /orderLoadSnapshots/{document=**} { allow read, write: if false; }
+    match /orderLoadSnapshotSecurity/{document=**} { allow read, write: if false; }
     match /branches/{branchId} {
       // Manager may read only their own assigned branch (Admin-written branchId).
       // Distributor may read only their own authoritative assigned branch.
@@ -309,6 +311,7 @@ service cloud.firestore {
         && hasVerifiedOperationalEmail()
         && !request.resource.data.diff(resource.data).affectedKeys().hasAny([
           'uid', 'email', 'role', 'accountSource', 'verificationSource', 'status', 'distributorStatus', 'approvalStatus', 'accountStatus',
+          'profilePhotoUrl', 'profilePhotoPath', 'profilePhotoStorageProvider', 'profilePhotoRemoved', 'photoURL', 'avatarUrl',
           'accountActionHoldIntentId',
           'rejectionReason', 'username', 'usernameNormalized', 'unique_id',
           'emailVerified', 'emailVerifiedAt', 'emailVerificationRequired',
@@ -325,7 +328,9 @@ service cloud.firestore {
     // Catalog mutations are server-only. The backend validates Administrator
     // identity and writes audit records before using the Admin SDK.
     match /products/{productId} {
-      allow read: if hasActiveGlobalAccount();
+      // Promotion drafts and audit metadata live on these documents. Other
+      // roles receive a sanitized, role-scoped catalog from the backend.
+      allow read: if isAdmin();
       allow create, update, delete: if false;
     }
 

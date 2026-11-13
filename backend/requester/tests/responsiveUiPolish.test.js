@@ -7,6 +7,24 @@ const root = resolve(__dirname, '../../..');
 const read = (...parts) => readFileSync(resolve(root, ...parts), 'utf8');
 const { compactNotificationStatus, notificationLayoutForWidth } = require('../../../components/notificationPresentation');
 
+test('portal Logout uses the existing web CTA only in light mode and preserves the dark button', () => {
+  const css = read('global.css');
+  assert.match(css, /button\[data-bluetap-cta='true'\][\s\S]*?background-color: var\(--bluetap-primary\) !important/);
+  assert.match(css, /button\[data-bluetap-cta='true'\] > div[\s\S]*?color: #ffffff !important/);
+  for (const role of ['requester/r_profile.jsx', 'distributor/d_profile.jsx']) {
+    const profile = read('app', ...role.split('/'));
+    const styleAt = profile.indexOf('style={styles.logoutButton}');
+    assert.ok(styleAt >= 0);
+    const logout = profile.slice(profile.lastIndexOf('<TouchableOpacity', styleAt), profile.indexOf('</TouchableOpacity>', styleAt));
+    assert.match(logout, /onPress=\{\(\) => confirmLeave\(handleLogout\)\}/);
+    assert.match(logout, /disabled=\{savingProfile\}/);
+    assert.match(logout, /dataSet=\{!isDark \? \{ bluetapCta: 'true' \} : undefined\}/);
+    assert.match(logout, /tintColor=\{colors.onPrimary \|\| '#FFFFFF'\}/);
+    assert.match(profile, /logoutButton: \{[\s\S]*?backgroundColor: BLUE/);
+    assert.match(profile, /logoutText: \{[\s\S]*?color: '#FFFFFF'/);
+  }
+});
+
 test('theme transition uses semantic gold sun and cool BlueTap moon colors', () => {
   const source = read('components', 'BlueTapThemeTransition.jsx');
   assert.match(source, /darkTarget \? '#70BDF2' : '#FFD67A'/);
@@ -26,7 +44,8 @@ test('native Login CTA has explicit semantic contrast, touch height, and press f
 test('Requester Orders uses the canonical blue light-theme canvas with readable pinned header text', () => {
   const source = read('app', 'requester', 'r_request.jsx');
   assert.match(source, /isDark \? \[colors\.background, colors\.header\] : \[colors\.primary, colors\.primaryLight\]/);
-  assert.match(source, /fixedHeaderArea, \{ backgroundColor: isDark \? colors\.background : colors\.primary \}/);
+  assert.match(source, /<View style=\{styles\.fixedHeaderArea\}>/);
+  assert.doesNotMatch(source.match(/fixedHeaderArea: \{[\s\S]*?\n  \}/)?.[0] || '', /backgroundColor|borderWidth|shadow/);
   assert.match(source, /pageTitle, \{ color: isDark \? colors\.textPrimary : colors\.onPrimary \}/);
   assert.match(source, /subtitle, \{ color: isDark \? colors\.textSecondary : colors\.onPrimary \}/);
 });

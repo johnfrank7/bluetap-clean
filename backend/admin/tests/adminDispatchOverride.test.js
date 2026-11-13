@@ -3,6 +3,7 @@ const test = require('node:test');
 const { createAdminDispatchOverrideHandler } = require('../adminDispatchOverrideHandler');
 const { authorityKeyHash, buildConversationFoundation } = require('../../chat/conversationService');
 const { manilaScheduleDate, scheduledWeekday } = require('../../../services/productOrderPolicy');
+const { seedDispatchGuards } = require('../../manager/tests/dispatchGuardFixture');
 
 function fixture() {
   const validDate = manilaScheduleDate(2, 13);
@@ -20,11 +21,11 @@ function fixture() {
   let auditId = 0;
   const db = { collection(name) { return {
     doc(id = `audit-${++auditId}`) { const path = `${name}/${id}`; return { id, path, get: async () => snap(path), update: async (update) => records.set(path, { ...records.get(path), ...update }), set: async (data) => records.set(path, data) }; },
-    where(field, operator, value) { const docs = () => [...records.keys()].filter((path) => path.startsWith(`${name}/`) && records.get(path)[field] === value).map(snap); return { get: async () => ({ docs: docs() }), limit(count) { return { get: async () => ({ docs: docs().slice(0, count) }) }; } }; },
+    where(field, operator, value) { const filters = [[field, operator, value]]; const docs = () => [...records.keys()].filter((path) => path.startsWith(`${name}/`) && filters.every(([key, op, expected]) => op === '!=' ? records.get(path)[key] != null && records.get(path)[key] !== expected : records.get(path)[key] === expected)).map(snap); return { where(key, op, expected) { filters.push([key, op, expected]); return this; }, get: async () => ({ docs: docs() }), limit(count) { return { get: async () => ({ docs: docs().slice(0, count) }) }; } }; },
     add: async (data) => { records.set(`${name}/audit-${++auditId}`, data); },
   }; }, runTransaction: async (run) => run({ get: async (ref) => ref.get(), update(ref, data) { records.set(ref.path, { ...records.get(ref.path), ...data }); }, set(ref, data) { records.set(ref.path, data); } }) };
   const auth = { async verifyIdToken(token) { if (token === 'admin-token') return { uid: 'admin-a', role: 'admin', admin: true }; throw new Error('bad token'); }, async getUser(uid) { return { disabled: uid === 'distributor-disabled' }; } };
-  return { records, validDate, handler: createAdminDispatchOverrideHandler(() => ({ auth, db })) };
+  return { records, validDate, handler: createAdminDispatchOverrideHandler(() => { seedDispatchGuards(records); return { auth, db }; }) };
 }
 
 async function call(handler, method, body, query = {}) {

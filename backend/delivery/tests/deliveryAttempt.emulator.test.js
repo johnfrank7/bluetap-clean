@@ -32,6 +32,7 @@ test('real Firestore transaction atomically commits attempt, moderation, chat, a
     await db.collection('branches').doc(branchId).set({ status: 'active' });
     await db.collection('users').doc(distributorUid).set({ role: 'distributor', approvalStatus: 'active', branchId, fullName: 'Emulator Distributor', phone: '09123456789', completeAddress: 'Test Address' });
     await db.collection('requests').doc(orderId).set({ requesterUid, branchId, currentBranchId: branchId, assignedDistributorUid: distributorUid, assignmentVersion: 1, status: 'accepted' });
+    await db.collection('distributorDispatchGuards').doc(distributorUid).set({ schemaVersion: 1, initialized: true, distributorUid, revision: 0, reservations: [{ orderId, scheduledAt: null }] });
     const reviewRef = db.collection('orderAbuseReviews').doc(hashId(branchId, requesterUid));
     const historical = { key: `historical-${suffix}`, orderId, type: 'delivery_failure', category: 'NO_RESPONSE',
       at: new Date() };

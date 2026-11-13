@@ -95,3 +95,20 @@ export async function updateAdminProduct(productId, changes, file) {
   invalidate();
   return result.product;
 }
+
+export async function saveAdminPromotionDraft(productId, bundlePromotion) {
+  try {
+    const result = await adminApiRequest('/api/admin/bundle-promotion-drafts', { method: 'PATCH', body: { productId, bundlePromotion } });
+    invalidate();
+    return result.product;
+  } catch (error) {
+    if (error.status === 404 && error.code === 'not-found') throw new Error('Promotion draft service is unavailable. Ensure the backend includes the current promotion update.');
+    throw error;
+  }
+}
+
+export async function changeAdminPromotionStatus(productId, action, expectedVersion) {
+  const result = await adminApiRequest('/api/admin/products', { method: 'PATCH', body: { productId, bundlePromotionAction: action, expectedVersion } });
+  invalidate();
+  return result.product;
+}

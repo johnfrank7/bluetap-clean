@@ -11,6 +11,7 @@ const { getClientIp } = require('../../utils/request');
 const EXPECTED_ROUTES = [
   '/api/admin/accounts',
   '/api/admin/branches',
+  '/api/admin/bundle-promotion-drafts',
   '/api/admin/chat-review',
   '/api/admin/dashboard/overview',
   '/api/admin/delivery-appeals',
@@ -27,6 +28,7 @@ const EXPECTED_ROUTES = [
   '/api/auth/complete-required-password-change',
   '/api/auth/create-registration-session',
   '/api/auth/login-with-username',
+  '/api/auth/password-change-otp',
   '/api/auth/password-recovery',
   '/api/auth/registration-branches',
   '/api/auth/registration-policy',
@@ -55,6 +57,7 @@ const EXPECTED_ROUTES = [
   '/api/requester/delivery-appeals',
   '/api/requester/delivery-reports',
   '/api/requester/orders',
+  '/api/trip-capability',
   '/api/verification/face-service-status',
   '/api/verification/registration-face',
   '/api/verification/verify-face',

@@ -1,14 +1,20 @@
 const { getFirebaseAdmin } = require('../firebase/firebaseAdmin');
 const { requireActiveDistributor } = require('../auth/authorization');
+const { canonicalAccountStatus } = require('../auth/accountStatus');
 const { applyCors } = require('../utils/cors');
 const { safeOrder, owningBranchId } = require('../manager/dispatchHandler');
 const { OtpError } = require('../utils/otpError');
+const { scheduleTimestampMillis } = require('../utils/scheduleTimestamp');
+const { schedulingEvent } = require('../utils/schedulingEvent');
+const { planDispatchTransition, stageDistributorGuard } = require('../utils/distributorCapacityGuard');
+const { lifecycle: tripLifecycle, listLifecycleTrips, requireTripEmulator, planTripOrderLifecycle, stageTripOrderLifecycle, readTripRescheduleSource } = require('../utils/deliveryTripFoundation');
 const { assignmentVersionForTransition, getAssignmentVersion } = require('../utils/relationshipEpochs');
 const { FAILED_DELIVERY_CHAT_GRACE_MS } = require('../chat/chatAuthorization');
 const { postOrderAccessEndsAt, reconcileOrderLifecycleInTransaction } = require('../chat/conversationLifecycleService');
 const { prepareOrderAbuseIncidentInTransaction } = require('../moderation/moderationService');
 const { attemptIdFor, prepareDeliveryAttemptTransition, stageDeliveryAttemptWrites } = require('../delivery/deliveryAttemptService');
 const { normalizeFailureReport, matchesCommittedReport } = require('../delivery/deliveryReportEvidence');
+const { effectiveDeliveryDays, isAllowedDeliveryDate } = require('../../services/productOrderPolicy');
 
 const clean = (value, max = 128) => String(value || '').trim().slice(0, max);
 const history = (value) => Array.isArray(value) ? value : [];
@@ -20,15 +26,24 @@ function bodyOf(req) {
   catch { throw new OtpError(400, 'INVALID_REQUEST', 'The request body is invalid.'); }
 }
 
-async function updateOrder(db, orderId, prepare) {
+async function updateOrder(db, orderId, prepare, distributor) {
   const ref = db.collection('requests').doc(orderId);
   if (typeof db.runTransaction === 'function') {
     return db.runTransaction(async (tx) => {
       const snapshot = await tx.get(ref);
       if (!snapshot.exists) throw new OtpError(404, 'ORDER_NOT_FOUND', 'The assigned delivery was not found.');
+      const [actor, branch] = await Promise.all([tx.get(db.collection('users').doc(distributor.decoded.uid)), tx.get(db.collection('branches').doc(distributor.branch.id))]);
+      const profile = actor.data() || {};
+      if (!actor.exists || profile.role !== 'distributor' || canonicalAccountStatus(profile) !== 'active' || profile.mustChangePassword === true || profile.accountActionHoldIntentId || clean(profile.branchId) !== distributor.branch.id || !isDistributorProfileComplete(profile) || !branch.exists || branch.data()?.status !== 'active') throw new OtpError(403, 'DISTRIBUTOR_INACTIVE', 'Distributor access to this branch has changed.');
       const current = snapshot.data() || {};
       const { update, moderationWrite, attemptWrites, replay } = await prepare(current, tx);
       if (replay) return replay;
+      const event = update.distributorDeliveryHistory?.[update.distributorDeliveryHistory.length - 1]?.event;
+      const tripPlan = process.env.BLUETAP_TRIP_EMULATOR_MODE === '1'
+        ? await planTripOrderLifecycle(tx, db, { orderId, event, distributor }) : null;
+      const legacyStart = process.env.BLUETAP_TRIP_EMULATOR_MODE === '1' && !tripPlan && event === 'DELIVERY_STARTED';
+      const guardPlans = !tripPlan && (legacyStart || ['ASSIGNMENT_DECLINED', 'DELIVERY_RESCHEDULED', 'DELIVERY_COMPLETED'].includes(event))
+        ? await planDispatchTransition(tx, db, { orderId, before: current, after: { ...current, ...update }, forceCheck: legacyStart || event === 'DELIVERY_RESCHEDULED' }) : [];
       let activeOrderGuard = null;
       let completedRequesterUid = '';
       if (statusOf(update) === 'delivered') {
@@ -48,6 +63,8 @@ async function updateOrder(db, orderId, prepare) {
         event: update.distributorDeliveryHistory?.[update.distributorDeliveryHistory.length - 1]?.event || 'ORDER_UPDATED',
         now: update.updatedAt || new Date(),
       });
+      guardPlans.forEach((plan) => stageDistributorGuard(tx, plan));
+      stageTripOrderLifecycle(tx, tripPlan);
       if (moderationWrite) tx.set(moderationWrite.ref, moderationWrite.data, { merge: true });
       stageDeliveryAttemptWrites(tx, attemptWrites);
       tx.update(ref, update);
@@ -86,7 +103,43 @@ function createDistributorAssignedOrdersHandler(getAdmin = getFirebaseAdmin) {
     try {
       const { auth, db } = getAdmin();
       const distributor = await requireActiveDistributor(req, auth, db);
+      const updateAssignedOrder = (id, prepare) => updateOrder(db, id, prepare, distributor);
       if (req.method === 'GET') {
+        const query = req.query || Object.fromEntries(new URL(req.url || '/', 'http://localhost').searchParams);
+        if (query.tripLifecycle === '1') return res.status(200).json({ trips: await listLifecycleTrips(db, auth, distributor, 'distributor') });
+        if (process.env.BLUETAP_TRIP_EMULATOR_MODE === '1') requireTripEmulator(db);
+        if (query.rescheduleProposalOrderId || query.rescheduleProposalId) {
+          requireTripEmulator(db);
+          const orderId = query.rescheduleProposalOrderId; const proposalId = query.rescheduleProposalId;
+          if (typeof orderId !== 'string' || !orderId || orderId.length > 128 || orderId.trim() !== orderId || orderId.includes('/') || (proposalId !== undefined && (typeof proposalId !== 'string' || !/^[A-Za-z0-9_-]{8,128}$/.test(proposalId)))) throw new OtpError(400, 'INVALID_INPUT', 'Choose a valid order and proposal.');
+          const proposal = await db.runTransaction(async (tx) => {
+            const [snapshot, actor, branch] = await Promise.all([tx.get(db.collection('requests').doc(orderId)), tx.get(db.collection('users').doc(distributor.decoded.uid)), tx.get(db.collection('branches').doc(distributor.branch.id))]);
+            const order = snapshot.data() || {}; const profile = actor.data() || {};
+            if (!actor.exists || profile.role !== 'distributor' || canonicalAccountStatus(profile) !== 'active' || profile.mustChangePassword === true || profile.accountActionHoldIntentId || clean(profile.branchId) !== distributor.branch.id || !isDistributorProfileComplete(profile) || !branch.exists || branch.data()?.status !== 'active') throw new OtpError(403, 'DISTRIBUTOR_INACTIVE', 'Distributor access to this branch has changed.');
+            if (!snapshot.exists || clean(order.assignedDistributorUid || order.distributor_id) !== distributor.decoded.uid || owningBranchId(order) !== distributor.branch.id) throw new OtpError(404, 'ORDER_NOT_FOUND', 'The assigned delivery was not found.');
+            const own = history(order.distributorRescheduleProposals).filter((item) => item?.orderId === orderId && item.distributorUid === distributor.decoded.uid && item.branchId === distributor.branch.id);
+            const item = proposalId === undefined ? own.at(-1) : own.find((entry) => entry.id === proposalId);
+            if (!item || !/^[A-Za-z0-9_-]{8,128}$/.test(item.id || '') || own.filter((entry) => entry.id === item.id).length !== 1 || !['pending', 'approved', 'rejected', 'superseded'].includes(item.status)) throw new OtpError(404, 'PROPOSAL_NOT_FOUND', 'The proposal was not found.');
+            const proposedTime = scheduleTimestampMillis(item.scheduledAt);
+            if (typeof item.scheduledAt !== 'string' || proposedTime === null || (item.reason !== undefined && typeof item.reason !== 'string')) throw new OtpError(409, 'TRIP_INVALID', 'The proposal requires reconciliation.');
+            let status = item.status === 'superseded' ? 'stale' : item.status;
+            if (status === 'pending') {
+              try {
+                const source = await readTripRescheduleSource(tx, db, { orderId, order, context: distributor, role: 'distributor' });
+                const keys = ['tripId', 'tripRevision', 'manifestRevision', 'tripState', 'assignmentVersion', 'scheduledAtMillis', 'branchId', 'distributorUid'];
+                if (proposedTime < Date.now() - 5 * 60 * 1000 || !item.source || keys.some((key) => item.source[key] !== source[key])) status = 'stale';
+              } catch (error) {
+                if (!['ORDER_NOT_RESCHEDULABLE', 'TRIP_INVALID', 'TRIP_UNLOADING_REQUIRED', 'TRIP_RESOURCES_INVALID', 'TRIP_SCHEDULE_UNKNOWN', 'TRIP_LOAD_UNKNOWN'].includes(error.reason)) throw error;
+                status = 'stale';
+              }
+            } else if (status === 'approved') {
+              const reservation = await tx.get(db.collection('deliveryTripOrderReservations').doc(orderId));
+              if (clean(order.status, 80).toLowerCase() !== 'scheduled' || getAssignmentVersion(order) !== item.source?.assignmentVersion || scheduleTimestampMillis(order.scheduledAt || order.scheduled_at) !== scheduleTimestampMillis(item.scheduledAt) || !reservation.exists || reservation.data()?.orderId !== orderId || reservation.data()?.branchId !== distributor.branch.id || reservation.data()?.tripId !== item.targetTripId) status = 'stale';
+            }
+            return { id: item.id, orderId, status, scheduledAt: item.scheduledAt, reason: clean(item.reason, 240), decidedAt: item.decidedAt || null };
+          });
+          return res.status(200).json({ proposal });
+        }
         const [ordersSnapshot, branchesSnapshot] = await Promise.all([
           db.collection('requests').where('assignedDistributorUid', '==', distributor.decoded.uid).get(),
           db.collection('branches').get(),
@@ -111,6 +164,53 @@ function createDistributorAssignedOrdersHandler(getAdmin = getFirebaseAdmin) {
       const body = bodyOf(req);
       const orderId = clean(body.orderId);
       const action = clean(body.action, 48).toLowerCase();
+      if (action === 'propose-reschedule' && process.env.BLUETAP_TRIP_EMULATOR_MODE === '1') {
+        requireTripEmulator(db);
+        if (!orderId || orderId.includes('/')) throw new OtpError(400, 'ORDER_NOT_FOUND', 'Choose a valid order.');
+        if (!isDistributorProfileComplete(distributor.profile)) throw new OtpError(409, 'PROFILE_INCOMPLETE', 'Complete your profile before handling deliveries.');
+        const id = body.clientMutationId;
+        if (typeof id !== 'string' || !/^[A-Za-z0-9_-]{8,128}$/.test(id)) throw new OtpError(400, 'INVALID_MUTATION_ID', 'Use a valid proposal request ID.');
+        const scheduledAt = body.scheduledAt ? new Date(body.scheduledAt) : null;
+        if (!scheduledAt || Number.isNaN(scheduledAt.getTime()) || scheduledAt.getTime() < Date.now() - 5 * 60 * 1000) throw new OtpError(400, 'INVALID_DELIVERY_SCHEDULE', 'Choose a current or future delivery time.');
+        const reason = clean(body.reason || body.rescheduleReason, 240).normalize('NFC').replace(/\s+/gu, ' ');
+        const result = await db.runTransaction(async (tx) => {
+          const ref = db.collection('requests').doc(orderId); const snapshot = await tx.get(ref);
+          if (!snapshot.exists) throw new OtpError(404, 'ORDER_NOT_FOUND', 'The assigned delivery was not found.');
+          const order = snapshot.data() || {};
+          if (clean(order.assignedDistributorUid || order.distributor_id) !== distributor.decoded.uid || owningBranchId(order) !== distributor.branch.id) throw new OtpError(404, 'ORDER_NOT_FOUND', 'The assigned delivery was not found.');
+          const [actor, branch] = await Promise.all([tx.get(db.collection('users').doc(distributor.decoded.uid)), tx.get(db.collection('branches').doc(distributor.branch.id))]);
+          const profile = actor.data() || {};
+          if (!actor.exists || profile.role !== 'distributor' || canonicalAccountStatus(profile) !== 'active' || profile.mustChangePassword === true || profile.accountActionHoldIntentId || clean(profile.branchId) !== distributor.branch.id || !isDistributorProfileComplete(profile) || !branch.exists || branch.data()?.status !== 'active') throw new OtpError(403, 'DISTRIBUTOR_INACTIVE', 'Distributor access to this branch has changed.');
+          if (order.distributorRescheduleProposals !== undefined && !Array.isArray(order.distributorRescheduleProposals)) throw new OtpError(409, 'TRIP_INVALID', 'Reschedule proposals require reconciliation.');
+          const proposals = history(order.distributorRescheduleProposals); const previous = proposals.find((item) => item?.id === id);
+          if (previous) {
+            if (previous.distributorUid !== distributor.decoded.uid || previous.branchId !== distributor.branch.id || previous.scheduledAt !== scheduledAt.toISOString() || previous.reason !== reason) throw new OtpError(409, 'RESCHEDULE_PROPOSAL_CONFLICT', 'This proposal ID was already used for different details.');
+            return previous;
+          }
+          const days = Array.isArray(order.effectiveDeliveryDaysSnapshot) ? order.effectiveDeliveryDaysSnapshot : effectiveDeliveryDays(order.items || []);
+          if (!isAllowedDeliveryDate(scheduledAt, days)) throw new OtpError(409, 'PRODUCT_DELIVERY_DAY_UNAVAILABLE', 'Choose a delivery day allowed for every product in this order.');
+          const source = await readTripRescheduleSource(tx, db, { orderId, order, context: distributor, role: 'distributor' });
+          const pending = proposals.find((item) => item?.status === 'pending');
+          if (pending && pending.source?.tripId === source.tripId && pending.source?.tripRevision === source.tripRevision && pending.source?.assignmentVersion === source.assignmentVersion) throw new OtpError(409, 'RESCHEDULE_PROPOSAL_PENDING', 'A proposal is already awaiting Manager review.');
+          const prior = proposals.map((item) => item?.status === 'pending' ? { ...item, status: 'superseded' } : item);
+          const proposal = { id, status: 'pending', orderId, distributorUid: source.distributorUid, branchId: source.branchId, scheduledAt: scheduledAt.toISOString(), reason, source, createdAt: new Date() };
+          tx.update(ref, { distributorRescheduleProposals: [...prior, proposal] });
+          return proposal;
+        });
+        return res.status(200).json({ proposal: result });
+      }
+      if (['report-trip-loading', 'report-trip-unloading'].includes(action) && process.env.BLUETAP_TRIP_EMULATOR_MODE === '1') {
+        requireTripEmulator(db);
+        if (!isDistributorProfileComplete(distributor.profile)) throw new OtpError(409, 'PROFILE_INCOMPLETE', 'Complete your profile before handling deliveries.');
+        const tripId = clean(body.tripId, 128);
+        if (!tripId || tripId.includes('/')) throw new OtpError(400, 'TRIP_INVALID', 'Choose a valid trip.');
+        await db.runTransaction((tx) => tripLifecycle(tx, db, { tripId, context: distributor, action: action === 'report-trip-loading' ? 'reportLoading' : 'reportReturnAndUnloading' }));
+        return res.status(200).json({ success: true, tripId });
+      }
+      if (process.env.BLUETAP_TRIP_EMULATOR_MODE === '1' && !['accept-assignment', 'decline-assignment', 'start-delivery', 'fail-delivery', 'mark-delivered'].includes(action)) {
+        requireTripEmulator(db);
+        throw new OtpError(503, 'TRIP_MODE_INTEGRATION_INCOMPLETE', 'This delivery action is unavailable until trip coordination is complete.');
+      }
       if (!orderId || !['accept-assignment', 'decline-assignment', 'schedule-delivery', 'start-delivery', 'fail-delivery', 'reschedule-delivery', 'mark-delivered'].includes(action)) {
         throw new OtpError(400, 'INVALID_DELIVERY_ACTION', 'Choose a valid delivery action.');
       }
@@ -118,7 +218,7 @@ function createDistributorAssignedOrdersHandler(getAdmin = getFirebaseAdmin) {
         throw new OtpError(409, 'PROFILE_INCOMPLETE', 'Complete your profile before handling deliveries.');
       }
       const now = new Date();
-      const saved = await updateOrder(db, orderId, async (current, tx) => {
+      const saved = await updateAssignedOrder(orderId, async (current, tx) => {
         if (clean(current.assignedDistributorUid || current.distributor_id) !== distributor.decoded.uid
           || owningBranchId(current) !== distributor.branch.id) {
           throw new OtpError(404, 'ORDER_NOT_FOUND', 'The assigned delivery was not found.');
@@ -223,10 +323,15 @@ function createDistributorAssignedOrdersHandler(getAdmin = getFirebaseAdmin) {
           reportEvidence = report.evidence;
           failureReason = failureReasonNote ? `${failureReasonLabel}: ${failureReasonNote}` : failureReasonLabel;
           event = 'DELIVERY_FAILED';
+          const existingFailedAt = current.distributorChatGraceUntil
+            ? (current.deliveryFailedAt?.toDate?.() || (current.deliveryFailedAt instanceof Date ? current.deliveryFailedAt : null))
+            : null;
+          const existingGraceUntil = current.distributorChatGraceUntil?.toDate?.()
+            || (current.distributorChatGraceUntil instanceof Date ? current.distributorChatGraceUntil : null);
           update = {
             status: 'delivery_failed',
-            deliveryFailedAt: now,
-            distributorChatGraceUntil: new Date(now.getTime() + FAILED_DELIVERY_CHAT_GRACE_MS),
+            deliveryFailedAt: existingFailedAt || now,
+            distributorChatGraceUntil: existingGraceUntil || new Date(now.getTime() + FAILED_DELIVERY_CHAT_GRACE_MS),
             failureReason,
             failureReasonCode,
             failureReasonLabel,
@@ -248,6 +353,7 @@ function createDistributorAssignedOrdersHandler(getAdmin = getFirebaseAdmin) {
             expectedDeliveryDate: scheduledAt.toISOString(),
             delivery_date: scheduledAt.toISOString(),
             rescheduledAt: now,
+            latestSchedulingEvent: schedulingEvent(current, 'DELIVERY_RESCHEDULED', now),
             distributorChatGraceUntil: null,
           };
         } else {

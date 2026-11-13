@@ -1,9 +1,8 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Modal,
   Platform,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -11,16 +10,20 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { EmailAuthProvider, reauthenticateWithCredential, updatePassword } from 'firebase/auth';
+import { EmailAuthProvider, reauthenticateWithCredential } from 'firebase/auth';
 import { auth } from '../firebase';
 import { useBlueTapTheme } from './BlueTapTheme';
 import { BLUETAP_COLORS } from '../constants/bluetapTheme';
 import { validatePasswordStrength } from '../services/passwordValidator';
+import { passwordChangeOtp } from '../services/passwordChangeOtp';
+import PasswordVisibilityButton from './PasswordVisibilityButton';
+import { signOutAndClearSessions } from '../services/authSession';
 
 export { validatePasswordStrength };
 
-export default function ChangePasswordModal({ visible, onClose, onSuccess }) {
-  const { colors, isDark } = useBlueTapTheme();
+export default function ChangePasswordModal({ visible, onClose, onSuccess, theme }) {
+  const portalTheme = useBlueTapTheme();
+  const { colors, isDark } = theme || portalTheme;
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -30,6 +33,18 @@ export default function ChangePasswordModal({ visible, onClose, onSuccess }) {
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
+  const [step, setStep] = useState('credentials');
+  const [otp, setOtp] = useState('');
+  const [retryAt, setRetryAt] = useState(0);
+  const [clock, setClock] = useState(Date.now());
+  const inFlight = useRef(false);
+  const accountUid = useRef('');
+  useEffect(() => {
+    if (!visible || !retryAt) return undefined;
+    const timer = setInterval(() => setClock(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [visible, retryAt]);
+  const retrySeconds = Math.max(0, Math.ceil((retryAt - clock) / 1000));
 
   const resetForm = () => {
     setCurrentPassword('');
@@ -40,6 +55,10 @@ export default function ChangePasswordModal({ visible, onClose, onSuccess }) {
     setShowConfirm(false);
     setErrorMessage('');
     setSuccessMessage('');
+    setStep('credentials');
+    setOtp('');
+    setRetryAt(0);
+    accountUid.current = '';
   };
 
   const handleClose = () => {
@@ -49,8 +68,25 @@ export default function ChangePasswordModal({ visible, onClose, onSuccess }) {
   };
 
   const handleSubmit = async () => {
+    if (inFlight.current) return;
     setErrorMessage('');
     setSuccessMessage('');
+
+    if (step === 'otp') {
+      if (!/^\d{6}$/.test(otp)) { setErrorMessage('Enter the six-digit code.'); return; }
+      if (!auth.currentUser || auth.currentUser.uid !== accountUid.current) { setErrorMessage('Your session changed. Please sign in again.'); return; }
+      inFlight.current = true;
+      setLoading(true);
+      try {
+        const result = await passwordChangeOtp(auth.currentUser, 'confirm', { code: otp, newPassword });
+        if (result.changed !== true) throw new Error('Password change could not be confirmed.');
+        setSuccessMessage('Password successfully updated.');
+        setTimeout(async () => { resetForm(); onSuccess?.(); onClose?.(); if (result.signOutRequired === true) await signOutAndClearSessions(); }, 1200);
+      } catch (error) {
+        setErrorMessage(error?.message || 'Password change could not be confirmed. Sign in with your new password or contact support.');
+      } finally { inFlight.current = false; setLoading(false); }
+      return;
+    }
 
     if (!currentPassword) {
       setErrorMessage('Please enter your current password.');
@@ -62,6 +98,7 @@ export default function ChangePasswordModal({ visible, onClose, onSuccess }) {
       setErrorMessage(validation.message);
       return;
     }
+    if (newPassword.length < 12 || newPassword.length > 128) { setErrorMessage('Use 12–128 characters.'); return; }
 
     if (newPassword !== confirmPassword) {
       setErrorMessage('New passwords do not match.');
@@ -79,20 +116,19 @@ export default function ChangePasswordModal({ visible, onClose, onSuccess }) {
       return;
     }
 
+    inFlight.current = true;
     try {
       setLoading(true);
       const credential = EmailAuthProvider.credential(currentUser.email, currentPassword);
       await reauthenticateWithCredential(currentUser, credential);
-      await updatePassword(currentUser, newPassword);
-
-      setSuccessMessage('Password successfully updated.');
-      setTimeout(() => {
-        resetForm();
-        onSuccess?.();
-        onClose?.();
-      }, 1200);
+      if (auth.currentUser?.uid !== currentUser.uid) throw new Error('Your session changed. Please sign in again.');
+      await passwordChangeOtp(currentUser, 'request');
+      accountUid.current = currentUser.uid;
+      setCurrentPassword('');
+      setStep('otp');
+      setClock(Date.now());
+      setRetryAt(Date.now() + 60000);
     } catch (err) {
-      console.warn('Change password error code:', err?.code || 'unknown');
       const code = err?.code || '';
       if (code === 'auth/wrong-password' || code === 'auth/invalid-credential') {
         setErrorMessage('Current password is incorrect.');
@@ -101,15 +137,31 @@ export default function ChangePasswordModal({ visible, onClose, onSuccess }) {
       } else if (code === 'auth/requires-recent-login') {
         setErrorMessage('For security, please log out and sign in again before changing your password.');
       } else {
-        setErrorMessage('Failed to change password. Please try again.');
+        setErrorMessage(err?.message || 'Failed to request a code. Please try again.');
       }
     } finally {
       setLoading(false);
+      inFlight.current = false;
     }
+  };
+
+  const resend = async () => {
+    if (inFlight.current || retrySeconds || auth.currentUser?.uid !== accountUid.current) return;
+    inFlight.current = true;
+    setLoading(true);
+    setErrorMessage('');
+    try {
+      await passwordChangeOtp(auth.currentUser, 'request');
+      setOtp('');
+      setClock(Date.now());
+      setRetryAt(Date.now() + 60000);
+    } catch (error) { setErrorMessage(error?.message || 'Could not send another code.'); }
+    finally { inFlight.current = false; setLoading(false); }
   };
 
   const themeColors = colors || BLUETAP_COLORS;
   const styles = getStyles(themeColors, isDark);
+  const Form = Platform.OS === 'web' ? 'form' : View;
 
   return (
     <Modal
@@ -118,7 +170,7 @@ export default function ChangePasswordModal({ visible, onClose, onSuccess }) {
       animationType="fade"
       onRequestClose={handleClose}
     >
-      <View style={styles.overlay}>
+      <View dataSet={{ bluetapPasswordTheme: isDark ? 'dark' : 'light' }} style={styles.overlay}>
         <View style={styles.modalCard} accessibilityViewIsModal accessibilityRole="dialog">
           {/* Header */}
           <View style={styles.modalHeader}>
@@ -137,6 +189,7 @@ export default function ChangePasswordModal({ visible, onClose, onSuccess }) {
             </TouchableOpacity>
           </View>
 
+          <Form {...(Platform.OS === 'web' ? { onSubmit: (event) => { event.preventDefault(); if (!loading && !successMessage) handleSubmit(); } } : {})} style={Platform.OS === 'web' ? { display: 'flex', flexDirection: 'column', minHeight: 0 } : { flexShrink: 1 }}>
           {/* Body */}
           <ScrollView
             style={styles.modalBody}
@@ -155,6 +208,7 @@ export default function ChangePasswordModal({ visible, onClose, onSuccess }) {
               </View>
             )}
 
+            {step === 'credentials' ? <>
             {/* Current Password Field */}
             <View style={styles.inputGroup}>
               <Text style={styles.fieldLabel}>Current Password</Text>
@@ -162,6 +216,8 @@ export default function ChangePasswordModal({ visible, onClose, onSuccess }) {
                 <TextInput
                   style={styles.textInput}
                   secureTextEntry={!showCurrent}
+                  autoComplete="current-password"
+                  accessibilityLabel="Current Password"
                   value={currentPassword}
                   onChangeText={(val) => {
                     setCurrentPassword(val);
@@ -172,14 +228,7 @@ export default function ChangePasswordModal({ visible, onClose, onSuccess }) {
                   autoCapitalize="none"
                   editable={!loading && !successMessage}
                 />
-                <Pressable
-                  onPress={() => setShowCurrent((prev) => !prev)}
-                  style={styles.toggleVisibility}
-                  accessibilityRole="button"
-                  accessibilityLabel={showCurrent ? 'Hide current password' : 'Show current password'}
-                >
-                  <Text style={styles.toggleVisibilityText}>{showCurrent ? 'Hide' : 'Show'}</Text>
-                </Pressable>
+                <PasswordVisibilityButton visible={showCurrent} onPress={() => setShowCurrent((prev) => !prev)} color={themeColors.iconPrimary || themeColors.primary} label="current password" />
               </View>
             </View>
 
@@ -190,37 +239,40 @@ export default function ChangePasswordModal({ visible, onClose, onSuccess }) {
                 <TextInput
                   style={styles.textInput}
                   secureTextEntry={!showNew}
+                  autoComplete="new-password"
+                  accessibilityLabel="New Password"
                   value={newPassword}
                   onChangeText={(val) => {
                     setNewPassword(val);
                     if (errorMessage) setErrorMessage('');
                   }}
-                  placeholder="Enter at least 8 characters"
+                  placeholder="Enter at least 12 characters"
                   placeholderTextColor={themeColors.textSecondary || '#8E8E93'}
                   autoCapitalize="none"
                   editable={!loading && !successMessage}
                 />
-                <Pressable
-                  onPress={() => setShowNew((prev) => !prev)}
-                  style={styles.toggleVisibility}
-                  accessibilityRole="button"
-                  accessibilityLabel={showNew ? 'Hide new password' : 'Show new password'}
-                >
-                  <Text style={styles.toggleVisibilityText}>{showNew ? 'Hide' : 'Show'}</Text>
-                </Pressable>
+                <PasswordVisibilityButton visible={showNew} onPress={() => setShowNew((prev) => !prev)} color={themeColors.iconPrimary || themeColors.primary} label="new password" />
               </View>
               <Text style={styles.helperText}>
-                Minimum 8 characters with at least 1 uppercase, 1 lowercase, and 1 number.
+                12–128 characters with at least 1 uppercase, 1 lowercase, and 1 number.
               </Text>
             </View>
+            </> : <View style={styles.inputGroup}>
+              <Text style={styles.fieldLabel}>Email verification code</Text>
+              <Text style={styles.helperText}>Enter the code sent to your verified account email.</Text>
+              <TextInput style={styles.textInput} accessibilityLabel="Email verification code" keyboardType="number-pad" autoComplete="one-time-code" value={otp} onChangeText={(value) => setOtp(value.replace(/\D/g, '').slice(0, 6))} editable={!loading && !successMessage} maxLength={6} />
+              <TouchableOpacity accessibilityRole="button" disabled={loading || retrySeconds > 0} onPress={resend} style={styles.resendButton}><Text style={[styles.toggleVisibilityText, { color: themeColors.textPrimary }]}>{retrySeconds ? `Resend code in ${retrySeconds}s` : 'Resend code'}</Text></TouchableOpacity>
+            </View>}
 
             {/* Confirm New Password Field */}
-            <View style={styles.inputGroup}>
+            {step === 'credentials' && <View style={styles.inputGroup}>
               <Text style={styles.fieldLabel}>Confirm New Password</Text>
               <View style={styles.inputWrapper}>
                 <TextInput
                   style={styles.textInput}
                   secureTextEntry={!showConfirm}
+                  autoComplete="new-password"
+                  accessibilityLabel="Confirm New Password"
                   value={confirmPassword}
                   onChangeText={(val) => {
                     setConfirmPassword(val);
@@ -231,16 +283,9 @@ export default function ChangePasswordModal({ visible, onClose, onSuccess }) {
                   autoCapitalize="none"
                   editable={!loading && !successMessage}
                 />
-                <Pressable
-                  onPress={() => setShowConfirm((prev) => !prev)}
-                  style={styles.toggleVisibility}
-                  accessibilityRole="button"
-                  accessibilityLabel={showConfirm ? 'Hide confirm password' : 'Show confirm password'}
-                >
-                  <Text style={styles.toggleVisibilityText}>{showConfirm ? 'Hide' : 'Show'}</Text>
-                </Pressable>
+                <PasswordVisibilityButton visible={showConfirm} onPress={() => setShowConfirm((prev) => !prev)} color={themeColors.iconPrimary || themeColors.primary} label="confirm password" />
               </View>
-            </View>
+            </View>}
           </ScrollView>
 
           {/* Footer */}
@@ -250,6 +295,7 @@ export default function ChangePasswordModal({ visible, onClose, onSuccess }) {
               disabled={loading}
               accessibilityRole="button"
               accessibilityLabel="Cancel password change"
+              dataSet={{ bluetapPasswordCancel: 'true' }}
               style={styles.cancelBtn}
             >
               <Text style={styles.cancelBtnText}>Cancel</Text>
@@ -260,6 +306,7 @@ export default function ChangePasswordModal({ visible, onClose, onSuccess }) {
               disabled={loading || !!successMessage}
               accessibilityRole="button"
               accessibilityLabel="Update password"
+              dataSet={{ bluetapCta: 'true' }}
               style={[
                 styles.submitBtn,
                 (loading || !!successMessage) && styles.submitBtnDisabled,
@@ -268,10 +315,11 @@ export default function ChangePasswordModal({ visible, onClose, onSuccess }) {
               {loading ? (
                 <ActivityIndicator color="#FFFFFF" size="small" />
               ) : (
-                <Text style={styles.submitBtnText}>Update Password</Text>
+                <Text style={styles.submitBtnText}>{step === 'credentials' ? 'Send Code' : 'Update Password'}</Text>
               )}
             </TouchableOpacity>
           </View>
+          </Form>
         </View>
       </View>
     </Modal>
@@ -290,6 +338,7 @@ const getStyles = (colors, isDark) =>
     modalCard: {
       width: '100%',
       maxWidth: 480,
+      maxHeight: '90%',
       backgroundColor: colors.surface || '#FFFFFF',
       borderRadius: 18,
       overflow: 'hidden',
@@ -342,6 +391,7 @@ const getStyles = (colors, isDark) =>
     },
     modalBody: {
       maxHeight: 400,
+      flexShrink: 1,
     },
     bodyContent: {
       paddingHorizontal: 20,
@@ -399,10 +449,7 @@ const getStyles = (colors, isDark) =>
       fontSize: 14,
       color: colors.textPrimary || '#1E293B',
     },
-    toggleVisibility: {
-      paddingVertical: 8,
-      paddingHorizontal: 6,
-    },
+    resendButton: { minHeight: 44, justifyContent: 'center', alignSelf: 'flex-start', paddingHorizontal: 4 },
     toggleVisibilityText: {
       fontSize: 12,
       fontWeight: '700',

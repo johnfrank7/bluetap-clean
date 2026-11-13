@@ -1,6 +1,6 @@
-import { collection, onSnapshot } from 'firebase/firestore';
-import { db } from '../firebase';
+import { auth } from '../firebase';
 import { getModuleSession } from './authSession';
+import { getManagerWorkspace } from './managerWorkspace';
 
 export const PRODUCTS_COLLECTION = 'products';
 export const PRODUCT_SCHEMA_FIELDS = ['id', 'product_name', 'description', 'price', 'image', 'imageUrl', 'imagePath', 'imageStorageProvider', 'containerType', 'size', 'active', 'branchIds', 'createdAt', 'updatedAt'];
@@ -8,8 +8,11 @@ export const PRODUCT_SCHEMA_FIELDS = ['id', 'product_name', 'description', 'pric
 const subscribers = new Set();
 let sourceProducts = [];
 let cachedProducts = null;
-let unsubscribeFirestore = null;
+let refreshTimer = null;
 let stopTimer = null;
+let sourceUid = '';
+let generation = 0;
+let refreshPromise = null;
 
 const amount = (value) => Number.isFinite(Number(value)) ? Number(value) : 0;
 const millis = (value) => value?.toMillis?.() || (value?.seconds ? value.seconds * 1000 : new Date(value || 0).getTime() || 0);
@@ -47,13 +50,34 @@ const emit = () => {
 
 const start = () => {
   if (stopTimer) { clearTimeout(stopTimer); stopTimer = null; }
-  if (unsubscribeFirestore) return;
-  unsubscribeFirestore = onSnapshot(collection(db, PRODUCTS_COLLECTION), (snapshot) => {
-    sourceProducts = snapshot.docs.map((item) => normalizeProduct(item.id, item.data()));
-    emit();
-  }, (error) => {
-    subscribers.forEach(({ onError }) => onError?.(error));
-  });
+  const uid = auth.currentUser?.uid || '';
+  if (sourceUid !== uid) {
+    generation += 1;
+    if (refreshTimer) clearInterval(refreshTimer);
+    refreshTimer = null;
+    refreshPromise = null;
+    sourceUid = uid;
+    sourceProducts = [];
+    cachedProducts = null;
+  }
+  if (refreshTimer) return;
+  const currentGeneration = generation;
+  const refresh = () => {
+    if (refreshPromise) return;
+    const request = getManagerWorkspace().then((workspace) => {
+      if (currentGeneration !== generation || auth.currentUser?.uid !== sourceUid) return;
+      sourceProducts = (Array.isArray(workspace.products) ? workspace.products : []).map((item) => normalizeProduct(item.id, item));
+      emit();
+    }).catch((error) => {
+      if (currentGeneration !== generation) return;
+      sourceProducts = [];
+      emit();
+      subscribers.forEach(({ onError }) => onError?.(error));
+    }).finally(() => { if (refreshPromise === request) refreshPromise = null; });
+    refreshPromise = request;
+  };
+  refresh();
+  refreshTimer = setInterval(refresh, 15000);
 };
 
 export const subscribeProducts = (listener, onError) => {
@@ -64,7 +88,7 @@ export const subscribeProducts = (listener, onError) => {
   return () => {
     subscribers.delete(subscriber);
     if (subscribers.size === 0) stopTimer = setTimeout(() => {
-      if (subscribers.size === 0) { unsubscribeFirestore?.(); unsubscribeFirestore = null; sourceProducts = []; cachedProducts = null; }
+      if (subscribers.size === 0) { generation += 1; clearInterval(refreshTimer); refreshTimer = null; refreshPromise = null; sourceUid = ''; sourceProducts = []; cachedProducts = null; }
     }, 15_000);
   };
 };

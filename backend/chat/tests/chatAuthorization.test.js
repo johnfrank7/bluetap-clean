@@ -9,6 +9,7 @@ const {
   authorizeRequesterBranch,
   authorizeRequesterDistributor,
   FAILED_DELIVERY_CHAT_GRACE_MS,
+  failedDeliveryChatEndsAt,
 } = require('../chatAuthorization');
 
 const requester = { uid: 'requester-a', role: 'requester', accountStatus: 'active' };
@@ -50,6 +51,21 @@ test('Requester and Distributor authority requires ownership, assignment, branch
   assert.equal(authorizeRequesterDistributor({ requester, distributor, branch: branchA, order: failed, assignmentVersion: 4, now: new Date(graceUntil.getTime() - 1000) }).accessEndsAt, graceUntil);
   assert.throws(() => authorizeRequesterDistributor({ requester, distributor, branch: branchA, order: failed, assignmentVersion: 4, now: graceUntil }), (error) => error.reason === 'CHAT_ASSIGNMENT_NOT_WRITABLE');
   assert.throws(() => authorizeRequesterDistributor({ requester, distributor, branch: branchA, order: failed, assignmentVersion: 4, now: new Date(graceUntil.getTime() + 1) }), (error) => error.reason === 'CHAT_ASSIGNMENT_NOT_WRITABLE');
+  const readAtDeadline = authorizeRequesterDistributor({ requester, distributor, branch: branchA, order: failed, assignmentVersion: 4, now: graceUntil, mode: 'read' });
+  assert.equal(readAtDeadline.accessEndsAt, graceUntil);
+  assert.equal(readAtDeadline.sendExpired, true);
+  const repeatedFailed = {
+    ...failed,
+    deliveryFailedAt: new Date(failedAt.getTime() + (45 * 60 * 1000)),
+    distributorChatGraceUntil: new Date(graceUntil.getTime() + (45 * 60 * 1000)),
+    distributorDeliveryHistory: [
+      { event: 'DELIVERY_STARTED', startedAt: new Date(failedAt.getTime() - (15 * 60 * 1000)) },
+      { event: 'DELIVERY_FAILED', failedAt },
+      { event: 'DELIVERY_FAILED', failedAt: new Date(failedAt.getTime() + (45 * 60 * 1000)) },
+    ],
+  };
+  assert.equal(failedDeliveryChatEndsAt(repeatedFailed).getTime(), graceUntil.getTime());
+  assert.throws(() => authorizeRequesterDistributor({ requester, distributor, branch: branchA, order: repeatedFailed, assignmentVersion: 4, now: graceUntil }), (error) => error.reason === 'CHAT_ASSIGNMENT_NOT_WRITABLE');
   assert.throws(() => authorizeRequesterDistributor({ requester, distributor, branch: branchA, order: { ...order, assignmentVersion: 0 }, assignmentVersion: 1 }), (error) => error.reason === 'INVALID_ASSIGNMENT_VERSION');
 });
 

@@ -120,7 +120,8 @@ test('Manager Accounts UI merges branch requesters for view-only branch visibili
 test('Manager Profile supports image size validation, web photo conversion, and navbar instant sync', () => {
   assert.match(profileCode, /3 \* 1024 \* 1024/);
   assert.match(profileCode, /Profile pictures must be 3 MB or smaller/);
-  assert.match(profileCode, /updateManagerProfile\(\{ fullName, phone, address \}, selectedImage\)/);
+  assert.match(profileCode, /const changes = changedProfileFields\(/);
+  assert.match(profileCode, /updateManagerProfile\(changes, selectedImage, expectedProfile\.current, removeImage\)/);
   assert.match(profileCode, /realtime\.primeProfile\(saved\)/);
   assert.match(profileCode, /saveLocalUser\(saved\)/);
   assert.match(realtimeCode, /profile:\s*state\.profile \|\| session\.profile/);

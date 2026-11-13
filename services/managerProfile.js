@@ -47,7 +47,7 @@ export function profileImagePayload(asset) {
 
 export const ensureManagerProfile = () => managerProfileRequest();
 
-export const updateManagerProfile = (changes, imageAsset = null) => managerProfileRequest({
+export const updateManagerProfile = (changes, imageAsset = null, expectedProfile, removeImage = false) => managerProfileRequest({
   method: 'PATCH',
-  body: { ...changes, ...(imageAsset ? { imageUpload: profileImagePayload(imageAsset) } : {}) },
+  body: { ...changes, expectedProfile, ...(imageAsset ? { imageUpload: profileImagePayload(imageAsset) } : {}), ...(removeImage ? { removeImage: true } : {}) },
 });

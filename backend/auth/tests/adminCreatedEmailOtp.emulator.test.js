@@ -32,7 +32,7 @@ function loadAuthSessionHarness(context) {
     .replace(/^export \{[^}]+\};\r?\n/gm, '');
   return vm.runInNewContext(
     `${source}\n({ getPostAuthenticationDestination, validateRoleAccess, isOperationalEmailVerificationPending })`,
-    context
+    { reload, ...context }
   );
 }
 
@@ -50,7 +50,8 @@ test('Admin-created account completes real Auth emulator email verification befo
     try {
       await auth.createUser({ uid, email, emailVerified: false, password: 'SafePassword2026' });
       await db.collection('users').doc(uid).set({ role: 'requester', accountStatus: 'active',
-        accountSource: 'admin_created', emailVerificationRequired: true, emailVerified: false, email });
+        accountSource: 'admin_created', emailVerificationRequired: true, emailVerified: false, email,
+        emailOtpVerification: { status: 'reconciliation-failed', profileSynced: false } });
       const credential = await signInWithEmailAndPassword(clientAuth, email, 'SafePassword2026');
       const request = async () => ({ headers: { authorization: `Bearer ${await credential.user.getIdToken(true)}` } });
       await assert.rejects(requireRequester(await request(), auth, db),
@@ -70,6 +71,7 @@ test('Admin-created account completes real Auth emulator email verification befo
       const syncedProfile = (await db.collection('users').doc(uid).get()).data();
       assert.equal(syncedProfile.emailVerified, true);
       assert.equal(syncedProfile.emailOtpVerification?.status, 'verified');
+      assert.equal(syncedProfile.emailOtpVerification?.profileSynced, true);
       const syncedOtp = (await db.collection('emailOtpVerifications').doc(uid).get()).data();
       assert.equal(syncedOtp.profileSynced, true);
       await reload(credential.user);

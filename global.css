@@ -255,6 +255,21 @@ button[aria-label='Edit branch delivery pricing'] > div {
   color: #ffffff !important;
 }
 
+/* Keep the password dialog's secondary action readable across web resets. */
+button[data-bluetap-password-cancel='true'] {
+  background-color: #f8fcff !important;
+  border-color: #d7ecff !important;
+  color: #12304a !important;
+}
+button[data-bluetap-password-cancel='true'] > div { color: #12304a !important; }
+[data-bluetap-password-theme='dark'] button[data-bluetap-password-cancel='true'] {
+  background-color: #112a40 !important;
+  border-color: #1c3c55 !important;
+  color: #f5faff !important;
+}
+[data-bluetap-password-theme='dark'] button[data-bluetap-password-cancel='true'] > div { color: #f5faff !important; }
+button[data-bluetap-password-cancel='true']:disabled { opacity: 0.75; }
+
 /* Custom scrollbar for horizontal product selection on web */
 [data-product-scroll='true']::-webkit-scrollbar {
   height: 8px;

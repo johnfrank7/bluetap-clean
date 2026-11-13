@@ -28,7 +28,7 @@ function ReviewButton({ label, onPress, disabled, primary, styles, icon }) {
   </Pressable>;
 }
 
-export function ManagerDeliveryReviewList({ state, flow, colors, onReview }) {
+export function ManagerDeliveryReviewList({ state, flow, colors, onReview, failedOrdersById = null, onResolveOrder = null }) {
   const { width } = useWindowDimensions();
   const styles = useMemo(() => makeStyles(colors, width), [colors, width]);
   return <View style={styles.listArea}>
@@ -42,15 +42,44 @@ export function ManagerDeliveryReviewList({ state, flow, colors, onReview }) {
     {state.listLoaded && !state.listBusy && !state.listError && state.reviews.length === 0 && !state.nextCursor
       ? <View style={styles.center}><Text style={styles.muted}>No failed deliveries awaiting review.</Text></View> : null}
     {state.reviews.length ? <ScrollView nestedScrollEnabled style={styles.listScroll} contentContainerStyle={styles.listContent}>
-      {state.reviews.map((review) => <View key={review.attemptId} style={styles.row}>
-        <View style={styles.rowCopy}>
-          <Text style={styles.rowTitle} numberOfLines={2}>Order #{review.orderReference || review.orderId}</Text>
-          <Text style={styles.rowReason} numberOfLines={2}>{review.reportedReasonLabel || 'Failed delivery'}</Text>
-          <Text style={styles.muted}>Reported {dateLabel(review.reportReceivedAt)} · {review.reviewState === 'reported' ? 'Awaiting review' : 'Resolved'}</Text>
-        </View>
-        <ReviewButton label={`Review order ${review.orderReference || review.orderId}`}
-          onPress={() => onReview(review)} styles={styles} icon="FileSearch" />
-      </View>)}
+      {state.reviews.map((review) => {
+        const failedOrder = failedOrdersById?.get?.(String(review.orderId)) || null;
+        const canResolveOrder = Boolean(
+          onResolveOrder &&
+          failedOrder &&
+          String(failedOrder.status || '').toLowerCase() === 'delivery_failed' &&
+          (failedOrder.assignedDistributorUid || failedOrder.distributor_id)
+        );
+        return (
+          <View key={review.attemptId} style={styles.row}>
+            <View style={styles.rowCopy}>
+              <Text style={styles.rowTitle} numberOfLines={2}>Order #{review.orderReference || review.orderId}</Text>
+              <Text style={styles.rowReason} numberOfLines={2}>{review.reportedReasonLabel || 'Failed delivery'}</Text>
+              <Text style={styles.muted}>Reported {dateLabel(review.reportReceivedAt)} · {review.reviewState === 'reported' ? 'Awaiting review' : 'Resolved'}</Text>
+            </View>
+            <View style={styles.itemActions}>
+              {canResolveOrder ? (
+                <>
+                  <ReviewButton
+                    label="Reschedule"
+                    onPress={() => onResolveOrder(failedOrder, 'reschedule')}
+                    styles={styles}
+                    icon="Calendar"
+                  />
+                  <ReviewButton
+                    label="Reassign"
+                    onPress={() => onResolveOrder(failedOrder, 'reassign')}
+                    styles={styles}
+                    icon="UserCheck"
+                  />
+                </>
+              ) : null}
+              <ReviewButton label={`Review order ${review.orderReference || review.orderId}`}
+                onPress={() => onReview(review)} styles={styles} icon="FileSearch" />
+            </View>
+          </View>
+        );
+      })}
     </ScrollView> : null}
     {state.nextCursor ? <View style={styles.pager}>
       <Text style={styles.muted}>Showing {state.reviews.length} loaded cases</Text>
@@ -155,6 +184,7 @@ function makeStyles(colors, width = 1200) {
     row: { flexDirection: width < 430 ? 'column' : 'row', alignItems: width < 430 ? 'stretch' : 'center',
       gap: 10, padding: 11, backgroundColor: colors.surfaceAlt, borderColor: colors.border,
       borderWidth: 1, borderRadius: 10, minWidth: 0 },
+    itemActions: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 6 },
     rowCopy: { flex: 1, minWidth: 0 },
     rowTitle: { color: colors.textPrimary, fontSize: 13, fontWeight: '800', flexShrink: 1 },
     rowReason: { color: colors.textSecondary, fontSize: 12, marginTop: 3, flexShrink: 1 },

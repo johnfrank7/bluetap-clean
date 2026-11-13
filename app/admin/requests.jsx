@@ -13,6 +13,7 @@ import {
   View,
 } from 'react-native';
 import AdminShell from '../../components/AdminShell';
+import SavedOrderPricing from '../../components/SavedOrderPricing';
 import DropdownChevron from '../../components/DropdownChevron';
 import DropdownMenuOverlay from '../../components/DropdownMenuOverlay';
 import { useAdminTheme } from '../../components/AdminTheme';
@@ -22,6 +23,7 @@ import { getBranches } from '../../services/branchManagement';
 import { ADMIN_CACHE_KEYS, useAdminData } from '../../services/adminDataCache';
 import { requesterOrderStatusLabel } from '../../constants/requesterOrderStatus';
 import { getAdminOverrideDetails, submitAdminOverrideAssignment } from '../../services/adminDispatchOverride';
+import { useVerifiedTripMode, getAdminTripOptions, proposeAdminTrip, tripMutationId, parseManilaTripTime } from '../../services/tripApprovals';
 import TopToastFeedback from '../../components/TopToastFeedback';
 import BlueTapEmptyState from '../../components/BlueTapEmptyState';
 import SoftStatusBadge from '../../components/SoftStatusBadge';
@@ -88,16 +90,20 @@ function RequestsFilterWebStyles({ colors }) {
           background-color: ${colors.primarySoft};
           border-color: ${colors.primary};
         }
-        button[data-admin-requests-details="true"] {
+        button[data-admin-requests-details="true"],
+        button[data-admin-requests-override="true"] {
           background-color: ${primary} !important;
           border-color: ${primary} !important;
         }
         button[data-admin-requests-details="true"]:hover,
-        button[data-admin-requests-details="true"]:focus-visible {
+        button[data-admin-requests-details="true"]:focus-visible,
+        button[data-admin-requests-override="true"]:hover,
+        button[data-admin-requests-override="true"]:focus-visible {
           background-color: ${primaryStrong} !important;
           border-color: ${primaryStrong} !important;
         }
-        button[data-admin-requests-details="true"] > div {
+        button[data-admin-requests-details="true"] > div,
+        button[data-admin-requests-override="true"] > div {
           color: ${colors.onPrimary} !important;
         }
       `,
@@ -109,30 +115,6 @@ const formatAmount = (val) => {
   if (val === undefined || val === null || val === '') return '₱0.00';
   const num = Number(val);
   return isNaN(num) || !Number.isFinite(num) ? 'Unavailable' : `₱${num.toFixed(2)}`;
-};
-
-const formatPriceOrUnavailable = (val) => {
-  if (val === undefined || val === null || val === '') return 'Unavailable';
-  const num = Number(val);
-  return isNaN(num) || !Number.isFinite(num) ? 'Unavailable' : `₱${num.toFixed(2)}`;
-};
-
-const normalizeOrderItem = (item = {}) => {
-  const quantity = Number(item.quantity) || 1;
-  const unitPrice = item.unitPriceAtOrder !== undefined && item.unitPriceAtOrder !== null
-    ? Number(item.unitPriceAtOrder)
-    : (item.unitPrice !== undefined && item.unitPrice !== null ? Number(item.unitPrice) : null);
-  const total = item.totalAtOrder !== undefined && item.totalAtOrder !== null
-    ? Number(item.totalAtOrder)
-    : (item.subtotal !== undefined && item.subtotal !== null
-      ? Number(item.subtotal)
-      : (unitPrice !== null ? unitPrice * quantity : null));
-  return {
-    name: item.productNameSnapshot || item.productName || item.name || 'Product',
-    quantity,
-    unitPrice,
-    total,
-  };
 };
 
 const formatDate = (val) => {
@@ -212,6 +194,12 @@ export default function AdminRequestsPage() {
   const [overrideReason, setOverrideReason] = useState('');
   const [overrideDistributorOpen, setOverrideDistributorOpen] = useState(false);
   const [overrideDistributorQuery, setOverrideDistributorQuery] = useState('');
+  const tripMode = useVerifiedTripMode();
+  const [overrideTrips, setOverrideTrips] = useState([]);
+  const [selectedOverrideTrip, setSelectedOverrideTrip] = useState('');
+  const [tripDeliveryTime, setTripDeliveryTime] = useState('');
+  const overrideSubmissionLock = React.useRef(false);
+  const overrideMutation = React.useRef(null);
   const [toast, setToast] = useState({ visible: false, message: '', type: 'info' });
 
   const showToast = (message, type = 'info') => {
@@ -237,9 +225,10 @@ export default function AdminRequestsPage() {
   );
   const selectedOverrideName = eligibleOverrideDistributors.find((dist) => dist.uid === selectedOverrideDistributor);
   const selectedOrderOverrideEligible = OVERRIDE_ELIGIBLE_STATUSES.has((selectedOrder?.status || '').toLowerCase());
-  const overrideSubmitDisabled = overrideLoading || !selectedOverrideDistributor || !overrideReason.trim() || !overrideAllowedOffsets.length;
+  const overrideSubmitDisabled = overrideLoading || ['checking', 'blocked'].includes(tripMode) || !selectedOverrideDistributor || !overrideReason.trim() || (tripMode === 'trip' ? !selectedOverrideTrip || !tripDeliveryTime.trim() : !overrideAllowedOffsets.length);
 
   const openOverride = async (order) => {
+    if (['checking', 'blocked'].includes(tripMode)) { showToast('Trip availability could not be verified.', 'error'); return; }
     if (!order) return;
     setOverrideModalVisible(true);
     setOverrideLoading(true);
@@ -249,9 +238,15 @@ export default function AdminRequestsPage() {
     setOverrideReason('');
     setOverrideDistributorOpen(false);
     setOverrideDistributorQuery('');
+    setOverrideTrips([]); setSelectedOverrideTrip(''); setTripDeliveryTime('');
     try {
       const data = await getAdminOverrideDetails(order.id || order.requestId);
       setOverrideData(data);
+      if (tripMode === 'trip') {
+        const choices = await getAdminTripOptions(order.id || order.requestId);
+        if (!Array.isArray(choices.trips)) throw new Error('Trip options could not be verified.');
+        setOverrideTrips(choices.trips);
+      }
       setSelectedOverrideDistributor(data.eligibleDistributors?.find((dist) => dist.branchId === data.branchId)?.uid || '');
       setOverrideDayOffset(Array.from({ length: 14 }, (_, index) => index).find((offset) =>
         isAllowedDeliveryDate(manilaScheduleDate(offset, 12), data.effectiveDeliveryDaysSnapshot || []) && availableOverrideSlots(offset).length
@@ -265,6 +260,7 @@ export default function AdminRequestsPage() {
   };
 
   const submitOverride = async () => {
+    if (overrideSubmissionLock.current || ['checking', 'blocked'].includes(tripMode)) return;
     if (!selectedOverrideDistributor) {
       setOverrideError('Please select an eligible distributor.');
       return;
@@ -273,24 +269,35 @@ export default function AdminRequestsPage() {
       setOverrideError('Explain why this emergency reassignment is needed.');
       return;
     }
-    if (!overrideAllowedOffsets.includes(overrideDayOffset)) {
+    if (tripMode !== 'trip' && !overrideAllowedOffsets.includes(overrideDayOffset)) {
       setOverrideError('Choose a delivery day allowed for every product in this order.');
       return;
     }
     const slot = OVERRIDE_TIME_SLOTS[overrideSlotIndex] || OVERRIDE_TIME_SLOTS[0];
-    const sched = manilaScheduleDate(overrideDayOffset, slot.hours, slot.minutes);
+    const sched = tripMode === 'trip' ? parseManilaTripTime(tripDeliveryTime) : manilaScheduleDate(overrideDayOffset, slot.hours, slot.minutes);
+    if (tripMode === 'trip') {
+      if (!sched || sched.getTime() < Date.now() - 5 * 60 * 1000 || !isAllowedDeliveryDate(sched, overrideData?.effectiveDeliveryDaysSnapshot || [])) { setOverrideError('Enter a current or future product-compatible date and time in Philippine time.'); return; }
+      const trip = overrideTrips.find((item) => item.tripId === selectedOverrideTrip && item.distributorUid === selectedOverrideDistributor);
+      if (!trip || sched.getTime() < new Date(trip.plannedDeparture).getTime() || sched.getTime() > new Date(trip.estimatedReturn).getTime()) { setOverrideError('Choose a trip whose planned interval contains this delivery time.'); return; }
+    }
 
+    overrideSubmissionLock.current = true;
     setOverrideLoading(true);
     setOverrideError('');
     try {
-      const res = await submitAdminOverrideAssignment(
-        selectedOrder.id || selectedOrder.requestId,
-        selectedOverrideDistributor,
-        sched.toISOString(),
-        overrideReason.trim()
-      );
-      setOverrideSuccess('Distributor successfully reassigned via Admin Override.');
-      showToast('Distributor successfully reassigned via Admin Override.', 'success');
+      let res;
+      if (tripMode === 'trip') {
+        const payload = { orderId: selectedOrder.id || selectedOrder.requestId, distributorUid: selectedOverrideDistributor, tripId: selectedOverrideTrip, scheduledAt: sched.toISOString(), reason: overrideReason.trim() };
+        const fingerprint = JSON.stringify(payload);
+        if (overrideMutation.current?.uncertain && overrideMutation.current.fingerprint !== fingerprint) throw new Error('The previous proposal could not be confirmed. Retry the same details before changing them.');
+        if (!overrideMutation.current || overrideMutation.current.fingerprint !== fingerprint) overrideMutation.current = { fingerprint, id: tripMutationId() };
+        res = await proposeAdminTrip({ ...payload, clientMutationId: overrideMutation.current.id });
+        if (res?.proposal?.status !== 'pending' || res.proposal.orderId !== payload.orderId) { const error = new Error('The proposal could not be confirmed. Retry the same details.'); error.uncertain = true; throw error; }
+        overrideMutation.current.uncertain = false;
+      } else res = await submitAdminOverrideAssignment(selectedOrder.id || selectedOrder.requestId, selectedOverrideDistributor, sched.toISOString(), overrideReason.trim());
+      const message = tripMode === 'trip' ? 'Pending Branch Manager Approval.' : 'Distributor successfully reassigned via Admin Override.';
+      setOverrideSuccess(message);
+      showToast(message, 'success');
       if (res.order) {
         setSelectedOrder(res.order);
       }
@@ -299,10 +306,12 @@ export default function AdminRequestsPage() {
         setOverrideSuccess('');
       }, 1500);
     } catch (err) {
+      if (tripMode === 'trip' && err.uncertain && overrideMutation.current) overrideMutation.current.uncertain = true;
       const msg = err.message || 'Failed to execute Admin Override.';
       setOverrideError(msg);
       showToast(msg, 'error');
     } finally {
+      overrideSubmissionLock.current = false;
       setOverrideLoading(false);
     }
   };
@@ -930,45 +939,7 @@ export default function AdminRequestsPage() {
               {/* Ordered Items Table */}
               <View style={styles.modalSection}>
                 <Text style={styles.modalSectionTitle}>Ordered Items & Charges</Text>
-                {Array.isArray(selectedOrder?.items) && selectedOrder.items.length > 0 ? (
-                  selectedOrder.items.map((rawItem, idx) => {
-                    const item = normalizeOrderItem(rawItem);
-                    return (
-                      <View key={idx} style={styles.itemRow}>
-                        <View style={{ flex: 1 }}>
-                          <Text style={styles.itemName}>
-                            {item.name}
-                          </Text>
-                          <Text style={styles.itemSub}>
-                            {formatPriceOrUnavailable(item.unitPrice)} × {item.quantity}
-                          </Text>
-                        </View>
-                        <Text style={styles.itemTotal}>
-                          {formatPriceOrUnavailable(item.total)}
-                        </Text>
-                      </View>
-                    );
-                  })
-                ) : (
-                  <View style={styles.itemRow}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.itemName}>
-                        {selectedOrder?.productNameSnapshot || selectedOrder?.product || 'Standard Product'}
-                      </Text>
-                      <Text style={styles.itemSub}>Qty: {selectedOrder?.quantity || 1}</Text>
-                    </View>
-                    <Text style={styles.itemTotal}>
-                      {formatAmount(selectedOrder?.totalAtOrder || selectedOrder?.totalAmount)}
-                    </Text>
-                  </View>
-                )}
-
-                <View style={styles.totalRow}>
-                  <Text style={styles.totalLabel}>Total Authoritative Amount</Text>
-                  <Text style={styles.totalValue}>
-                    {formatAmount(selectedOrder?.totalAtOrder || selectedOrder?.totalAmount)}
-                  </Text>
-                </View>
+                <SavedOrderPricing order={selectedOrder} colors={colors} />
               </View>
 
               {/* Container & Notes */}
@@ -1044,6 +1015,7 @@ export default function AdminRequestsPage() {
                 <TouchableOpacity
                   accessibilityRole="button"
                   accessibilityLabel="Override Distributor Assignment"
+                  dataSet={{ adminRequestsOverride: 'true' }}
                   onPress={() => openOverride(selectedOrder)}
                   style={styles.overrideActionButton}
                 >
@@ -1160,7 +1132,7 @@ export default function AdminRequestsPage() {
                             style={styles.overrideSearchInput}
                           />
                           {filteredOverrideDistributors.length ? filteredOverrideDistributors.map((dist) => (
-                            <Pressable key={dist.uid} accessibilityRole="option" accessibilityState={{ selected: selectedOverrideDistributor === dist.uid }} onPress={() => { setSelectedOverrideDistributor(dist.uid); setOverrideDistributorOpen(false); setOverrideDistributorQuery(''); }} style={[styles.overrideOption, selectedOverrideDistributor === dist.uid && styles.overrideOptionSelected]}>
+                            <Pressable key={dist.uid} accessibilityRole="option" accessibilityState={{ selected: selectedOverrideDistributor === dist.uid }} onPress={() => { setSelectedOverrideDistributor(dist.uid); setSelectedOverrideTrip(''); setOverrideDistributorOpen(false); setOverrideDistributorQuery(''); }} style={[styles.overrideOption, selectedOverrideDistributor === dist.uid && styles.overrideOptionSelected]}>
                               <Text style={styles.overrideOptionName}>{dist.name}{dist.publicUid ? ` · ${dist.publicUid}` : ''}</Text>
                               <Text style={styles.overrideOptionMeta}>{dist.phone || 'Contact unavailable'}</Text>
                             </Pressable>
@@ -1171,7 +1143,22 @@ export default function AdminRequestsPage() {
                   )}
                 </View>
 
-                <View style={styles.overrideSection}>
+                {tripMode === 'trip' && <View style={styles.overrideSection}>
+                  <Text style={styles.overrideSectionTitle}>Select an eligible trip</Text>
+                  <Text style={styles.overrideSectionHint}>This proposal requires the branch Manager’s approval before any assignment changes.</Text>
+                  {overrideTrips.filter((trip) => trip.distributorUid === selectedOverrideDistributor).length === 0 && <Text style={styles.overrideSectionHint}>No eligible trip is available for this Distributor.</Text>}
+                  {overrideTrips.filter((trip) => trip.distributorUid === selectedOverrideDistributor).map((trip) => <Pressable key={trip.tripId} accessibilityRole="radio" accessibilityState={{ checked: selectedOverrideTrip === trip.tripId }} onPress={() => setSelectedOverrideTrip(trip.tripId)} style={[styles.overrideOption, selectedOverrideTrip === trip.tripId && styles.overrideOptionSelected]}>
+                    <Text style={styles.overrideOptionName}>{trip.tripId}</Text>
+                    <Text style={styles.overrideOptionMeta}>{new Date(trip.plannedDeparture).toLocaleString('en-US', { timeZone: 'Asia/Manila' })} – {new Date(trip.estimatedReturn).toLocaleString('en-US', { timeZone: 'Asia/Manila' })} · {trip.projectedStandardContainers} standard containers</Text>
+                    {trip.hasOtherCargo && <Text style={styles.overrideOptionMeta}>Additional cargo requires loading review.</Text>}
+                  </Pressable>)}
+                </View>}
+                {tripMode === 'blocked' && <Text accessibilityRole="alert" style={styles.overrideErrorText}>Trip availability could not be verified. Try again after the connection is restored.</Text>}
+                {tripMode === 'trip' ? <View style={styles.overrideSection}>
+                  <Text style={styles.overrideSectionTitle}>Proposed delivery schedule</Text>
+                  <Text style={styles.overrideSectionHint}>Enter Philippine time as YYYY-MM-DD HH:MM, within the selected trip.</Text>
+                  <TextInput accessibilityLabel="Proposed delivery date and time in Philippine time" placeholder="YYYY-MM-DD HH:MM" placeholderTextColor={colors.textSecondary} value={tripDeliveryTime} onChangeText={setTripDeliveryTime} maxLength={16} style={styles.overrideSearchInput} />
+                </View> : <View style={styles.overrideSection}>
                   <Text style={styles.overrideSectionTitle}>Delivery schedule</Text>
                   <Text style={styles.overrideSectionHint}>Choose a product-compatible day and an available time slot.</Text>
                   {!overrideAllowedOffsets.length && <View style={styles.overrideScheduleWarning}><Text style={styles.overrideScheduleWarningTitle}>No compatible delivery day</Text><Text style={styles.overrideScheduleWarningText}>The products in this order do not share a delivery day. Update product schedules before assigning a distributor.</Text></View>}
@@ -1206,7 +1193,7 @@ export default function AdminRequestsPage() {
                       </TouchableOpacity>
                     ))}
                   </View></>}
-                </View>
+                </View>}
 
                 <View style={styles.overrideSection}>
                   <Text style={styles.overrideSectionTitle}>Reason for override <Text style={styles.overrideRequired}>Required</Text></Text>
@@ -1241,7 +1228,7 @@ export default function AdminRequestsPage() {
                 {overrideLoading ? (
                   <ActivityIndicator size="small" color="#FFFFFF" />
                 ) : (
-                  <Text style={styles.overrideSubmitBtnText}>Confirm Reassignment</Text>
+                  <Text style={styles.overrideSubmitBtnText}>{tripMode === 'trip' ? 'Send Proposal' : 'Confirm Reassignment'}</Text>
                 )}
               </TouchableOpacity>
             </View>
@@ -1878,6 +1865,7 @@ const createStyles = (colors, isMobile = false) =>
       fontSize: 13,
     },
     overrideActionButton: {
+      minHeight: 44,
       paddingHorizontal: 16,
       paddingVertical: 10,
       borderRadius: 8,

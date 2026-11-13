@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import SavedOrderPricing from '../../components/SavedOrderPricing';
 import { useLocalSearchParams } from 'expo-router';
 import {
   ActivityIndicator,
@@ -17,6 +18,7 @@ import {
 import {
   decideOutsideRadiusOrder,
   dispatchManagerOrder,
+  quoteManagerOrder,
 } from '../../services/managerOrderApprovals';
 import { subscribeProducts } from '../../services/products';
 import { haversineDistanceKm } from '../../services/location';
@@ -29,8 +31,15 @@ import ManagerShell, { MANAGER_COLORS, ManagerPill } from '../../components/Mana
 import { useManagerOngoingRequests } from '../../components/ManagerOngoingRequestsMonitor';
 import { useManagerRealtimeData } from '../../components/ManagerRealtimeData';
 import { ManagerDeliveryReviewList, ManagerDeliveryReviewModal } from '../../components/ManagerDeliveryReview';
+import ManagerFailedDeliveryResolutionModal from '../../components/ManagerFailedDeliveryResolutionModal';
+import { getTripPreparation, useVerifiedTripMode } from '../../services/tripApprovals';
 import { fetchManagerDeliveryReviews, fetchManagerDeliveryReview, submitManagerDeliveryDecision } from '../../services/managerDeliveryReviews';
 import { createManagerDeliveryReviewFlow } from '../../services/managerDeliveryReviewFlow';
+const {
+  canManagerResolveFailedOrder,
+  createManagerFailedDeliveryResolutionFlow,
+  getEligibleBranchDistributors,
+} = require('../../services/managerFailedDeliveryResolution');
 import { parseTimestamp } from '../../services/notificationTimestamp';
 import LocationMap from '../../components/LocationMap';
 import { ManagerOrderChatAction } from '../../components/chat/ChatOrderActions';
@@ -204,6 +213,9 @@ function OutsideRadiusApprovalQueue({
   reviewFlow,
   reviewState,
   onOpenReview,
+  failedOrders = [],
+  failedOrdersById = null,
+  onResolveOrder = null,
   style,
 }) {
   const [error, setError] = useState('');
@@ -282,7 +294,60 @@ function OutsideRadiusApprovalQueue({
       </View>
 
       {reviewState.activeTab === 'failed' ? (
-        <ManagerDeliveryReviewList state={reviewState} flow={reviewFlow} colors={colors} onReview={onOpenReview} />
+        <View style={{ gap: 10 }}>
+          {Boolean(Array.isArray(failedOrders) && failedOrders.length > 0) ? (
+            <View style={styles.failedResolutionStrip}>
+              <Text style={styles.subSectionTitle}>Active Failed Orders Awaiting Schedule or Reassignment ({failedOrders.length})</Text>
+              {failedOrders.slice(0, 3).map((failedOrder) => (
+                <View key={failedOrder.id} style={styles.failedResolutionItem}>
+                  <View style={styles.orderHeaderRow}>
+                    <View style={{ flex: 1, minWidth: 0 }}>
+                      <Text numberOfLines={1} ellipsizeMode="tail" style={styles.requesterName}>
+                        {failedOrder.requesterName || 'Requester'} · #{failedOrder.requestId || failedOrder.id}
+                      </Text>
+                      <Text numberOfLines={1} ellipsizeMode="tail" style={styles.detailLine}>
+                        Distributor: {failedOrder.assignedDistributorName || 'Assigned Distributor'}
+                        {failedOrder.failureReason ? ` · ${failedOrder.failureReason}` : ''}
+                      </Text>
+                    </View>
+                  </View>
+                  <View style={[styles.actionRow, styles.requestActionRow]}>
+                    <View style={styles.actionSecondaryGroup}>
+                      <View style={styles.chatActionWrap}>
+                        <ManagerOrderChatAction order={failedOrder} style={styles.managerChatButton} />
+                      </View>
+                      <ManagerActionButton onPress={() => onOpenOrder(failedOrder)} style={[styles.actionButton, styles.viewDetailsBtn]}>
+                        <Text style={styles.viewDetailsBtnText}>View Details</Text>
+                      </ManagerActionButton>
+                    </View>
+                    <View style={styles.actionDecisionGroup}>
+                      <ManagerActionButton
+                        onPress={() => onResolveOrder?.(failedOrder, 'reschedule')}
+                        style={[styles.actionButton, styles.editOrderBtn]}
+                      >
+                        <Text style={styles.editOrderBtnText}>Reschedule</Text>
+                      </ManagerActionButton>
+                      <ManagerActionButton
+                        onPress={() => onResolveOrder?.(failedOrder, 'reassign')}
+                        style={[styles.actionButton, styles.viewDetailsBtn]}
+                      >
+                        <Text style={styles.viewDetailsBtnText}>Reassign</Text>
+                      </ManagerActionButton>
+                    </View>
+                  </View>
+                </View>
+              ))}
+            </View>
+          ) : null}
+          <ManagerDeliveryReviewList
+            state={reviewState}
+            flow={reviewFlow}
+            colors={colors}
+            onReview={onOpenReview}
+            failedOrdersById={failedOrdersById}
+            onResolveOrder={onResolveOrder}
+          />
+        </View>
       ) : <>
 
       {!!error && (
@@ -422,13 +487,15 @@ function OutsideRadiusApprovalQueue({
   );
 }
 
-function EditOrderModal({ visible, order, onClose, onDismiss, onSaveSuccess, colors, styles }) {
+function EditOrderModal({ visible, order, onClose, onDismiss, onSaveSuccess, onResolveOrder, colors, styles }) {
   const [catalogProducts, setCatalogProducts] = useState([]);
   const [items, setItems] = useState([]);
   const [notes, setNotes] = useState('');
   const [container, setContainer] = useState('');
   const [saving, setSaving] = useState(false);
   const [editError, setEditError] = useState('');
+  const [priceQuote, setPriceQuote] = useState(null);
+  const initializedOrder = useRef(null);
 
   const isEditable = order && EDITABLE_STATUSES.has(order.status);
 
@@ -440,7 +507,12 @@ function EditOrderModal({ visible, order, onClose, onDismiss, onSaveSuccess, col
   }, []);
 
   useEffect(() => {
-    if (order) {
+    if (!visible || !order) {
+      initializedOrder.current = null;
+      return;
+    }
+    if (initializedOrder.current !== order.id) {
+      initializedOrder.current = order.id;
       setItems(
         (order.items || []).map((it) => {
           const found = catalogProducts.find(
@@ -450,15 +522,16 @@ function EditOrderModal({ visible, order, onClose, onDismiss, onSaveSuccess, col
             productId: it.productId || it.product_id || it.id || found?.id || '',
             productNameSnapshot: it.productNameSnapshot || it.product_name || 'Product',
             quantity: Number(it.quantity) || 1,
-            unitPrice: Number(it.quantity) > 0 ? (Number(it.totalAtOrder || 0) / Number(it.quantity)) : 0,
+            unitPrice: Number(it.unitPriceAtOrder ?? it.unitPrice ?? 0),
           };
         })
       );
       setNotes(order.notes || order.specialInstructions || '');
       setContainer(order.container || '');
       setEditError('');
+      setPriceQuote(null);
     }
-  }, [order, catalogProducts]);
+  }, [visible, order, catalogProducts]);
 
   const updateQuantity = (index, delta) => {
     setItems((curr) =>
@@ -507,14 +580,20 @@ function EditOrderModal({ visible, order, onClose, onDismiss, onSaveSuccess, col
     setSaving(true);
     setEditError('');
     try {
-      await dispatchManagerOrder(order.id, 'edit-order', {
+      const payload = {
         items: items.map((it) => ({
           productId: it.productId,
           quantity: it.quantity,
         })),
         notes,
         container,
-      });
+      };
+      const quote = await quoteManagerOrder(order.id, payload);
+      if (quote.requiresConfirmation) {
+        setPriceQuote({ ...quote, payload });
+        return;
+      }
+      await dispatchManagerOrder(order.id, 'edit-order', payload);
       onSaveSuccess?.();
       onClose();
     } catch (err) {
@@ -524,10 +603,26 @@ function EditOrderModal({ visible, order, onClose, onDismiss, onSaveSuccess, col
     }
   };
 
+  const confirmPriceChange = async () => {
+    if (!order || !priceQuote || saving) return;
+    setSaving(true);
+    setEditError('');
+    try {
+      await dispatchManagerOrder(order.id, 'edit-order', { ...priceQuote.payload, quoteId: priceQuote.quoteId });
+      setPriceQuote(null);
+      onSaveSuccess?.();
+      onClose();
+    } catch (err) {
+      setEditError(err.message || 'Unable to confirm the changes.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   if (!order) return null;
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} onDismiss={onDismiss}>
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={() => priceQuote ? setPriceQuote(null) : onClose()} onDismiss={onDismiss}>
       <View style={styles.modalBackdrop}>
         <View accessibilityViewIsModal style={styles.editModalCard}>
           <View style={styles.modalHeaderRow}>
@@ -553,7 +648,6 @@ function EditOrderModal({ visible, order, onClose, onDismiss, onSaveSuccess, col
                   ['Assigned distributor', order.assignedDistributorName || 'Not assigned'],
                   ['Distributor public ID', order.assignedDistributorUniqueId || order.distributorUniqueId || 'Not available'],
                   ['Container type', order.container || 'Not set'],
-                  ['Total', formatAmount(order.totalAtOrder)],
                   ['Requested branch', order.initialBranchName || order.initialBranchNameSnapshot || order.transferFromBranchName || order.currentBranchName || 'Not available'],
                   ['Current branch', order.currentBranchName || order.branchNameSnapshot || 'Not available'],
                   ['Delivery address', order.address || 'Not available'],
@@ -644,6 +738,11 @@ function EditOrderModal({ visible, order, onClose, onDismiss, onSaveSuccess, col
             </View>
 
             <View style={styles.modalSection}>
+              <Text style={styles.modalSectionTitle}>Saved Order Pricing</Text>
+              <SavedOrderPricing order={order} colors={colors} />
+            </View>
+
+            <View style={styles.modalSection}>
               <Text style={styles.modalSectionTitle}>Container & Packaging</Text>
               {isEditable ? (
                 <TextInput
@@ -686,6 +785,27 @@ function EditOrderModal({ visible, order, onClose, onDismiss, onSaveSuccess, col
               <Text style={styles.cancelBtnText}>Close</Text>
             </TouchableOpacity>
 
+            {Boolean(canManagerResolveFailedOrder(order, order?.currentBranchId || order?.branchId) && onResolveOrder) ? (
+              <>
+                <TouchableOpacity
+                  accessibilityRole="button"
+                  accessibilityLabel="Reschedule failed delivery"
+                  onPress={() => onResolveOrder(order, 'reschedule')}
+                  style={styles.saveBtn}
+                >
+                  <Text style={styles.saveBtnText}>Reschedule Delivery</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  accessibilityRole="button"
+                  accessibilityLabel="Reassign distributor for failed delivery"
+                  onPress={() => onResolveOrder(order, 'reassign')}
+                  style={styles.cancelBtn}
+                >
+                  <Text style={styles.cancelBtnText}>Reassign Distributor</Text>
+                </TouchableOpacity>
+              </>
+            ) : null}
+
             {Boolean(isEditable) ? (
               <TouchableOpacity
                 disabled={saving}
@@ -697,6 +817,25 @@ function EditOrderModal({ visible, order, onClose, onDismiss, onSaveSuccess, col
             ) : null}
           </View>
         </View>
+        {Boolean(priceQuote) && <View style={{ ...StyleSheet.absoluteFillObject, zIndex: 50, elevation: 50, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'center', padding: 18 }}>
+          <View accessibilityViewIsModal style={{ backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1, borderRadius: 16, padding: 18, maxHeight: '90%', width: '100%', maxWidth: 480, alignSelf: 'center' }}>
+            <Text accessibilityRole="header" style={{ color: colors.textPrimary, fontSize: 19, fontWeight: '800', marginBottom: 12 }}>Review Price Changes</Text>
+            <ScrollView style={{ flexGrow: 0, flexShrink: 1 }}>
+              {[['Previous', priceQuote?.before], ['Updated', priceQuote?.after]].map(([label, pricing]) => <View key={label} style={{ marginBottom: 14 }}>
+                <Text style={{ color: colors.textPrimary, fontWeight: '800' }}>{label} total: {pricing?.totalAtOrder == null ? '—' : formatAmount(pricing.totalAtOrder)}</Text>
+                {(pricing?.items || []).map((item, index) => <Text key={`${item.productId || 'item'}-${index}`} style={{ color: colors.textSecondary, marginTop: 4 }}>{item.productNameSnapshot || item.product_name || 'Product'} × {item.quantity} · {item.totalAtOrder == null ? '—' : formatAmount(item.totalAtOrder)}</Text>)}
+                <Text style={{ color: colors.textSecondary, marginTop: 4 }}>Product subtotal: {pricing?.subtotalAtOrder == null ? '—' : formatAmount(pricing.subtotalAtOrder)}</Text>
+                {Boolean(pricing?.pricingSnapshot || Number(pricing?.discountAmount) > 0) && <Text style={{ color: colors.textSecondary }}>Promotional savings: {formatAmount(pricing.discountAmount)}</Text>}
+                <Text style={{ color: colors.textSecondary }}>Delivery fee: {pricing?.deliveryFeeAtOrder == null ? '—' : formatAmount(pricing.deliveryFeeAtOrder)}</Text>
+              </View>)}
+              {!!editError && <Text accessibilityRole="alert" style={{ color: colors.danger, marginBottom: 10 }}>{editError}</Text>}
+            </ScrollView>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
+              <TouchableOpacity accessibilityRole="button" disabled={saving} onPress={() => { setPriceQuote(null); setEditError(''); }} style={[styles.cancelBtn, { flexGrow: 1 }]}><Text style={styles.cancelBtnText}>Keep Editing</Text></TouchableOpacity>
+              <TouchableOpacity accessibilityRole="button" disabled={saving} onPress={confirmPriceChange} style={[styles.saveBtn, { flexGrow: 1 }, saving && styles.actionDisabled]}><Text style={styles.saveBtnText}>{saving ? 'Confirming…' : 'Confirm Changes'}</Text></TouchableOpacity>
+            </View>
+          </View>
+        </View>}
       </View>
     </Modal>
   );
@@ -1138,6 +1277,7 @@ function BranchOrdersOverview({
   colors,
   isDark,
   onOpenOrder,
+  onResolveOrder = null,
   initialFilter = '',
   viewAllTick = 0,
   targetOrderId = '',
@@ -1400,6 +1540,9 @@ function BranchOrdersOverview({
                     {Boolean(scheduleSummary) ? (
                       <Text numberOfLines={1} ellipsizeMode="tail" style={styles.detailLine}>Schedule: {scheduleSummary}</Text>
                     ) : null}
+                    {Boolean(order.status === 'delivery_failed' && order.failureReason) ? (
+                      <Text numberOfLines={1} ellipsizeMode="tail" style={styles.failureDetailLine}>Issue: {order.failureReason}</Text>
+                    ) : null}
                     <Text numberOfLines={2} ellipsizeMode="tail" style={styles.detailLine}>Delivery: {order.address || 'Address provided'}</Text>
                     {order.distanceKmSnapshot != null ? <Text numberOfLines={1} ellipsizeMode="tail" style={styles.detailLine}>Distance: {orderDistance(order)}</Text> : null}
                   </View>
@@ -1431,6 +1574,34 @@ function BranchOrdersOverview({
                       {isEditable ? 'Edit Order Details' : 'View Order Details'}
                     </Text>
                   </ManagerActionButton>
+                  {Boolean(canManagerResolveFailedOrder(order, order.currentBranchId || order.branchId) && onResolveOrder) ? (
+                    <>
+                      <ManagerActionButton
+                        disabled={entry.actionsDisabled}
+                        onPress={() => onResolveOrder(order, 'reschedule')}
+                        style={[
+                          styles.actionButton,
+                          styles.overviewActionButton,
+                          styles.editOrderBtn,
+                          entry.actionsDisabled && styles.actionDisabled,
+                        ]}
+                      >
+                        <Text style={styles.editOrderBtnText}>Reschedule Delivery</Text>
+                      </ManagerActionButton>
+                      <ManagerActionButton
+                        disabled={entry.actionsDisabled}
+                        onPress={() => onResolveOrder(order, 'reassign')}
+                        style={[
+                          styles.actionButton,
+                          styles.overviewActionButton,
+                          styles.viewDetailsBtn,
+                          entry.actionsDisabled && styles.actionDisabled,
+                        ]}
+                      >
+                        <Text style={styles.viewDetailsBtnText}>Reassign Distributor</Text>
+                      </ManagerActionButton>
+                    </>
+                  ) : null}
                 </View>
               </View>
             </View>
@@ -1492,6 +1663,24 @@ export default function ManagerRequestPage() {
     return flow;
   }, [reviewScope]);
   const reviewState = useSyncExternalStore(reviewFlow.subscribe, reviewFlow.getState, reviewFlow.getState);
+  const tripMode = useVerifiedTripMode();
+  const resolutionFlow = useMemo(() => {
+    const flow = createManagerFailedDeliveryResolutionFlow(
+      { dispatchOrder: (orderId, action, payload) => dispatchManagerOrder(orderId, action, payload), getTripPreparation },
+      createMutationId
+    );
+    flow.setScope(reviewScope, realtime.branchId);
+    return flow;
+  }, [reviewScope, realtime.branchId]);
+  const resolutionState = useSyncExternalStore(resolutionFlow.subscribe, resolutionFlow.getState, resolutionFlow.getState);
+  useEffect(() => { resolutionFlow.setTripMode(tripMode); }, [resolutionFlow, tripMode]);
+  const branchDistributors = useMemo(
+    () => getEligibleBranchDistributors(realtime.users || [], realtime.branchId, '', 'assign'),
+    [realtime.branchId, realtime.users]
+  );
+  useEffect(() => {
+    resolutionFlow.updateDistributors(branchDistributors);
+  }, [branchDistributors, resolutionFlow]);
   const pendingReviewRef = useRef(null);
   useEffect(() => { pendingReviewRef.current = null; }, [reviewScope]);
   const dispatchData = useMemo(() => {
@@ -1503,6 +1692,7 @@ export default function ManagerRequestPage() {
     return {
       orders: queues.editable.map(mapOrder),
       ongoing: queues.ongoing.map(mapOrder),
+      failedDeliveries: (queues.failedDeliveries || []).map(mapOrder),
       pendingOrders: queues.pendingOrders.map(mapOrder),
       completed: queues.completed.map(mapOrder),
       review: queues.review.map(mapOrder),
@@ -1558,11 +1748,25 @@ export default function ManagerRequestPage() {
     setToast({ visible: true, message, type });
   };
 
+  const failedOrdersById = useMemo(
+    () => new Map((dispatchData.failedDeliveries || []).map((order) => [String(order.id), order])),
+    [dispatchData.failedDeliveries]
+  );
+
   const handleOpenOrder = (order) => {
     setTargetHighlighted(false);
     setSelectedOrder(order);
     setModalVisible(true);
   };
+
+  const handleOpenResolution = useCallback(
+    (order, mode = 'reschedule') => {
+      if (!order) return;
+      setModalVisible(false);
+      resolutionFlow.open(order, mode, branchDistributors, tripMode);
+    },
+    [branchDistributors, resolutionFlow, tripMode]
+  );
 
   const finishReviewHandoff = () => {
     if (modalVisible || !pendingReviewRef.current) return;
@@ -1771,6 +1975,9 @@ export default function ManagerRequestPage() {
           reviewFlow={reviewFlow}
           reviewState={reviewState}
           onOpenReview={handleOpenReview}
+          failedOrders={dispatchData.failedDeliveries}
+          failedOrdersById={failedOrdersById}
+          onResolveOrder={handleOpenResolution}
           style={styles.ordersColumnCard}
         />
       </View>
@@ -1783,6 +1990,7 @@ export default function ManagerRequestPage() {
         colors={colors}
         isDark={isDark}
         onOpenOrder={handleOpenOrder}
+        onResolveOrder={handleOpenResolution}
         initialFilter={requestedFilter}
         viewAllTick={viewAllTick}
         targetOrderId={effectiveTargetId}
@@ -1820,10 +2028,18 @@ export default function ManagerRequestPage() {
         onClose={() => setModalVisible(false)}
         onDismiss={finishReviewHandoff}
         onSaveSuccess={() => {}}
+        onResolveOrder={handleOpenResolution}
         colors={colors}
         styles={styles}
       />
-      <ManagerDeliveryReviewModal state={reviewState} flow={reviewFlow} colors={colors} visible={!modalVisible} />
+      <ManagerDeliveryReviewModal state={reviewState} flow={reviewFlow} colors={colors} visible={!modalVisible && !resolutionState.visible} />
+      <ManagerFailedDeliveryResolutionModal
+        state={resolutionState}
+        flow={resolutionFlow}
+        colors={colors}
+        isDark={isDark}
+        onSuccess={(res) => showToast(res.message, 'success')}
+      />
     </ManagerShell>
   );
 }
@@ -2345,6 +2561,23 @@ const createStyles = (
       color: colors.danger,
       fontSize: 11,
       marginTop: 2,
+    },
+    failureDetailLine: {
+      color: colors.danger,
+      fontSize: 12,
+      lineHeight: 17,
+      fontWeight: '700',
+    },
+    failedResolutionStrip: {
+      gap: 8,
+      marginBottom: 4,
+    },
+    failedResolutionItem: {
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surfaceAlt,
+      borderRadius: 12,
+      padding: 12,
     },
     branchOrdersToolbar: {
       flexDirection: width < 768 ? 'column' : 'row',

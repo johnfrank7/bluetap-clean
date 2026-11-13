@@ -60,6 +60,7 @@ test('public login handoff skips OTP for verified and OTP-disabled accounts with
     [false, false, false, '/requester/r_dashboard'],
     [true, true, true, '/requester/r_dashboard'],
     [true, false, false, '/email-verification'],
+    [true, false, true, '/email-verification'],
     [true, true, false, '/email-verification'],
   ]) {
     const events = [];
@@ -288,6 +289,7 @@ test('public form establishes the client session before profile lookup and role 
       fetchFirestoreUserProfile: async (user) => ({ ...profile, uid: user.uid, email: 'public@example.test' }),
       ensureUserUniqueId: async (_user, data) => data,
       saveLocalUser: () => {}, saveRoleSession: () => events.push('shared-session'),
+      recheckPendingEmailVerification: async (profile) => profile,
       clearAllAuthSessions: () => events.push('clear'), signOut: async () => {
         if (scenario.staleAdmin && auth.currentUser?.uid === 'old-admin') events.push('firebase-signout');
         auth.currentUser = null;
@@ -320,4 +322,58 @@ test('public form establishes the client session before profile lookup and role 
       assert.equal(auth.currentUser.uid, 'public-user');
     }
   });
+});
+
+test('post-OTP continuation stays fail-closed until the authoritative profile is reconciled', async () => {
+  const page = readFileSync(resolve(root, 'app/email-verification.jsx'), 'utf8');
+  const start = page.indexOf('  const continueAfterVerification = React.useCallback(');
+  const end = page.indexOf('  const requestOtp = React.useCallback(', start);
+  assert.ok(start >= 0 && end > start);
+  const events = [];
+  const account = {
+    uid: 'verified-requester', email: 'requester@example.test', emailVerified: true,
+    getIdToken: async (forceRefresh) => { events.push(`token:${forceRefresh}`); return 'mock-token'; },
+  };
+  const auth = { currentUser: account };
+  const destination = loadService('services/authSession.js', { auth }, 'getPostAuthenticationDestination');
+  const profile = {
+    uid: account.uid, email: account.email, role: 'requester', accountStatus: 'active',
+    emailVerificationRequired: true, emailVerified: false,
+    emailOtpVerification: { status: 'verified' }, registrationCompleted: true,
+    faceVerification: { required: false, status: 'not_required' },
+  };
+  const context = {
+    React: { useCallback: (callback) => callback }, auth, registration: false,
+    rootNavigationState: { key: 'ready' },
+    router: { replace: (path) => events.push(`route:${path}`) },
+    reload: async () => { events.push('reload'); },
+    fetchFirestoreUserProfile: async () => ({ ...profile }),
+    getPostAuthenticationDestination: destination,
+    setPendingDestination: () => { throw new Error('Root navigation is ready'); },
+    setMessage: (message) => events.push(`message:${message}`),
+    setMessageType: (type) => events.push(`type:${type}`),
+    setRegistrationFinalizationFailed: () => {},
+    console: { log: () => {} },
+  };
+  const continuation = vm.runInNewContext(`${page.slice(start, end)}\ncontinueAfterVerification`, context);
+
+  assert.equal(await continuation(account), false);
+  assert.equal(events.some((event) => event.startsWith('route:')), false);
+  assert.equal(events.some((event) => event.startsWith('message:Your code was accepted')), true);
+  assert.equal(events.includes('type:error'), true);
+
+  profile.emailVerified = true;
+  events.length = 0;
+  assert.equal(await continuation(account), true);
+  assert.equal(events.includes('reload'), true);
+  assert.equal(events.includes('token:true'), true);
+  assert.equal(events.includes('route:/requester/r_dashboard'), true);
+
+  const failedAccount = { ...account, emailVerified: false };
+  auth.currentUser = failedAccount;
+  events.length = 0;
+  assert.equal(await continuation(failedAccount), false);
+  assert.equal(events.some((event) => event.startsWith('route:')), false);
+  assert.match(page, /verified \? 'Continue' : 'Confirm Code'/);
+  assert.match(page, /verified \? continueVerified : verify/);
 });

@@ -314,6 +314,26 @@ test('message action derivation and failed-delivery UI remain role and lifecycle
   }, now);
   assert.equal(grace.state, 'grace');
   assert.equal(grace.minutes, 42);
+  const expiredNotice = model.conversationLifecycleNotice({
+    type: 'requester_distributor', accessEndsAt: new Date(now),
+    orderContext: { status: 'delivery_failed' },
+  }, now);
+  assert.equal(expiredNotice.state, 'closed');
+  assert.equal(expiredNotice.readOnly, true);
+  assert.match(expiredNotice.body, /Read-only/i);
+  const failedConversation = {
+    type: 'requester_distributor',
+    status: 'active',
+    accessEndsAt: new Date(now),
+    orderContext: { status: 'delivery_failed', distributorChatGraceUntil: new Date(now) },
+    participantState: [{ principalType: 'user', principalId: 'r1', accessState: 'active' }],
+  };
+  const failedAtMs = now - (60 * 60 * 1000);
+  const sevenDaysAfterFailMs = failedAtMs + (7 * 24 * 60 * 60 * 1000);
+  assert.deepEqual(model.conversationAvailability(failedConversation, 'requester', 'r1', '', now - 1), { readable: true, sendable: true });
+  assert.deepEqual(model.conversationAvailability(failedConversation, 'requester', 'r1', '', now), { readable: true, sendable: false });
+  assert.deepEqual(model.conversationAvailability({ ...failedConversation, status: 'read_only', participantState: [{ principalType: 'user', principalId: 'r1', accessState: 'read_only' }] }, 'requester', 'r1', '', sevenDaysAfterFailMs - 1), { readable: true, sendable: false });
+  assert.deepEqual(model.conversationAvailability({ ...failedConversation, status: 'read_only', participantState: [{ principalType: 'user', principalId: 'r1', accessState: 'read_only' }] }, 'requester', 'r1', '', sevenDaysAfterFailMs), { readable: false, sendable: false });
   assert.equal(model.conversationLifecycleNotice({ type: 'requester_distributor', orderContext: { status: 'delivered' } }, now).state, 'closed');
 });
 

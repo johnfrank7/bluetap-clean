@@ -914,6 +914,212 @@ test('failed delivery send authority uses exact trusted server-time grace semant
   assert.equal(forged.body.error.reason, 'CHAT_REQUEST_FIELDS_INVALID');
 });
 
+test('expired failed-delivery chat remains readable for authorized participants while blocking sends, unauthorized access, deadline resets, and order mutation', async () => {
+  const f = fixture();
+  const conversationId = await directConversation(f);
+  const failedAt = new Date(Date.parse('2026-01-01T00:00:00Z'));
+  const graceUntil = new Date(failedAt.getTime() + (60 * 60 * 1000));
+  f.records.set('requests/order-a', {
+    ...f.records.get('requests/order-a'),
+    status: 'delivery_failed',
+    deliveryFailedAt: failedAt,
+    distributorChatGraceUntil: graceUntil,
+  });
+  f.records.set(`chatConversations/${conversationId}`, {
+    ...f.records.get(`chatConversations/${conversationId}`),
+    status: 'active',
+    accessEndsAt: graceUntil,
+    readAccessEndsAt: graceUntil,
+    lifecycleReason: 'delivery_failed_grace',
+  });
+
+  f.setTime(failedAt.getTime() + (20 * 60 * 1000));
+  const msg1 = await call(f.messages, 'POST', 'requester-a-token', {
+    conversationId, clientMutationId: 'fd-read-1', body: 'Gate is open on the left side',
+  });
+  assert.equal(msg1.statusCode, 201);
+  f.setTime(graceUntil.getTime() - 1);
+  const msg2 = await call(f.messages, 'POST', 'distributor-a-token', {
+    conversationId, clientMutationId: 'fd-read-2', body: 'Noted, will coordinate reschedule',
+  });
+  assert.equal(msg2.statusCode, 201);
+
+  const orderSnapshotBeforeExpiry = structuredClone(f.records.get('requests/order-a'));
+
+  // At exact expiry boundary and after: sends & mutations are blocked, but existing messages remain readable
+  for (const expiredTime of [graceUntil.getTime(), graceUntil.getTime() + 1, graceUntil.getTime() + (2 * 60 * 60 * 1000)]) {
+    f.setTime(expiredTime);
+    const reqSend = await call(f.messages, 'POST', 'requester-a-token', {
+      conversationId, clientMutationId: `late-req-${expiredTime}`, body: 'Late requester message',
+    });
+    assert.equal(reqSend.statusCode, 409);
+    assert.equal(reqSend.body.error.reason, 'CHAT_READ_ONLY');
+
+    const distSend = await call(f.messages, 'POST', 'distributor-a-token', {
+      conversationId, clientMutationId: `late-dist-${expiredTime}`, body: 'Late distributor message',
+    });
+    assert.equal(distSend.statusCode, 409);
+    assert.equal(distSend.body.error.reason, 'CHAT_READ_ONLY');
+
+    const reqRead = await call(f.messages, 'GET', 'requester-a-token', {}, `?conversationId=${conversationId}&limit=20`);
+    assert.equal(reqRead.statusCode, 200);
+    assert.deepEqual(reqRead.body.messages.map((item) => item.body), [
+      'Noted, will coordinate reschedule',
+      'Gate is open on the left side',
+    ]);
+
+    const distRead = await call(f.messages, 'GET', 'distributor-a-token', {}, `?conversationId=${conversationId}&limit=20`);
+    assert.equal(distRead.statusCode, 200);
+    assert.equal(distRead.body.messages.length, 2);
+  }
+
+  // Edit and delete are blocked after failed-delivery chat expiration
+  f.setTime(graceUntil.getTime() + 1000);
+  const editAfterExpiry = await call(f.messages, 'PATCH', 'distributor-a-token', {
+    conversationId, messageId: msg2.body.message.id, clientMutationId: 'edit-after-expiry', body: 'Edited after expiry',
+  });
+  assert.equal(editAfterExpiry.statusCode, 409);
+  assert.equal(editAfterExpiry.body.error.reason, 'CHAT_READ_ONLY');
+  const deleteAfterExpiry = await call(f.messages, 'DELETE', 'distributor-a-token', {
+    conversationId, messageId: msg2.body.message.id, clientMutationId: 'delete-after-expiry',
+  });
+  assert.equal(deleteAfterExpiry.statusCode, 409);
+  assert.equal(deleteAfterExpiry.body.error.reason, 'CHAT_READ_ONLY');
+
+  // Advancing read state and listing/resolving existing conversation remain allowed in read_only state
+  const readCursor = await call(f.readState, 'POST', 'requester-a-token', { conversationId, lastReadSeq: 2 });
+  assert.equal(readCursor.statusCode, 200);
+
+  const reqSummaries = await call(f.conversations, 'GET', 'requester-a-token');
+  assert.equal(reqSummaries.statusCode, 200);
+  const reqSummary = reqSummaries.body.conversations.find((item) => item.id === conversationId);
+  assert.ok(reqSummary);
+  assert.equal(reqSummary.status, 'read_only');
+
+  const resolvedAfterExpiry = await resolve(f, 'distributor-a-token', { type: 'requester_distributor', orderId: 'order-a' });
+  assert.equal(resolvedAfterExpiry.statusCode, 200);
+  assert.equal(resolvedAfterExpiry.body.created, false);
+  assert.equal(resolvedAfterExpiry.body.conversation.id, conversationId);
+  assert.equal(resolvedAfterExpiry.body.conversation.status, 'read_only');
+  assert.equal(new Date(resolvedAfterExpiry.body.conversation.accessEndsAt).getTime(), graceUntil.getTime());
+
+  // Repeated failure events on the order do not reset or extend the deadline
+  f.records.set('requests/order-a', {
+    ...f.records.get('requests/order-a'),
+    deliveryFailedAt: new Date(graceUntil.getTime() + (10 * 60 * 1000)),
+    distributorChatGraceUntil: new Date(graceUntil.getTime() + (70 * 60 * 1000)),
+    distributorDeliveryHistory: [
+      { event: 'DELIVERY_FAILED', failedAt },
+      { event: 'DELIVERY_FAILED', failedAt: new Date(graceUntil.getTime() + (10 * 60 * 1000)) },
+    ],
+  });
+  const sendAfterRepeatedFailure = await call(f.messages, 'POST', 'requester-a-token', {
+    conversationId, clientMutationId: 'send-after-repeated-failure', body: 'Should still be read-only',
+  });
+  assert.equal(sendAfterRepeatedFailure.statusCode, 409);
+  assert.equal(sendAfterRepeatedFailure.body.error.reason, 'CHAT_READ_ONLY');
+  f.records.set('requests/order-a', orderSnapshotBeforeExpiry);
+
+  // Chat expiration does not cancel or reschedule the order
+  assert.deepEqual(f.records.get('requests/order-a'), orderSnapshotBeforeExpiry);
+  assert.equal(f.records.get('requests/order-a').status, 'delivery_failed');
+
+  // Unauthorized participants and other branches cannot read or resolve the expired failed-delivery chat
+  assert.equal((await call(f.messages, 'GET', 'requester-b-token', {}, `?conversationId=${conversationId}`)).statusCode, 403);
+  assert.equal((await call(f.messages, 'GET', 'distributor-b-token', {}, `?conversationId=${conversationId}`)).statusCode, 403);
+  assert.equal((await call(f.messages, 'GET', 'manager-a-token', {}, `?conversationId=${conversationId}`)).statusCode, 403);
+  assert.equal((await call(f.messages, 'GET', 'manager-b-token', {}, `?conversationId=${conversationId}`)).statusCode, 403);
+  assert.equal((await resolve(f, 'requester-b-token', { type: 'requester_distributor', orderId: 'order-a' })).statusCode, 403);
+  assert.equal((await resolve(f, 'distributor-b-token', { type: 'requester_distributor', orderId: 'order-a' })).statusCode, 403);
+
+  // Resolving a brand-new conversation after expiration when none existed before is rejected
+  f.records.set('requests/order-b', {
+    ...f.records.get('requests/order-b'),
+    assignedDistributorUid: 'distributor-b',
+    assignmentVersion: 2,
+    currentBranchId: 'branch-a',
+    branchId: 'branch-a',
+    status: 'delivery_failed',
+    deliveryFailedAt: failedAt,
+    distributorChatGraceUntil: graceUntil,
+  });
+  const createAfterExpiry = await resolve(f, 'requester-b-token', { type: 'requester_distributor', orderId: 'order-b' });
+  assert.equal(createAfterExpiry.statusCode, 403);
+  assert.equal(createAfterExpiry.body.error.reason, 'CHAT_ASSIGNMENT_NOT_WRITABLE');
+
+  // Authorized historical records only: any message tagged with a foreign orderId is filtered out
+  f.records.set(`chatConversations/${conversationId}/messages/foreign-order-msg`, {
+    seq: 3,
+    senderUid: 'distributor-a',
+    senderRole: 'distributor',
+    body: 'Foreign order message',
+    orderId: 'order-b',
+    createdAt: failedAt,
+  });
+  const filteredRead = await call(f.messages, 'GET', 'requester-a-token', {}, `?conversationId=${conversationId}&limit=20`);
+  assert.equal(filteredRead.statusCode, 200);
+  assert.deepEqual(filteredRead.body.messages.map((item) => item.body), [
+    'Noted, will coordinate reschedule',
+    'Gate is open on the left side',
+  ]);
+  f.records.delete(`chatConversations/${conversationId}/messages/foreign-order-msg`);
+
+  // Reassignment invalidates the stale assignment epoch for former distributor across delivery_failed, rescheduled/assigned, and delivered states even if readAccessEndsAt was in the future
+  const futureReadEndsAt = new Date(failedAt.getTime() + (7 * 24 * 60 * 60 * 1000));
+  f.records.set(`chatConversations/${conversationId}`, {
+    ...f.records.get(`chatConversations/${conversationId}`),
+    status: 'read_only',
+    readAccessEndsAt: futureReadEndsAt,
+  });
+  for (const reassignedStatus of ['delivery_failed', 'distributor_assigned', 'scheduled', 'out_for_delivery', 'delivered']) {
+    f.records.set('requests/order-a', {
+      ...orderSnapshotBeforeExpiry,
+      status: reassignedStatus,
+      assignedDistributorUid: 'distributor-b',
+      assignmentVersion: 5,
+    });
+    const staleDistributorRead = await call(f.messages, 'GET', 'distributor-a-token', {}, `?conversationId=${conversationId}`);
+    assert.equal(staleDistributorRead.statusCode, 409, `expected 409 for status ${reassignedStatus}`);
+    assert.equal(staleDistributorRead.body.error.reason, 'CHAT_STALE_ASSIGNMENT');
+    const staleDistributorCursor = await call(f.readState, 'POST', 'distributor-a-token', { conversationId, lastReadSeq: 2 });
+    assert.equal(staleDistributorCursor.statusCode, 409);
+    assert.equal(staleDistributorCursor.body.error.reason, 'CHAT_STALE_ASSIGNMENT');
+  }
+
+  // Restore assignment and verify 7-day historical read-access boundary (POST_ORDER_FOLLOWUP_DAYS = 7 days, NOT 90-day storage retention)
+  f.records.set('requests/order-a', orderSnapshotBeforeExpiry);
+  f.records.set(`chatConversations/${conversationId}`, {
+    ...f.records.get(`chatConversations/${conversationId}`),
+    status: 'read_only',
+    accessEndsAt: graceUntil,
+    readAccessEndsAt: graceUntil,
+  });
+  const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
+  f.setTime(failedAt.getTime() + sevenDaysMs - 1);
+  assert.equal((await call(f.messages, 'GET', 'requester-a-token', {}, `?conversationId=${conversationId}`)).statusCode, 200);
+  assert.equal((await call(f.messages, 'GET', 'distributor-a-token', {}, `?conversationId=${conversationId}`)).statusCode, 200);
+  assert.equal((await resolve(f, 'requester-a-token', { type: 'requester_distributor', orderId: 'order-a' })).statusCode, 200);
+
+  for (const afterReadWindowMs of [
+    failedAt.getTime() + sevenDaysMs,
+    failedAt.getTime() + (8 * 24 * 60 * 60 * 1000),
+    failedAt.getTime() + (90 * 24 * 60 * 60 * 1000) + 1,
+  ]) {
+    f.setTime(afterReadWindowMs);
+    const expiredReadReq = await call(f.messages, 'GET', 'requester-a-token', {}, `?conversationId=${conversationId}`);
+    assert.equal(expiredReadReq.statusCode, 403);
+    assert.equal(expiredReadReq.body.error.reason, 'CHAT_NOT_AUTHORIZED');
+    const expiredReadDist = await call(f.messages, 'GET', 'distributor-a-token', {}, `?conversationId=${conversationId}`);
+    assert.equal(expiredReadDist.statusCode, 403);
+    assert.equal(expiredReadDist.body.error.reason, 'CHAT_NOT_AUTHORIZED');
+    const expiredResolve = await resolve(f, 'distributor-a-token', { type: 'requester_distributor', orderId: 'order-a' });
+    assert.equal(expiredResolve.statusCode, 403);
+    assert.equal(expiredResolve.body.error.reason, 'CHAT_NOT_AUTHORIZED');
+    const expiredList = await call(f.conversations, 'GET', 'requester-a-token');
+    assert.equal(expiredList.body.conversations.some((item) => item.id === conversationId), false);
+  }
+});
+
 test('message history is newest-first and bounded by sequence pagination', async () => {
   const f = fixture();
   const conversationId = await directConversation(f);

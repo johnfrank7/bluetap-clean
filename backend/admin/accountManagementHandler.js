@@ -6,6 +6,8 @@ const { normalizeUsername } = require('../username/username');
 const { loadRegistrationSecurity, SESSION_ROLES } = require('../registration/registrationSecurity');
 const { generateNextPublicUid, formatPublicUid, parsePublicUidNumber } = require('../utils/publicUidGenerator');
 const { normalizePhilippinePhone } = require('../utils/phoneUtils');
+const { planDistributorBranchChange, stageDistributorGuard } = require('../utils/distributorCapacityGuard');
+const { checkTripBranchChange } = require('../utils/deliveryTripFoundation');
 const { ACCOUNT_STATUS, canonicalAccountStatus } = require('../auth/accountStatus');
 const { authorizeAccountActionIntent } = require('../auth/accountActionIntentService');
 const { resumePendingIntent } = require('../auth/accountActionExecutor');
@@ -66,8 +68,16 @@ function requiresOperationalBranch(data = {}) { if (data.role === 'manager') ret
 function nameChanges(fullName) { const [firstName, ...rest] = fullName.split(/\s+/); return { fullName, firstName, lastName: rest.join(' ') }; }
 function timeoutOverride(value) { if (value === null || value === undefined || value === '') return null; const parsed = Number(value); if (!Number.isInteger(parsed) || !IDLE_TIMEOUTS.has(parsed)) throw new OtpError(400, 'INVALID_SESSION_TIMEOUT_OVERRIDE', 'Choose a supported idle timeout or use the role default.'); return parsed; }
 function auditRecord(action, admin, uid, role, before, after, now, branchId = null, extra = {}) { return { action, actorUid: admin.uid, targetUid: uid, role, branchId, previousStatus: statusOf(before), newStatus: statusOf(after), before: safeAuditMetadata(before), after: safeAuditMetadata(after), createdAt: now, ...extra }; }
-const ACTIVE_DELIVERY_STATUSES = new Set(['distributor_assigned', 'accepted', 'scheduled', 'out_for_delivery']);
-async function distributorHasActiveDeliveries(db, uid) { const snapshot = await db.collection('requests').where('assignedDistributorUid', '==', uid).get(); return (snapshot.docs || []).some((doc) => ACTIVE_DELIVERY_STATUSES.has(clean(doc.data()?.status, 60).toLowerCase())); }
+const ACTIVE_DELIVERY_STATUSES = new Set(['distributor_assigned', 'accepted', 'scheduled', 'out_for_delivery', 'delivery_failed']);
+async function distributorHasActiveDeliveries(db, uid, tx = null) {
+  const queries = ['assignedDistributorUid', 'distributor_id'].map((field) => db.collection('requests').where(field, '==', uid));
+  const snapshots = await Promise.all(queries.map((query) => tx ? tx.get(query) : query.get()));
+  return snapshots.some((snapshot) => (snapshot.docs || []).some((doc) => {
+    const order = doc.data() || {};
+    return clean(order.assignedDistributorUid || order.distributor_id, 128) === uid
+      && ACTIVE_DELIVERY_STATUSES.has(clean(order.status, 60).toLowerCase());
+  }));
+}
 
 async function updateAccount({ auth, db, admin, uid, before, body }) {
   const now = new Date(); const requestedRole = clean(body.role || before.role, 30).toLowerCase(); if (!ROLES.has(requestedRole)) throw new OtpError(400, 'INVALID_ROLE', 'Choose requester, distributor, or manager.');
@@ -78,8 +88,15 @@ async function updateAccount({ auth, db, admin, uid, before, body }) {
     && body.active !== (canonicalAccountStatus(before) === ACCOUNT_STATUS.ACTIVE)) {
     throw new OtpError(409, 'ACCOUNT_ACTION_WORKFLOW_REQUIRED', 'Use the dedicated account access action to change active status.');
   }
+  const currentName = clean(before.fullName || `${before.firstName || ''} ${before.lastName || ''}`, 160);
+  const branchChanging = before.role === 'distributor' && Object.prototype.hasOwnProperty.call(body, 'branchId')
+    && clean(body.branchId, 80) !== clean(before.branchId, 80);
+  const authChanging = (body.fullName != null && clean(body.fullName, 160) !== currentName)
+    || (body.email != null && clean(body.email, 254).toLowerCase() !== clean(before.email, 254).toLowerCase())
+    || Boolean(clean(body.temporaryPassword, 128)) || requestedRole !== before.role;
+  if (branchChanging && authChanging) throw new OtpError(409, 'SEPARATE_BRANCH_AND_AUTH_CHANGES', 'Save the Distributor branch change separately from account, password, or role changes.');
   const changes = {}; const authChanges = {}; const audits = []; let branch = null; let revoke = false;
-  const fullName = clean(body.fullName ?? before.fullName, 160); if (!fullName) throw new OtpError(400, 'FULL_NAME_REQUIRED', 'Full name is required.'); if (fullName !== clean(before.fullName, 160)) { Object.assign(changes, nameChanges(fullName)); authChanges.displayName = fullName; }
+  const fullName = clean(body.fullName ?? currentName, 160); if (!fullName) throw new OtpError(400, 'FULL_NAME_REQUIRED', 'Full name is required.'); if (fullName !== currentName) { Object.assign(changes, nameChanges(fullName)); authChanges.displayName = fullName; }
   const email = emailFor(body.email ?? before.email); if (email !== clean(before.email, 254).toLowerCase()) { const authUser = await auth.getUserByEmail(email).catch((error) => error?.code === 'auth/user-not-found' ? null : Promise.reject(error)); if ((authUser && authUser.uid !== uid) || await emailIsAttached(db, email, uid)) throw new OtpError(409, 'EMAIL_ALREADY_IN_USE', 'This email is already in use.'); changes.email = email; changes.emailVerified = false; authChanges.email = email; authChanges.emailVerified = false; revoke = true; }
   if (requestedRole !== before.role) { if (['manager', 'distributor'].includes(requestedRole)) branch = await activeBranch(db, body.branchId); if (before.role === 'manager' && requestedRole !== 'manager') { const username = clean(body.username, 20); const normalized = normalizeUsername(username); const usernameDoc = await db.collection('usernames').doc(normalized).get(); if (usernameDoc.exists && usernameDoc.data()?.uid !== uid) throw new OtpError(409, 'USERNAME_ALREADY_IN_USE', 'This username is already in use.'); changes.username = username; changes.usernameNormalized = normalized; } changes.role = requestedRole; if (requestedRole === 'manager') Object.assign(changes, { branchId: branch.id, branchNameSnapshot: clean(branch.name), ...statusChanges('manager', 'active'), ...activeOperationalStatus('manager') }); if (requestedRole === 'requester') Object.assign(changes, statusChanges('requester', 'active')); if (requestedRole === 'distributor') Object.assign(changes, { branchId: branch.id, branchNameSnapshot: clean(branch.name), ...statusChanges('distributor', 'active'), ...activeOperationalStatus('distributor') }); if (typeof auth.setCustomUserClaims === 'function') await auth.setCustomUserClaims(uid, requestedRole === 'manager' ? { role: 'manager', manager: true } : {}); }
   const effectiveRole = requestedRole;
@@ -96,11 +113,22 @@ async function updateAccount({ auth, db, admin, uid, before, body }) {
   if (requestedRole !== before.role) audits.push('ACCOUNT_ROLE_CHANGED'); if (branch && branch.id !== before.branchId && effectiveRole === 'manager') audits.push('MANAGER_BRANCH_REASSIGNED'); if (Object.prototype.hasOwnProperty.call(changes, 'sessionIdleTimeoutOverrideMinutes')) audits.push('ACCOUNT_SESSION_POLICY_CHANGED'); if (Object.prototype.hasOwnProperty.call(changes, 'mustChangePassword') && !audits.includes('TEMP_PASSWORD_RESET')) audits.push('PASSWORD_CHANGE_REQUIRED'); if (Object.keys(changes).some((key) => !['updatedAt', 'updatedBy'].includes(key))) audits.unshift('ACCOUNT_UPDATED');
   await db.runTransaction(async (tx) => {
     const targetRef = db.collection('users').doc(uid);
+    let branchGuardPlan = null;
     if (membershipEpoch.changed) {
       const latestSnapshot = await tx.get(targetRef);
       const latest = latestSnapshot.data() || {};
       if (!latestSnapshot.exists || distributorBranchMembershipKey(latest) !== membershipEpoch.previousMembershipKey || getBranchMembershipVersion(latest) !== membershipEpoch.previousVersion) {
         throw new OtpError(409, 'DISTRIBUTOR_MEMBERSHIP_CHANGED', 'The Distributor branch membership changed. Refresh and try again.');
+      }
+      if (branchChanging) {
+        const latestBranch = await tx.get(db.collection('branches').doc(branch.id));
+        if (!latestBranch.exists || latestBranch.data()?.status !== 'active') throw new OtpError(409, 'BRANCH_INACTIVE', 'The selected branch is no longer active.');
+        if (latest.role !== 'distributor' || latest.accountActionHoldIntentId || canonicalAccountStatus(latest) !== canonicalAccountStatus(before)) throw new OtpError(409, 'DISTRIBUTOR_MEMBERSHIP_CHANGED', 'The Distributor account changed. Refresh and try again.');
+        if (!['active', 'inactive'].includes(statusOf(latest))) throw new OtpError(409, 'DISTRIBUTOR_WORKFLOW_REQUIRED', 'Pending and rejected distributors must be approved in Distributor Management.');
+        if (process.env.BLUETAP_TRIP_EMULATOR_MODE === '1') await checkTripBranchChange(tx, db, uid, clean(latest.branchId, 80));
+        if (await distributorHasActiveDeliveries(db, uid, tx)) throw new OtpError(409, 'DISTRIBUTOR_ACTIVE_DELIVERIES', 'This Distributor has active deliveries. Reassign those deliveries before changing branches.');
+        branchGuardPlan = await planDistributorBranchChange(tx, db, uid);
+        if (process.env.BLUETAP_TRIP_EMULATOR_MODE === '1' && !branchGuardPlan) throw new OtpError(409, 'TRIP_LEGACY_UNRESOLVED', 'Distributor reservations require reconciliation.');
       }
       await reconcileDistributorMembershipInTransaction({
         tx,
@@ -112,6 +140,7 @@ async function updateAccount({ auth, db, admin, uid, before, body }) {
         reason: 'distributor_branch_membership_changed',
       });
     }
+    if (branchGuardPlan) stageDistributorGuard(tx, branchGuardPlan);
     tx.update(targetRef, changes);
     audits.forEach((action) => tx.set(db.collection('adminAuditLogs').doc(), auditRecord(action, admin, uid, effectiveRole, before, after, now, branch?.id || after.branchId || null, action === 'DISTRIBUTOR_BRANCH_CHANGED' ? { previousBranchId: clean(before.branchId, 80), newBranchId: clean(after.branchId, 80), changedByAdminUid: admin.uid, changedAt: now } : {})));
   });

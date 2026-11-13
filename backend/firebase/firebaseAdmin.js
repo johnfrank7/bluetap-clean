@@ -18,13 +18,18 @@ function getFirebaseAdmin() {
     const projectId = process.env.FIREBASE_PROJECT_ID;
     const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
     const privateKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n');
-    if (localQa) {
+    const isolatedTripTest = process.env.BLUETAP_TRIP_EMULATOR_MODE === '1' && projectId === 'demo-bluetap';
+    if (localQa || isolatedTripTest) {
       app = initializeApp({ projectId }, name);
     } else {
       if (!projectId || !clientEmail || !privateKey) throw new Error('Missing server configuration');
       app = initializeApp({ credential: cert({ projectId, clientEmail, privateKey }), projectId }, name);
     }
   }
-  return { auth: getAuth(app), db: getFirestore(app) };
+  const auth = getAuth(app); const db = getFirestore(app);
+  if (process.env.BLUETAP_TRIP_EMULATOR_MODE === '1') {
+    require('../utils/deliveryTripFoundation').requireTripEmulator(db, auth);
+  }
+  return { auth, db };
 }
 module.exports = { getFirebaseAdmin };

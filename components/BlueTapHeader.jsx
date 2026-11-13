@@ -15,6 +15,7 @@ const { formatNotificationBadge } = require('../services/orderNotifications');
 
 const BlueTapHeader = memo(function BlueTapHeader({
   notificationPath,
+  notificationRef,
   rightContent = null,
 }) {
   const { navigateOnce, replaceOnce } = useSingleFlightNavigation();
@@ -53,6 +54,7 @@ const BlueTapHeader = memo(function BlueTapHeader({
             <ThemeIconButton inverse={!isDark} />
 
             <TouchableOpacity
+              ref={notificationRef}
               accessibilityLabel={unseenCount > 0 ? `Open notifications, ${unseenCount} ${unseenCountScope === 'loaded' ? 'loaded unseen' : 'unseen'}` : 'Open notifications'}
               accessibilityRole="button"
               activeOpacity={0.85}

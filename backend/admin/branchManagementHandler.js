@@ -4,6 +4,9 @@ const { applyCors } = require('../utils/cors');
 const { OtpError } = require('../utils/otpError');
 const { DEFAULT_SERVICE_RADIUS_KM, TOLEDO_BARANGAYS, TOLEDO_CITY } = require('../../constants/toledoBarangays.json');
 const { normalizeBranchDeliveryPricing } = require('../pricing/deliveryPricingService');
+const { createHash, randomUUID } = require('node:crypto');
+const { FieldValue } = require('firebase-admin/firestore');
+const { canonicalAccountStatus } = require('../auth/accountStatus');
 
 const BRANCH_STATUS = new Set(['active', 'inactive']);
 const MANAGER_STATUS = new Set(['active', 'inactive']);
@@ -144,6 +147,42 @@ async function listManagers(db) {
   }).sort((left, right) => (left.email || left.username).localeCompare(right.email || right.username));
 }
 
+// Explicit, one-time Admin attestation. Raw physical identifiers are never
+// stored or returned; claims prevent registering the same resource twice.
+async function verifyDeliveryResources(db, admin, body) {
+  const branchId = clean(body.branchId, 80);
+  if (!branchId || branchId.includes('/') || body.branchId !== branchId) throw new OtpError(400, 'BRANCH_ID_REQUIRED', 'Choose a valid branch.');
+  if (body.confirmedPhysicalInspection !== true || !Array.isArray(body.resourceIdentifiers) || body.resourceIdentifiers.length !== 2) throw new OtpError(400, 'RESOURCE_CONFIRMATION_REQUIRED', 'Confirm two inspected, distinct physical resources.');
+  const identifiers = body.resourceIdentifiers.map((value) => typeof value === 'string' ? value.normalize('NFKC').trim().toUpperCase() : '');
+  if (identifiers.some((value) => value.length < 3 || value.length > 80 || /[\u0000-\u001f\u007f]/.test(value)) || identifiers[0] === identifiers[1]) throw new OtpError(400, 'INVALID_RESOURCE_IDENTITIES', 'Provide two distinct physical resource identifiers.');
+  const fingerprints = identifiers.map((value) => createHash('sha256').update(`bluetap-delivery-resource-v1:${value}`).digest('hex'));
+  const resourceIds = [randomUUID(), randomUUID()];
+  const guardRef = db.collection('branchDeliveryResources').doc(branchId);
+  const branchRef = db.collection('branches').doc(branchId);
+  const adminRef = db.collection('users').doc(admin.uid);
+  const claims = fingerprints.map((id) => db.collection('deliveryResourceClaims').doc(id));
+  return db.runTransaction(async (tx) => {
+    const [branch, actor, guard, ...claimSnapshots] = await Promise.all([tx.get(branchRef), tx.get(adminRef), tx.get(guardRef), ...claims.map((ref) => tx.get(ref))]);
+    const profile = actor.data() || {};
+    if (!actor.exists || profile.role !== 'admin' || profile.mustChangePassword === true || profile.accountActionHoldIntentId || canonicalAccountStatus(profile) !== 'active') throw new OtpError(403, 'ADMIN_REQUIRED', 'Administrator access has changed.');
+    if (!branch.exists || branch.data()?.status !== 'active') throw new OtpError(409, 'BRANCH_INACTIVE', 'The selected branch is unavailable.');
+    if (guard.exists) {
+      const data = guard.data() || {}; const resources = data.resources;
+      const validId = (value) => typeof value === 'string' && value.length > 0 && value.length <= 128 && value.trim() === value && !value.includes('/');
+      const occupied = Array.isArray(resources) ? resources.filter((item) => item?.tripId !== null) : [];
+      if (data.schemaVersion !== 1 || data.initialized !== true || data.branchId !== branchId || !Number.isSafeInteger(data.revision) || data.revision < 0 || data.revision >= Number.MAX_SAFE_INTEGER - 1 || !Array.isArray(resources) || resources.length !== 2 || new Set(resources.map((item) => item?.id)).size !== 2 || new Set(resources.map((item) => item?.fingerprint)).size !== 2 || new Set(occupied.map((item) => item?.tripId)).size !== occupied.length || new Set(occupied.map((item) => item?.distributorUid)).size !== occupied.length || resources.some((item) => !item || !validId(item.id) || item.verified !== true || !fingerprints.includes(item.fingerprint) || !((item.tripId === null && item.distributorUid === null) || (validId(item.tripId) && validId(item.distributorUid)))) || claimSnapshots.some((snap, i) => !snap.exists || snap.data()?.branchId !== branchId || snap.data()?.resourceId !== resources.find((item) => item.fingerprint === fingerprints[i])?.id)) throw new OtpError(409, 'RESOURCE_RECONCILIATION_REQUIRED', 'Delivery resource records require reconciliation.');
+      return { resources: resources.map((item) => ({ id: item.id, status: item.tripId === null ? 'available' : 'occupied' })), unchanged: true };
+    }
+    if (body.confirmedResourcesUnoccupied !== true) throw new OtpError(400, 'RESOURCE_CONFIRMATION_REQUIRED', 'Confirm that both resources are currently unoccupied.');
+    if (claimSnapshots.some((snap) => snap.exists)) throw new OtpError(409, 'RESOURCE_ALREADY_REGISTERED', 'A delivery resource is already registered or needs reconciliation.');
+    const resources = fingerprints.map((fingerprint, index) => ({ id: resourceIds[index], fingerprint, verified: true, tripId: null, distributorUid: null }));
+    tx.create(guardRef, { schemaVersion: 1, initialized: true, branchId, revision: 0, resources, verifiedBy: admin.uid, verifiedAt: FieldValue.serverTimestamp() });
+    claims.forEach((ref, index) => tx.create(ref, { branchId, resourceId: resourceIds[index], verifiedBy: admin.uid, verifiedAt: FieldValue.serverTimestamp() }));
+    tx.create(db.collection('adminAuditLogs').doc(), { action: 'DELIVERY_RESOURCES_VERIFIED', branchId, adminUid: admin.uid, resourceIds, createdAt: FieldValue.serverTimestamp() });
+    return { resources: resources.map((item) => ({ id: item.id, status: 'available' })), unchanged: false };
+  });
+}
+
 function responseError(res, error) {
   const known = error instanceof OtpError;
   return res.status(known ? error.status : 500).json({ error: {
@@ -163,6 +202,10 @@ function createAdminBranchesHandler(getAdmin = getFirebaseAdmin) {
       const admin = await requireAdmin(req, auth, db);
       if (req.method === 'GET') return res.status(200).json({ branches: await listBranches(db) });
       const body = bodyOf(req);
+      if (req.method === 'PATCH' && body.action === 'verify-delivery-resources') {
+        const result = await verifyDeliveryResources(db, admin, body);
+        return res.status(200).json(result);
+      }
       if (req.method === 'POST') {
         const code = clean(body.code, 24).toUpperCase();
         const branchId = branchIdForCode(code);

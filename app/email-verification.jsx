@@ -17,7 +17,7 @@ import { onAuthStateChanged, reload, signInWithCustomToken, signOut } from 'fire
 import { createPortalStyleSheet, useBlueTapTheme } from '../components/BlueTapTheme';
 import { RegistrationActions, RegistrationBrand, RegistrationNotice, RegistrationStepper } from '../components/RegistrationUi';
 import { auth } from '../firebase';
-import { clearAllAuthSessions, fetchFirestoreUserProfile, getPostAuthenticationDestination } from '../services/authSession';
+import { clearAllAuthSessions, fetchFirestoreUserProfile, getCanonicalAccountStatus, getPostAuthenticationDestination } from '../services/authSession';
 import { requestEmailOtp, verifyEmailOtp, getPendingRegistration, clearPendingRegistration,
   setPendingRegistration, requestRegistrationOtp, completeRegistration, retryRegistrationFinalization } from '../services/emailVerification';
 const { REGISTRATION_STEP: STEP, buildRegistrationSteps, unavailableRegistrationRoute } = require('../services/registrationStepStatus');
@@ -99,13 +99,14 @@ export default function EmailVerificationPage() {
   const unavailableRoute = registration && draft
     ? unavailableRegistrationRoute(draft.profile.securityPolicy, STEP.verifyEmail, true)
     : null;
-  const automaticRequestRef = React.useRef(false);
   const registrationCompletedRef = React.useRef(false);
   const verificationInFlightRef = React.useRef(false);
   const [pendingDestination, setPendingDestination] = React.useState('');
 
   const [user, setUser] = React.useState(registration ? { email: draft?.profile.email } : auth.currentUser);
   const [loading, setLoading] = React.useState(true);
+  const [entryError, setEntryError] = React.useState('');
+  const [entryAttempt, setEntryAttempt] = React.useState(0);
   const [sending, setSending] = React.useState(false);
   const [verifying, setVerifying] = React.useState(false);
   const [verified, setVerified] = React.useState(false);
@@ -170,6 +171,8 @@ export default function EmailVerificationPage() {
         if (!profile) throw lastError || new Error('Your finalized profile is not available yet.');
         const destination = getPostAuthenticationDestination(profile);
         if (destination === '/email-verification') {
+          setMessage('Your code was accepted, but account verification is not complete yet. Please try again or contact support.');
+          setMessageType('error');
           return false;
         }
         if (!rootNavigationState?.key) {
@@ -273,40 +276,53 @@ export default function EmailVerificationPage() {
       return;
     }
     let active = true;
+    let checkSequence = 0;
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+      const run = ++checkSequence;
       if (!currentUser) {
         if (active) router.replace('/login');
         return;
       }
       if (!active) return;
-
-      setUser(currentUser);
+      setLoading(true);
+      setEntryError('');
       try {
+        const wasVerified = currentUser.emailVerified === true;
         await reload(currentUser);
-        const refreshedUser = auth.currentUser || currentUser;
-        if (refreshedUser.emailVerified) {
-          const continued = await continueAfterVerification(refreshedUser);
-          if (continued) return;
+        if (!active || run !== checkSequence || auth.currentUser?.uid !== currentUser.uid) return;
+        if (!wasVerified && currentUser.emailVerified === true) await currentUser.getIdToken(true);
+        if (!active || run !== checkSequence || auth.currentUser?.uid !== currentUser.uid) return;
+        const profile = await fetchFirestoreUserProfile(currentUser);
+        if (!active || run !== checkSequence || auth.currentUser?.uid !== currentUser.uid) return;
+        if (!profile || !['requester', 'distributor', 'manager', 'admin'].includes(profile.role)) {
+          throw new Error('Account profile is unavailable.');
         }
-      } catch (error) {
-        console.log('Email OTP initial refresh error:', error.message);
-      } finally {
-        if (active) setLoading(false);
-      }
-
-      // A fresh signup has already requested a code. A direct return or refresh
-      // has no route parameters, so ask the backend; its cooldown remains authoritative.
-      if (sent === undefined && !automaticRequestRef.current && active) {
-        automaticRequestRef.current = true;
-        await requestOtp({ account: currentUser, showSentMessage: false });
+        setUser(currentUser);
+        if (profile.accountActionHoldIntentId || getCanonicalAccountStatus(profile) !== 'active') {
+          setEntryError('Your account is not available. Please contact BlueTap support.');
+          setLoading(false);
+          return;
+        }
+        const destination = getPostAuthenticationDestination(profile);
+        if (destination === '/email-verification') {
+          setLoading(false);
+          return;
+        }
+        // Wait for navigation readiness without exposing an OTP screen.
+        if (rootNavigationState?.key) router.replace(destination);
+      } catch {
+        if (active && run === checkSequence && auth.currentUser?.uid === currentUser.uid) {
+          setEntryError('Your account could not be checked. Please try again.');
+          setLoading(false);
+        }
       }
     });
-
     return () => {
       active = false;
+      checkSequence += 1;
       unsubscribe();
     };
-  }, [continueAfterVerification, requestOtp, router, sent, registration, params.role, unavailableRoute, registrationSteps.length]);
+  }, [router, registration, params.role, unavailableRoute, registrationSteps.length, rootNavigationState?.key, entryAttempt]);
 
   const changeOtp = (value) => {
     setOtp(value.replace(/\D/g, '').slice(0, OTP_LENGTH));
@@ -340,8 +356,6 @@ export default function EmailVerificationPage() {
 
       await refreshedUser.getIdToken(true);
       setVerified(true);
-      setMessage('Email verified successfully.');
-      setMessageType('success');
       await continueAfterVerification(account);
     } catch (error) {
       const reason = error?.details?.reason;
@@ -364,6 +378,18 @@ export default function EmailVerificationPage() {
       setMessage(getOtpError(error));
       setMessageType('error');
       if (String(error?.code || '').includes('unauthenticated')) router.replace('/login');
+    } finally {
+      verificationInFlightRef.current = false;
+      setVerifying(false);
+    }
+  };
+
+  const continueVerified = async () => {
+    if (!verified || sending || verifying || verificationInFlightRef.current) return;
+    verificationInFlightRef.current = true;
+    setVerifying(true);
+    try {
+      await continueAfterVerification(auth.currentUser || user);
     } finally {
       verificationInFlightRef.current = false;
       setVerifying(false);
@@ -438,7 +464,17 @@ export default function EmailVerificationPage() {
             {loading ? (
               <View style={styles.loadingState}>
                 <ActivityIndicator size="large" color="#187BCD" />
-                <Text style={styles.loadingText}>Preparing email verification...</Text>
+                <Text style={styles.loadingText}>Checking your account...</Text>
+              </View>
+            ) : entryError ? (
+              <View style={styles.loadingState}>
+                <RegistrationNotice tone="error" title="Account check unavailable" message={entryError} />
+                <TouchableOpacity accessibilityRole="button" style={styles.resendButton} onPress={() => setEntryAttempt((value) => value + 1)}>
+                  <Text style={styles.resendButtonText}>Try again</Text>
+                </TouchableOpacity>
+                <TouchableOpacity accessibilityRole="button" style={styles.resendButton} onPress={returnToLogin}>
+                  <Text style={styles.resendButtonText}>Back to Login</Text>
+                </TouchableOpacity>
               </View>
             ) : (
               <>
@@ -513,12 +549,12 @@ export default function EmailVerificationPage() {
                   stacked={width < 520}
                   backLabel={registration ? 'Cancel registration' : 'Back to Login'}
                   primaryLabel={verifying
-                    ? registrationFinalizationFailed ? 'Finishing...' : 'Verifying...'
-                    : registrationFinalizationFailed ? 'Try Again' : verified ? 'Email Verified' : 'Confirm Code'}
+                    ? registrationFinalizationFailed ? 'Finishing...' : verified ? 'Continuing...' : 'Verifying...'
+                    : registrationFinalizationFailed ? 'Try Again' : verified ? 'Continue' : 'Confirm Code'}
                   onBack={returnToLogin}
-                  onPrimary={registrationFinalizationFailed ? retryFinalization : verify}
-                  backDisabled={sending || verifying || verified}
-                  primaryDisabled={registrationFinalizationFailed ? sending || verifying : verifyDisabled}
+                  onPrimary={registrationFinalizationFailed ? retryFinalization : verified ? continueVerified : verify}
+                  backDisabled={sending || verifying}
+                  primaryDisabled={registrationFinalizationFailed || verified ? sending || verifying : verifyDisabled}
                   loading={verifying}
                 />
 
@@ -540,7 +576,7 @@ export default function EmailVerificationPage() {
                         ? 'Sending...'
                         : resendSeconds > 0
                           ? 'Resend code in ' + resendSeconds + 's'
-                          : 'Resend code'}
+                          : codeSent ? 'Resend code' : 'Send code'}
                     </Text>
                   </TouchableOpacity>
                 </View>

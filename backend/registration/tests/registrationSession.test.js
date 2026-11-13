@@ -1,5 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { createHmac } = require('node:crypto');
 const { createRegistrationSessionService, setTrustedFaceVerification } = require('../registrationSession');
 
 const personal = { role: 'requester', firstName: 'Test', lastName: 'Person', phone: '+639123456789', barangay: 'Awihao', address: 'Test Street', installationId: '123e4567-e89b-42d3-a456-426614174000' };
@@ -36,6 +37,18 @@ test('registration session uses a random opaque id and starts unverified', async
   assert.equal(JSON.stringify(data).includes(personal.installationId), false);
   assert.equal(data.termsAcceptance, null);
   assert.equal(JSON.stringify(data).includes('Test Street'), false);
+});
+
+test('session creation permits an eligible network and rejects a finalized-count limit before creating a session', async () => {
+  const f = fixture();
+  const ipHash = createHmac('sha256', 'ip-secret').update('ip:network-test').digest('hex');
+  f.records.set(`registrationLimits/ip_${ipHash}`, { finalizedCount: 2, reservedCount: 9 });
+  const allowed = await f.service.create({ ...personal }, 'network-test');
+  assert.ok(f.records.has(`registrationSessions/${allowed.registrationSessionId}`));
+  const before = [...f.records.keys()].filter((key) => key.startsWith('registrationSessions/')).length;
+  f.records.set(`registrationLimits/ip_${ipHash}`, { finalizedCount: 3, reservedCount: 0 });
+  await assert.rejects(f.service.create({ ...personal }, 'network-test'), (error) => error.status === 403 && error.reason === 'IP_ACCOUNT_LIMIT_REACHED');
+  assert.equal([...f.records.keys()].filter((key) => key.startsWith('registrationSessions/')).length, before);
 });
 
 test('public start cannot bypass verification', async () => {

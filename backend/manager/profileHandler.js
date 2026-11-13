@@ -1,12 +1,14 @@
 const { getFirebaseAdmin } = require('../firebase/firebaseAdmin');
-const { requireActiveManager } = require('../auth/authorization');
+const { requireActiveManager, requireVerifiedOperationalEmail } = require('../auth/authorization');
+const { requireActiveAccount } = require('../auth/accountStatus');
 const { applyCors } = require('../utils/cors');
 const { OtpError } = require('../utils/otpError');
 const { generateNextPublicUid, formatPublicUid, parsePublicUidNumber } = require('../utils/publicUidGenerator');
 const { normalizePhilippinePhone } = require('../utils/phoneUtils');
+const { isValidManagerPhone } = require('../../services/managerPhone');
 const { createSupabaseAvatarStorage, decodeAvatarImage } = require('../services/supabaseAvatarStorage');
 
-const ALLOWED_PROFILE_FIELDS = new Set(['fullName', 'phone', 'address', 'imageUpload']);
+const ALLOWED_PROFILE_FIELDS = new Set(['fullName', 'phone', 'address', 'imageUpload', 'removeImage', 'expectedProfile']);
 const clean = (value, max = 160) => String(value || '').trim().slice(0, max);
 
 function bodyOf(req) {
@@ -29,9 +31,24 @@ function safeManagerProfile(uid, data = {}) {
     address: clean(data.address || data.location || data.completeAddress, 300),
     profilePhotoUrl: clean(data.profilePhotoUrl, 2048),
     profilePhotoPath: clean(data.profilePhotoPath, 300),
+    profilePhotoRemoved: data.profilePhotoRemoved === true,
     branchId: clean(data.branchId, 80),
     managerStatus: clean(data.managerStatus, 30),
   };
+}
+
+function profileBaseline(uid, profile) {
+  const safe = safeManagerProfile(uid, profile);
+  return { fullName: safe.fullName, phone: safe.phone, address: safe.address, profilePhotoPath: safe.profilePhotoPath };
+}
+
+function validateExpectedProfile(value) {
+  const fields = ['fullName', 'phone', 'address', 'profilePhotoPath'];
+  if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).length !== fields.length
+    || fields.some((key) => typeof value[key] !== 'string' || value[key].length > (key === 'fullName' ? 160 : key === 'phone' ? 40 : 300))) {
+    throw new OtpError(400, 'PROFILE_BASELINE_REQUIRED', 'Reload your profile before saving changes.');
+  }
+  return Object.fromEntries(fields.map((key) => [key, value[key].trim()]));
 }
 
 async function ensureManagerPublicUid(db, uid) {
@@ -74,7 +91,7 @@ function validateProfileChanges(body) {
     Object.assign(changes, { fullName, firstName, lastName: lastName.join(' ') });
   }
   if (Object.prototype.hasOwnProperty.call(body, 'phone')) {
-    const phone = normalizePhilippinePhone(body.phone);
+    const phone = isValidManagerPhone(body.phone) && normalizePhilippinePhone(body.phone);
     if (!phone) throw new OtpError(400, 'INVALID_PHONE', 'Enter a valid Philippine mobile number.');
     changes.phone = phone;
     changes.contactNumber = phone;
@@ -105,14 +122,18 @@ function createManagerProfileHandler(getAdmin = getFirebaseAdmin, { avatarStorag
     try {
       const { auth, db } = getAdmin();
       const manager = await requireActiveManager(req, auth, db);
-      let profile = await ensureManagerPublicUid(db, manager.decoded.uid);
-      if (req.method === 'GET') return res.status(200).json({ profile: safeManagerProfile(manager.decoded.uid, profile) });
+      if (req.method === 'GET') {
+        const profile = await ensureManagerPublicUid(db, manager.decoded.uid);
+        return res.status(200).json({ profile: safeManagerProfile(manager.decoded.uid, profile) });
+      }
 
       const body = bodyOf(req);
       const changes = validateProfileChanges(body);
-      const image = body.imageUpload ? decodeAvatarImage(body.imageUpload) : null;
-      if (!Object.keys(changes).length && !image) throw new OtpError(400, 'NO_PROFILE_CHANGES', 'No profile changes were provided.');
-
+      const expectedProfile = validateExpectedProfile(body.expectedProfile);
+      if (body.removeImage !== undefined && typeof body.removeImage !== 'boolean') throw new OtpError(400, 'INVALID_PROFILE_IMAGE_ACTION', 'Invalid profile picture action.');
+      if (body.removeImage === true && body.imageUpload) throw new OtpError(400, 'INVALID_PROFILE_IMAGE_ACTION', 'Choose one profile picture action.');
+      const image = body.imageUpload ? await decodeAvatarImage(body.imageUpload) : null;
+      if (!Object.keys(changes).length && !image && body.removeImage !== true) throw new OtpError(400, 'NO_PROFILE_CHANGES', 'No profile changes were provided.');
       let uploaded = null;
       try {
         if (image) uploaded = await avatarStorage.uploadAvatar(manager.decoded.uid, image);
@@ -122,19 +143,50 @@ function createManagerProfileHandler(getAdmin = getFirebaseAdmin, { avatarStorag
             profilePhotoUrl: uploaded.profilePhotoUrl,
             profilePhotoPath: uploaded.profilePhotoPath,
             profilePhotoStorageProvider: 'supabase',
-          } : {}),
+            profilePhotoRemoved: false,
+          } : body.removeImage === true ? { profilePhotoUrl: '', profilePhotoPath: '', profilePhotoStorageProvider: '', profilePhotoRemoved: true } : {}),
           updatedAt: new Date(),
         };
-        await db.collection('users').doc(manager.decoded.uid).set(nextChanges, { merge: true });
-        if (uploaded && profile.profilePhotoPath) {
-          await avatarStorage.deleteAvatar(profile.profilePhotoPath, manager.decoded.uid).catch(() => {});
+        const result = await db.runTransaction(async (tx) => {
+          const ref = db.collection('users').doc(manager.decoded.uid);
+          const currentSnap = await tx.get(ref);
+          const current = currentSnap.data() || {};
+          if (!currentSnap.exists || current.role !== 'manager' || current.managerStatus !== 'active') {
+            throw new OtpError(403, 'MANAGER_INACTIVE', 'This Manager account is inactive.');
+          }
+          if (current.mustChangePassword === true) throw new OtpError(403, 'PASSWORD_CHANGE_REQUIRED', 'You must change your temporary password before accessing BlueTap.');
+          requireActiveAccount(current, { inactiveReason: 'MANAGER_INACTIVE', inactiveMessage: 'This Manager account is inactive.' });
+          const branchId = String(current.branchId || '').trim();
+          if (!branchId || branchId !== manager.branch.id) throw new OtpError(403, 'BRANCH_ACCESS_DENIED', 'Manager branch access has changed.');
+          const branchSnap = await tx.get(db.collection('branches').doc(branchId));
+          if (!branchSnap.exists || branchSnap.data()?.status !== 'active') throw new OtpError(403, 'BRANCH_INACTIVE', 'This branch is currently inactive.');
+          const otpSnap = await tx.get(db.collection('emailOtpVerifications').doc(manager.decoded.uid));
+          await requireVerifiedOperationalEmail(current, manager.decoded, { collection: () => ({ doc: () => ({ get: async () => otpSnap }) }) });
+          const actual = profileBaseline(manager.decoded.uid, current);
+          if (Object.keys(expectedProfile).some((key) => expectedProfile[key] !== actual[key])) {
+            throw new OtpError(409, 'PROFILE_CONFLICT', 'Your profile changed elsewhere. Discard this edit and reopen it before saving.');
+          }
+          tx.set(ref, nextChanges, { merge: true });
+          return { profile: { ...current, ...nextChanges }, previousPhotoPath: current.profilePhotoPath, legacyPhotoReference: current.profilePhotoUrl || current.photoURL || current.avatarUrl || '' };
+        });
+        let photoCleanupIncomplete = false;
+        if ((uploaded || body.removeImage === true) && result.previousPhotoPath) {
+          photoCleanupIncomplete = (await avatarStorage.deleteAvatar(result.previousPhotoPath, manager.decoded.uid).catch(() => false)) === false;
+        } else if ((uploaded || body.removeImage === true) && result.legacyPhotoReference) {
+          photoCleanupIncomplete = true;
         }
-        profile = { ...profile, ...nextChanges };
+        return res.status(200).json({ profile: { ...safeManagerProfile(manager.decoded.uid, result.profile), photoCleanupIncomplete } });
       } catch (error) {
-        if (uploaded) await avatarStorage.deleteAvatar(uploaded.profilePhotoPath, manager.decoded.uid).catch(() => {});
+        if (uploaded) {
+          // A commit may have succeeded even when its response was lost. Delete
+          // the new object only after an authoritative read proves it is unused.
+          const latest = await db.collection('users').doc(manager.decoded.uid).get().catch(() => null);
+          if (latest?.exists && latest.data()?.profilePhotoPath !== uploaded.profilePhotoPath) {
+            await avatarStorage.deleteAvatar(uploaded.profilePhotoPath, manager.decoded.uid).catch(() => {});
+          }
+        }
         throw error;
       }
-      return res.status(200).json({ profile: safeManagerProfile(manager.decoded.uid, profile) });
     } catch (error) { return responseError(res, error); }
   };
 }

@@ -47,6 +47,17 @@ test('Admin shell owns responsive navigation, theme preference, and confirmed lo
   assert.match(sessions, /clearAllAuthSessions\(\);[\s\S]*await signOut\(auth\)/);
 });
 
+test('Admin shell keeps its role label while Admin profile/security screens omit account identity and password UI', () => {
+  const shell = read('components', 'AdminShell.jsx');
+  const profile = read('app', 'admin', 'profile.jsx');
+  const security = read('app', 'admin', 'registration-security.jsx');
+
+  assert.match(shell, /<Text style=\{styles\.brandRole\}>Administrator<\/Text>/);
+  assert.doesNotMatch(shell, /bluetapadmin/i);
+  assert.match(profile, /Redirect href="\/manager\/profile"/);
+  assert.doesNotMatch(profile + security, /bluetapadmin|Administrator password|<ChangePasswordModal/i);
+});
+
 test('every active Admin workspace route inherits the shared shell and themed dashboard primitives', () => {
   for (const page of ['dashboard.jsx', 'branches.jsx', 'managers.jsx', 'distributors.jsx', 'registration-security.jsx', 'system-maintenance.jsx']) {
     const source = read('app', 'admin', page);

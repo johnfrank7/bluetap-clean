@@ -165,7 +165,7 @@ export default function ChatConversationView() {
             {loadingEarlier ? <ActivityIndicator color={colors.primary} /> : <Text style={[styles.earlierText, { color: colors.primary }]}>Load earlier messages</Text>}
           </Pressable>
         )}
-        {messages.length === 0 && !threadError && <Text style={[styles.empty, { color: colors.textSecondary }]}>Start a secure BlueTap conversation.</Text>}
+        {messages.length === 0 && !threadError && <Text style={[styles.empty, { color: colors.textSecondary }]}>{canSend ? 'Start a secure BlueTap conversation.' : 'No messages were sent during this delivery window.'}</Text>}
         {!!threadError && <Text accessibilityRole="alert" style={[styles.error, { color: colors.danger }]}>{threadError}</Text>}
         {!!messageActionError && <Text accessibilityRole="alert" style={[styles.error, { color: colors.danger }]}>{messageActionError}</Text>}
         {messages.map((message) => (
@@ -177,8 +177,8 @@ export default function ChatConversationView() {
             colors={colors}
             onRetry={retryMessage}
             onReport={reportingAllowed ? (item) => setReportTarget({ type: 'message', message: item }) : undefined}
-            onEdit={currentConversation.historyId ? undefined : (item) => { setEditTarget(item); setEditBody(item.body || ''); }}
-            onDelete={currentConversation.historyId ? undefined : setDeleteTarget}
+            onEdit={currentConversation.historyId || !canSend ? undefined : (item) => { setEditTarget(item); setEditBody(item.body || ''); }}
+            onDelete={currentConversation.historyId || conversationNotice?.state === 'closed' ? undefined : setDeleteTarget}
             onReply={canSend ? (item) => setReplyTarget(item) : undefined}
             desktopMenuOpen={activeMessageMenu?.id === message.id}
             onToggleDesktopMenu={toggleDesktopMessageMenu}

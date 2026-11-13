@@ -6,7 +6,7 @@ import { acknowledgeModerationNotice, loadModerationNotices, markModerationNotic
 import { subscribeModerationActivity } from '../services/moderationRealtime';
 import { useBlueTapTheme } from './BlueTapTheme';
 
-const Context = React.createContext({ notices: [], activeRestrictions: [], deliveryStatus: null, loading: false, acknowledge: async () => {}, openNotice: () => {}, refresh: async () => {} });
+const Context = React.createContext({ notices: [], activeRestrictions: [], deliveryStatus: null, loading: false, modalOpen: false, acknowledge: async () => {}, openNotice: () => {}, refresh: async () => {} });
 const timeOf = (value) => value?.toDate?.()?.getTime?.() || new Date(value || 0).getTime() || 0;
 const categoryLabel = (value) => String(value || 'account conduct').toLowerCase().replaceAll('_', ' ');
 const formatNoticeTime = (value) => {
@@ -94,7 +94,7 @@ export function ModerationNoticeProvider({ children }) {
     return active;
   }, [clock, deliveryStatus, notices]);
   const selected = notices.find((notice) => notice.id === selectedId) || null;
-  const value = React.useMemo(() => ({ notices, activeRestrictions, deliveryStatus, loading, acknowledge, openNotice, refresh }), [acknowledge, activeRestrictions, deliveryStatus, loading, notices, openNotice, refresh]);
+  const value = React.useMemo(() => ({ notices, activeRestrictions, deliveryStatus, loading, modalOpen: Boolean(selected || notices.some((notice) => !notice.type?.startsWith('delivery_appeal_') && !notice.seenAt)), acknowledge, openNotice, refresh }), [acknowledge, activeRestrictions, deliveryStatus, loading, selected, notices, openNotice, refresh]);
   return <Context.Provider value={value}>{children}<NoticeDetailModal notice={selected} onClose={() => setSelectedId('')} onAcknowledge={(noticeId) => acknowledge(noticeId).then(() => setSelectedId('')).catch(() => {})} /></Context.Provider>;
 }
 

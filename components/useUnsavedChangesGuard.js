@@ -6,10 +6,15 @@ export default function useUnsavedChangesGuard({
   isDirty = false,
   isSubmitting = false,
   onDiscard,
+  onSave,
   onContinueEditing,
   firstIncompleteRef,
+  navigationManaged = false,
 } = {}) {
   const [showPrompt, setShowPrompt] = React.useState(false);
+  const [savingAndLeaving, setSavingAndLeaving] = React.useState(false);
+  const [saveError, setSaveError] = React.useState('');
+  const savingRef = React.useRef(false);
   const pendingActionRef = React.useRef(null);
   const isDirtyRef = React.useRef(isDirty);
   const isSubmittingRef = React.useRef(isSubmitting);
@@ -22,7 +27,7 @@ export default function useUnsavedChangesGuard({
     if (Platform.OS !== 'web' || typeof window === 'undefined') return undefined;
 
     const handleBeforeUnload = (event) => {
-      if (isDirtyRef.current && !isSubmittingRef.current) {
+      if (isDirtyRef.current || isSubmittingRef.current || savingRef.current) {
         event.preventDefault();
         event.returnValue = '';
         return '';
@@ -36,7 +41,7 @@ export default function useUnsavedChangesGuard({
 
   // Web browser Back button protection
   React.useEffect(() => {
-    if (Platform.OS !== 'web' || typeof window === 'undefined') return undefined;
+    if (navigationManaged || Platform.OS !== 'web' || typeof window === 'undefined') return undefined;
 
     const handlePopState = () => {
       if (isDirtyRef.current && !isSubmittingRef.current) {
@@ -51,14 +56,15 @@ export default function useUnsavedChangesGuard({
 
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
-  }, []);
+  }, [navigationManaged]);
 
   // Hardware Back button protection on native (Android)
   React.useEffect(() => {
-    if (Platform.OS === 'web') return undefined;
+    if (navigationManaged || Platform.OS === 'web') return undefined;
 
     const handleBackPress = () => {
-      if (isDirtyRef.current && !isSubmittingRef.current) {
+      if (isSubmittingRef.current) return true;
+      if (isDirtyRef.current) {
         setShowPrompt(true);
         return true; // prevent default back
       }
@@ -67,20 +73,24 @@ export default function useUnsavedChangesGuard({
 
     const subscription = BackHandler.addEventListener('hardwareBackPress', handleBackPress);
     return () => subscription.remove();
-  }, []);
+  }, [navigationManaged]);
 
   const confirmLeave = React.useCallback((proceedAction) => {
-    if (!isDirtyRef.current || isSubmittingRef.current) {
+    if (isSubmittingRef.current || savingRef.current || pendingActionRef.current) return false;
+    if (!isDirtyRef.current) {
       if (typeof proceedAction === 'function') proceedAction();
       return true;
     }
     pendingActionRef.current = proceedAction;
+    setSaveError('');
     setShowPrompt(true);
     return false;
   }, []);
 
   const handleContinueEditing = React.useCallback(() => {
+    if (savingRef.current || isSubmittingRef.current) return;
     setShowPrompt(false);
+    setSaveError('');
     pendingActionRef.current = null;
     if (typeof onContinueEditing === 'function') {
       try {
@@ -97,6 +107,7 @@ export default function useUnsavedChangesGuard({
   }, [firstIncompleteRef, onContinueEditing]);
 
   const handleDiscardAndLeave = React.useCallback(() => {
+    if (isSubmittingRef.current || savingRef.current) return;
     setShowPrompt(false);
     if (typeof onDiscard === 'function') {
       try {
@@ -111,14 +122,43 @@ export default function useUnsavedChangesGuard({
     }
   }, [onDiscard]);
 
+  const handleSaveAndLeave = React.useCallback(async () => {
+    if (!onSave || savingRef.current || isSubmittingRef.current || !pendingActionRef.current) return;
+    savingRef.current = true;
+    setSavingAndLeaving(true);
+    setSaveError('');
+    let saved = false;
+    try {
+      saved = (await onSave()) === true;
+    } catch {
+      saved = false;
+    }
+    if (saved) {
+      const action = pendingActionRef.current;
+      pendingActionRef.current = null;
+      isDirtyRef.current = false;
+      setShowPrompt(false);
+      savingRef.current = false;
+      setSavingAndLeaving(false);
+      if (typeof action === 'function') action();
+      return;
+    }
+    setSaveError('Changes could not be saved. Check the form and try again.');
+    savingRef.current = false;
+    setSavingAndLeaving(false);
+  }, [onSave]);
+
   const UnsavedModal = React.useCallback((props) => (
     <UnsavedChangesModal
       visible={showPrompt}
       onContinueEditing={handleContinueEditing}
       onDiscardAndLeave={handleDiscardAndLeave}
+      onSaveAndLeave={onSave ? handleSaveAndLeave : undefined}
+      saving={savingAndLeaving || isSubmitting}
+      error={saveError}
       {...props}
     />
-  ), [showPrompt, handleContinueEditing, handleDiscardAndLeave]);
+  ), [showPrompt, handleContinueEditing, handleDiscardAndLeave, handleSaveAndLeave, onSave, savingAndLeaving, isSubmitting, saveError]);
 
   return {
     isDirty,
@@ -126,6 +166,7 @@ export default function useUnsavedChangesGuard({
     confirmLeave,
     handleContinueEditing,
     handleDiscardAndLeave,
+    handleSaveAndLeave,
     UnsavedModal,
   };
 }

@@ -1,4 +1,4 @@
-import { signOut } from 'firebase/auth';
+import { reload, signOut } from 'firebase/auth';
 import { doc, getDocFromServer } from 'firebase/firestore';
 
 import { auth, db } from '../firebase';
@@ -384,6 +384,25 @@ export const fetchFirestoreUserProfile = async (user) => {
   return profile;
 };
 
+// Recheck only accounts that appear to require email verification. Never use
+// cached profile data or a different account to clear a verification gate.
+export const recheckPendingEmailVerification = async (profile, currentUser) => {
+  if (!profile || !currentUser?.uid || profile.mustChangePassword === true ||
+      profile.accountActionHoldIntentId || getCanonicalAccountStatus(profile) !== 'active' ||
+      !isOperationalEmailVerificationPending(profile, currentUser)) return profile;
+  if (auth.currentUser?.uid !== currentUser.uid) throw new Error('Account changed during verification check.');
+  const wasVerified = currentUser.emailVerified === true;
+  await reload(currentUser);
+  if (auth.currentUser?.uid !== currentUser.uid) throw new Error('Account changed during verification check.');
+  if (!wasVerified && currentUser.emailVerified === true) await currentUser.getIdToken(true);
+  const refreshed = await fetchFirestoreUserProfile(currentUser);
+  if (auth.currentUser?.uid !== currentUser.uid || !refreshed || refreshed.uid !== currentUser.uid ||
+      normalizeRole(refreshed.role) !== normalizeRole(profile.role)) {
+    throw new Error('Account profile is unavailable or changed.');
+  }
+  return refreshed;
+};
+
 const validateRoleAccessOnce = async (expectedRole) => {
   const expected = normalizeRole(expectedRole);
 
@@ -480,6 +499,18 @@ const validateRoleAccessOnce = async (expectedRole) => {
         : expected === 'manager'
           ? 'Manager profile could not be verified. Please contact support.'
           : 'Unauthorized Access',
+      redirectTo: getRoleLoginPath(expected),
+      shouldSignOut: false,
+      clearRole: expected,
+    };
+  }
+
+  try {
+    if (profile?.role === expected) profile = await recheckPendingEmailVerification(profile, currentUser);
+  } catch {
+    return {
+      status: 'verification-check-failed',
+      message: 'Your account could not be checked. Please try again.',
       redirectTo: getRoleLoginPath(expected),
       shouldSignOut: false,
       clearRole: expected,

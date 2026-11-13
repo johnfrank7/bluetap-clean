@@ -1,4 +1,4 @@
-import { cancelRequesterOrder, createRequesterOrder, getRequesterOrders, updateRequesterOrder } from './requesterOrdering';
+import { cancelRequesterOrder, createRequesterOrder, getRequesterOrders, quoteRequesterOrder, updateRequesterOrder } from './requesterOrdering';
 import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import { db } from '../firebase';
 import {
@@ -68,6 +68,7 @@ const normalizeRequest = (id, data = {}) => {
 
   return {
     id,
+    pricingDetailsSource: data.pricingDetailsSource || data,
     request_id: data.request_id || data.requestId || '',
     requesterUid: (data.requesterUid || data.requester_id || '').toString().trim(),
     requester_id: (data.requester_id || data.requesterUid || '').toString().trim(),
@@ -87,6 +88,9 @@ const normalizeRequest = (id, data = {}) => {
     branchLocation: data.branchLocation || null,
     assignedDistributorUid: data.assignedDistributorUid || '',
     assignmentVersion: data.assignmentVersion,
+    assignmentHistory: Array.isArray(data.assignmentHistory) ? data.assignmentHistory : [],
+    distributorDeliveryHistory: Array.isArray(data.distributorDeliveryHistory) ? data.distributorDeliveryHistory : [],
+    latestSchedulingEvent: data.latestSchedulingEvent || null,
     product_id: data.product_id || items[0]?.product_id || '',
     product_name:
       data.product_name ||
@@ -127,6 +131,12 @@ const normalizeRequest = (id, data = {}) => {
     assigned_at: data.assigned_at || data.assignedAt || null,
     deliveryFailedAt: data.deliveryFailedAt || data.delivery_failed_at || null,
     delivery_failed_at: data.delivery_failed_at || data.deliveryFailedAt || null,
+    rescheduledAt: data.rescheduledAt || data.rescheduled_at || null,
+    rescheduled_at: data.rescheduled_at || data.rescheduledAt || null,
+    rescheduleReason: data.rescheduleReason || '',
+    rescheduledByRole: data.rescheduledByRole || '',
+    reassignedAt: data.reassignedAt || data.reassigned_at || null,
+    reassignmentReason: data.reassignmentReason || '',
     failureReason: formatDeliveryFailureReason(data, ''),
     failureReasonCode: data.failureReasonCode || '',
     failureReasonLabel: data.failureReasonLabel || '',
@@ -250,7 +260,7 @@ const getRequestSignature = (requests) =>
   requests
     .map(
       (request) =>
-        `${request.id}|${request.status}|${timestampToMillis(request.updated_at)}|${timestampToMillis(request.created_at)}|${request.total_cost}|${request.quantity}`
+        `${request.id}|${request.status}|${timestampToMillis(request.updated_at)}|${timestampToMillis(request.created_at)}|${timestampToMillis(request.scheduledAt)}|${timestampToMillis(request.assignedAt)}|${request.assignmentVersion || 1}|${request.total_cost}|${request.quantity}`
     )
     .join('::');
 
@@ -424,6 +434,7 @@ export const createRequest = async (requestData) => {
     deliveryLocation: requestData.deliveryLocation,
     container: requestData.container,
     expectedDeliveryDate: requestData.expectedDeliveryDate || requestData.delivery_date,
+    quoteId: requestData.quoteId,
     items: normalizeItems(requestData).map((item) => ({ productId: item.product_id, quantity: item.quantity })),
   });
   return primeRequesterRequest(order);
@@ -455,4 +466,10 @@ export const updateRequest = async (request, payload) => {
 
   const updated = await updateRequesterOrder(requestId, payload);
   return primeRequesterRequest({ ...updated, id: requestId });
+};
+
+export const quoteRequestEdit = async (request, payload) => {
+  const requestId = typeof request === 'string' ? request : request?.id;
+  if (!requestId) throw new Error('Request is missing an ID.');
+  return quoteRequesterOrder(requestId, payload);
 };

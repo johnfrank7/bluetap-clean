@@ -158,6 +158,7 @@ export default function ManagerShell({
   children,
   contentScrollRef,
   headerAction,
+  onNavigate,
   subtitle,
   title,
 }) {
@@ -187,7 +188,7 @@ export default function ManagerShell({
     return String(raw).trim() || 'Manager';
   }, [managerProfile, managerSession]);
 
-  const photoUrl = managerProfile.profilePhotoUrl || managerProfile.photoURL || managerProfile.avatarUrl || managerSession?.photoURL || '';
+  const photoUrl = managerProfile.profilePhotoRemoved ? '' : (managerProfile.profilePhotoUrl || managerProfile.photoURL || managerProfile.avatarUrl || managerSession?.photoURL || '');
 
   const managerInitials = React.useMemo(() => {
     if (!managerDisplayName || managerDisplayName === 'Manager') return 'M';
@@ -249,7 +250,8 @@ export default function ManagerShell({
   };
 
   const openNotifications = () => {
-    if (navigateOnce('/manager/notifications')) recordManagerNotificationOrigin(pathname);
+    const action = () => { if (navigateOnce('/manager/notifications')) recordManagerNotificationOrigin(pathname); };
+    if (onNavigate) onNavigate(action); else action();
   };
 
   const completeLogout = async () => {
@@ -353,7 +355,7 @@ export default function ManagerShell({
         <SidebarLogoutControl
           collapsed={isCollapsed}
           colors={colors}
-          onPress={() => setConfirmLogout(true)}
+          onPress={() => onNavigate ? onNavigate(() => setConfirmLogout(true)) : setConfirmLogout(true)}
         />
       </View>
     </Animated.View>

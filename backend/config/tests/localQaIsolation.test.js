@@ -54,6 +54,8 @@ test('local QA server accepts only an exact demo project and loopback emulators 
 });
 
 test('local QA browser origin gate rejects production and external origins', () => {
+  assert.equal(isLocalQaBrowserOrigin('http://127.0.0.1:8081'), true);
+  assert.equal(isLocalQaBrowserOrigin('http://localhost:8081'), true);
   assert.equal(isLocalQaBrowserOrigin('http://127.0.0.1:8082'), true);
   assert.equal(isLocalQaBrowserOrigin('http://localhost:8082'), true);
   assert.equal(isLocalQaBrowserOrigin('https://bluetap-beta.vercel.app'), false);
@@ -62,7 +64,7 @@ test('local QA browser origin gate rejects production and external origins', () 
 });
 
 test('local QA API applies its loopback origin policy to preflight and actual requests', async (t) => {
-  const keys = { ...serverEnv, ALLOWED_ORIGINS: 'http://127.0.0.1:8082' };
+  const keys = { ...serverEnv, ALLOWED_ORIGINS: 'http://localhost:8081,http://127.0.0.1:8081,http://127.0.0.1:8082' };
   const original = Object.fromEntries(Object.keys(keys).map((key) => [key, process.env[key]]));
   for (const [key, value] of Object.entries(keys)) process.env[key] = value;
   t.after(() => {
@@ -80,10 +82,12 @@ test('local QA API applies its loopback origin policy to preflight and actual re
     const external = await fetch(url, { method, headers });
     assert.equal(external.status, 403);
     assert.equal(external.headers.get('access-control-allow-origin'), null);
-    headers.Origin = 'http://127.0.0.1:8082';
-    const local = await fetch(url, { method, headers });
-    assert.equal(local.status, method === 'OPTIONS' ? 204 : 200);
-    assert.equal(local.headers.get('access-control-allow-origin'), headers.Origin);
+    for (const origin of ['http://localhost:8081', 'http://127.0.0.1:8081', 'http://127.0.0.1:8082']) {
+      headers.Origin = origin;
+      const local = await fetch(url, { method, headers });
+      assert.equal(local.status, method === 'OPTIONS' ? 204 : 200);
+      assert.equal(local.headers.get('access-control-allow-origin'), origin);
+    }
   }
 });
 

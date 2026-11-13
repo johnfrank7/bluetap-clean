@@ -316,6 +316,7 @@ export default function ChatDataProvider({ children, role }) {
     hydratedOpenThreadRef.current = false;
     lastOpenThreadSeqRef.current = 0;
     if (!panelOpen || !currentConversation?.id || accessReadiness !== 'ready' || !availability.readable || currentConversation.historyId || currentConversation.type === 'requester_branch') return undefined;
+    if (!availability.sendable) return undefined;
     const unsubscribe = subscribeOpenConversationMessages({
       conversationId: currentConversation.id,
       onData: (items) => {
@@ -348,11 +349,11 @@ export default function ChatDataProvider({ children, role }) {
       if (threadUnsubscribeRef.current === unsubscribe) threadUnsubscribeRef.current = null;
       unsubscribe?.();
     };
-  }, [accessReadiness, availability.readable, currentConversation?.id, currentConversation?.historyId, currentConversation?.type, panelOpen, threadVersion]);
+  }, [accessReadiness, availability.readable, availability.sendable, currentConversation?.id, currentConversation?.historyId, currentConversation?.type, panelOpen, threadVersion]);
 
   React.useEffect(() => {
     if (!panelOpen || !currentConversation?.id || accessReadiness !== 'ready' || !availability.readable ||
-      (!currentConversation.historyId && currentConversation.type !== 'requester_branch')) return undefined;
+      (!currentConversation.historyId && currentConversation.type !== 'requester_branch' && availability.sendable)) return undefined;
     let cancelled = false;
     loadMessageHistory({ conversationId: currentConversation.id, historyId: currentConversation.historyId, limit: 40 })
       .then((page) => {
@@ -366,7 +367,7 @@ export default function ChatDataProvider({ children, role }) {
         if (!cancelled) setThreadError(loadError?.message || 'Messages could not be loaded.');
       });
     return () => { cancelled = true; };
-  }, [accessReadiness, availability.readable, currentConversation?.id, currentConversation?.historyId, currentConversation?.type, panelOpen, summaryVersion, threadVersion]);
+  }, [accessReadiness, availability.readable, availability.sendable, currentConversation?.id, currentConversation?.historyId, currentConversation?.type, panelOpen, summaryVersion, threadVersion]);
 
   const messages = React.useMemo(() => mergeMessages(olderMessages, liveMessages, localMessages), [liveMessages, localMessages, olderMessages]);
 
@@ -522,7 +523,7 @@ export default function ChatDataProvider({ children, role }) {
   const loadEarlierMessages = React.useCallback(async () => {
     if (!currentConversation?.id || loadingEarlier) return;
     const committed = messages.filter((message) => Number.isSafeInteger(Number(message.seq)));
-    const backendThread = Boolean(currentConversation.historyId || currentConversation.type === 'requester_branch');
+    const backendThread = Boolean(currentConversation.historyId || currentConversation.type === 'requester_branch' || !availability.sendable);
     const beforeSeq = backendThread ? backendBeforeSeq : committed.reduce((minimum, message) => Math.min(minimum, Number(message.seq)), Number.MAX_SAFE_INTEGER);
     if (!Number.isFinite(beforeSeq)) return;
     setLoadingEarlier(true);
@@ -536,7 +537,7 @@ export default function ChatDataProvider({ children, role }) {
     } finally {
       setLoadingEarlier(false);
     }
-  }, [backendBeforeSeq, currentConversation?.id, currentConversation?.historyId, currentConversation?.type, loadingEarlier, messages]);
+  }, [availability.sendable, backendBeforeSeq, currentConversation?.id, currentConversation?.historyId, currentConversation?.type, loadingEarlier, messages]);
 
   const openChat = React.useCallback(() => {
     if (Platform.OS === 'web' && typeof document !== 'undefined' && document.activeElement?.blur) {

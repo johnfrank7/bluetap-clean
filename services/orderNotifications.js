@@ -17,14 +17,30 @@ const dateOf = (value) => {
   return Number.isNaN(date.getTime()) ? null : date;
 };
 
+function latestSchedulingEvent(order = {}) {
+  const assignmentEvents = new Set(['DISTRIBUTOR_ASSIGNED', 'DISTRIBUTOR_REASSIGNED', 'ADMIN_DISPATCH_OVERRIDE', 'DELIVERY_RESCHEDULED_BY_MANAGER']);
+  const projected = order.latestSchedulingEvent;
+  if (projected && (assignmentEvents.has(projected.event) || projected.event === 'DELIVERY_RESCHEDULED')) {
+    const at = dateOf(projected.at);
+    if (at && Number.isFinite(at.getTime())) return { entry: { ...projected, rescheduleReason: projected.reason }, at };
+  }
+  const events = [
+    ...(Array.isArray(order.assignmentHistory) ? order.assignmentHistory : []).filter((entry) => assignmentEvents.has(entry?.event)),
+    ...(Array.isArray(order.distributorDeliveryHistory) ? order.distributorDeliveryHistory : []).filter((entry) => entry?.event === 'DELIVERY_RESCHEDULED'),
+  ];
+  return events.map((entry) => ({ entry, at: dateOf(entry.rescheduledAt || entry.assignedAt || entry.createdAt || entry.at) }))
+    .filter(({ at }) => at && Number.isFinite(at.getTime()))
+    .sort((left, right) => right.at.getTime() - left.at.getTime())[0] || null;
+}
+
 function lifecycleTimestamp(order = {}) {
   const status = statusOf(order.status);
   if (status === 'delivered') return order.deliveredAt || order.delivered_at || order.updatedAt;
   if (status === 'delivery_failed') return order.deliveryFailedAt || order.delivery_failed_at || order.updatedAt;
   if (status === 'out_for_delivery') return order.deliveryStartedAt || order.outForDeliveryAt || order.updatedAt;
-  if (status === 'scheduled') return order.scheduledAt || order.scheduled_at || order.delivery_date || order.updatedAt;
+  if (status === 'scheduled') return latestSchedulingEvent(order)?.at || order.rescheduledAt || order.updatedAt || order.scheduledAt || order.scheduled_at || order.delivery_date;
   if (status === 'accepted') return order.acceptedAt || order.accepted_at || order.updatedAt;
-  if (status === 'distributor_assigned') return order.assignedAt || order.assigned_at || order.updatedAt;
+  if (status === 'distributor_assigned') return latestSchedulingEvent(order)?.at || order.assignedAt || order.assigned_at || order.updatedAt;
   if (['cancelled', 'canceled'].includes(status)) return order.cancelledAt || order.canceled_at || order.updatedAt;
   return order.updatedAt || order.updated_at || order.createdAt || order.created_at;
 }
@@ -32,7 +48,7 @@ function lifecycleTimestamp(order = {}) {
 const formatSchedule = (value) => {
   const date = dateOf(value);
   if (!date) return '';
-  return date.toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
+  return date.toLocaleString('en-US', { timeZone: 'Asia/Manila', month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
 };
 
 function requesterMessage(order) {
@@ -41,13 +57,34 @@ function requesterMessage(order) {
   const status = statusOf(order.status);
   if (status === 'scheduled') {
     const schedule = formatSchedule(order.scheduledAt || order.scheduled_at || order.delivery_date);
+    const latest = latestSchedulingEvent(order);
+    if (latest?.entry.event === 'DELIVERY_RESCHEDULED_BY_MANAGER' || latest?.entry.event === 'DELIVERY_RESCHEDULED') {
+      const reasonText = latest.entry.event === 'DELIVERY_RESCHEDULED_BY_MANAGER' ? clean(latest.entry.rescheduleReason) : '';
+      return schedule
+        ? `Order ${reference} has been rescheduled for delivery on ${schedule}.${reasonText ? ` Note: ${reasonText}.` : ''} Provider: ${provider}.`
+        : `Order ${reference} has been rescheduled by ${provider}.${reasonText ? ` Note: ${reasonText}.` : ''}`;
+    }
     return schedule
       ? `Order ${reference} has been approved and scheduled for delivery on ${schedule}. Provider: ${provider}.`
       : `Order ${reference} has been approved and scheduled by ${provider}.`;
   }
   if (status === 'delivery_failed') return `Delivery attempt failed for Order ${reference}. Reason: ${formatDeliveryFailureReason(order, 'Delivery issue reported')}.`;
   if (status === 'awaiting_distributor_assignment') return `Order ${reference} was approved and is waiting for distributor assignment at ${provider}.`;
-  if (status === 'distributor_assigned') return `A Distributor has been assigned to Order ${reference}.`;
+  if (status === 'distributor_assigned') {
+    const schedule = formatSchedule(order.scheduledAt || order.scheduled_at || order.delivery_date);
+    const latest = latestSchedulingEvent(order);
+    const wasReassigned = latest ? ['DISTRIBUTOR_REASSIGNED', 'ADMIN_DISPATCH_OVERRIDE'].includes(latest.entry.event) : Boolean(order.reassignedAt || order.reassigned_at)
+      || Number(order.assignmentVersion) > 2
+      || (Array.isArray(order.assignmentHistory) && order.assignmentHistory.some((entry) => entry?.event === 'DISTRIBUTOR_REASSIGNED'));
+    if (wasReassigned) {
+      return schedule
+        ? `A new Distributor has been assigned to Order ${reference} and scheduled for delivery on ${schedule}. Provider: ${provider}.`
+        : `A new Distributor has been assigned to Order ${reference}.`;
+    }
+    return schedule
+      ? `A Distributor has been assigned to Order ${reference} and scheduled for delivery on ${schedule}.`
+      : `A Distributor has been assigned to Order ${reference}.`;
+  }
   if (status === 'out_for_delivery') return `Order ${reference} is out for delivery.`;
   if (status === 'delivered') return `Order ${reference} was delivered.`;
   if (status === 'branch_transfer_pending') return `Order ${reference} has a branch transfer in progress.`;
@@ -76,7 +113,7 @@ function getRoleOrderNotifications(orders = [], role, now = Date.now()) {
     const status = statusOf(order.status);
     if (!orderId || !at || at.getTime() < now - RETENTION_MS) return null;
     return {
-      id: `order:${orderId}:${status}:${at.getTime()}`,
+      id: `order:${orderId}:${status}:${at.getTime()}${['scheduled', 'distributor_assigned'].includes(status) && order.latestSchedulingEvent?.id ? `:${order.latestSchedulingEvent.id}` : ''}`,
       kind: 'order',
       orderId,
       requestId: orderReferenceOf(order),

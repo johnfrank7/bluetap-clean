@@ -62,6 +62,7 @@ function ConversationRow({ colors, conversation, onPress, role }) {
           {!!roleLabel && !!conversation.orderStatus && <SoftStatusBadge status={conversation.orderStatus} compact numberOfLines={1} style={styles.contextStatusBadge} />}
         </View>}
         {!!conversation.historyId && <Text style={[styles.context, { color: colors.textSecondary }]} numberOfLines={1}>Archived {formatTimestamp(conversation.archivedAt)} · Read-only</Text>}
+        {!conversation.historyId && conversation.type === 'requester_distributor' && (conversation.status === 'read_only' || (String(conversation.orderStatus || '').toLowerCase() === 'delivery_failed' && timeOf(conversation.accessEndsAt) > 0 && timeOf(conversation.accessEndsAt) <= Date.now())) && <Text style={[styles.context, { color: colors.textSecondary }]} numberOfLines={1}>Messaging window ended · Read-only</Text>}
         <View style={styles.previewRow}><Text style={[styles.preview, { color: conversation.unreadCount ? colors.textPrimary : colors.textSecondary }]} numberOfLines={1}>{conversation.lastMessagePreview || conversation.emptyPreview || 'Start the conversation'}</Text></View>
       </View>
     </Pressable>

@@ -72,7 +72,8 @@ test('Manager Profile uses the persistent shared profile and branch cache with s
 
 test('Manager Profile exposes only personal edits and canonical public UID display', () => {
   assert.match(managerProfile, /getProfileUniqueId\(manager \|\| \{\}\)/);
-  assert.match(managerProfile, /updateManagerProfile\(\{ fullName, phone, address \}, selectedImage\)/);
+  assert.match(managerProfile, /const changes = changedProfileFields\(/);
+  assert.match(managerProfile, /updateManagerProfile\(changes, selectedImage, expectedProfile\.current, removeImage\)/);
   assert.match(managerProfile, /normalizePhilippinePhone/);
   assert.match(managerProfile, /TopToastFeedback/);
   for (const label of ['UID', 'Full Name', 'Contact Number', 'Email Address', 'Complete Address / Location', 'Branch', 'Access Level']) {

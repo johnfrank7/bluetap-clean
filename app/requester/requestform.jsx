@@ -5,6 +5,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import LocationMap from '../../components/LocationMap';
 import ProductCard from '../../components/ProductCard';
+import { PromotionTierNote } from '../../components/RequesterPromotion';
 import BlueTapIcon from '../../components/BlueTapIcon';
 import { createPortalStyleSheet, useBlueTapTheme } from '../../components/BlueTapTheme';
 import TopToastFeedback from '../../components/TopToastFeedback';
@@ -12,11 +13,13 @@ import { ModerationNoticeBanner, useModerationNotices } from '../../components/M
 import { BLUETAP_COLORS, BLUETAP_LAYOUT } from '../../constants/bluetapTheme';
 import { USER_PORTAL_BOTTOM_CONTENT_INSET, USER_PORTAL_LAYOUT } from '../../constants/userPortalLayout';
 import { haversineDistanceKm, rankProviderBranches, rankBranchesByDistance, requestCurrentLocation } from '../../services/location';
-import { getCachedCatalog, getRequesterCatalog, getRequesterOrders } from '../../services/requesterOrdering';
+const { eligiblePromotionPreviews, estimatedPromotionSavings } = require('../../services/promotionPresentation');
+import { getCachedCatalog, getRequesterCatalog, getRequesterOrders, quoteRequesterCreate } from '../../services/requesterOrdering';
 import { buildBuyAgainDraft } from '../../services/buyAgain';
 import { createRequest, subscribeRequesterCurrentRequests } from '../../services/requests';
 import { auth } from '../../firebase';
 import useUnsavedChangesGuard from '../../components/useUnsavedChangesGuard';
+import { useRequesterTour, useRequesterTourTarget } from '../../components/RequesterTutorialModal';
 import {
   normalizeBranchDeliveryPricing,
   calculateDeliveryFee,
@@ -61,10 +64,10 @@ function resolvePublicOrderReference(order = {}) {
   return '';
 }
 
-function Section({ number, title, helper, rightAction, children }) {
+function Section({ number, title, helper, rightAction, children, tourRef, onTourLayout }) {
   useBlueTapTheme();
   return (
-    <View style={styles.section}>
+    <View ref={tourRef} style={styles.section} onLayout={onTourLayout}>
       <View style={styles.sectionHeading}>
         <View style={styles.number}><Text style={styles.numberText}>{number}</Text></View>
         <View style={styles.sectionTitleWrap}>
@@ -85,6 +88,18 @@ function LimitWarning({ items, colors }) {
 }
 
 export default function RequestFormPage() {
+  const { active: tourActive, target: tourTarget, registerLeaveGuard, setOrderBlocked, notifyTourScroll } = useRequesterTour();
+  const locationTourRef = useRequesterTourTarget('order-location');
+  const providerTourRef = useRequesterTourTarget('order-provider');
+  const productsTourRef = useRequesterTourTarget('order-products');
+  const containerTourRef = useRequesterTourTarget('order-container');
+  const reviewTourRef = useRequesterTourTarget('order-review');
+  const [tourLayouts, setTourLayouts] = React.useState({});
+  const recordTourLayout = (key) => (event) => {
+    if (Platform.OS === 'web') return;
+    const y = event.nativeEvent.layout.y;
+    setTourLayouts((previous) => previous[key] === y ? previous : { ...previous, [key]: y });
+  };
   const { colors, isDark } = useBlueTapTheme();
   const { activeRestrictions } = useModerationNotices();
   const router = useRouter(); const params = useLocalSearchParams(); const preferredProductId = firstParam(params.productId); const buyAgainOrderId = firstParam(params.buyAgainOrderId);
@@ -93,6 +108,7 @@ export default function RequestFormPage() {
   const [loadError, setLoadError] = React.useState('');
   const [deliveryLocation,setDeliveryLocation] = React.useState(null); const [locationState,setLocationState] = React.useState('idle'); const [locationError,setLocationError] = React.useState('');
   const [selectedBranchId,setSelectedBranchId] = React.useState(''); const [items,setItems] = React.useState([]); const [container,setContainer] = React.useState(containers[0]); const [submitting,setSubmitting] = React.useState(false); const [submitError,setSubmitError] = React.useState(''); const [reviewing,setReviewing] = React.useState(false);
+  const [createQuote, setCreateQuote] = React.useState(null);
   const [activeOrders,setActiveOrders] = React.useState([]); const [saveAsDefaultLocation,setSaveAsDefaultLocation] = React.useState(false);
   const [toast,setToast] = React.useState({ visible: false, message: '', type: 'error' });
   const [buyAgainTemplate,setBuyAgainTemplate] = React.useState(null); const [buyAgainMessage,setBuyAgainMessage] = React.useState(''); const appliedBuyAgainId = React.useRef('');
@@ -113,6 +129,14 @@ export default function RequestFormPage() {
     }
   }, []);
   React.useEffect(() => { load(Boolean(buyAgainOrderId)); }, [load, buyAgainOrderId]);
+  React.useEffect(() => {
+    if (catalog?.promotionPreviewOnly !== true || submitting) return undefined;
+    let live = true;
+    const timer = setInterval(() => {
+      getRequesterCatalog({ force: true }).then((next) => { if (live) setCatalog(next); }).catch(() => { if (live) setCatalog((current) => current ? { ...current, promotionPreviews: [] } : current); });
+    }, 15000);
+    return () => { live = false; clearInterval(timer); };
+  }, [catalog?.promotionPreviewOnly, submitting]);
   React.useEffect(() => { if (!buyAgainOrderId) return; let active = true; getRequesterOrders().then((orders) => { if (!active) return; const order = orders.find((entry) => entry.id === buyAgainOrderId && String(entry.status).toLowerCase() === 'delivered'); if (order) setBuyAgainTemplate(order); else setBuyAgainMessage('This previous order is unavailable for Buy Again.'); }).catch(() => { if (active) setBuyAgainMessage('Previous order details could not be loaded.'); }); return () => { active = false; }; }, [buyAgainOrderId]);
 
   React.useEffect(() => {
@@ -156,6 +180,17 @@ export default function RequestFormPage() {
     appliedBuyAgainId.current = buyAgainTemplate.id;
   }, [buyAgainTemplate, catalog, deliveryLocation, rankedBranches]);
   const selectedBranch = (catalog?.branches||[]).find((branch)=>branch.id===selectedBranchId) || null;
+  const [promotionClock, setPromotionClock] = React.useState(Date.now());
+  React.useEffect(() => { const timer = setInterval(() => setPromotionClock(Date.now()), 15000); return () => clearInterval(timer); }, []);
+  const promotionOffers = React.useMemo(() => eligiblePromotionPreviews(catalog, selectedBranchId, container, promotionClock), [catalog, selectedBranchId, container, promotionClock]);
+  React.useEffect(() => {
+    const expirations = promotionOffers.map((offer) => offer.endsAt ? new Date(offer.endsAt).getTime() : Infinity).filter(Number.isFinite);
+    if (!expirations.length) return undefined;
+    const delay = Math.min(...expirations) - Date.now();
+    if (delay > 15000) return undefined;
+    const timer = setTimeout(() => setPromotionClock(Date.now()), Math.max(0, delay + 1));
+    return () => clearTimeout(timer);
+  }, [promotionOffers, promotionClock]);
   const products = React.useMemo(()=>(catalog?.products||[]).filter((product)=>selectedBranchId&&productAvailable(product,selectedBranchId)).map((product) => ({ ...product, ...(selectedBranch?.productPolicies?.[product.id] || {}) })),[catalog?.products,selectedBranch,selectedBranchId]);
   React.useEffect(()=>{ if(!preferredProductId||!selectedBranchId||!products.some((product)=>product.id===preferredProductId)) return; setItems((current)=>current.some((item)=>item.productId===preferredProductId)?current:[...current,{productId:preferredProductId,quantity:1}]); },[preferredProductId,products,selectedBranchId]);
   React.useEffect(()=>{ if (!selectedBranchId) return; setItems((current)=>current.filter((item)=>products.some((product)=>product.id===item.productId))); },[products,selectedBranchId]);
@@ -172,7 +207,8 @@ export default function RequestFormPage() {
     return getDeliveryFeeBreakdown(selectedDistance, branchPricing);
   }, [selectedBranch, selectedDistance, branchPricing]);
   const estimatedDeliveryFee = deliveryBreakdown ? deliveryBreakdown.totalFee : 0;
-  const estimatedTotal = calculateOrderTotal(clientEstimate, estimatedDeliveryFee);
+  const estimatedSavingsCentavos = estimatedPromotionSavings(itemDetails, promotionOffers, catalog?.promotionCheckoutEnabled === true);
+  const estimatedTotal = calculateOrderTotal(clientEstimate - (estimatedSavingsCentavos || 0) / 100, estimatedDeliveryFee);
 
   const profileComplete = catalog?.profile?.complete === true;
   const hasActiveOrder = activeOrders.length > 0;
@@ -184,7 +220,28 @@ export default function RequestFormPage() {
   const addProduct = (product) => setItems((current)=>{ const found=current.find((item)=>item.productId===product.id); return found?current.map((item)=>item.productId===product.id?{...item,quantity:Math.min(100,item.quantity+1)}:item):[...current,{productId:product.id,quantity:1}]; });
   const changeQuantity = (productId,delta) => setItems((current)=>current.map((item)=>item.productId===productId?{...item,quantity:item.quantity+delta}:item).filter((item)=>item.quantity>0));
   const canReview = !hasActiveOrder&&!orderingRestriction&&profileComplete&&deliveryLocation&&selectedBranch&&items.length>0;
+  const checkoutPayload = { branchId: selectedBranch?.id, deliveryLocation, container, items: items.map(({ productId, quantity }) => ({ productId, quantity })) };
+  const checkoutFingerprint = JSON.stringify(checkoutPayload);
+  const promotionCheckoutSeen = React.useRef(false);
+  if (catalog?.promotionCheckoutEnabled === true) promotionCheckoutSeen.current = true;
+  const promotionCheckout = promotionCheckoutSeen.current;
+  const checkoutAvailable = catalog?.promotionCheckoutEnabled === true;
+  const validCreateQuote = promotionCheckout && checkoutAvailable && createQuote?.fingerprint === checkoutFingerprint && new Date(createQuote.expiresAt).getTime() > Date.now() ? createQuote : null;
+  React.useEffect(() => {
+    if (promotionCheckout && reviewing && !validCreateQuote) { setReviewing(false); setCreateQuote(null); }
+  }, [promotionCheckout, reviewing, validCreateQuote]);
+  React.useEffect(() => {
+    if (!validCreateQuote) return undefined;
+    const timer = setTimeout(() => { setCreateQuote(null); setReviewing(false); setSubmitError('The price quote expired. Review your request again.'); }, Math.max(0, new Date(validCreateQuote.expiresAt).getTime() - Date.now()));
+    return () => clearTimeout(timer);
+  }, [validCreateQuote]);
   const scrollViewRef = React.useRef(null);
+  React.useEffect(() => {
+    const y = tourLayouts[tourTarget];
+    if (Platform.OS !== 'web' && tourActive && Number.isFinite(y)) {
+      scrollViewRef.current?.scrollTo?.({ y: Math.max(0, y - 80), animated: false });
+    }
+  }, [tourActive, tourTarget, tourLayouts]);
   const productsScrollRef = React.useRef(null);
   const [canScrollLeft, setCanScrollLeft] = React.useState(false);
   const [canScrollRight, setCanScrollRight] = React.useState(true);
@@ -262,11 +319,22 @@ export default function RequestFormPage() {
     onDiscard: resetDraft,
     onContinueEditing: handleContinueEditing,
   });
+  React.useEffect(() => { registerLeaveGuard(confirmLeave); return () => registerLeaveGuard(null); }, [registerLeaveGuard, confirmLeave]);
+  React.useEffect(() => { setOrderBlocked(hasActiveOrder); return () => setOrderBlocked(false); }, [setOrderBlocked, hasActiveOrder]);
   const leaveRequestForm = () => confirmLeave(() => router.canGoBack?.() ? router.back() : router.replace('/requester/r_dashboard'));
 
-  const submit = async () => { if(!canReview||submitting) return; setSubmitting(true); setSubmitError(''); try { await createRequest({branchId:selectedBranch.id,deliveryLocation,container,saveAsDefaultLocation,items:items.map(({productId,quantity})=>({product_id:productId,quantity}))}); router.replace('/requester/r_request'); } catch(error){setSubmitError(error.message); setToast({ visible: true, message: error.message || 'Unable to submit order.', type: 'error' });} finally{setSubmitting(false);} };
+  const requestReview = async () => {
+    if (!canReview || submitting) return;
+    if (!promotionCheckout) { setReviewing(true); return; }
+    if (!checkoutAvailable) { setSubmitError('The offer is unavailable. Refresh your request before ordering.'); return; }
+    setSubmitting(true); setSubmitError('');
+    try { const quote = await quoteRequesterCreate(checkoutPayload); setCreateQuote({ ...quote, fingerprint: checkoutFingerprint }); setReviewing(true); }
+    catch (error) { setCreateQuote(null); setSubmitError(error.message || 'Unable to review the current offer.'); }
+    finally { setSubmitting(false); }
+  };
+  const submit = async () => { if(!canReview||submitting) return; if (promotionCheckout && (!validCreateQuote || new Date(validCreateQuote.expiresAt).getTime() <= Date.now())) { setReviewing(false); setCreateQuote(null); setSubmitError('The price quote expired. Review your request again.'); return; } setSubmitting(true); setSubmitError(''); try { await createRequest({branchId:selectedBranch.id,deliveryLocation,container,saveAsDefaultLocation,quoteId:validCreateQuote?.quoteId,items:items.map(({productId,quantity})=>({product_id:productId,quantity}))}); router.replace('/requester/r_request'); } catch(error){ if (promotionCheckout) { setCreateQuote(null); setReviewing(false); getRequesterCatalog({ force: true }).then(setCatalog).catch(() => setCatalog((current) => current ? { ...current, promotionPreviews: [] } : current)); } setSubmitError(error.message); setToast({ visible: true, message: error.message || 'Unable to submit order.', type: 'error' });} finally{setSubmitting(false);} };
 
-  return <LinearGradient colors={isDark?[colors.background,colors.header]:[colors.primary,colors.primaryLight]} style={styles.gradient} start={{x:0,y:0}} end={{x:0,y:1}}><SafeAreaView edges={['left','right','bottom']} style={styles.safe}><TopToastFeedback visible={toast.visible} message={toast.message} type={toast.type} onDismiss={() => setToast((t) => ({ ...t, visible: false }))} /><KeyboardAvoidingView behavior={Platform.OS==='ios'?'padding':undefined} style={styles.flex}><ScrollView ref={scrollViewRef} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
+  return <LinearGradient colors={isDark?[colors.background,colors.header]:[colors.primary,colors.primaryLight]} style={styles.gradient} start={{x:0,y:0}} end={{x:0,y:1}}><SafeAreaView edges={['left','right','bottom']} style={styles.safe}><TopToastFeedback visible={toast.visible} message={toast.message} type={toast.type} onDismiss={() => setToast((t) => ({ ...t, visible: false }))} /><KeyboardAvoidingView behavior={Platform.OS==='ios'?'padding':undefined} style={styles.flex}><ScrollView ref={scrollViewRef} onScroll={tourActive && Platform.OS !== 'web' ? notifyTourScroll : undefined} scrollEventThrottle={16} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
     <View style={styles.pageHeading}>
       <View style={styles.headerTopRow}>
         <Text style={[styles.eyebrow, isDark && { color: colors.primaryLight }]}>NEW REQUEST</Text>
@@ -315,7 +383,7 @@ export default function RequestFormPage() {
         );
       })()}
       {!profileComplete&&<View style={styles.warning}><Text style={styles.warningTitle}>Complete your profile before placing an order.</Text><Text style={styles.warningText}>Your full name, contact number, and complete address are required for delivery.</Text><TouchableOpacity onPress={()=>router.push('/requester/r_profile')} style={styles.linkButton}><Text style={styles.linkText}>Complete profile</Text></TouchableOpacity></View>}
-      <Section number="1" title="Delivery location" helper="BlueTap requests your device GPS location to find nearby stations. Continuous tracking is never enabled.">
+      <Section number="1" title="Delivery location" helper="BlueTap requests your device GPS location to find nearby stations. Continuous tracking is never enabled." tourRef={locationTourRef} onTourLayout={recordTourLayout('order-location')}>
         <TouchableOpacity onPress={useCurrentLocation} disabled={locationState==='loading'} style={styles.primaryButton}><Text style={styles.primaryText}>{locationState==='loading'?(deliveryLocation?'Updating location…':'Finding your location…'):deliveryLocation?'Update current location':'Use my current location'}</Text></TouchableOpacity>
         {!!locationError&&<View style={styles.inlineError}><Text style={styles.inlineErrorText}>{locationError} If GPS is unavailable, retry or tap the map to place the delivery pin manually.</Text><TouchableOpacity accessibilityRole="button" onPress={useCurrentLocation}><Text style={styles.retryText}>Retry</Text></TouchableOpacity></View>}
         <View style={{ marginTop: 12 }}>
@@ -324,7 +392,7 @@ export default function RequestFormPage() {
         {deliveryLocation&&<View style={styles.locationStatus}><Text style={styles.locationStatusTitle}>Delivery location selected</Text><Text style={styles.locationStatusText}>{locationState==='saved'?'Using your saved default delivery location. Nearby providers have been updated.':'Your verified device GPS location is ready. Nearby providers have been updated.'}</Text></View>}
         {deliveryLocation&&<TouchableOpacity onPress={()=>setSaveAsDefaultLocation(!saveAsDefaultLocation)} style={styles.saveDefaultRow}><View style={[styles.checkbox,saveAsDefaultLocation&&styles.checkboxChecked]}>{saveAsDefaultLocation&&<Text style={styles.checkmark}>✓</Text>}</View><Text style={styles.saveDefaultText}>Save as default delivery location</Text></TouchableOpacity>}
       </Section>
-      <Section number="2" title="Select provider branch" helper="Distances are straight-line estimates, not driving distance.">
+      <Section number="2" title="Select provider branch" helper="Distances are straight-line estimates, not driving distance." tourRef={providerTourRef} onTourLayout={recordTourLayout('order-provider')}>
         {!deliveryLocation?<View style={styles.empty}><Text style={styles.emptyTitle}>Choose a delivery location to see nearby BlueTap providers.</Text></View>:rankedBranches.length===0?<View style={styles.empty}><Text style={styles.emptyTitle}>No nearby providers available</Text><Text style={styles.emptyText}>No active Admin-created branch has valid coordinates.</Text></View>:rankedBranches.map((branch,index)=>{
           const restricted=branchOrderingRestriction(branch);
           const restrictionUntil=restricted?.endsAt?formatRestrictionUntil(restricted.endsAt):'';
@@ -344,6 +412,8 @@ export default function RequestFormPage() {
       <Section
         number="3"
         title="Select products"
+        tourRef={productsTourRef}
+        onTourLayout={recordTourLayout('order-products')}
         helper={selectedBranch ? 'Only products available from this provider are shown.' : 'Select a provider to view its catalog.'}
         rightAction={
           selectedBranch && products.length > 1 ? (
@@ -401,15 +471,17 @@ export default function RequestFormPage() {
             {products.map((product) => (
               <View key={product.id} style={styles.productWrap}>
                 <ProductCard product={product} compact compactSelection selected={items.some((item) => item.productId === product.id)} onOrder={addProduct} />
+                {promotionOffers.filter((offer) => offer.productId === product.id).map((offer) => <PromotionTierNote key={`${offer.id}-${offer.version}`} offer={offer} quantity={items.find((item) => item.productId === product.id)?.quantity} colors={colors} checkoutEnabled={checkoutAvailable} />)}
               </View>
             ))}
           </ScrollView>
         )}
         {itemDetails.map((item)=><View key={item.productId} style={styles.itemRow}><View style={styles.itemInfo}><Text style={styles.itemName}>{item.product.product_name}</Text><Text style={styles.itemPrice}>{formatPrice(item.product.price)} each · {formatPrice(item.lineTotal)}</Text></View><View style={styles.quantity}><TouchableOpacity onPress={()=>changeQuantity(item.productId,-1)} style={styles.quantityButton}><Text style={styles.quantityText}>−</Text></TouchableOpacity><Text style={styles.quantityValue}>{item.quantity}</Text><TouchableOpacity onPress={()=>changeQuantity(item.productId,1)} style={styles.quantityButton}><Text style={styles.quantityText}>+</Text></TouchableOpacity></View></View>)}
       </Section>
-      <Section number="4" title="Order details"><View style={styles.choiceRow}>{containers.map((option)=><TouchableOpacity key={option} onPress={()=>setContainer(option)} style={[styles.choice,container===option&&styles.choiceActive]}><Text style={[styles.choiceText,container===option&&styles.choiceTextActive]}>{option}</Text></TouchableOpacity>)}</View></Section>
-      <Section number="5" title="Review request">
+      <Section number="4" title="Order details" tourRef={containerTourRef} onTourLayout={recordTourLayout('order-container')}><View style={styles.choiceRow}>{containers.map((option)=><TouchableOpacity key={option} onPress={()=>setContainer(option)} style={[styles.choice,container===option&&styles.choiceActive]}><Text style={[styles.choiceText,container===option&&styles.choiceTextActive]}>{option}</Text></TouchableOpacity>)}</View></Section>
+      <Section number="5" title="Review request" tourRef={reviewTourRef} onTourLayout={recordTourLayout('order-review')}>
         <LimitWarning items={itemDetails} colors={colors} />
+        {promotionOffers.some((offer) => itemDetails.some((item) => item.productId === offer.productId && offer.tiers.some((tier) => tier.quantity === item.quantity))) ? <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 8 }}>{checkoutAvailable ? 'Offers are subject to availability. Review the current price before ordering.' : promotionCheckout ? 'The offer is unavailable. Refresh your request before ordering.' : 'Bundle amounts shown above are previews only. The regular prices below apply at checkout.'}</Text> : null}
         <View style={styles.reviewRow}>
           <Text style={styles.reviewLabel}>Provider</Text>
           <Text style={styles.reviewValue}>{selectedBranch?.name || 'Not selected'}</Text>
@@ -428,8 +500,9 @@ export default function RequestFormPage() {
         </View>
         <View style={styles.reviewRow}>
           <Text style={styles.reviewLabel}>Items Subtotal</Text>
-          <Text style={styles.reviewValue}>{formatPrice(clientEstimate)}</Text>
+          <Text style={styles.reviewValue}>{formatPrice(validCreateQuote ? validCreateQuote.pricingSnapshot.regularSubtotalCentavos / 100 : clientEstimate)}</Text>
         </View>
+        {(validCreateQuote ? validCreateQuote.pricingSnapshot.promotionalSavingsCentavos : estimatedSavingsCentavos) > 0 && <View style={styles.reviewRow}><Text style={styles.reviewLabel}>{validCreateQuote ? 'Promotion savings' : 'Estimated promotion savings'}</Text><Text style={styles.reviewValue}>−{formatPrice((validCreateQuote ? validCreateQuote.pricingSnapshot.promotionalSavingsCentavos : estimatedSavingsCentavos) / 100)}</Text></View>}
         <View style={styles.reviewRow}>
           <View style={styles.reviewLabelWrap}>
             <Text style={styles.reviewLabel}>Delivery Fee</Text>
@@ -441,12 +514,14 @@ export default function RequestFormPage() {
               </Text>
             )}
           </View>
-          <Text style={styles.reviewValue}>{selectedBranch ? formatPrice(estimatedDeliveryFee) : '—'}</Text>
+          <Text style={styles.reviewValue}>{selectedBranch ? formatPrice(validCreateQuote ? validCreateQuote.pricingSnapshot.deliveryFeeCentavos / 100 : estimatedDeliveryFee) : '—'}</Text>
         </View>
         <View style={styles.reviewRow}>
-          <Text style={styles.reviewLabel}>Estimated total</Text>
-          <Text style={styles.total}>{formatPrice(estimatedTotal)}</Text>
+          <Text style={styles.reviewLabel}>{validCreateQuote ? 'Quoted total' : 'Estimated total'}</Text>
+          <Text style={styles.total}>{formatPrice(validCreateQuote ? validCreateQuote.pricingSnapshot.payableCentavos / 100 : estimatedTotal)}</Text>
         </View>
+        {!validCreateQuote && catalog?.promotionCheckoutEnabled === true && estimatedSavingsCentavos === null && <Text style={styles.reviewCoverageText}>Promotional estimate unavailable. Review for the current price.</Text>}
+        {!validCreateQuote && estimatedSavingsCentavos > 0 && <Text style={styles.reviewCoverageText}>Estimated savings; confirm the current price at review.</Text>}
         {selectedBranch && (
           <View style={[styles.reviewCoverage, selectedOutsideServiceArea ? styles.reviewOutside : styles.reviewWithin]}>
             <Text style={styles.reviewCoverageTitle}>{selectedOutsideServiceArea ? 'Outside normal delivery area' : 'Within delivery area'}</Text>
@@ -460,7 +535,7 @@ export default function RequestFormPage() {
           </View>
         )}
         {!!submitError && <Text accessibilityRole="alert" style={styles.submitError}>{submitError}</Text>}
-        <TouchableOpacity disabled={!canReview || submitting} onPress={reviewing ? submit : () => setReviewing(true)} style={[styles.submitButton, (!canReview || submitting) && styles.disabled]}>
+        <TouchableOpacity disabled={!canReview || submitting} onPress={reviewing ? submit : requestReview} style={[styles.submitButton, (!canReview || submitting) && styles.disabled]}>
           <Text style={styles.submitText}>{submitting ? 'Submitting…' : hasActiveOrder ? 'Active order in progress' : reviewing ? (needsManagerApproval ? 'Confirm approval request' : 'Confirm order') : (needsManagerApproval ? 'Request branch approval' : 'Review request')}</Text>
         </TouchableOpacity>
         {reviewing && (

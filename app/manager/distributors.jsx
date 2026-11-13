@@ -21,7 +21,16 @@ import BlueTapEmptyState from '../../components/BlueTapEmptyState';
 import TopToastFeedback from '../../components/TopToastFeedback';
 import ManagerShell, { MANAGER_COLORS, ManagerPill } from '../../components/ManagerShell';
 import { useManagerRealtimeData } from '../../components/ManagerRealtimeData';
+import ManagerFailedDeliveryResolutionModal from '../../components/ManagerFailedDeliveryResolutionModal';
+import ManagerTripApprovals from '../../components/ManagerTripApprovals';
+import ManagerTripPreparation from '../../components/ManagerTripPreparation';
+import ManagerTripCapacity from '../../components/ManagerTripCapacity';
+import TripLifecycleControls from '../../components/TripLifecycleControls';
+import { getManagerTripCapacity, useVerifiedTripMode } from '../../services/tripApprovals';
 import { parseTimestamp } from '../../services/notificationTimestamp';
+const {
+  createManagerFailedDeliveryResolutionFlow,
+} = require('../../services/managerFailedDeliveryResolution');
 import { approveManagerDistributor, rejectManagerDistributor } from '../../services/managerWorkspace';
 import { normalizeDistributorApplication, formatDistributorStatusLabel } from '../../services/distributorApplications';
 const { getManagerQueues, toManagerOrder } = require('../../services/managerOperational');
@@ -111,6 +120,7 @@ const allowedDayOffsets = (order) => {
 
 function DistributorDispatchQueue({ styles, colors, isDark, onShowToast }) {
   const realtime = useManagerRealtimeData();
+  const tripMode = useVerifiedTripMode();
   const [metadata, setMetadata] = useState({ branchId: '', distributors: [], branches: [] });
   const branchMetadata = metadata.branchId === realtime.branchId ? metadata : { distributors: [], branches: [] };
   const data = useMemo(() => ({
@@ -123,6 +133,10 @@ function DistributorDispatchQueue({ styles, colors, isDark, onShowToast }) {
   const [error, setError] = useState('');
   const [updatingId, setUpdatingId] = useState('');
   const [assigningOrderId, setAssigningOrderId] = useState('');
+  const [assignmentPanelMode, setAssignmentPanelMode] = useState('');
+  const [selectedTripId, setSelectedTripId] = useState('');
+  const [capacityRefresh, setCapacityRefresh] = useState(0);
+  const [tripCapacity, setTripCapacity] = useState({ status: 'loading', data: null });
   const [transferringOrderId, setTransferringOrderId] = useState('');
   const [transferReason, setTransferReason] = useState('');
 
@@ -132,12 +146,25 @@ function DistributorDispatchQueue({ styles, colors, isDark, onShowToast }) {
   const [selectedSlotIndex, setSelectedSlotIndex] = useState(0);
   const [dateSelectorOpen, setDateSelectorOpen] = useState(false);
   const [scheduleError, setScheduleError] = useState('');
+  const resolutionFlow = useMemo(() => {
+    const flow = createManagerFailedDeliveryResolutionFlow({
+      dispatchOrder: (orderId, action, payload) => dispatchManagerOrder(orderId, action, payload),
+    });
+    flow.setScope(realtime.branchId || 'manager', realtime.branchId || '');
+    return flow;
+  }, [realtime.branchId]);
+  const [resolutionState, setResolutionState] = useState(() => resolutionFlow.getState());
+  useEffect(() => resolutionFlow.subscribe(setResolutionState), [resolutionFlow]);
+  useEffect(() => {
+    resolutionFlow.updateDistributors(data.distributors || []);
+  }, [data.distributors, resolutionFlow]);
 
   const load = async () => {
     setError('');
     try {
       const result = await getManagerDispatch();
       setMetadata({ branchId: realtime.branchId, distributors: result.distributors || [], branches: result.branches || [] });
+      setCapacityRefresh((value) => value + 1);
     } catch (loadFailure) {
       setError(loadFailure.message);
     }
@@ -147,8 +174,33 @@ function DistributorDispatchQueue({ styles, colors, isDark, onShowToast }) {
     if (realtime.branchId) load();
   }, [realtime.branchId]);
 
+  useEffect(() => {
+    if (tripMode !== 'trip' || assignmentPanelMode !== 'trip' || !assigningOrderId) { setTripCapacity({ status: 'loading', data: null }); return undefined; }
+    let active = true; let sequence = 0; let pending = false; let deadline = null;
+    const refresh = async () => {
+      if (pending) return;
+      pending = true;
+      const current = ++sequence; let expired = false;
+      setTripCapacity({ status: 'loading', data: null });
+      deadline = setTimeout(() => { expired = true; if (active && current === sequence) setTripCapacity({ status: 'unavailable', data: null }); }, 12000);
+      try { const result = await getManagerTripCapacity(selectedTripId); if (!expired && active && current === sequence) setTripCapacity({ status: 'ready', data: result }); }
+      catch { if (active && current === sequence) setTripCapacity({ status: 'unavailable', data: null }); }
+      finally { clearTimeout(deadline); deadline = null; pending = false; }
+    };
+    refresh();
+    const timer = setInterval(refresh, 15000);
+    return () => { active = false; clearInterval(timer); clearTimeout(deadline); };
+  }, [tripMode, assignmentPanelMode, assigningOrderId, selectedTripId, capacityRefresh, realtime.branchId]);
+
   const openAssignmentPanel = (order) => {
+    if (order?.status === 'delivery_failed' && tripMode !== 'trip') {
+      setAssigningOrderId('');
+      setTransferringOrderId('');
+      resolutionFlow.open(order, 'reassign', data.distributors || []);
+      return;
+    }
     setAssigningOrderId(order.id);
+    setAssignmentPanelMode(tripMode);
     setTransferringOrderId('');
     setSelectedDistributorUid(order.assignedDistributorUid || (data.distributors[0]?.uid || ''));
     setSelectedDayOffset(allowedDayOffsets(order)[0] ?? 0);
@@ -158,6 +210,7 @@ function DistributorDispatchQueue({ styles, colors, isDark, onShowToast }) {
   };
 
   const submitAssignment = async (order, isReassign) => {
+    if (tripMode !== 'default' || assignmentPanelMode !== 'default') return;
     if (!selectedDistributorUid) {
       setScheduleError('Please select a distributor.');
       return;
@@ -219,6 +272,30 @@ function DistributorDispatchQueue({ styles, colors, isDark, onShowToast }) {
       return st !== 'pending' && ['awaiting_distributor_assignment', 'delivery_failed'].includes(st);
     }
   );
+  const capacityMonitorId = '__capacity_monitor__';
+  const capacityMonitorOpen = tripMode === 'trip' && assignmentPanelMode === 'trip' && assigningOrderId === capacityMonitorId;
+  useEffect(() => {
+    if (dispatchableOrders.length > 0 && assigningOrderId === capacityMonitorId) setAssigningOrderId('');
+  }, [dispatchableOrders.length, assigningOrderId]);
+  const distributorOptions = () => metadata.branchId !== realtime.branchId ? <ActivityIndicator color={colors.primary} /> : data.distributors.length === 0 ? (
+    <Text style={styles.panelEmptyText}>No eligible distributors currently found for this branch.</Text>
+  ) : (
+    <View style={styles.distributorList}>
+      {data.distributors.map((distributor) => {
+        const isSelected = selectedDistributorUid === distributor.uid;
+        return (
+          <TouchableOpacity key={distributor.uid} accessibilityRole="radio" accessibilityState={{ selected: isSelected }} onPress={() => setSelectedDistributorUid(distributor.uid)} style={[styles.distributorOption, isSelected && styles.distributorOptionSelected]}>
+            <View style={[styles.radioCircle, isSelected && styles.radioCircleSelected]}>{isSelected && <View style={styles.radioDot} />}</View>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={[styles.distributorName, isSelected && styles.distributorNameSelected]}>{distributor.name}</Text>
+              <Text style={styles.distributorSub}>Eligible · This Branch</Text>
+              {tripMode === 'trip' && <ManagerTripCapacity snapshot={tripCapacity} distributorUid={distributor.uid} colors={colors} selectionIsExplicit={!!selectedTripId} />}
+            </View>
+          </TouchableOpacity>
+        );
+      })}
+    </View>
+  );
 
   return (
     <View style={styles.dispatchCard}>
@@ -240,12 +317,18 @@ function DistributorDispatchQueue({ styles, colors, isDark, onShowToast }) {
           <Text style={styles.approvalErrorText}>{error}</Text>
         </View>
       )}
+      {tripMode === 'blocked' && <Text accessibilityRole="alert" style={styles.approvalErrorText}>Trip availability could not be verified. Dispatch actions are unavailable until the connection is verified.</Text>}
+      {tripMode === 'trip' && <Text style={styles.approvalHelper}>Trip assignment and direct rescheduling controls are not available on this screen yet. Pending proposals can be reviewed below.</Text>}
+      <ManagerTripApprovals mode={tripMode} orders={realtime.requests} colors={colors} onRefresh={load} />
+      <ManagerTripPreparation mode={tripMode} colors={colors} distributors={data.distributors || []} onRefresh={load} onSelectedTripChange={setSelectedTripId} />
+      <TripLifecycleControls mode={tripMode} role="manager" colors={colors} distributors={data.distributors || []} />
 
       {loading ? (
         <View style={styles.approvalEmpty}>
           <ActivityIndicator color={colors.primary} />
         </View>
       ) : dispatchableOrders.length === 0 ? (
+        <>
         <BlueTapEmptyState
           compact
           variant="dispatch"
@@ -255,12 +338,24 @@ function DistributorDispatchQueue({ styles, colors, isDark, onShowToast }) {
           dark={isDark}
           style={styles.visualEmpty}
         />
+        {tripMode === 'trip' && <>
+          <TouchableOpacity accessibilityRole="button" accessibilityState={{ expanded: capacityMonitorOpen }} onPress={() => { setAssignmentPanelMode('trip'); setAssigningOrderId(capacityMonitorOpen ? '' : capacityMonitorId); }} style={styles.refreshButton}>
+            <Text style={styles.refreshText}>{capacityMonitorOpen ? 'Close Capacity' : 'View Distributor Capacity'}</Text>
+          </TouchableOpacity>
+          {capacityMonitorOpen && <View style={styles.assignmentPanel}>
+            <Text style={styles.panelTitle}>Select Available Distributor</Text>
+            <Text style={styles.panelEmptyText}>Capacity is advisory and may change.</Text>
+            {selectedTripId && tripCapacity.status === 'ready' && !tripCapacity.data.selectedTrip && <Text accessibilityRole="alert" style={styles.panelEmptyText}>The selected trip is no longer available. Refresh trip preparation.</Text>}
+            <ScrollView nestedScrollEnabled style={{ maxHeight: 220 }}>{distributorOptions()}</ScrollView>
+          </View>}
+        </>}
+        </>
       ) : (
         <ScrollView nestedScrollEnabled style={styles.queueScroll} contentContainerStyle={styles.queueContent}>
         {dispatchableOrders.map((order) => {
           const isUpdating = updatingId === order.id;
           const assigned = !!order.assignedDistributorUid;
-          const isPanelOpen = assigningOrderId === order.id;
+          const isPanelOpen = assigningOrderId === order.id && assignmentPanelMode === tripMode;
           const isTransferOpen = transferringOrderId === order.id;
 
           return (
@@ -301,25 +396,41 @@ function DistributorDispatchQueue({ styles, colors, isDark, onShowToast }) {
               <View style={styles.dispatchInfoBlock}>
                 <View style={styles.dispatchActions}>
                   <TouchableOpacity
-                    disabled={isUpdating}
+                    disabled={isUpdating || !['default', 'trip'].includes(tripMode)}
                     onPress={() => (isPanelOpen ? setAssigningOrderId('') : openAssignmentPanel(order))}
-                    style={[styles.assignButton, isUpdating && styles.actionDisabled]}
+                    style={[styles.assignButton, (isUpdating || !['default', 'trip'].includes(tripMode)) && styles.actionDisabled]}
                   >
                     <Text style={styles.assignButtonText}>
-                      {isPanelOpen ? 'Close Assignment' : assigned ? 'Reassign & Schedule' : 'Assign & Schedule'}
+                      {tripMode === 'trip' ? (isPanelOpen ? 'Close Capacity' : 'View Distributor Capacity') : isPanelOpen ? 'Close Assignment' : assigned ? 'Reassign & Schedule' : 'Assign & Schedule'}
                     </Text>
                   </TouchableOpacity>
 
-                  <TouchableOpacity
-                    disabled={isUpdating}
-                    onPress={() => {
-                      setTransferringOrderId(isTransferOpen ? '' : order.id);
-                      setAssigningOrderId('');
-                    }}
-                    style={styles.transferButton}
-                  >
-                    <Text style={styles.transferButtonText}>Transfer Branch</Text>
-                  </TouchableOpacity>
+                  {order.status === 'delivery_failed' ? (
+                    <TouchableOpacity
+                      accessibilityRole="button"
+                      accessibilityLabel={`Reschedule delivery for order ${order.requestId || order.id}`}
+                      disabled={isUpdating || tripMode !== 'default'}
+                      onPress={() => {
+                        setTransferringOrderId('');
+                        setAssigningOrderId('');
+                        resolutionFlow.open(order, 'reschedule', data.distributors || []);
+                      }}
+                      style={[styles.transferButton, (isUpdating || tripMode !== 'default') && styles.actionDisabled]}
+                    >
+                      <Text style={styles.transferButtonText}>Reschedule Delivery</Text>
+                    </TouchableOpacity>
+                  ) : (
+                    <TouchableOpacity
+                      disabled={isUpdating}
+                      onPress={() => {
+                        setTransferringOrderId(isTransferOpen ? '' : order.id);
+                        setAssigningOrderId('');
+                      }}
+                      style={styles.transferButton}
+                    >
+                      <Text style={styles.transferButtonText}>Transfer Branch</Text>
+                    </TouchableOpacity>
+                  )}
                 </View>
               </View>
 
@@ -341,33 +452,11 @@ function DistributorDispatchQueue({ styles, colors, isDark, onShowToast }) {
               {isPanelOpen && (
                 <View style={styles.assignmentPanel}>
                   <Text style={styles.panelTitle}>1. Select Available Distributor</Text>
-                  {metadata.branchId !== realtime.branchId ? <ActivityIndicator color={colors.primary} /> : data.distributors.length === 0 ? (
-                    <Text style={styles.panelEmptyText}>No eligible distributors currently found for this branch.</Text>
-                  ) : (
-                    <View style={styles.distributorList}>
-                      {data.distributors.map((distributor) => {
-                        const isSelected = selectedDistributorUid === distributor.uid;
-                        return (
-                          <TouchableOpacity
-                            key={distributor.uid}
-                            onPress={() => setSelectedDistributorUid(distributor.uid)}
-                            style={[styles.distributorOption, isSelected && styles.distributorOptionSelected]}
-                          >
-                            <View style={[styles.radioCircle, isSelected && styles.radioCircleSelected]}>
-                              {isSelected && <View style={styles.radioDot} />}
-                            </View>
-                            <View style={{ flex: 1 }}>
-                              <Text style={[styles.distributorName, isSelected && styles.distributorNameSelected]}>
-                                {distributor.name}
-                              </Text>
-                              <Text style={styles.distributorSub}>Eligible · This Branch</Text>
-                            </View>
-                          </TouchableOpacity>
-                        );
-                      })}
-                    </View>
-                  )}
+                  {tripMode === 'trip' && <Text style={styles.panelEmptyText}>Capacity is advisory and may change. Assign orders in trip preparation.</Text>}
+                  {tripMode === 'trip' && selectedTripId && tripCapacity.status === 'ready' && !tripCapacity.data.selectedTrip && <Text accessibilityRole="alert" style={styles.panelEmptyText}>The selected trip is no longer available. Refresh trip preparation.</Text>}
+                  {distributorOptions()}
 
+                  {tripMode === 'default' && <>
                   <Text style={[styles.panelTitle, { marginTop: 14 }]}>2. Set Delivery Schedule</Text>
                   <View style={styles.scheduleRow}>
                     <Text style={styles.scheduleSubTitle}>Delivery Date</Text>
@@ -427,6 +516,7 @@ function DistributorDispatchQueue({ styles, colors, isDark, onShowToast }) {
                       {isUpdating ? 'Saving…' : 'Confirm Assignment & Schedule'}
                     </Text>
                   </TouchableOpacity>
+                  </>}
                 </View>
               )}
 
@@ -468,6 +558,16 @@ function DistributorDispatchQueue({ styles, colors, isDark, onShowToast }) {
         })}
         </ScrollView>
       )}
+      <ManagerFailedDeliveryResolutionModal
+        state={resolutionState}
+        flow={resolutionFlow}
+        colors={colors}
+        isDark={isDark}
+        onSuccess={async (res) => {
+          onShowToast?.(res.message, 'success');
+          await load();
+        }}
+      />
     </View>
   );
 }

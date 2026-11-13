@@ -10,6 +10,7 @@ export default function TopToastFeedback({
   type = 'success', // 'success' | 'error' | 'warning' | 'info'
   duration = 3200,
   onDismiss,
+  reduceMotion = false,
 }) {
   const { colors, isDark } = useBlueTapTheme();
   const opacityAnim = useRef(new Animated.Value(0)).current;
@@ -20,7 +21,8 @@ export default function TopToastFeedback({
     if (visible && message) {
       if (timerRef.current) clearTimeout(timerRef.current);
 
-      Animated.parallel([
+      if (reduceMotion) { opacityAnim.setValue(1); translateYAnim.setValue(0); }
+      else Animated.parallel([
         Animated.timing(opacityAnim, {
           toValue: 1,
           duration: 220,
@@ -46,9 +48,10 @@ export default function TopToastFeedback({
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
     };
-  }, [visible, message, duration]);
+  }, [visible, message, duration, reduceMotion]);
 
   const dismissToast = () => {
+    if (reduceMotion) { opacityAnim.setValue(0); translateYAnim.setValue(-24); if (onDismiss) onDismiss(); return; }
     Animated.parallel([
       Animated.timing(opacityAnim, {
         toValue: 0,

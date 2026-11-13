@@ -27,6 +27,7 @@ import {
   clearAllAuthSessions,
   fetchFirestoreUserProfile,
   getPostAuthenticationDestination,
+  recheckPendingEmailVerification,
   saveRoleSession,
 } from '../services/authSession';
 import { loginWithUsernameResult } from '../services/usernameAuth';
@@ -102,6 +103,8 @@ export default function LoginPage() {
   const { signup, passwordChanged } = useLocalSearchParams();
   const emailInputRef = React.useRef(null);
   const passwordInputRef = React.useRef(null);
+  const forgotPasswordTriggerRef = React.useRef(null);
+  const recoveryCodeInputRef = React.useRef(null);
   const scrollViewRef = React.useRef(null);
   const activeFieldRef = React.useRef(null);
   const keyboardFrameRef = React.useRef(null);
@@ -130,6 +133,9 @@ export default function LoginPage() {
   const [recoveryMaskedEmail, setRecoveryMaskedEmail] = React.useState('');
   const [recoveryAuthorization, setRecoveryAuthorization] = React.useState('');
   const [recoveryCode, setRecoveryCode] = React.useState('');
+  const [recoveryResendAt, setRecoveryResendAt] = React.useState(0);
+  const [recoveryNow, setRecoveryNow] = React.useState(Date.now());
+  const [recoveryCodeFocused, setRecoveryCodeFocused] = React.useState(false);
   const [recoveryPassword, setRecoveryPassword] = React.useState('');
   const [recoveryPasswordConfirm, setRecoveryPasswordConfirm] = React.useState('');
   const [showRecoveryPassword, setShowRecoveryPassword] = React.useState(false);
@@ -147,6 +153,18 @@ export default function LoginPage() {
   }), []);
 
   React.useEffect(() => () => adminEntryTracker.reset(), [adminEntryTracker]);
+
+  React.useEffect(() => {
+    if (!forgotPasswordVisible || recoveryStep !== 'verify' || !recoveryResendAt) return undefined;
+    const timer = setInterval(() => setRecoveryNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [forgotPasswordVisible, recoveryStep, recoveryResendAt]);
+  React.useEffect(() => {
+    if (!forgotPasswordVisible || recoveryStep !== 'verify' || resetLoading) return undefined;
+    const timer = setTimeout(() => recoveryCodeInputRef.current?.focus(), 100);
+    return () => clearTimeout(timer);
+  }, [forgotPasswordVisible, recoveryStep, resetLoading]);
+  const recoveryResendSeconds = Math.max(0, Math.ceil((recoveryResendAt - recoveryNow) / 1000));
 
   React.useEffect(() => { warmLoginBackend(); prepareSignup(); }, []);
 
@@ -169,7 +187,7 @@ export default function LoginPage() {
       if (!user?.uid || loginInFlight.current || loginSucceeded.current) return;
       try {
         const profile = await fetchFirestoreUserProfile(user);
-        if (cancelled || !profile?.role) return;
+        if (cancelled || loginInFlight.current || loginSucceeded.current || auth.currentUser?.uid !== user.uid || !profile?.role) return;
         const destination = getPostAuthenticationDestination(profile);
         if (destination && destination !== '/login') {
           router.replace(destination);
@@ -436,6 +454,12 @@ export default function LoginPage() {
         throw Object.assign(new Error('Account setup incomplete'), { code: 'ACCOUNT_SETUP_INCOMPLETE' });
       }
 
+      try {
+        profileData = await recheckPendingEmailVerification(profileData, user);
+      } catch {
+        throw Object.assign(new Error('Account verification check unavailable'), { code: 'VERIFICATION_CHECK_UNAVAILABLE' });
+      }
+      if (requestId !== requestSequence.current || auth.currentUser?.uid !== user.uid) return;
       saveLocalUser(profileData);
       successState.current = true;
       finishSuccessfulLogin(profileData);
@@ -443,6 +467,10 @@ export default function LoginPage() {
 
     } catch (error) {
       if (requestId !== requestSequence.current || successState.current) return;
+      if (error?.code === 'VERIFICATION_CHECK_UNAVAILABLE') {
+        showNotification('Account check unavailable', 'Your account could not be checked. Please try again.');
+        return;
+      }
       if (auth.currentUser && (!authenticatedUser || auth.currentUser.uid === authenticatedUser.uid)) {
         clearAllAuthSessions();
         await signOut(auth).catch(() => {});
@@ -503,7 +531,7 @@ export default function LoginPage() {
     clearFocusScrollTimeout();
     setResetEmail(email.trim().toLowerCase());
     setResetEmailError('');
-    setRecoveryStep('email'); setRecoverySessionId(''); setRecoveryMaskedEmail(''); setRecoveryAuthorization(''); setRecoveryCode(''); setRecoveryPassword(''); setRecoveryPasswordConfirm('');
+    setRecoveryStep('email'); setRecoverySessionId(''); setRecoveryMaskedEmail(''); setRecoveryAuthorization(''); setRecoveryCode(''); setRecoveryPassword(''); setRecoveryPasswordConfirm(''); setRecoveryResendAt(0); setRecoveryCodeFocused(false);
     setForgotPasswordVisible(true);
   };
 
@@ -515,6 +543,7 @@ export default function LoginPage() {
   };
 
   const handlePasswordReset = async () => {
+    if (resetLoading || (recoveryStep === 'verify' && recoveryResendSeconds > 0)) return;
     const normalizedEmail = resetEmail.trim().toLowerCase();
 
     if (!isValidEmail(normalizedEmail)) {
@@ -528,10 +557,15 @@ export default function LoginPage() {
 
       const result = await requestPasswordRecovery(normalizedEmail);
       setRecoverySessionId(result.recoverySessionId);
-      setRecoveryMaskedEmail(result.maskedEmail || normalizedEmail);
+      setRecoveryMaskedEmail(typeof result.maskedEmail === 'string' && /^[^\s@]*\*+[^\s@]*@[^\s@]+$/.test(result.maskedEmail) ? result.maskedEmail : '');
+      const retrySeconds = Number(result.retryAfterSeconds);
+      const now = Date.now(); setRecoveryNow(now);
+      setRecoveryResendAt(Number.isFinite(retrySeconds) && retrySeconds > 0 ? now + retrySeconds * 1000 : 0);
       setRecoveryStep('verify');
     } catch (error) {
       const message = error?.message || 'Password recovery is temporarily unavailable. Please try again.';
+      const retrySeconds = Number(error?.retryAfterSeconds);
+      if (Number.isFinite(retrySeconds) && retrySeconds > 0) { const now = Date.now(); setRecoveryNow(now); setRecoveryResendAt(now + retrySeconds * 1000); }
       setResetEmailError(message);
     } finally {
       setResetLoading(false);
@@ -539,6 +573,7 @@ export default function LoginPage() {
   };
 
   const verifyRecoveryCode = async () => {
+    if (resetLoading) return;
     if (!/^\d{6}$/.test(recoveryCode)) { setResetEmailError('Enter the six-digit code from your email.'); return; }
     try { setResetLoading(true); setResetEmailError(''); const result = await verifyPasswordRecovery(recoverySessionId, recoveryCode); setRecoveryAuthorization(result.resetAuthorization); setRecoveryStep('password'); }
     catch (error) { setResetEmailError(error?.message || 'That code is invalid or expired.'); }
@@ -674,6 +709,7 @@ export default function LoginPage() {
   const loginLinks = (
     <>
       <TouchableOpacity
+        ref={forgotPasswordTriggerRef}
         style={styles.forgotPasswordContainer}
         onPress={openForgotPassword}
         disabled={loading}
@@ -791,18 +827,20 @@ export default function LoginPage() {
           </View>
         </Modal>
 
-        <Modal visible={forgotPasswordVisible} transparent animationType="slide">
+        <Modal visible={forgotPasswordVisible} transparent animationType="slide" onRequestClose={closeForgotPassword} onDismiss={() => forgotPasswordTriggerRef.current?.focus()}>
           <View style={styles.modalBackground}>
-            <View style={styles.modalContainer}>
-              <Text style={styles.modalTitle}>{recoveryStep === 'email' ? 'Reset your password' : recoveryStep === 'verify' ? 'Check your email' : recoveryStep === 'password' ? 'Create a new password' : 'Password changed'}</Text>
-              <Text style={styles.resetHelperText}>{recoveryStep === 'email' ? 'Enter the email linked to your BlueTap account.' : recoveryStep === 'verify' ? `If this email has an eligible BlueTap account, check ${recoveryMaskedEmail} for a code. If none arrives, contact support.` : recoveryStep === 'password' ? 'Choose a new password with uppercase, lowercase, and a number.' : 'Your password was changed. Sign in with your new password.'}</Text>
+            <View accessibilityViewIsModal style={[styles.modalContainer, recoveryStep === 'verify' && styles.recoveryVerifyCard, recoveryStep === 'verify' && { backgroundColor: colors.surface, borderColor: colors.border }]}>
+              {recoveryStep === 'verify' ? <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={[styles.recoveryIconCircle, { backgroundColor: colors.primarySoft }]}><View style={[styles.recoveryEnvelope, { borderColor: colors.iconPrimary }]}><View style={[styles.recoveryFlap, styles.recoveryFlapLeft, { backgroundColor: colors.iconPrimary }]} /><View style={[styles.recoveryFlap, styles.recoveryFlapRight, { backgroundColor: colors.iconPrimary }]} /></View></View> : null}
+              <Text style={recoveryStep === 'verify' ? [styles.recoveryVerifyTitle, { color: colors.textPrimary }] : styles.modalTitle}>{recoveryStep === 'email' ? 'Reset your password' : recoveryStep === 'verify' ? 'Verify your email' : recoveryStep === 'password' ? 'Create a new password' : 'Password changed'}</Text>
+              <Text style={recoveryStep === 'verify' ? [styles.recoveryVerifyDescription, { color: colors.textSecondary }] : styles.resetHelperText}>{recoveryStep === 'email' ? 'Enter the email linked to your BlueTap account.' : recoveryStep === 'verify' ? 'If your account is eligible, check your email for a six-digit code.' : recoveryStep === 'password' ? 'Choose a new password with uppercase, lowercase, and a number.' : 'Your password was changed. Sign in with your new password.'}</Text>
+              {recoveryStep === 'verify' && !!recoveryMaskedEmail ? <Text style={[styles.recoveryMaskedEmail, { color: colors.textPrimary }]}>{recoveryMaskedEmail}</Text> : null}
               {recoveryStep === 'email' ? <TextInput style={[styles.resetInput, !!resetEmailError && styles.resetInputError]} placeholder="Email address" placeholderTextColor={colors.textSecondary} keyboardType="email-address" autoCapitalize="none" value={resetEmail} onChangeText={setResetEmail} /> : null}
-              {recoveryStep === 'verify' ? <TextInput style={[styles.resetInput, !!resetEmailError && styles.resetInputError]} placeholder="6-digit code" placeholderTextColor={colors.textSecondary} keyboardType="number-pad" maxLength={6} value={recoveryCode} onChangeText={(value) => setRecoveryCode(value.replace(/\D/g, ''))} /> : null}
+              {recoveryStep === 'verify' ? <TextInput ref={recoveryCodeInputRef} autoFocus accessibilityLabel="Six-digit verification code" accessibilityHint={resetEmailError || undefined} editable={!resetLoading} style={[styles.recoveryCodeInput, { backgroundColor: colors.input || colors.surfaceAlt, borderColor: resetEmailError ? colors.danger : recoveryCodeFocused ? colors.primary : colors.border, color: colors.textPrimary }]} placeholder="000000" placeholderTextColor={colors.textSecondary} keyboardType="number-pad" textContentType="oneTimeCode" autoComplete="one-time-code" returnKeyType="done" onSubmitEditing={verifyRecoveryCode} onFocus={() => setRecoveryCodeFocused(true)} onBlur={() => setRecoveryCodeFocused(false)} maxLength={6} value={recoveryCode} onChangeText={(value) => { setRecoveryCode(value.replace(/\D/g, '')); if (resetEmailError) setResetEmailError(''); }} /> : null}
               {recoveryStep === 'password' ? <><View style={[styles.resetPasswordField, !!resetEmailError && styles.resetInputError]}><TextInput style={styles.resetPasswordInput} placeholder="New password" placeholderTextColor={colors.textSecondary} secureTextEntry={!showRecoveryPassword} value={recoveryPassword} onChangeText={setRecoveryPassword} /><PasswordVisibilityButton visible={showRecoveryPassword} onPress={() => setShowRecoveryPassword((value) => !value)} label="new password" /></View><View style={styles.resetPasswordField}><TextInput style={styles.resetPasswordInput} placeholder="Confirm new password" placeholderTextColor={colors.textSecondary} secureTextEntry={!showRecoveryConfirmation} value={recoveryPasswordConfirm} onChangeText={setRecoveryPasswordConfirm} /><PasswordVisibilityButton visible={showRecoveryConfirmation} onPress={() => setShowRecoveryConfirmation((value) => !value)} label="password confirmation" /></View></> : null}
-              {!!resetEmailError && <Text style={styles.resetErrorText}>{resetEmailError}</Text>}
-              {recoveryStep !== 'done' ? <TouchableOpacity style={[styles.modalButton, resetLoading && styles.buttonDisabled]} onPress={recoveryStep === 'email' ? handlePasswordReset : recoveryStep === 'verify' ? verifyRecoveryCode : completeRecovery} disabled={resetLoading}><Text style={styles.modalButtonText}>{resetLoading ? 'Please wait…' : recoveryStep === 'email' ? 'Send verification code' : recoveryStep === 'verify' ? 'Verify code' : 'Save new password'}</Text></TouchableOpacity> : <TouchableOpacity style={styles.modalButton} onPress={closeForgotPassword}><Text style={styles.modalButtonText}>Back to sign in</Text></TouchableOpacity>}
-              {recoveryStep === 'verify' ? <TouchableOpacity style={styles.modalCancel} onPress={handlePasswordReset} disabled={resetLoading}><Text style={styles.modalCancelText}>Resend code</Text></TouchableOpacity> : null}
-              {recoveryStep !== 'done' ? <TouchableOpacity style={styles.modalCancel} onPress={closeForgotPassword} disabled={resetLoading}><Text style={styles.modalCancelText}>Cancel</Text></TouchableOpacity> : null}
+              {!!resetEmailError && <Text accessibilityRole="alert" style={recoveryStep === 'verify' ? [styles.recoveryError, { color: colors.danger }] : styles.resetErrorText}>{resetEmailError}</Text>}
+              {recoveryStep !== 'done' ? <TouchableOpacity accessibilityRole="button" style={[styles.modalButton, recoveryStep === 'verify' && styles.recoveryVerifyButton, { backgroundColor: colors.primaryAction || colors.primary }, resetLoading && styles.buttonDisabled]} onPress={recoveryStep === 'email' ? handlePasswordReset : recoveryStep === 'verify' ? verifyRecoveryCode : completeRecovery} disabled={resetLoading}><Text style={[styles.modalButtonText, { color: colors.onPrimary || '#FFFFFF' }]}>{resetLoading ? 'Please wait…' : recoveryStep === 'email' ? 'Send verification code' : recoveryStep === 'verify' ? 'Verify & Continue' : 'Save new password'}</Text></TouchableOpacity> : <TouchableOpacity style={[styles.modalButton, { backgroundColor: colors.primaryAction || colors.primary }]} onPress={closeForgotPassword}><Text style={[styles.modalButtonText, { color: colors.onPrimary || '#FFFFFF' }]}>Back to sign in</Text></TouchableOpacity>}
+              {recoveryStep === 'verify' ? <TouchableOpacity accessibilityRole="button" accessibilityState={{ disabled: resetLoading || recoveryResendSeconds > 0 }} style={styles.recoveryResend} onPress={handlePasswordReset} disabled={resetLoading || recoveryResendSeconds > 0}><Text style={[styles.recoveryResendText, { color: resetLoading || recoveryResendSeconds > 0 ? colors.textSecondary : colors.primary }]}>{recoveryResendSeconds > 0 ? `Resend code in ${recoveryResendSeconds}s` : 'Resend code'}</Text></TouchableOpacity> : null}
+              {recoveryStep !== 'done' ? <TouchableOpacity accessibilityRole="button" style={recoveryStep === 'verify' ? styles.recoveryBack : styles.modalCancel} onPress={closeForgotPassword} disabled={resetLoading}><Text style={recoveryStep === 'verify' ? [styles.recoveryBackText, { color: colors.textSecondary }] : styles.modalCancelText}>{recoveryStep === 'verify' ? '‹  Back to login' : 'Cancel'}</Text></TouchableOpacity> : null}
             </View>
           </View>
         </Modal>
@@ -1030,6 +1068,22 @@ const styles = createPortalStyleSheet({
     padding: 24,
     alignItems: 'center',
   },
+  recoveryVerifyCard: { maxWidth: 390, borderWidth: 1, paddingHorizontal: 22, paddingVertical: 24 },
+  recoveryIconCircle: { width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center', marginBottom: 14 },
+  recoveryEnvelope: { width: 24, height: 17, borderWidth: 1.8, borderRadius: 3 },
+  recoveryFlap: { position: 'absolute', top: 4, width: 13, height: 1.8 },
+  recoveryFlapLeft: { left: 0, transform: [{ rotate: '32deg' }] },
+  recoveryFlapRight: { right: 0, transform: [{ rotate: '-32deg' }] },
+  recoveryVerifyTitle: { fontSize: 21, fontWeight: '800', textAlign: 'center', marginBottom: 8 },
+  recoveryVerifyDescription: { fontSize: 14, lineHeight: 20, textAlign: 'center' },
+  recoveryMaskedEmail: { fontSize: 14, fontWeight: '700', textAlign: 'center', marginTop: 5 },
+  recoveryCodeInput: { width: '100%', minHeight: 54, borderWidth: 1.5, borderRadius: 11, textAlign: 'center', fontSize: 22, fontWeight: '700', letterSpacing: 6, marginTop: 18, marginBottom: 6 },
+  recoveryError: { width: '100%', fontSize: 12, lineHeight: 17, marginTop: 3, marginBottom: 3 },
+  recoveryVerifyButton: { marginTop: 12, marginBottom: 0, minHeight: 48, justifyContent: 'center' },
+  recoveryResend: { minHeight: 44, justifyContent: 'center', alignItems: 'center', marginTop: 4 },
+  recoveryResendText: { fontSize: 13, fontWeight: '700' },
+  recoveryBack: { minHeight: 40, justifyContent: 'center', alignItems: 'center' },
+  recoveryBackText: { fontSize: 13, fontWeight: '600' },
   modalTitle: {
     fontSize: 18,
     fontWeight: 'bold',

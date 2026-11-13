@@ -1,7 +1,8 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigation } from 'expo-router';
+import { usePreventRemove } from '@react-navigation/native';
 import {
   ActivityIndicator,
-  Image,
   Platform,
   Pressable,
   ScrollView,
@@ -17,7 +18,8 @@ import * as ImagePicker from 'expo-image-picker';
 import { saveLocalUser } from '../../localUsers';
 import { useAdminTheme } from '../../components/AdminTheme';
 import BlueTapIcon from '../../components/BlueTapIcon';
-import ManagerShell, { ManagerPill, ManagerWaterDrop } from '../../components/ManagerShell';
+import ManagerShell from '../../components/ManagerShell';
+import ManagerProfileHeader from '../../components/ManagerProfileHeader';
 import { useManagerRealtimeData } from '../../components/ManagerRealtimeData';
 import TopToastFeedback from '../../components/TopToastFeedback';
 import ChangePasswordModal from '../../components/ChangePasswordModal';
@@ -26,6 +28,8 @@ import { getModuleSession } from '../../services/authSession';
 import { formatPhilippinePhone, normalizePhilippinePhone } from '../../services/phoneUtils';
 import { updateManagerProfile } from '../../services/managerProfile';
 import { getProfileUniqueId } from '../../services/uniqueIds';
+const { isValidManagerPhone } = require('../../services/managerPhone');
+const { profileDraftsDiffer, changedProfileFields } = require('../../services/profileDraftComparison');
 
 const clean = (value, fallback = 'Not set') =>
   typeof value === 'string' && value.trim() ? value.trim() : fallback;
@@ -42,13 +46,16 @@ const draftFor = (profile = {}) => {
   };
 };
 
-function ProfileField({ editable, label, multiline, onChangeText, value, themedStyles }) {
+function ProfileField({ editable, disabled, label, multiline, onChangeText, value, themedStyles, error, keyboardType }) {
   return (
     <View style={themedStyles.fieldWrap}>
       <Text style={themedStyles.detailLabel}>{label}</Text>
       {editable ? (
         <TextInput
           accessibilityLabel={label}
+          aria-invalid={!!error}
+          keyboardType={keyboardType}
+          editable={!disabled}
           multiline={multiline}
           onChangeText={onChangeText}
           style={[themedStyles.input, multiline && themedStyles.multilineInput]}
@@ -57,49 +64,62 @@ function ProfileField({ editable, label, multiline, onChangeText, value, themedS
       ) : (
         <Text style={themedStyles.detailValue}>{value}</Text>
       )}
+      {!!error && <Text accessibilityRole="alert" style={themedStyles.fieldError}>{error}</Text>}
     </View>
   );
 }
 
 export default function ManagerSettingsPage() {
-  const { colors, preference, setPreference } = useAdminTheme();
+  const { colors, preference, resolvedTheme, setPreference } = useAdminTheme();
   const { width } = useWindowDimensions();
   const compact = width < 700;
   const styles = useMemo(() => createStyles(colors, compact), [colors, compact]);
   const session = getModuleSession('manager');
   const realtime = useManagerRealtimeData();
   const manager = realtime.profile;
+  const navigation = useNavigation();
+  const editBaseline = useRef(null);
+  const expectedProfile = useRef(null);
+  const saveInFlight = useRef(false);
 
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [draft, setDraft] = useState(() => draftFor(manager));
   const [selectedImage, setSelectedImage] = useState(null);
+  const [removeImage, setRemoveImage] = useState(false);
   const [toast, setToast] = useState({ visible: false, message: '', type: 'info' });
   const [passwordModalVisible, setPasswordModalVisible] = useState(false);
+  const [profileSaveError, setProfileSaveError] = useState('');
+  const phoneValid = isValidManagerPhone(draft.phone);
+  const phoneError = editing && !phoneValid ? 'Enter 09XXXXXXXXX or +639XXXXXXXXX (Philippine mobile number).' : '';
 
   useEffect(() => {
     if (!editing) setDraft(draftFor(manager || {}));
   }, [editing, manager]);
 
   const isProfileDirty = useMemo(() => {
-    if (!editing || !manager) return false;
-    const initial = draftFor(manager);
+    if (!editing) return false;
+    const initial = editBaseline.current || draftFor(manager);
     return (
-      draft.fullName !== initial.fullName ||
-      draft.phone !== initial.phone ||
-      draft.address !== initial.address ||
-      Boolean(selectedImage)
+      profileDraftsDiffer(draft, initial, normalizePhilippinePhone) ||
+      Boolean(selectedImage) || removeImage
     );
-  }, [editing, manager, draft, selectedImage]);
+  }, [editing, manager, draft, selectedImage, removeImage]);
 
   const { confirmLeave, UnsavedModal } = useUnsavedChangesGuard({
     isDirty: isProfileDirty,
     isSubmitting: saving,
+    onSave: saveProfile,
+    navigationManaged: true,
     onDiscard: () => {
       setDraft(draftFor(manager || {}));
       setSelectedImage(null);
+      setRemoveImage(false);
       setEditing(false);
     },
+  });
+  usePreventRemove(isProfileDirty || saving, ({ data }) => {
+    confirmLeave(() => navigation.dispatch(data.action));
   });
 
   const managerFullName = fullNameFor(manager || {});
@@ -124,7 +144,8 @@ export default function ManagerSettingsPage() {
     realtime.branch?.name || session?.branchName,
     realtime.branchLoading ? 'Loading…' : 'Not assigned'
   );
-  const photoUri = selectedImage?.uri || manager?.profilePhotoUrl || '';
+  const storedPhotoUri = manager?.profilePhotoRemoved ? '' : (manager?.profilePhotoUrl || manager?.photoURL || manager?.avatarUrl || '');
+  const photoUri = selectedImage?.uri || (removeImage ? '' : storedPhotoUri);
   const loadError =
     realtime.errors?.branch || realtime.errors?.profile || realtime.errors?.profileEnsure || '';
   const missingRequiredData =
@@ -134,8 +155,12 @@ export default function ManagerSettingsPage() {
   const changeDraft = (field, value) => setDraft((current) => ({ ...current, [field]: value }));
 
   const beginEditing = () => {
-    setDraft(draftFor(manager || {}));
+    editBaseline.current = draftFor(manager || {});
+    expectedProfile.current = { ...editBaseline.current, profilePhotoPath: String(manager?.profilePhotoPath || '').trim() };
+    setProfileSaveError('');
+    setDraft(editBaseline.current);
     setSelectedImage(null);
+    setRemoveImage(false);
     setEditing(true);
   };
 
@@ -144,6 +169,7 @@ export default function ManagerSettingsPage() {
     confirmLeave(() => {
       setDraft(draftFor(manager || {}));
       setSelectedImage(null);
+      setRemoveImage(false);
       setEditing(false);
     });
   };
@@ -190,34 +216,44 @@ export default function ManagerSettingsPage() {
           }
         }
         setSelectedImage(asset);
+        setRemoveImage(false);
       }
     } catch {
       showToast('The profile picture could not be opened. Please try again.', 'error');
     }
   };
 
-  const saveProfile = async () => {
-    if (saving) return;
-    const fullName = draft.fullName.trim();
-    const phone = normalizePhilippinePhone(draft.phone);
-    const address = draft.address.trim();
-    if (!fullName) return showToast('Full name is required.', 'warning');
-    if (!phone) return showToast('Enter a valid Philippine mobile number.', 'warning');
-    if (!address) return showToast('Complete address is required.', 'warning');
+  async function saveProfile() {
+    if (saveInFlight.current) return false;
+    const changes = changedProfileFields(draft, expectedProfile.current || draftFor(manager || {}), normalizePhilippinePhone);
+    if ('fullName' in changes && !changes.fullName) { showToast('Full name is required.', 'warning'); return false; }
+    if ('phone' in changes && (!isValidManagerPhone(changes.phone) || !normalizePhilippinePhone(changes.phone))) { showToast('Enter a valid Philippine mobile number.', 'warning'); return false; }
+    if ('address' in changes && !changes.address) { showToast('Complete address is required.', 'warning'); return false; }
+    if (!Object.keys(changes).length && !selectedImage && !removeImage) { setEditing(false); showToast('No changes to save.', 'info'); return true; }
     try {
+      saveInFlight.current = true;
       setSaving(true);
-      const saved = await updateManagerProfile({ fullName, phone, address }, selectedImage);
+      setProfileSaveError('');
+      const saved = await updateManagerProfile(changes, selectedImage, expectedProfile.current, removeImage);
+      if (!saved) throw new Error('The server did not confirm the profile update.');
       realtime.primeProfile(saved);
       saveLocalUser(saved);
       setEditing(false);
       setSelectedImage(null);
-      showToast('Profile updated successfully.', 'success');
+      setRemoveImage(false);
+      const cleanupWarning = saved.photoCleanupIncomplete ? 'Profile saved, but the previous photo could not be removed from storage. Contact support.' : '';
+      setProfileSaveError(cleanupWarning);
+      showToast(cleanupWarning || 'Profile updated successfully.', cleanupWarning ? 'warning' : 'success');
+      return !cleanupWarning;
     } catch (error) {
+      setProfileSaveError(error?.message || 'Manager profile could not be saved.');
       showToast(error?.message || 'Manager profile could not be saved.', 'error');
+      return false;
     } finally {
+      saveInFlight.current = false;
       setSaving(false);
     }
-  };
+  }
 
   const themeOptions = [
     { key: 'light', label: 'Light', hint: 'Default crisp theme', icon: 'sun' },
@@ -226,7 +262,7 @@ export default function ManagerSettingsPage() {
   ];
 
   return (
-    <ManagerShell active="settings" title="Settings" subtitle="Manage your profile, application theme, and account security">
+    <ManagerShell active="settings" title="Settings" subtitle="Manage your profile, application theme, and account security" onNavigate={confirmLeave}>
       <TopToastFeedback
         visible={toast.visible}
         message={toast.message}
@@ -236,48 +272,10 @@ export default function ManagerSettingsPage() {
       <View style={styles.container}>
         {/* Profile Card */}
         <View style={styles.card}>
-          <View style={styles.avatarRow}>
-            <View style={styles.avatarArea}>
-              <View style={styles.avatar}>
-                {photoUri ? (
-                  <Image accessibilityLabel="Manager profile picture" source={{ uri: photoUri }} style={styles.avatarImage} />
-                ) : (
-                  <ManagerWaterDrop color={colors.primary} size={34} />
-                )}
-              </View>
-              {editing && (
-                <TouchableOpacity accessibilityRole="button" onPress={choosePhoto} style={styles.changePhotoButton}>
-                  <Text style={styles.changePhotoText}>{selectedImage ? 'Change photo' : 'Choose photo'}</Text>
-                </TouchableOpacity>
-              )}
-            </View>
-
-            <View style={styles.profileText}>
-              {realtime.profileLoading && !managerFullName ? (
-                <ActivityIndicator color={colors.primary} size="small" style={styles.nameLoader} />
-              ) : (
-                <Text style={styles.profileName}>{managerFullName || managerEmail || 'Manager'}</Text>
-              )}
-              <View style={styles.profileRoleBadge}>
-                <ManagerPill tone="blue">Manager</ManagerPill>
-              </View>
-            </View>
-            <View style={styles.headerActions}>
-              {!editing && (
-                <TouchableOpacity
-                  accessibilityRole="button"
-                  accessibilityLabel="Edit Profile"
-                  accessibilityHint="Opens the profile edit form"
-                  activeOpacity={0.78}
-                  disabled={!manager || realtime.profileLoading}
-                  onPress={beginEditing}
-                  style={[styles.editButton, (!manager || realtime.profileLoading) && styles.disabledButton]}
-                >
-                  <BlueTapIcon color={colors.iconInteractive || colors.primary} name="edit" size={18} />
-                </TouchableOpacity>
-              )}
-            </View>
-          </View>
+          <ManagerProfileHeader colors={colors} name={managerFullName} email={managerEmail} photoUri={photoUri}
+            loading={realtime.profileLoading} editing={editing} saving={saving} canRemovePhoto={Boolean(storedPhotoUri || selectedImage)}
+            onChoosePhoto={choosePhoto} onRemovePhoto={() => { setSelectedImage(null); setRemoveImage(Boolean(storedPhotoUri)); }}
+            onEdit={beginEditing} editDisabled={!manager || realtime.profileLoading} />
 
           {!!loadError && (
             <View accessibilityRole="alert" style={styles.errorBanner}>
@@ -304,10 +302,10 @@ export default function ManagerSettingsPage() {
               <View style={styles.detailSection}>
                 <Text style={styles.sectionTitle}>Personal information</Text>
                 <View style={styles.sectionGrid}>
-                  <ProfileField editable={editing} label="Full Name" onChangeText={(value) => changeDraft('fullName', value)} themedStyles={styles} value={editing ? draft.fullName : managerFullName || 'Not set'} />
-                  <ProfileField editable={editing} label="Contact Number" onChangeText={(value) => changeDraft('phone', value)} themedStyles={styles} value={editing ? draft.phone : managerContact} />
+                  <ProfileField editable={editing} disabled={saving} label="Full Name" onChangeText={(value) => changeDraft('fullName', value)} themedStyles={styles} value={editing ? draft.fullName : managerFullName || 'Not set'} />
+                  <ProfileField editable={editing} disabled={saving} label="Contact Number" keyboardType="phone-pad" error={phoneError} onChangeText={(value) => changeDraft('phone', value)} themedStyles={styles} value={editing ? draft.phone : managerContact} />
                   <ProfileField label="Email Address" themedStyles={styles} value={managerEmail} />
-                  <ProfileField editable={editing} label="Complete Address / Location" multiline onChangeText={(value) => changeDraft('address', value)} themedStyles={styles} value={editing ? draft.address : managerAddress} />
+                  <ProfileField editable={editing} disabled={saving} label="Complete Address / Location" multiline onChangeText={(value) => changeDraft('address', value)} themedStyles={styles} value={editing ? draft.address : managerAddress} />
                 </View>
               </View>
               <View style={styles.detailSection}>
@@ -330,9 +328,9 @@ export default function ManagerSettingsPage() {
                 accessibilityRole="button"
                 accessibilityLabel={saving ? 'Saving profile changes' : 'Save profile changes'}
                 dataSet={{ bluetapCta: 'true' }}
-                disabled={saving}
+                disabled={saving || !phoneValid}
                 onPress={saveProfile}
-                style={[styles.primaryButton, saving && styles.disabledButton]}
+                style={[styles.primaryButton, (saving || !phoneValid) && styles.disabledButton]}
               >
                 {saving ? <ActivityIndicator color="#FFFFFF" size="small" /> : <Text style={styles.primaryButtonText}>Save Changes</Text>}
               </TouchableOpacity>
@@ -393,6 +391,7 @@ export default function ManagerSettingsPage() {
               onPress={() => setPasswordModalVisible(true)}
               accessibilityRole="button"
               accessibilityLabel="Change Password"
+              dataSet={{ bluetapCta: 'true' }}
               style={styles.changePasswordBtn}
             >
               <Text style={styles.changePasswordBtnText}>Change Password</Text>
@@ -402,11 +401,12 @@ export default function ManagerSettingsPage() {
       </View>
 
       <ChangePasswordModal
+        theme={{ colors, isDark: resolvedTheme === 'dark' }}
         visible={passwordModalVisible}
         onClose={() => setPasswordModalVisible(false)}
         onSuccess={() => showToast('Password updated successfully.', 'success')}
       />
-      <UnsavedModal />
+      <UnsavedModal {...(profileSaveError ? { error: profileSaveError } : {})} />
     </ManagerShell>
   );
 }
@@ -420,51 +420,6 @@ const createStyles = (colors, compact) =>
       borderColor: colors.border,
       borderRadius: 18,
       padding: compact ? 16 : 22,
-    },
-    avatarRow: {
-      flexDirection: compact ? 'column' : 'row',
-      alignItems: compact ? 'flex-start' : 'center',
-      gap: 14,
-      borderBottomWidth: 1,
-      borderBottomColor: colors.border,
-      paddingBottom: 20,
-    },
-    avatarArea: { alignItems: 'center', gap: 7 },
-    avatar: {
-      width: 76,
-      height: 76,
-      borderRadius: 38,
-      alignItems: 'center',
-      justifyContent: 'center',
-      backgroundColor: colors.primarySoft,
-      borderWidth: 2,
-      borderColor: colors.border,
-      overflow: 'hidden',
-    },
-    avatarImage: { width: '100%', height: '100%', resizeMode: 'cover' },
-    changePhotoButton: { minHeight: 32, justifyContent: 'center', paddingHorizontal: 8 },
-    changePhotoText: { color: colors.primary, fontSize: 12, fontWeight: '800' },
-    profileText: { flex: 1, minWidth: compact ? '100%' : 180 },
-    nameLoader: { alignSelf: 'flex-start', marginBottom: 4 },
-    profileName: { color: colors.textPrimary, fontSize: 21, fontWeight: '800' },
-    profileRoleBadge: { marginTop: 6 },
-    headerActions: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 10,
-      width: compact ? '100%' : 'auto',
-      justifyContent: 'flex-end',
-      marginTop: compact ? 8 : 0,
-    },
-    editButton: {
-      alignItems: 'center',
-      backgroundColor: colors.surface,
-      borderColor: colors.border,
-      borderRadius: 10,
-      borderWidth: 1,
-      height: 38,
-      justifyContent: 'center',
-      width: 38,
     },
     errorBanner: {
       backgroundColor: colors.dangerSoft,
@@ -517,6 +472,7 @@ const createStyles = (colors, compact) =>
       paddingVertical: 10,
     },
     detailLabel: { color: colors.textSecondary, fontSize: 11, fontWeight: '700' },
+    fieldError: { color: colors.danger, fontSize: 12, lineHeight: 18, marginTop: 6 },
     detailValue: { color: colors.textPrimary, fontSize: 14, fontWeight: '600', marginTop: 3 },
     input: {
       color: colors.textPrimary,
@@ -552,7 +508,7 @@ const createStyles = (colors, compact) =>
       paddingHorizontal: 20,
     },
     primaryButtonText: { color: colors.onPrimary || '#FFFFFF', fontSize: 13, fontWeight: '800' },
-    disabledButton: { opacity: 0.5 },
+    disabledButton: { opacity: 0.75 },
     securityNote: {
       color: colors.textSecondary,
       fontSize: 11,
@@ -636,9 +592,11 @@ const createStyles = (colors, compact) =>
       marginTop: 2,
     },
     changePasswordBtn: {
-      minHeight: 40,
+      minHeight: 44,
       paddingHorizontal: 16,
       borderRadius: 10,
+      borderWidth: 1,
+      borderColor: colors.primaryAction,
       backgroundColor: colors.primaryAction,
       justifyContent: 'center',
       alignItems: 'center',

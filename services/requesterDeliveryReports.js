@@ -1,11 +1,15 @@
 import { auth } from '../firebase';
 import { getApiUrl } from './apiClient';
 import { ensureAuthStateReady } from './authSession';
+import { missingEndpointError, rememberMissingEndpoint } from './unavailableEndpoint';
 
 const PATH = '/api/requester/delivery-reports';
 const TIMEOUT_MS = 25000;
 
 async function request(path, { method = 'GET', body } = {}) {
+  const url = getApiUrl(path);
+  const unavailable = method === 'GET' && missingEndpointError(url);
+  if (unavailable) throw unavailable;
   await ensureAuthStateReady();
   const token = await auth.currentUser?.getIdToken();
   if (!token) {
@@ -18,7 +22,7 @@ async function request(path, { method = 'GET', body } = {}) {
   try {
     let response;
     try {
-      response = await fetch(getApiUrl(path), {
+      response = await fetch(url, {
         method,
         headers: { Authorization: `Bearer ${token}`, ...(body ? { 'Content-Type': 'application/json' } : {}) },
         ...(body ? { body: JSON.stringify(body) } : {}),
@@ -31,8 +35,9 @@ async function request(path, { method = 'GET', body } = {}) {
       throw error;
     }
     const result = await response.json().catch(() => null);
+    if (method === 'GET') rememberMissingEndpoint(url, response.status, result);
     if (!response.ok) {
-      const error = new Error(result?.error?.message || 'Delivery reports are temporarily unavailable.');
+      const error = new Error(missingEndpointError(url)?.message || result?.error?.message || 'Delivery reports are temporarily unavailable.');
       error.code = result?.error?.reason || 'DELIVERY_REPORT_UNAVAILABLE';
       error.status = response.status;
       error.uncertain = method === 'POST' && response.status >= 500;

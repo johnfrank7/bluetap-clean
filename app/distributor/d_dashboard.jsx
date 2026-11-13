@@ -223,32 +223,26 @@ const getDistributorRequestItems = (request) => {
   if (Array.isArray(request.items) && request.items.length > 0) {
     return request.items.filter(Boolean).map((item, index) => {
       const quantity = Number(item.quantity || 0);
-      const unitPrice = Number(item.product_price ?? item.unitPrice ?? 0);
-      const subtotal = Number(
-        item.line_total ?? item.subtotal ?? unitPrice * quantity
-      );
+      const unitPrice = item.unitPriceAtOrder ?? item.product_price ?? item.unitPrice;
+      const subtotal = item.totalAtOrder ?? item.line_total ?? item.subtotal;
 
       return {
         id: String(item.product_id || item.id || `${request.requestId}-${index}`),
         productName: String(item.product_name || item.productName || item.productNameSnapshot || 'Product'),
         quantity: Number.isFinite(quantity) ? quantity : item.quantity,
-        unitPrice: Number.isFinite(unitPrice) ? unitPrice : 0,
-        subtotal: Number.isFinite(subtotal) ? subtotal : 0,
+        unitPrice,
+        subtotal,
       };
     });
   }
 
   const quantity = getNumericQuantity(request.quantity);
-  const totalAmount = Number(request.total_cost || request.totalAmount || request.totalAtOrder || 0);
-  const unitPrice = quantity > 0 ? totalAmount / quantity : totalAmount;
 
   return [
     {
       id: request.productId || request.requestId,
       productName: request.productsOrdered || request.productName || 'Product',
       quantity: request.quantity || quantity || 'Not set',
-      unitPrice,
-      subtotal: totalAmount,
     },
   ];
 };
@@ -538,6 +532,7 @@ function DistributorDashboardContent() {
   ], [colors, dashboardCounts, isDark]);
   const detailsRequestData = activeRequest
     ? {
+        pricingDetailsSource: activeRequest.pricingDetailsSource || activeRequest,
         requestId: activeRequest.requestId,
         status: activeRequest.status,
         orderDate: activeRequest.orderDate || 'Not set',

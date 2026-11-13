@@ -32,6 +32,11 @@ test('assistantStorage handles getAssistantVisibility and setAssistantVisibility
   assert.equal(setRes, true);
   const visible = await getAssistantVisibility();
   assert.equal(visible, true);
+  await setAssistantVisibility(false, 'requester');
+  await setAssistantVisibility(true, 'distributor');
+  assert.equal(await getAssistantVisibility('requester'), false);
+  assert.equal(await getAssistantVisibility('distributor'), true);
+  await setAssistantVisibility(true, 'requester');
 });
 
 test('Requester and Distributor profiles integrate ChangePasswordModal and Assistant toggle', () => {
@@ -64,12 +69,15 @@ test('Manager Shell and SidebarIcon include unified Settings navigation', () => 
 
 test('RequestDetailsModal provides an itemized breakdown of products, delivery fee, and grand total', () => {
   const modal = read('components', 'RequestDetailsModal.jsx');
+  const pricing = read('components', 'SavedOrderPricing.jsx');
+  const projection = read('services', 'savedOrderPricing.js');
 
-  assert.match(modal, /Products Subtotal/);
-  assert.match(modal, /Delivery Fee/);
-  assert.match(modal, /Grand Total/);
-  assert.match(modal, /discountAmount/);
-  assert.match(modal, /formatAmount/);
+  assert.match(modal, /<SavedOrderPricing order=\{request\}/);
+  assert.match(pricing, /Regular product subtotal/);
+  assert.match(pricing, /Delivery fee/);
+  assert.match(pricing, /Final payable total/);
+  assert.match(projection, /discountAmount/);
+  assert.match(pricing, /formatCurrency/);
 });
 
 test('Distributor scheduled requests decouples network errors from empty list presentation', () => {
@@ -81,15 +89,12 @@ test('Distributor scheduled requests decouples network errors from empty list pr
   assert.match(scheduled, /minHeight: 44/);
 });
 
-test('Requester tutorial overlay covers 5 tabs: Home, Add Request, Requests, Schedule, Profile with Next, Back, Skip, and Finish controls', () => {
+test('Requester tutorial covers five real targets with Next, Back, Skip, and Finish controls', () => {
   const tutorial = read('components', 'RequesterTutorialModal.jsx');
-
-  // 5 Requester tabs
-  assert.match(tutorial, /Step 1 of 5 · Home/);
-  assert.match(tutorial, /Step 2 of 5 · Add Request/);
-  assert.match(tutorial, /Step 3 of 5 · Requests/);
-  assert.match(tutorial, /Step 4 of 5 · Schedule/);
-  assert.match(tutorial, /Step 5 of 5 · Profile/);
+  const { TUTORIAL_STEPS } = require('../../../services/requesterTour');
+  assert.deepEqual(TUTORIAL_STEPS.map((step) => step.target), ['home', 'add', 'orders', 'notifications', 'profile']);
+  for (const step of TUTORIAL_STEPS) assert.ok(require('fs').existsSync(require('path').resolve(__dirname, '../../../app', `${step.route.slice(1)}.jsx`)));
+  assert.doesNotMatch(JSON.stringify(TUTORIAL_STEPS), /recurring|calendar/i);
 
   // Controls: Next, Back, Skip, Finish
   assert.match(tutorial, /Skip/);
@@ -98,30 +103,28 @@ test('Requester tutorial overlay covers 5 tabs: Home, Add Request, Requests, Sch
   assert.match(tutorial, /'Finish'/);
   assert.match(tutorial, /accessibilityLabel="Skip tutorial"/);
   assert.match(tutorial, /accessibilityLabel="Previous step"/);
-  assert.match(tutorial, /accessibilityLabel={isLastStep \? 'Finish tutorial' : 'Next step'}/);
+  assert.match(tutorial, /accessibilityLabel=\{last \? 'Finish tutorial' : 'Next step'\}/);
 });
 
 test('Requester tutorial provides first-time display, dismissal persistence, and reopening via How to Use BlueTap', () => {
   const tutorial = read('components', 'RequesterTutorialModal.jsx');
-  const dashboard = read('app', 'requester', 'r_dashboard.jsx');
+  const layout = read('app', 'requester', '_layout.jsx');
   const profile = read('app', 'requester', 'r_profile.jsx');
 
   // First-time display check in Requester Dashboard
-  assert.match(dashboard, /AsyncStorage\.getItem\(storageKey\)/);
-  assert.match(dashboard, /seen !== 'true'/);
-  assert.match(dashboard, /setTutorialVisible\(true\)/);
-  assert.match(dashboard, /<RequesterTutorialModal/);
+  assert.match(tutorial, /AsyncStorage\.getItem\(getTutorialSeenKey\(uid\)\)/);
+  assert.match(tutorial, /seen !== 'true'/);
+  assert.match(layout, /<RequesterTourProvider>/);
 
   // Dismissal and persistence in modal
   assert.match(tutorial, /TUTORIAL_SEEN_KEY = 'bluetap:requester:tutorial_seen'/);
-  assert.match(tutorial, /AsyncStorage\.setItem\(storageKey, 'true'\)/);
-  assert.match(tutorial, /handleSkip/);
-  assert.match(tutorial, /onClose\?\.()/);
+  assert.match(tutorial, /AsyncStorage\.setItem\(getTutorialSeenKey\(uid\), 'true'\)/);
+  assert.match(tutorial, /AsyncStorage\.removeItem\(activeKey\(uid\)\)/);
+  assert.match(tutorial, /accessibilityLabel="Skip tutorial"/);
 
   // Reopening through "How to Use BlueTap" in Requester Profile
   assert.match(profile, /How to Use BlueTap/);
-  assert.match(profile, /setTutorialVisible\(true\)/);
-  assert.match(profile, /<RequesterTutorialModal/);
+  assert.match(profile, /confirmLeave\(startTour\)/);
 });
 
 test('Requester tutorial key generation is account-scoped', () => {
@@ -138,12 +141,7 @@ test('Requester tutorial key generation is account-scoped', () => {
   assert.equal(fn.getTutorialSeenKey(null), 'bluetap:requester:tutorial_seen');
   assert.equal(fn.getTutorialSeenKey(undefined), 'bluetap:requester:tutorial_seen');
 
-  const dashboard = read('app', 'requester', 'r_dashboard.jsx');
-  assert.match(dashboard, /getTutorialSeenKey\(requesterId\)/);
-  assert.match(dashboard, /userId=\{requesterId\}/);
-
-  const profile = read('app', 'requester', 'r_profile.jsx');
-  assert.match(profile, /userId=\{userData\?\.uid \|\| auth\.currentUser\?\.uid\}/);
+  assert.match(tutorial, /bluetap:requester:tutorial_active:\$\{uid\}/);
 });
 
 test('ChangePasswordModal securely enforces reauthentication and sanitizes error messages', () => {
@@ -151,10 +149,11 @@ test('ChangePasswordModal securely enforces reauthentication and sanitizes error
 
   assert.match(modal, /EmailAuthProvider\.credential\(currentUser\.email, currentPassword\)/);
   assert.match(modal, /reauthenticateWithCredential\(currentUser, credential\)/);
-  assert.match(modal, /updatePassword\(currentUser, newPassword\)/);
-  assert.match(modal, /console\.warn\('Change password error code:', err\?\.code \|\| 'unknown'\)/);
+  assert.doesNotMatch(modal, /updatePassword\(currentUser, newPassword\)/);
+  assert.match(modal, /passwordChangeOtp\(currentUser, 'request'\)/);
+  assert.match(modal, /passwordChangeOtp\(auth\.currentUser, 'confirm'/);
   assert.doesNotMatch(modal, /console\.warn\('Change password error:', err\)/);
-  assert.match(modal, /setErrorMessage\('Failed to change password\. Please try again\.'\)/);
+  assert.match(modal, /result\.changed !== true/);
 });
 
 test('Requester tutorial has Requester-only visibility and is absent from Distributor, Manager, and Admin shells', () => {

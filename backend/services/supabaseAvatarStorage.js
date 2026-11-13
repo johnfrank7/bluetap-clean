@@ -1,5 +1,6 @@
 const { randomUUID } = require('node:crypto');
 const { createClient } = require('@supabase/supabase-js');
+const sharp = require('sharp');
 
 const { OtpError } = require('../utils/otpError');
 
@@ -7,6 +8,10 @@ const MAX_AVATAR_BYTES = 3 * 1024 * 1024;
 const IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 
 const storageError = (reason, message, status = 502) => new OtpError(status, reason, message);
+const avatarOwnerSegment = (uid) => {
+  if (typeof uid !== 'string' || !uid || uid.length > 128) return '';
+  return `u_${Buffer.from(uid, 'utf8').toString('base64url')}`;
+};
 
 function imageTypeFor(bytes) {
   if (bytes.subarray(0, 3).equals(Buffer.from([0xff, 0xd8, 0xff]))) return 'image/jpeg';
@@ -15,11 +20,12 @@ function imageTypeFor(bytes) {
   return null;
 }
 
-function decodeAvatarImage(value) {
+async function decodeAvatarImage(value) {
   if (!value || typeof value !== 'object') return null;
   const contentType = String(value.contentType || '').toLowerCase().trim();
   const encoded = String(value.dataBase64 || '');
   if (!IMAGE_TYPES.has(contentType)) throw storageError('PROFILE_IMAGE_TYPE_INVALID', 'Use a JPG, PNG, or WebP profile picture.', 422);
+  if (encoded.length > Math.ceil(MAX_AVATAR_BYTES / 3) * 4) throw storageError('PROFILE_IMAGE_TOO_LARGE', 'Profile pictures must be 3 MB or smaller.', 413);
   if (!encoded || !/^[A-Za-z0-9+/]+={0,2}$/.test(encoded) || encoded.length % 4 !== 0) {
     throw storageError('PROFILE_IMAGE_TYPE_INVALID', 'Use a valid JPG, PNG, or WebP profile picture.', 400);
   }
@@ -28,7 +34,20 @@ function decodeAvatarImage(value) {
     throw storageError('PROFILE_IMAGE_TYPE_INVALID', 'The selected file does not match its image type.', 422);
   }
   if (bytes.length > MAX_AVATAR_BYTES) throw storageError('PROFILE_IMAGE_TOO_LARGE', 'Profile pictures must be 3 MB or smaller.', 413);
-  return { bytes, contentType };
+  try {
+    // Decode and re-encode the image, discarding metadata and rejecting truncated
+    // or oversized pixel payloads before they reach persistent storage.
+    const input = sharp(bytes, { failOn: 'warning', limitInputPixels: 16_000_000, animated: false });
+    const metadata = await input.metadata();
+    const format = contentType === 'image/jpeg' ? 'jpeg' : contentType.slice(6);
+    if (metadata.format !== format || !metadata.width || !metadata.height) throw new Error('invalid image');
+    const normalized = await input.rotate().toBuffer();
+    if (normalized.length > MAX_AVATAR_BYTES) throw storageError('PROFILE_IMAGE_TOO_LARGE', 'Profile pictures must be 3 MB or smaller.', 413);
+    return { bytes: normalized, contentType };
+  } catch (error) {
+    if (error instanceof OtpError) throw error;
+    throw storageError('PROFILE_IMAGE_TYPE_INVALID', 'Use a valid JPG, PNG, or WebP profile picture.', 422);
+  }
 }
 
 function avatarStorageConfigStatus(env = process.env) {
@@ -70,10 +89,10 @@ function createSupabaseAvatarStorage({ env = process.env, createClientImpl = cre
   };
   return {
     async uploadAvatar(uid, image) {
-      const safeUid = String(uid || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 128);
+      const safeUid = avatarOwnerSegment(uid);
       if (!safeUid) throw storageError('AUTHENTICATION_REQUIRED', 'Authentication is required.', 401);
       const extension = image.contentType === 'image/jpeg' ? 'jpg' : image.contentType.split('/')[1];
-      const profilePhotoPath = `avatars/${safeUid}/${randomUUID()}.${extension}`;
+      const profilePhotoPath = `avatars-v2/${safeUid}/${randomUUID()}.${extension}`;
       const { bucket } = await ensureBucket();
       const { error } = await client.storage.from(bucket).upload(profilePhotoPath, image.bytes, {
         contentType: image.contentType,
@@ -90,12 +109,17 @@ function createSupabaseAvatarStorage({ env = process.env, createClientImpl = cre
       return { profilePhotoUrl: data.publicUrl, profilePhotoPath };
     },
     async deleteAvatar(path, uid) {
-      const safeUid = String(uid || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 128);
+      const safeUid = avatarOwnerSegment(uid);
       const safePath = String(path || '');
-      if (!safeUid || !new RegExp(`^avatars/${safeUid}/[a-zA-Z0-9-]+\\.(jpg|png|webp)$`).test(safePath)) return;
+      const validName = /^[a-zA-Z0-9-]+\.(jpg|png|webp)$/;
+      const segments = safePath.split('/');
+      // Legacy paths were derived by stripping characters from UIDs. They can
+      // collide with another account, so never infer ownership or delete them.
+      if (!safeUid || segments.length !== 3 || segments[0] !== 'avatars-v2' || segments[1] !== safeUid || !validName.test(segments[2])) return false;
       const { bucket } = await ensureBucket();
       const { error } = await client.storage.from(bucket).remove([safePath]);
       if (error) throw storageError('PROFILE_IMAGE_DELETE_FAILED', 'The previous profile picture could not be removed.');
+      return true;
     },
   };
 }

@@ -107,7 +107,7 @@ export function toDistributorScreenOrder(order = {}) {
   const items = Array.isArray(order.items) ? order.items.filter(Boolean) : [];
   const quantity = items.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0);
   const productNames = items.map((item) => safeString(item.productNameSnapshot || item.product_name || item.name)).filter(Boolean);
-  const totalAmount = Number(order.totalAtOrder || order.total_cost || order.totalAmount || 0);
+  const totalAmount = Number(order.totalAtOrder ?? order.total_cost ?? order.totalAmount ?? 0);
   const scheduledRaw = order.scheduledAt || order.scheduledDateTime || order.expectedDeliveryDate || order.delivery_date || order.deliveryDate || order.scheduledDate || order.scheduleDate;
   const deliveryRaw = order.expectedDeliveryDate || order.delivery_date || order.deliveryDate || order.scheduledAt || order.scheduledDate;
   const deliveryDate = formatDistributorOrderDate(deliveryRaw, 'Not set');
@@ -129,14 +129,15 @@ export function toDistributorScreenOrder(order = {}) {
     id: safeString(item.id || item.product_id || `${order.id || requestId}-${index}`),
     productName: safeString(item.productNameSnapshot || item.product_name || item.name, 'Product'),
     quantity: Number(item.quantity) || 0,
-    unitPrice: Number(item.quantity) > 0 ? Number(item.totalAtOrder || item.line_total || 0) / Number(item.quantity) : Number(item.totalAtOrder || item.line_total || 0),
-    subtotal: Number(item.totalAtOrder || item.line_total || 0),
+    unitPrice: item.unitPriceAtOrder ?? item.unitPrice ?? item.product_price ?? item.price,
+    subtotal: item.totalAtOrder ?? item.line_total ?? item.subtotal,
   }));
 
   const rawAddress = order.deliveryAddress || order.address || order.deliveryLocation?.address;
   const resolvedAddress = safeString(rawAddress, 'Not set');
 
   return {
+    pricingDetailsSource: order,
     sourceId: safeString(order.id || requestId, 'Not set'),
     id: requestId,
     requestId,
@@ -182,8 +183,8 @@ export function toDistributorScreenOrder(order = {}) {
     deliveryLocation: order.deliveryLocation || null,
     branchId: safeString(order.branchId || order.currentBranchId, ''),
     branchLocation: order.branchLocation || order.currentBranchLocation || null,
-    subtotalAtOrder: Number(order.subtotalAtOrder || order.subtotal || 0),
-    deliveryFeeAtOrder: Number(order.deliveryFeeAtOrder || order.deliveryFee || 0),
+    subtotalAtOrder: order.subtotalAtOrder ?? order.subtotal,
+    deliveryFeeAtOrder: order.deliveryFeeAtOrder ?? order.deliveryFee,
     distanceKm: Number(order.distanceKmAtOrder || order.distanceKm || 0),
     distanceKmAtOrder: Number(order.distanceKmAtOrder || order.distanceKm || 0),
     scheduledAt: order.scheduledAt || null,

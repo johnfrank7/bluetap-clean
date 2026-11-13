@@ -13,7 +13,8 @@ import {
 } from 'react-native';
 import { createPortalStyleSheet, useBlueTapTheme } from './BlueTapTheme';
 import { createShadow } from './shadowStyles';
-import { updateRequest } from '../services/requests';
+import { quoteRequestEdit, updateRequest } from '../services/requests';
+import { getProductsForBranch } from '../services/requesterOrdering';
 import useUnsavedChangesGuard from './useUnsavedChangesGuard';
 
 const formatPrice = (val) => `₱${Number(val || 0).toFixed(2)}`;
@@ -34,12 +35,18 @@ export default function RequesterEditOrderModal({
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [priceQuote, setPriceQuote] = useState(null);
+  const [catalog, setCatalog] = useState([]);
+  const [catalogError, setCatalogError] = useState('');
+  const [replacingIndex, setReplacingIndex] = useState(null);
   const initialSnapshotRef = React.useRef(null);
 
   useEffect(() => {
     if (!request || !visible) return;
 
     setError('');
+    setPriceQuote(null);
+    setReplacingIndex(null);
     const initContainer = request.container || '';
     const initNotes = request.notes || request.specialInstructions || '';
     setContainer(initContainer);
@@ -74,6 +81,17 @@ export default function RequesterEditOrderModal({
       items: mappedItems.map((i) => ({ productId: i.productId, quantity: i.quantity })),
     };
   }, [request, visible]);
+
+  useEffect(() => {
+    if (!visible || !request?.currentBranchId && !request?.branchId) return undefined;
+    let active = true;
+    setCatalog([]);
+    setCatalogError('');
+    getProductsForBranch(request.currentBranchId || request.branchId, { force: true }).then((products) => {
+      if (active) setCatalog(products);
+    }).catch(() => { if (active) { setCatalog([]); setCatalogError('Products could not be loaded. You can still edit quantity and notes.'); } });
+    return () => { active = false; };
+  }, [visible, request?.currentBranchId, request?.branchId]);
 
   const isDirty = React.useMemo(() => {
     if (!visible || !request || !initialSnapshotRef.current) return false;
@@ -135,12 +153,34 @@ export default function RequesterEditOrderModal({
         notes: notes.trim(),
       };
 
+      const quote = await quoteRequestEdit(request, payload);
+      if (quote.requiresConfirmation) {
+        setPriceQuote({ ...quote, payload });
+        return;
+      }
       const updated = await updateRequest(request, payload);
       onShowToast?.('Order updated successfully.', 'success');
       onSaved?.(updated);
       onClose();
     } catch (err) {
       setError(err?.message || 'Failed to update order. Please try again.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const confirmPriceChange = async () => {
+    if (!priceQuote || saving) return;
+    setSaving(true);
+    setError('');
+    try {
+      const updated = await updateRequest(request, { ...priceQuote.payload, quoteId: priceQuote.quoteId });
+      setPriceQuote(null);
+      onShowToast?.('Order updated successfully.', 'success');
+      onSaved?.(updated);
+      onClose();
+    } catch (err) {
+      setError(err?.message || 'Unable to confirm the change. Please retry.');
     } finally {
       setSaving(false);
     }
@@ -155,7 +195,7 @@ export default function RequesterEditOrderModal({
         visible={visible}
         transparent
         animationType="fade"
-        onRequestClose={saving ? undefined : () => confirmLeave(onClose)}
+        onRequestClose={saving ? undefined : () => priceQuote ? setPriceQuote(null) : confirmLeave(onClose)}
         statusBarTranslucent
       >
         <View style={styles.rootOverlay}>
@@ -246,6 +286,7 @@ export default function RequesterEditOrderModal({
                       <Text style={[styles.itemPrice, { color: colors.textSecondary }]}>
                         {formatPrice(item.unitPrice)} each
                       </Text>
+                      {catalog.length > 0 && <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Change product for ${item.name}`} disabled={saving} onPress={() => setReplacingIndex(idx)} style={{ minHeight: 44, justifyContent: 'center' }}><Text style={{ color: colors.primaryAction, fontWeight: '700' }}>Change product</Text></TouchableOpacity>}
                     </View>
 
                     <View style={styles.qtyControlRow}>
@@ -309,6 +350,18 @@ export default function RequesterEditOrderModal({
                     </View>
                   </View>
                 ))}
+                {catalogError ? <Text style={{ color: colors.textSecondary }}>{catalogError}</Text> : null}
+                {replacingIndex !== null && <View style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 10, marginTop: 8 }}>
+                  <Text style={{ color: colors.textPrimary, fontWeight: '800' }}>Choose a product</Text>
+                  {catalog.map((product) => {
+                    const alreadySelected = items.some((item, index) => index !== replacingIndex && item.productId === product.id);
+                    return <TouchableOpacity key={product.id} accessibilityRole="button" disabled={saving || alreadySelected} onPress={() => {
+                      setItems((current) => current.map((item, index) => index === replacingIndex ? { ...item, id: product.id, productId: product.id, name: product.product_name, unitPrice: Number(product.price) || 0 } : item));
+                      setReplacingIndex(null);
+                    }} style={{ minHeight: 44, justifyContent: 'center', opacity: alreadySelected ? 0.5 : 1 }}><Text style={{ color: colors.textPrimary }}>{product.product_name} · {formatPrice(product.price)}{alreadySelected ? ' · already selected' : ''}</Text></TouchableOpacity>;
+                  })}
+                  <TouchableOpacity accessibilityRole="button" onPress={() => setReplacingIndex(null)} style={{ minHeight: 44, justifyContent: 'center' }}><Text style={{ color: colors.primaryAction, fontWeight: '700' }}>Cancel product change</Text></TouchableOpacity>
+                </View>}
               </View>
 
               {/* Container Type */}
@@ -465,6 +518,27 @@ export default function RequesterEditOrderModal({
               </TouchableOpacity>
             </View>
           </View>
+          {Boolean(priceQuote) && <View style={{ ...StyleSheet.absoluteFillObject, zIndex: 50, elevation: 50, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'center', padding: 18 }}>
+          <View accessibilityViewIsModal style={{ backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1, borderRadius: 16, padding: 18, maxHeight: '90%', width: '100%', maxWidth: 480, alignSelf: 'center' }}>
+            <Text accessibilityRole="header" style={{ color: colors.textPrimary, fontSize: 19, fontWeight: '800', marginBottom: 12 }}>Review Price Changes</Text>
+            <ScrollView style={{ flexGrow: 0, flexShrink: 1 }}>
+              {[['Previous', priceQuote?.before], ['Updated', priceQuote?.after]].map(([label, pricing]) => (
+                <View key={label} style={{ marginBottom: 14 }}>
+                  <Text style={{ color: colors.textPrimary, fontWeight: '800' }}>{label} total: {pricing?.totalAtOrder == null ? '—' : formatPrice(pricing.totalAtOrder)}</Text>
+                  {(pricing?.items || []).map((item, index) => <Text key={`${item.productId || 'item'}-${index}`} style={{ color: colors.textSecondary, marginTop: 4 }}>{item.productNameSnapshot || item.product_name || 'Product'} × {item.quantity} · {item.totalAtOrder == null ? '—' : formatPrice(item.totalAtOrder)}</Text>)}
+                  <Text style={{ color: colors.textSecondary, marginTop: 4 }}>Product subtotal: {pricing?.subtotalAtOrder == null ? '—' : formatPrice(pricing.subtotalAtOrder)}</Text>
+                  {Boolean(pricing?.pricingSnapshot || Number(pricing?.discountAmount) > 0) && <Text style={{ color: colors.textSecondary }}>Promotional savings: {formatPrice(pricing.discountAmount)}</Text>}
+                  <Text style={{ color: colors.textSecondary }}>Delivery fee: {pricing?.deliveryFeeAtOrder == null ? '—' : formatPrice(pricing.deliveryFeeAtOrder)}</Text>
+                </View>
+              ))}
+              {!!error && <Text accessibilityRole="alert" style={{ color: colors.danger, marginBottom: 10 }}>{error}</Text>}
+            </ScrollView>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
+              <TouchableOpacity accessibilityRole="button" disabled={saving} onPress={() => { setPriceQuote(null); setError(''); }} style={[styles.cancelBtn, { borderColor: colors.border, flexGrow: 1 }]}><Text style={{ color: colors.textPrimary, fontWeight: '700' }}>Keep Editing</Text></TouchableOpacity>
+              <TouchableOpacity accessibilityRole="button" disabled={saving} onPress={confirmPriceChange} style={[styles.saveBtn, { backgroundColor: colors.primaryAction, flexGrow: 1 }]}><Text style={{ color: colors.onPrimary, fontWeight: '800' }}>{saving ? 'Confirming…' : 'Confirm Changes'}</Text></TouchableOpacity>
+            </View>
+          </View>
+        </View>}
         </View>
       </Modal>
       <UnsavedModal />

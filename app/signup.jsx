@@ -20,6 +20,7 @@ import { useFaceServiceWarmup } from '../services/useFaceServiceWarmup';
 import RegistrationFaceCapture from '../components/RegistrationFaceCapture';
 import DropdownChevron from '../components/DropdownChevron';
 import PasswordVisibilityButton from '../components/PasswordVisibilityButton';
+import AdminIcon from '../components/AdminIcon';
 import { RegistrationActions, RegistrationBrand, RegistrationHeading, RegistrationNotice, RegistrationStepper } from '../components/RegistrationUi';
 import { auth } from '../firebase';
 import { signInWithCustomToken } from 'firebase/auth';
@@ -28,9 +29,9 @@ import useUnsavedChangesGuard from '../components/useUnsavedChangesGuard';
 
 const { isTrustedRegistrationFaceVerification } = require('../services/webFaceCaptureCore');
 const { REGISTRATION_STEP: STEP, REGISTRATION_STEP_LABELS, buildRegistrationDisplaySteps, buildRegistrationSteps, adjacentRegistrationStep, registrationEntryStep } = require('../services/registrationStepStatus');
+const { confirmedDuplicateEmail, credentialFeedback, registrationSessionNotice } = require('../services/registrationFeedback');
 
 const BARANGAYS = ['Awihao', 'Bagakay', 'Bato', 'Biga', 'Bulongan', 'Bunga', 'Cabitoonan', 'Calongcalong', 'Cambang-ug', 'Camp 8', 'Canlumampao', 'Cantabaco', 'Capitan Claudio', 'Carmen', 'Daanglungsod', 'Don Andres Soriano', 'Dumlog', 'Gen. Climaco', 'Ibo', 'Ilihan', 'Juan Climaco, Sr.', 'Landahan', 'Loay', 'Luray II', 'Matab-ang', 'Media Once', 'Pangamihan', 'Poblacion', 'Poog', 'Putingbato', 'Sagay', 'Sam-ang', 'Sangi', 'Santo Niño', 'Subayon', 'Talavera', 'Tubod', 'Tungkay'];
-const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PHONE = /^9\d{9}$/;
 const firstParam = (value) => Array.isArray(value) ? value[0] : value;
 
@@ -41,12 +42,22 @@ const normalizePhone = (value) => {
   return digits.slice(0, 10);
 };
 
-const Field = ({ label, error, hint, children }) => (
+const Field = ({ label, error, errorStyle, hint, hintStyle, children }) => (
   <View style={styles.field}>
     <Text style={styles.label}>{label}</Text>
     {children}
-    {!!error && <Text style={styles.error}>{error}</Text>}
-    {!error && !!hint && <Text style={styles.hint}>{hint}</Text>}
+    {!!error && <Text style={[styles.error, errorStyle]}>{error}</Text>}
+    {!error && !!hint && <Text style={[styles.hint, hintStyle]}>{hint}</Text>}
+  </View>
+);
+
+const DuplicateEmailIcon = ({ color, backgroundColor }) => (
+  <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={styles.mailIcon}>
+    <View style={[styles.mailEnvelope, { borderColor: color }]}>
+      <View style={[styles.mailFlap, styles.mailFlapLeft, { backgroundColor: color }]} />
+      <View style={[styles.mailFlap, styles.mailFlapRight, { backgroundColor: color }]} />
+    </View>
+    <Text style={[styles.mailCross, { color, backgroundColor }]}>×</Text>
   </View>
 );
 
@@ -76,6 +87,10 @@ export default function SignupPage() {
   const [branchLoadError, setBranchLoadError] = React.useState('');
   const [showPassword, setShowPassword] = React.useState(false);
   const [showPasswordConfirmation, setShowPasswordConfirmation] = React.useState(false);
+  const [credentialTouched, setCredentialTouched] = React.useState({ username: false, email: false, password: false, confirmPassword: false });
+  const [duplicateEmail, setDuplicateEmail] = React.useState('');
+  const currentEmail = React.useRef(form.email);
+  currentEmail.current = form.email;
   const [usernameState, setUsernameState] = React.useState(() => usernameTaken && usernameRetryDraft
     ? { status: 'taken', checked: normalizeUsername(usernameRetryDraft.profile.username) }
     : { status: 'idle', checked: '' });
@@ -205,6 +220,7 @@ export default function SignupPage() {
   }, [stepTransition]);
 
   const update = (key, value) => {
+    if (key === 'email') { currentEmail.current = value; setDuplicateEmail(''); }
     setForm((current) => ({ ...current, [key]: value }));
     setErrors((current) => ({ ...current, [key]: '' }));
     if (key === 'username') {
@@ -231,7 +247,20 @@ export default function SignupPage() {
   const accountComplete = !!form.role;
   const personalComplete = !!form.firstName.trim() && !!form.lastName.trim() && PHONE.test(form.phone) && !!form.barangay && !!form.address.trim() && (form.role !== 'distributor' || !!form.requestedBranchId);
   const identityComplete = !!registrationSessionId && (securityPolicy?.faceVerificationRequired === false || isTrustedRegistrationFaceVerification(faceVerification));
-  const credentialsComplete = !validateUsername(form.username) && EMAIL.test(form.email.trim()) && form.password.length >= 8 && form.password === form.confirmPassword && usernameState.status === 'available' && termsAccepted;
+  const credentialState = credentialFeedback(form);
+  const credentialErrorStyle = isDark ? { borderColor: colors.danger, backgroundColor: colors.dangerSoft } : null;
+  const credentialSuccessStyle = isDark ? { borderColor: colors.success } : null;
+  const credentialErrorTextStyle = isDark ? { color: colors.danger } : null;
+  const markCredentialTouched = (key) => setCredentialTouched((current) => ({ ...current, [key]: true }));
+  const usernameAvailable = !errors.username && usernameState.status === 'available' && usernameState.checked === normalizeUsername(form.username);
+  const usernameError = errors.username || (usernameState.status === 'taken' ? 'Username is already taken.'
+    : usernameState.status === 'unavailable' ? 'Unable to check username.'
+      : credentialTouched.username && usernameState.status === 'invalid' ? 'Invalid username format.' : '');
+  const emailDuplicate = !!duplicateEmail && duplicateEmail === form.email.trim().toLowerCase();
+  const emailError = emailDuplicate ? 'Email is already registered.' : errors.email || (credentialTouched.email && credentialState.emailInvalid ? 'Enter a valid email address.' : '');
+  const passwordError = !credentialState.passwordValid && (errors.password || (credentialTouched.password && form.password)) ? 'Use 8–128 characters; outer spaces do not count.' : '';
+  const confirmationError = credentialState.confirmationValid ? '' : (credentialTouched.confirmPassword && credentialState.confirmationMismatch ? 'Passwords do not match.' : (!form.confirmPassword ? errors.confirmPassword : ''));
+  const credentialsComplete = !validateUsername(form.username) && credentialState.emailValid && credentialState.passwordValid && credentialState.confirmationValid && usernameState.status === 'available' && termsAccepted;
   const visibleRegistrationSteps = React.useMemo(
     () => buildRegistrationSteps(securityPolicy),
     [securityPolicy?.emailOtpRequired, securityPolicy?.faceVerificationRequired],
@@ -326,8 +355,8 @@ export default function SignupPage() {
       else if (usernameState.status === 'taken' && usernameState.checked === normalizeUsername(form.username)) next.username = 'This username is already taken.';
       else if (usernameState.status === 'checking') next.username = 'Checking username availability. Please wait.';
       else if (usernameState.status === 'unavailable') next.username = 'Unable to check username. Please try again.';
-      if (!EMAIL.test(form.email.trim())) next.email = 'Enter a valid email address.';
-      if (form.password.length < 8) next.password = 'Password must be at least 8 characters.';
+      if (!credentialState.emailValid) next.email = 'Enter a valid email address.';
+      if (!credentialState.passwordValid) next.password = 'Password must be 8 to 128 characters; spaces at the ends do not count toward the minimum.';
       if (form.password !== form.confirmPassword) next.confirmPassword = 'Passwords do not match.';
     }
     setErrors(next);
@@ -361,7 +390,7 @@ export default function SignupPage() {
         setErrors({});
         return;
       } catch (error) {
-        setNotice({ title: 'Could not start verification', message: error.message });
+        setNotice(registrationSessionNotice(error));
         return;
       } finally { setLoading(false); }
     }
@@ -422,6 +451,11 @@ export default function SignupPage() {
       if (reason === 'username-taken') {
         setErrors((current) => ({ ...current, username: 'This username is already taken.' }));
         setUsernameState({ status: 'taken', checked: normalizeUsername(form.username) });
+      }
+      const confirmedDuplicate = confirmedDuplicateEmail(reason, form.email, currentEmail.current);
+      if (confirmedDuplicate) {
+        setDuplicateEmail(confirmedDuplicate);
+        return;
       }
       setNotice({
         title: reason === 'account-exists' ? 'Email already registered' : reason === 'username-taken' ? 'Username unavailable' : 'Signup failed',
@@ -525,12 +559,15 @@ export default function SignupPage() {
               />}
 
               {step === STEP.credentials && <View>
-                <Field label="Username" error={errors.username} hint={usernameState.status === 'checking' ? 'Checking username availability...' : usernameState.status === 'available' ? 'Username is available.' : usernameState.status === 'taken' ? 'Username is already taken.' : usernameState.status === 'invalid' ? 'Invalid username format' : usernameState.status === 'unavailable' ? 'Unable to check username' : '4-20 characters; letters, numbers, and underscores.'}>
-                  <TextInput style={[styles.input, errors.username && styles.inputError, usernameState.status === 'available' && styles.inputSuccess]} value={form.username} onChangeText={(v) => update('username', v.replace(/\s/g, ''))} autoCapitalize="none" autoCorrect={false} maxLength={20} />
+                <Field label="Username" error={usernameError} errorStyle={credentialErrorTextStyle} hint={usernameAvailable ? 'Username is available.' : ''} hintStyle={{ color: colors.success }}>
+                  <View style={[styles.password, usernameError && styles.inputError, usernameError && credentialErrorStyle, usernameAvailable && styles.inputSuccess, usernameAvailable && credentialSuccessStyle]}>
+                    <TextInput style={styles.passwordInput} value={form.username} onChangeText={(v) => update('username', v.replace(/\s/g, ''))} onBlur={() => markCredentialTouched('username')} accessibilityLabel="Username" accessibilityHint={usernameAvailable ? 'Username available' : undefined} autoCapitalize="none" autoCorrect={false} maxLength={20} />
+                    {usernameAvailable ? <AdminIcon name="check" color={colors.iconSuccess} size={18} style={styles.validationCheck} /> : null}
+                  </View>
                 </Field>
-                <Field label="Recovery email" error={errors.email}><TextInput style={[styles.input, errors.email && styles.inputError]} value={form.email} onChangeText={(v) => update('email', v)} keyboardType="email-address" autoCapitalize="none" autoComplete="email" /></Field>
-                <Field label="Password" error={errors.password} hint="Use at least 8 characters."><View style={[styles.password, errors.password && styles.inputError]}><TextInput style={styles.passwordInput} value={form.password} onChangeText={(v) => update('password', v)} secureTextEntry={!showPassword} autoCapitalize="none" /><PasswordVisibilityButton visible={showPassword} onPress={() => setShowPassword((v) => !v)} /></View></Field>
-                <Field label="Confirm password" error={errors.confirmPassword}><View style={[styles.password, errors.confirmPassword && styles.inputError]}><TextInput style={styles.passwordInput} value={form.confirmPassword} onChangeText={(v) => update('confirmPassword', v)} secureTextEntry={!showPasswordConfirmation} autoCapitalize="none" /><PasswordVisibilityButton visible={showPasswordConfirmation} onPress={() => setShowPasswordConfirmation((v) => !v)} label="password confirmation" /></View></Field>
+                <Field label="Recovery email" errorStyle={credentialErrorTextStyle} error={emailError}><View style={[styles.password, emailError && styles.inputError, emailError && credentialErrorStyle]}><TextInput style={styles.passwordInput} value={form.email} onChangeText={(v) => update('email', v)} onBlur={() => markCredentialTouched('email')} accessibilityLabel="Recovery email" accessibilityHint={emailDuplicate ? 'Email is already registered.' : undefined} keyboardType="email-address" autoCapitalize="none" autoComplete="email" />{emailDuplicate ? <DuplicateEmailIcon color={colors.iconDanger} backgroundColor={isDark ? colors.dangerSoft : '#FFF8F8'} /> : null}</View></Field>
+                <Field label="Password" errorStyle={credentialErrorTextStyle} error={passwordError}><View style={[styles.password, passwordError && styles.inputError, passwordError && credentialErrorStyle, credentialState.passwordValid && styles.inputSuccess, credentialState.passwordValid && credentialSuccessStyle]}><TextInput style={styles.passwordInput} value={form.password} onChangeText={(v) => update('password', v)} onBlur={() => markCredentialTouched('password')} accessibilityLabel="Password" accessibilityHint={credentialState.passwordValid ? 'Password meets requirements' : undefined} secureTextEntry={!showPassword} autoCapitalize="none" />{credentialState.passwordValid ? <AdminIcon name="check" color={colors.iconSuccess} size={18} style={styles.validationCheck} /> : null}<PasswordVisibilityButton visible={showPassword} onPress={() => setShowPassword((v) => !v)} /></View></Field>
+                <Field label="Confirm password" errorStyle={credentialErrorTextStyle} error={confirmationError}><View style={[styles.password, confirmationError && styles.inputError, confirmationError && credentialErrorStyle, credentialState.confirmationValid && styles.inputSuccess, credentialState.confirmationValid && credentialSuccessStyle]}><TextInput style={styles.passwordInput} value={form.confirmPassword} onChangeText={(v) => update('confirmPassword', v)} onBlur={() => markCredentialTouched('confirmPassword')} accessibilityLabel="Confirm password" accessibilityHint={credentialState.confirmationValid ? 'Passwords match' : undefined} secureTextEntry={!showPasswordConfirmation} autoCapitalize="none" />{credentialState.confirmationValid ? <AdminIcon name="check" color={colors.iconSuccess} size={18} style={styles.validationCheck} /> : null}<PasswordVisibilityButton visible={showPasswordConfirmation} onPress={() => setShowPasswordConfirmation((v) => !v)} label="password confirmation" /></View></Field>
                 <View style={styles.termsRow}>
                   <TouchableOpacity style={styles.checkboxTouch} onPress={() => { setTermsAccepted((value) => !value); setErrors((current) => ({ ...current, terms: '' })); }} accessibilityRole="checkbox" accessibilityState={{ checked: termsAccepted }}>
                     <View style={[styles.checkboxBox, termsAccepted && styles.checkboxTouchChecked]}><Text style={styles.checkboxMark}>{termsAccepted ? '✓' : ''}</Text></View>
@@ -580,7 +617,8 @@ const styles = createPortalStyleSheet({
   phone: { flexDirection: 'row', alignItems: 'center', minHeight: 50, borderWidth: 1, borderColor: '#C8D9E6', borderRadius: 11, backgroundColor: '#FAFCFE' }, prefix: { paddingHorizontal: 14, color: '#17324D', fontWeight: '700', borderRightWidth: 1, borderRightColor: '#D8E5EF' }, phoneInput: { flex: 1, minHeight: 48, paddingHorizontal: 12, color: '#17324D', fontSize: 15 }, select: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }, inputText: { color: '#17324D', fontSize: 15 }, placeholder: { color: BLUETAP_COLORS.textSecondary, fontSize: 15 }, inputDisabled: { opacity: .58 }, dropdown: { maxHeight: 170, borderWidth: 1, borderColor: '#C8D9E6', borderRadius: 11, marginTop: -10, marginBottom: 15 }, option: { padding: 13, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#D8E5EF' }, emptyDropdown: { color: '#607A90', padding: 13, fontSize: 13 },
   identityBox: { alignItems: 'center' }, faceIcon: { width: 82, height: 82, borderRadius: 41, backgroundColor: '#E8F5FF', alignItems: 'center', justifyContent: 'center', marginBottom: 15 }, faceIconText: { color: BLUETAP_COLORS.primary, fontSize: 48 }, identityTitle: { color: '#17324D', fontSize: 17, fontWeight: '800', textAlign: 'center' }, identityText: { color: '#607A90', fontSize: 14, lineHeight: 21, textAlign: 'center', marginTop: 9 }, privacy: { backgroundColor: '#F1F7FB', padding: 13, borderRadius: 10, marginTop: 16 }, privacyText: { color: '#47667E', fontSize: 12, lineHeight: 18 }, status: { flexDirection: 'row', alignItems: 'center', marginTop: 14 }, successMark: { color: '#238A57', fontSize: 18, fontWeight: '900', marginRight: 7 }, reviewDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#C47A13', marginRight: 7 }, faceMessage: { color: '#A34B23', fontSize: 13, lineHeight: 18, textAlign: 'center', marginTop: 14 }, faceSuccess: { color: '#238A57', fontSize: 13, fontWeight: '700' }, faceReview: { color: '#A5650B', fontSize: 13, fontWeight: '700' },
   faceButton: { width: '100%', minHeight: 48, marginTop: 16, borderRadius: 11, borderWidth: 1, borderColor: '#9AC7E8', alignItems: 'center', justifyContent: 'center' }, faceButtonText: { color: BLUETAP_COLORS.primary, fontSize: 14, fontWeight: '700' },
-  password: { flexDirection: 'row', alignItems: 'center', minHeight: 50, borderWidth: 1, borderColor: '#C8D9E6', borderRadius: 11, backgroundColor: '#FAFCFE' }, passwordInput: { flex: 1, minHeight: 48, paddingHorizontal: 14, color: '#17324D', fontSize: 15 },
+  password: { flexDirection: 'row', alignItems: 'center', minHeight: 50, borderWidth: 1, borderColor: '#C8D9E6', borderRadius: 11, backgroundColor: '#FAFCFE' }, passwordInput: { flex: 1, minWidth: 0, minHeight: 48, paddingHorizontal: 14, color: '#17324D', fontSize: 15 }, validationCheck: { marginRight: 8 },
+  mailIcon: { width: 27, height: 24, marginRight: 10, justifyContent: 'center' }, mailEnvelope: { width: 20, height: 14, borderWidth: 1.5, borderRadius: 2 }, mailFlap: { position: 'absolute', top: 3, width: 11, height: 1.5 }, mailFlapLeft: { left: 0, transform: [{ rotate: '30deg' }] }, mailFlapRight: { right: 0, transform: [{ rotate: '-30deg' }] }, mailCross: { position: 'absolute', right: 0, bottom: 0, fontSize: 16, lineHeight: 17, fontWeight: '900' },
   termsRow: { flexDirection: 'row', alignItems: 'flex-start', minHeight: 44, marginTop: 2 }, checkboxTouch: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', marginRight: 2, marginTop: -8 }, checkboxBox: { width: 26, height: 26, borderRadius: 7, borderWidth: 1.5, borderColor: '#91ABC0', alignItems: 'center', justifyContent: 'center' }, checkboxTouchChecked: { backgroundColor: BLUETAP_COLORS.primary, borderColor: BLUETAP_COLORS.primary }, checkboxMark: { color: '#FFF', fontWeight: '900' }, termsText: { flex: 1, color: '#526E84', fontSize: 13, lineHeight: 20 }, termsLink: { color: BLUETAP_COLORS.primary, fontWeight: '800' },
   primary: { flex: 1, minHeight: 50, borderRadius: 11, paddingHorizontal: 18, backgroundColor: BLUETAP_COLORS.primary, alignItems: 'center', justifyContent: 'center' }, primaryText: { color: '#FFF', fontSize: 15, fontWeight: '800', textAlign: 'center' }, loginPrompt: { textAlign: 'center', color: '#6B8498', fontSize: 13, marginTop: 20 }, loginLink: { color: BLUETAP_COLORS.primary, fontWeight: '800' },
   modalBg: { flex: 1, backgroundColor: 'rgba(0,0,0,.5)', alignItems: 'center', justifyContent: 'center', padding: 20 }, modal: { width: '100%', maxWidth: 420, backgroundColor: '#FFF', borderRadius: 20, padding: 24 },

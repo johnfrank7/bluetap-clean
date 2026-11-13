@@ -27,6 +27,7 @@ function load(file, extra = '') {
     'react-native-safe-area-context': { useSafeAreaInsets: () => ({ bottom: state.bottom }) },
     './BlueTapTheme': { useBlueTapTheme: () => ({ colors: state.colors }) },
     './RoleNotifications': { useRoleNotifications: () => ({ attentionCounts: state.counts }) },
+    './RequesterTutorialModal': { useRequesterTourTarget: () => () => {} },
     './useSingleFlightNavigation': () => ({ replaceOnce: (route) => state.destinations.push(route) }),
     './shadowStyles': { createShadow: () => ({}) },
   };

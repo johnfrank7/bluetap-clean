@@ -174,7 +174,7 @@ function managementFixture() {
   const allDocs = (name) => [...records.keys()].filter((path) => path.startsWith(`${name}/`)).map(snapshot);
   const collection = (name) => ({
     doc(id = `auto-${++autoId}`) { const path = `${name}/${id}`; return { id, path, get: async () => snapshot(path), update: async (data) => { records.set(path, { ...records.get(path), ...data }); }, set: async (data) => { records.set(path, data); } }; },
-    where(field, _op, value) { return { limit() { return this; }, get: async () => ({ docs: allDocs(name).filter((doc) => doc.data()?.[field] === value) }) }; },
+    where(field, op, value) { const filters = [[field, op, value]]; return { where(key, operator, expected) { filters.push([key, operator, expected]); return this; }, limit() { return this; }, get: async () => ({ docs: allDocs(name).filter((doc) => filters.every(([key, operator, expected]) => operator === '!=' ? doc.data()?.[key] != null && doc.data()[key] !== expected : doc.data()?.[key] === expected)) }) }; },
     orderBy() { return { limit() { return this; }, get: async () => ({ docs: allDocs(name) }) }; },
     get: async () => ({ docs: allDocs(name) }),
   });
@@ -190,7 +190,7 @@ function managementFixture() {
     const result = await run({
       get: async (ref) => {
         if (hasWritten) throw new Error('Firestore transactions require all reads to be executed before all writes.');
-        return snapshot(ref.path);
+        return ref.path ? snapshot(ref.path) : ref.get();
       },
       create(ref, data) {
         hasWritten = true;
@@ -297,7 +297,7 @@ test('Admin Distributor reassignment requires an active branch, records an audit
   const audit = [...fixture.records.values()].find((value) => value.action === 'DISTRIBUTOR_BRANCH_CHANGED');
   assert.equal(audit.previousBranchId, 'north'); assert.equal(audit.newBranchId, 'south'); assert.equal(audit.changedByAdminUid, 'admin-1');
   fixture.records.set('requests/open-delivery', { assignedDistributorUid: 'distributor-1', status: 'out_for_delivery' });
-  const blocked = await call(handler, 'PATCH', 'admin-token', { uid: 'distributor-1', action: 'updateAccount', fullName: 'Dina Driver', email: 'dina@example.test', role: 'distributor', branchId: 'north', active: true });
+  const blocked = await call(handler, 'PATCH', 'admin-token', { uid: 'distributor-1', action: 'updateAccount', fullName: 'Dina Driver Updated', email: 'dina@example.test', role: 'distributor', branchId: 'north', active: true });
   assert.equal(blocked.statusCode, 409); assert.equal(blocked.body.error.reason, 'DISTRIBUTOR_ACTIVE_DELIVERIES');
   assert.match(blocked.body.error.message, /active deliveries/i);
 });
@@ -311,6 +311,135 @@ test('Admin can manually assign an active branch to a legacy active Distributor 
   assert.equal(fixture.records.get('users/legacy-distributor').branchMembershipVersion, 2);
   assert.ok([...fixture.records.values()].some((value) => value.action === 'DISTRIBUTOR_BRANCH_CHANGED' && value.targetUid === 'legacy-distributor'));
 });
+
+test('Distributor branch and actual Auth changes must be saved separately before any writes', async () => {
+  for (const changes of [
+    { fullName: 'Changed Name' }, { email: 'new@example.test' },
+    { temporaryPassword: 'SafePassword2026' }, { role: 'manager' },
+  ]) {
+    const fixture = managementFixture();
+    fixture.records.set('branches/south', { name: 'South', status: 'active' });
+    const { auth, db } = fixture.getAdmin(); let authWrites = 0; let transactions = 0;
+    auth.updateUser = async () => { authWrites++; }; auth.setCustomUserClaims = async () => { authWrites++; };
+    const run = db.runTransaction; db.runTransaction = async (fn) => { transactions++; return run(fn); };
+    const before = structuredClone(fixture.records.get('users/distributor-1'));
+    const result = await call(accountHandler(fixture), 'PATCH', 'admin-token', { uid: 'distributor-1', action: 'updateAccount', branchId: 'south', ...changes });
+    assert.equal(result.statusCode, 409); assert.equal(result.body.error.reason, 'SEPARATE_BRANCH_AND_AUTH_CHANGES');
+    assert.equal(authWrites, 0); assert.equal(transactions, 0); assert.deepEqual(fixture.records.get('users/distributor-1'), before);
+  }
+});
+
+test('unchanged submitted Auth fields do not prevent a branch-only edit and credentials save separately', async () => {
+  const fixture = managementFixture(); fixture.records.set('branches/south', { name: 'South', status: 'active' });
+  const handler = accountHandler(fixture);
+  const branch = await call(handler, 'PATCH', 'admin-token', { uid: 'distributor-1', action: 'updateAccount', branchId: 'south', fullName: ' Dina Driver ', email: ' DINA@EXAMPLE.TEST ', role: 'distributor', temporaryPassword: '' });
+  assert.equal(branch.statusCode, 200); assert.equal(fixture.records.get('users/distributor-1').branchId, 'south');
+  const credentials = await call(handler, 'PATCH', 'admin-token', { uid: 'distributor-1', action: 'updateAccount', email: 'new-driver@example.test' });
+  assert.equal(credentials.statusCode, 200); assert.equal(fixture.records.get('users/distributor-1').branchId, 'south');
+  assert.equal(fixture.authUsers.get('distributor-1').email, 'new-driver@example.test');
+  assert.equal(fixture.authUsers.get('distributor-1').emailVerified, false);
+});
+
+test('branch transaction rejects changed account, inactive destination, and legacy failed assignment', async () => {
+  for (const race of ['account', 'branch', 'failed']) {
+    const fixture = managementFixture(); fixture.records.set('branches/south', { name: 'South', status: 'active' });
+    const { db } = fixture.getAdmin(); const run = db.runTransaction;
+    db.runTransaction = async (fn) => {
+      if (race === 'account') fixture.records.set('users/distributor-1', { ...fixture.records.get('users/distributor-1'), branchId: 'east' });
+      if (race === 'branch') fixture.records.set('branches/south', { name: 'South', status: 'inactive' });
+      if (race === 'failed') fixture.records.set('requests/failed', { distributor_id: 'distributor-1', status: 'delivery_failed' });
+      return run(fn);
+    };
+    const result = await call(accountHandler(fixture), 'PATCH', 'admin-token', { uid: 'distributor-1', action: 'updateAccount', branchId: 'south' });
+    assert.equal(result.statusCode, 409); assert.notEqual(fixture.records.get('users/distributor-1').branchId, 'south');
+    assert.equal(result.body.error.reason, { account: 'DISTRIBUTOR_MEMBERSHIP_CHANGED', branch: 'BRANCH_INACTIVE', failed: 'DISTRIBUTOR_ACTIVE_DELIVERIES' }[race]);
+  }
+});
+
+test('role changes still set claims and ambiguous Auth failure is never reported as success', async () => {
+  const fixture = managementFixture(); const { auth } = fixture.getAdmin(); let claims;
+  auth.setCustomUserClaims = async (uid, value) => { claims = { uid, value }; };
+  const result = await call(accountHandler(fixture), 'PATCH', 'admin-token', { uid: 'distributor-1', action: 'updateAccount', role: 'manager', branchId: 'north' });
+  assert.equal(result.statusCode, 200); assert.deepEqual(claims, { uid: 'distributor-1', value: { role: 'manager', manager: true } });
+  const failed = managementFixture(); const authFailed = failed.getAdmin().auth; let calls = 0;
+  authFailed.updateUser = async () => { calls++; throw new Error('unknown outcome'); };
+  const response = await call(accountHandler(failed), 'PATCH', 'admin-token', { uid: 'distributor-1', action: 'updateAccount', temporaryPassword: 'SafePassword2026' });
+  assert.equal(response.statusCode, 500); assert.equal(calls, 1); assert.equal(failed.records.get('users/distributor-1').mustChangePassword, undefined);
+});
+
+test('Manager cannot invoke the Admin account editor', async () => {
+  const fixture = managementFixture(); const result = await call(accountHandler(fixture), 'PATCH', 'manager-token', { uid: 'distributor-1', action: 'updateAccount', branchId: 'south', temporaryPassword: 'SafePassword2026' });
+  assert.equal(result.statusCode, 403);
+  assert.equal(fixture.records.get('users/distributor-1').branchId, 'north');
+});
+
+test('Firestore emulator enforces the separation and revalidates failed assignments in a transaction',
+  { skip: process.env.FIRESTORE_EMULATOR_HOST !== '127.0.0.1:8080' || process.env.GCLOUD_PROJECT !== 'demo-bluetap' }, async () => {
+    const { randomUUID } = require('node:crypto');
+    const { initializeApp, deleteApp } = require('firebase-admin/app');
+    const { getFirestore } = require('firebase-admin/firestore');
+    const suffix = randomUUID().slice(0, 8); const app = initializeApp({ projectId: 'demo-bluetap' }, `account-separation-${suffix}`);
+    const db = getFirestore(app); const uid = `dist-${suffix}`; const adminUid = `admin-${suffix}`; const north = `north-${suffix}`; const south = `south-${suffix}`;
+    const authUser = { uid, email: `${uid}@example.test`, emailVerified: true, metadata: {} }; let authWrites = 0;
+    const auth = { verifyIdToken: async () => ({ uid: adminUid, role: 'admin', admin: true }), getUser: async () => authUser,
+      updateUser: async () => { authWrites++; }, setCustomUserClaims: async () => { authWrites++; }, revokeRefreshTokens: async () => {} };
+    try {
+      await Promise.all([
+        db.collection('users').doc(adminUid).set({ role: 'admin', accountStatus: 'active' }),
+        db.collection('users').doc(uid).set({ role: 'distributor', fullName: 'Emulator Driver', email: authUser.email, distributorStatus: 'active', approvalStatus: 'active', branchId: north }),
+        db.collection('branches').doc(north).set({ name: 'North', status: 'active' }),
+        db.collection('branches').doc(south).set({ name: 'South', status: 'active' }),
+      ]);
+      const handler = createAdminAccountsHandler(() => ({ auth, db }));
+      const mixed = await call(handler, 'PATCH', 'admin-token', { uid, action: 'updateAccount', branchId: south, temporaryPassword: 'SafePassword2026' });
+      assert.equal(mixed.statusCode, 409); assert.equal(authWrites, 0);
+      const moved = await call(handler, 'PATCH', 'admin-token', { uid, action: 'updateAccount', branchId: south });
+      assert.equal(moved.statusCode, 200);
+      const run = db.runTransaction.bind(db);
+      db.runTransaction = async (fn) => {
+        await db.collection('requests').doc(`failed-${suffix}`).set({ distributor_id: uid, status: 'delivery_failed' });
+        return run(fn);
+      };
+      const blocked = await call(handler, 'PATCH', 'admin-token', { uid, action: 'updateAccount', branchId: north });
+      assert.equal(blocked.statusCode, 409); assert.equal(blocked.body.error.reason, 'DISTRIBUTOR_ACTIVE_DELIVERIES');
+      assert.equal((await db.collection('users').doc(uid).get()).data().branchId, south);
+    } finally { await deleteApp(app); }
+  });
+
+test('Firestore emulator blocks a stale Manager assignment after a branch change',
+  { skip: process.env.FIRESTORE_EMULATOR_HOST !== '127.0.0.1:8080' || process.env.GCLOUD_PROJECT !== 'demo-bluetap', timeout: 30000 }, async () => {
+    const { randomUUID } = require('node:crypto');
+    const { initializeApp, deleteApp } = require('firebase-admin/app');
+    const { getFirestore } = require('firebase-admin/firestore');
+    const { createManagerDispatchHandler } = require('../../manager/dispatchHandler');
+    const suffix = randomUUID().slice(0, 8); const app = initializeApp({ projectId: 'demo-bluetap' }, `branch-race-${suffix}`); const db = getFirestore(app);
+    const uid = `dist-${suffix}`; const adminUid = `admin-${suffix}`; const managerUid = `manager-${suffix}`; const north = `north-${suffix}`; const south = `south-${suffix}`; const orderId = `order-${suffix}`;
+    let reached; let release; const waiting = new Promise((resolve) => { reached = resolve; }); const gate = new Promise((resolve) => { release = resolve; });
+    const adminAuth = { verifyIdToken: async () => ({ uid: adminUid, role: 'admin', admin: true }), getUser: async (id) => ({ uid: id, email: `${uid}@example.test`, metadata: {} }) };
+    const managerAuth = { verifyIdToken: async () => ({ uid: managerUid, role: 'manager', manager: true }), getUser: async (id) => { if (id === uid) { reached(); await gate; } return { uid: id, disabled: false }; } };
+    try {
+      await Promise.all([
+        db.doc(`users/${adminUid}`).set({ role: 'admin', accountStatus: 'active' }),
+        db.doc(`users/${managerUid}`).set({ role: 'manager', accountStatus: 'active', managerStatus: 'active', branchId: north }),
+        db.doc(`users/${uid}`).set({ role: 'distributor', accountStatus: 'active', distributorStatus: 'active', approvalStatus: 'active', fullName: 'Race Driver', email: `${uid}@example.test`, branchId: north }),
+        db.doc(`distributorDispatchGuards/${uid}`).set({ schemaVersion: 1, initialized: true, distributorUid: uid, revision: 0, reservations: [] }),
+        db.doc(`branches/${north}`).set({ name: 'North', status: 'active' }), db.doc(`branches/${south}`).set({ name: 'South', status: 'active' }),
+        db.doc(`requests/${orderId}`).set({ status: 'awaiting_distributor_assignment', branchId: north, currentBranchId: north, requesterUid: `requester-${suffix}`, items: [] }),
+      ]);
+      const manager = createManagerDispatchHandler(() => ({ auth: managerAuth, db }));
+      const admin = createAdminAccountsHandler(() => ({ auth: adminAuth, db }));
+      const assigning = call(manager, 'PATCH', 'manager-token', { action: 'assign-distributor', orderId, distributorUid: uid, scheduledAt: new Date(Date.now() + 86400000).toISOString() });
+      await waiting;
+      try {
+        const moved = await call(admin, 'PATCH', 'admin-token', { uid, action: 'updateAccount', branchId: south });
+        assert.equal(moved.statusCode, 200);
+      } finally { release(); }
+      const assigned = await assigning;
+      assert.equal(assigned.statusCode, 409);
+      assert.equal((await db.doc(`users/${uid}`).get()).data().branchId, south);
+      assert.equal((await db.doc(`requests/${orderId}`).get()).data().assignedDistributorUid, undefined);
+    } finally { release(); await deleteApp(app); }
+  });
 
 test('Admin-created active Distributor requires and receives an authoritative active branch', async () => {
   const fixture = managementFixture(); const handler = accountHandler(fixture);

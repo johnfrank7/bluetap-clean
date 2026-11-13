@@ -13,6 +13,7 @@ import { createShadow } from './shadowStyles';
 import { useBlueTapTheme } from './BlueTapTheme';
 import { useRoleNotifications } from './RoleNotifications';
 import useSingleFlightNavigation from './useSingleFlightNavigation';
+import { useRequesterTourTarget } from './RequesterTutorialModal';
 const { formatNotificationBadge } = require('../services/orderNotifications');
 
 const ICON_SIZE = 27;
@@ -120,7 +121,7 @@ function NavIcon({ source, color }) {
   );
 }
 
-function BottomNav({ items, floating = true }) {
+function BottomNav({ items, floating = true, tourTargets = {} }) {
   const pathname = usePathname();
   const { replaceOnce } = useSingleFlightNavigation();
   const segments = useSegments();
@@ -153,6 +154,7 @@ function BottomNav({ items, floating = true }) {
         return (
           <View key={item.key} style={styles.navSlot}>
             <Pressable
+              ref={tourTargets[item.key]}
               dataSet={{ bluetapBottomNav: 'true' }}
               accessibilityRole="button"
               accessibilityState={{ selected: isActive }}
@@ -184,7 +186,10 @@ function BottomNav({ items, floating = true }) {
 }
 
 export function RequesterBottomNav() {
-  return <BottomNav items={requesterItems} />;
+  const home = useRequesterTourTarget('home');
+  const add = useRequesterTourTarget('add-nav');
+  const profile = useRequesterTourTarget('profile');
+  return <BottomNav items={requesterItems} tourTargets={{ home, add, profile }} />;
 }
 
 export function DistributorBottomNav() {

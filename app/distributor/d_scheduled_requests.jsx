@@ -9,6 +9,7 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -20,6 +21,7 @@ import SoftStatusBadge from '../../components/SoftStatusBadge';
 import { createShadow } from '../../components/shadowStyles';
 import BlueTapEmptyState from '../../components/BlueTapEmptyState';
 import DistributorProfileBanner from '../../components/DistributorProfileBanner';
+import TripLifecycleControls from '../../components/TripLifecycleControls';
 import PortalSwipeContainer, { DISTRIBUTOR_TABS } from '../../components/PortalSwipeContainer';
 import { createPortalStyleSheet, useBlueTapTheme } from '../../components/BlueTapTheme';
 import TopToastFeedback from '../../components/TopToastFeedback';
@@ -33,6 +35,8 @@ import {
   useAssignedDistributorOrders,
 } from '../../services/distributorOrders';
 import { useDistributorProfile } from '../../services/distributorProfile';
+import { useVerifiedTripMode, getDistributorProposal, proposeDistributorSchedule, tripMutationId } from '../../services/tripApprovals';
+const { manilaScheduleDate } = require('../../services/productOrderPolicy');
 import { formatDisplayUniqueId } from '../../services/uniqueIds';
 import { DistributorOrderChatAction } from '../../components/chat/ChatOrderActions';
 import AnimatedPresenceItem from '../../components/AnimatedPresenceItem';
@@ -62,19 +66,13 @@ const TIME_SLOTS = [
 const getAmountNumber = (amount) =>
   Number(String(amount || '').replace(/[^\d.]/g, '')) || 0;
 
-const getQuantityNumber = (quantity) => {
-  const match = String(quantity || '').match(/\d+(\.\d+)?/);
-  return Number(match?.[0] || 0);
-};
-
 const getDetailsRequestData = (request) => {
   if (!request) return null;
 
   const totalAmount = getAmountNumber(request.amountDue);
-  const quantity = getQuantityNumber(request.quantity);
-  const unitPrice = quantity > 0 ? totalAmount / quantity : totalAmount;
 
   return {
+    pricingDetailsSource: request.pricingDetailsSource || request,
     requestId: request.id,
     status: request.status || 'Scheduled',
     orderDate: 'Not set',
@@ -99,15 +97,9 @@ const getDetailsRequestData = (request) => {
     failureReasonCode: request.failureReasonCode,
     failureReasonLabel: request.failureReasonLabel,
     failureReasonNote: request.failureReasonNote,
-    items: [
-      {
-        id: request.id,
-        productName: request.productName,
-        quantity: request.quantity,
-        unitPrice,
-        subtotal: totalAmount,
-      },
-    ],
+    items: request.items?.length ? request.items : [{ id: request.id, productName: request.productName, quantity: request.quantity }],
+    subtotalAtOrder: request.subtotalAtOrder,
+    deliveryFeeAtOrder: request.deliveryFeeAtOrder,
     grandTotalAmount: totalAmount,
   };
 };
@@ -119,11 +111,16 @@ const ScheduledRequestCard = ({
   onViewDetails,
   processing,
   actionsDisabled = false,
+  tripMode,
+  proposal,
+  onRetryProposal,
+  floatingClearance,
 }) => {
   const statusNorm = normalizeDistributorOrderStatus(request.status);
   const isDeliveryFailed = statusNorm === 'delivery failed';
   const isScheduledOrAccepted = statusNorm === 'accepted' || statusNorm === 'scheduled';
   const interactionDisabled = processing || actionsDisabled;
+  const rescheduleDisabled = interactionDisabled || ['checking', 'blocked'].includes(tripMode) || (tripMode === 'trip' && (!proposal || proposal.loading || proposal.error || proposal.status === 'pending'));
 
   return (
     <View style={styles.requestCard}>
@@ -185,9 +182,13 @@ const ScheduledRequestCard = ({
             <Text style={styles.failureNoticeBody}>{request.failureReason || 'Issue reported during delivery attempt.'}</Text>
           </View>
         )}
+        {tripMode === 'trip' && proposal?.status && <Text style={styles.failureNoticeBody}>{({ pending: 'Pending Manager Approval', approved: 'Schedule approved', rejected: 'Schedule proposal rejected', stale: 'Schedule proposal is stale' })[proposal.status]}{proposal.scheduledAt ? ` · ${new Date(proposal.scheduledAt).toLocaleString('en-US', { timeZone: 'Asia/Manila' })}` : ''}</Text>}
+        {tripMode === 'trip' && proposal?.loading && <Text style={styles.failureNoticeBody}>Checking proposal status…</Text>}
+        {tripMode === 'trip' && proposal?.error && <Text style={styles.dialogError}>{proposal.error}</Text>}
+        {tripMode === 'trip' && proposal?.error && <TouchableOpacity accessibilityRole="button" onPress={onRetryProposal}><Text style={styles.secondaryActionText}>Retry proposal status</Text></TouchableOpacity>}
       </View>
 
-      <View style={styles.cardActionsRow}>
+      <View style={[styles.cardActionsRow, floatingClearance && styles.cardActionsFloatingClearance]}>
         <TouchableOpacity
           activeOpacity={0.8}
           disabled={actionsDisabled}
@@ -213,9 +214,9 @@ const ScheduledRequestCard = ({
         {isDeliveryFailed && (
           <TouchableOpacity
             activeOpacity={0.85}
-            disabled={interactionDisabled}
+            disabled={rescheduleDisabled}
             onPress={() => onOpenRescheduleModal(request)}
-            style={[styles.rescheduleActionButton, interactionDisabled && styles.actionButtonDisabled]}
+            style={[styles.rescheduleActionButton, rescheduleDisabled && styles.actionButtonDisabled]}
           >
             <Text style={styles.rescheduleActionText}>Reschedule Delivery</Text>
           </TouchableOpacity>
@@ -227,6 +228,7 @@ const ScheduledRequestCard = ({
 
 export default function DistributorScheduledRequests() {
   const { colors, isDark } = useBlueTapTheme();
+  const { width } = useWindowDimensions();
   const router = useRouter();
   const params = useLocalSearchParams();
   const openedParamRef = React.useRef('');
@@ -240,6 +242,11 @@ export default function DistributorScheduledRequests() {
   const [selectedSlotIndex, setSelectedSlotIndex] = useState(0);
   const [rescheduleError, setRescheduleError] = useState('');
   const [toast, setToast] = useState({ visible: false, message: '', type: 'success' });
+  const tripMode = useVerifiedTripMode();
+  const [proposals, setProposals] = useState({});
+  const [proposalRefreshKey, setProposalRefreshKey] = useState(0);
+  const submissionLock = React.useRef(false);
+  const proposalMutation = React.useRef(null);
 
   const { isComplete, loading: profileLoading } = useDistributorProfile();
   const { orders, loading, error, refresh } = useAssignedDistributorOrders();
@@ -251,6 +258,18 @@ export default function DistributorScheduledRequests() {
     [orders]
   );
   const scheduledPresentation = useAnimatedPresenceList(scheduledRequests, (request) => request.sourceId);
+
+  React.useEffect(() => {
+    if (tripMode !== 'trip') { setProposals({}); return undefined; }
+    let active = true;
+    const relevant = scheduledRequests.filter((item) => ['delivery failed', 'scheduled'].includes(normalizeDistributorOrderStatus(item.status)));
+    setProposals(Object.fromEntries(relevant.map((item) => [item.sourceId, { loading: true }])));
+    Promise.all(relevant.map(async (item) => {
+      try { return [item.sourceId, (await getDistributorProposal(item.sourceId)).proposal]; }
+      catch (error) { return [item.sourceId, error.code === 'PROPOSAL_NOT_FOUND' ? {} : { error: error.message || 'Proposal status unavailable.' }]; }
+    })).then((entries) => { if (active) setProposals(Object.fromEntries(entries)); });
+    return () => { active = false; };
+  }, [tripMode, scheduledRequests, proposalRefreshKey]);
 
   React.useEffect(() => {
     const rawTarget = params.orderId || params.id;
@@ -300,32 +319,39 @@ export default function DistributorScheduledRequests() {
   };
 
   const submitReschedule = async () => {
-    if (!reschedulingRequest) return;
+    if (!reschedulingRequest || submissionLock.current || ['checking', 'blocked'].includes(tripMode)) return;
     if (!isComplete) {
       Alert.alert('Profile Incomplete', 'Please complete your distributor profile before updating deliveries.');
       return;
     }
     const slot = TIME_SLOTS[selectedSlotIndex] || TIME_SLOTS[0];
-    const target = new Date();
-    target.setDate(target.getDate() + selectedDayOffset);
-    target.setHours(slot.hours, slot.minutes, 0, 0);
+    const target = tripMode === 'trip' ? manilaScheduleDate(selectedDayOffset, slot.hours, slot.minutes) : new Date();
+    if (tripMode !== 'trip') { target.setDate(target.getDate() + selectedDayOffset); target.setHours(slot.hours, slot.minutes, 0, 0); }
 
     if (target.getTime() < Date.now() + 5 * 60 * 1000) {
       setRescheduleError('Please choose a time slot in the future.');
       return;
     }
 
+    submissionLock.current = true;
     setProcessingRequestId(reschedulingRequest.sourceId);
     setRescheduleError('');
     try {
-      await rescheduleAssignedDelivery(reschedulingRequest.sourceId, target.toISOString());
+      if (tripMode === 'trip') {
+        const orderId = reschedulingRequest.sourceId; const scheduledAt = target.toISOString();
+        if (!proposalMutation.current || proposalMutation.current.orderId !== orderId || proposalMutation.current.scheduledAt !== scheduledAt) proposalMutation.current = { orderId, scheduledAt, id: tripMutationId() };
+        const result = await proposeDistributorSchedule(orderId, scheduledAt, proposalMutation.current.id);
+        if (result?.proposal?.status !== 'pending' || result.proposal.orderId !== orderId) throw new Error('The proposal could not be confirmed.');
+        setProposals((current) => ({ ...current, [orderId]: result.proposal }));
+      } else await rescheduleAssignedDelivery(reschedulingRequest.sourceId, target.toISOString());
       await refresh();
       setReschedulingRequest(null);
-      setToast({ visible: true, message: 'Delivery rescheduled successfully.', type: 'success' });
+      setToast({ visible: true, message: tripMode === 'trip' ? 'Pending Manager Approval.' : 'Delivery rescheduled successfully.', type: 'success' });
     } catch (err) {
       setRescheduleError(err.message || 'Failed to reschedule delivery.');
       setToast({ visible: true, message: err.message || 'Failed to reschedule delivery.', type: 'error' });
     } finally {
+      submissionLock.current = false;
       setProcessingRequestId('');
     }
   };
@@ -371,6 +397,8 @@ export default function DistributorScheduledRequests() {
           </View>
 
           <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+            <TripLifecycleControls mode={tripMode} role="distributor" colors={colors} />
+            {tripMode === 'blocked' && <View accessibilityRole="alert" style={styles.actionErrorCard}><Text style={styles.actionErrorText}>Trip availability could not be verified. Reopen this page to retry before rescheduling.</Text></View>}
             {!!actionError && (
               <View style={styles.actionErrorCard}>
                 <Text style={styles.actionErrorText}>{actionError}</Text>
@@ -412,6 +440,10 @@ export default function DistributorScheduledRequests() {
                   request={entry.item}
                   actionsDisabled={entry.actionsDisabled}
                   processing={processingRequestId === entry.id}
+                  tripMode={tripMode}
+                  proposal={proposals[entry.item.sourceId]}
+                  floatingClearance={width < 768}
+                  onRetryProposal={() => setProposalRefreshKey((value) => value + 1)}
                   onAdvance={advanceDelivery}
                   onOpenRescheduleModal={(req) => {
                     if (!isComplete) {
@@ -454,9 +486,9 @@ export default function DistributorScheduledRequests() {
       >
         <View style={styles.modalOverlay}>
           <View style={styles.dialogCard}>
-            <Text style={styles.dialogTitle}>Reschedule Failed Delivery</Text>
+            <Text style={styles.dialogTitle}>{tripMode === 'trip' ? 'Propose a Delivery Schedule' : 'Reschedule Failed Delivery'}</Text>
             <Text style={styles.dialogBody}>
-              Order #{reschedulingRequest?.id}. Select a new delivery slot to re-attempt this order.
+              Order #{reschedulingRequest?.id}. {tripMode === 'trip' ? 'The current schedule remains unchanged until Manager approval.' : 'Select a new delivery slot to re-attempt this order.'}
             </Text>
 
             <Text style={styles.pickerSectionLabel}>Select Date:</Text>
@@ -507,7 +539,7 @@ export default function DistributorScheduledRequests() {
                 {processingRequestId ? (
                   <ActivityIndicator color="#FFFFFF" size="small" />
                 ) : (
-                  <Text style={styles.dialogSuccessText}>Save Schedule</Text>
+                  <Text style={styles.dialogSuccessText}>{tripMode === 'trip' ? 'Send Proposal' : 'Save Schedule'}</Text>
                 )}
               </TouchableOpacity>
             </View>
@@ -678,6 +710,10 @@ const styles = createPortalStyleSheet({
     gap: 8,
     marginTop: 14,
     justifyContent: 'flex-end',
+  },
+  cardActionsFloatingClearance: {
+    // Keep the action row clear of the 54px floating portal controls.
+    marginRight: 56,
   },
   secondaryActionButton: {
     minHeight: 38,

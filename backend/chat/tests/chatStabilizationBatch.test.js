@@ -6,6 +6,7 @@ const {
   createChatMessagesHandler,
 } = require('../chatHandler');
 const { createOrderDetailsHandler } = require('../../orders/orderDetailsHandler');
+const { resolveRequesterName } = require('../../orders/requesterIdentity');
 const { applyCors } = require('../../utils/cors');
 const {
   formatOrderDate,
@@ -369,6 +370,20 @@ test('Authoritative Order Details: Requester can access own order and receives n
   assert.equal(data.order.requesterName, 'Alice Requester');
   assert.equal(data.order.contactNumber, '09171234567');
   assert.equal(data.order.requesterPublicUidSnapshot, 'Req001');
+});
+
+test('order and chat preserve the historical requester name and never borrow another profile', async () => {
+  const f = fixture();
+  f.records.get('requests/order-a').requesterNameSnapshot = 'Historical Requester';
+  const details = await callHandler(createOrderDetailsHandler(f.getAdmin), 'GET', 'requester-a-token', undefined, '?orderId=order-a');
+  const chat = await callHandler(f.conversations, 'POST', 'requester-a-token', { type: 'requester_distributor', orderId: 'order-a' });
+  assert.equal(details.statusCode, 200);
+  assert.equal(chat.statusCode, 201);
+  assert.equal(details.data.order.requesterName, 'Historical Requester');
+  assert.equal(chat.data.conversation.orderContext.requesterName, 'Historical Requester');
+  assert.equal(resolveRequesterName({ requesterUid: 'requester-a' }, { uid: 'requester-b', fullName: 'Other Person' }), '');
+  assert.equal(resolveRequesterName({ requesterUid: 'requester-a' }, { uid: 'requester-a', fullName: 'Current Name' }), 'Current Name');
+  assert.equal(resolveRequesterName({ requesterUid: 'requester-a', requesterNameSnapshot: 'test' }, { uid: 'requester-a', fullName: 'Current Name' }), 'test');
 });
 
 test('Authoritative Order Details: Requester cannot access another requester order', async () => {
