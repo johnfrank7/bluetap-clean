@@ -8,7 +8,6 @@ import { ManagerOngoingRequestsButton, useManagerOngoingRequests } from '../Mana
 import BlueTapChatIcon from './BlueTapChatIcon';
 import { useChat } from './ChatContext';
 import ChatPanel from './ChatPanel';
-import AssistantFloatingButton from '../assistant/AssistantFloatingButton';
 import { useRequesterTour } from '../RequesterTutorialModal';
 
 export default function ChatFloatingLauncher() {
@@ -59,7 +58,6 @@ export default function ChatFloatingLauncher() {
     <View pointerEvents="box-none" style={StyleSheet.absoluteFill}>
       {!panelOpen && !monitorOpen && !isAssistantRoute && (
         <Animated.View style={[styles.launcherPosition, { right, bottom, transform: [{ translateY: floatOffset }] }]}>
-          {portalRole && !(role === 'requester' && requesterTourActive) && <AssistantFloatingButton role={role} colors={colors} />}
           {role === 'manager' && (
             <ManagerOngoingRequestsButton onInteractChange={setInteracting} />
           )}

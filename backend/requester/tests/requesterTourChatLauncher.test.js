@@ -21,7 +21,6 @@ const mocks = {
   './BlueTapChatIcon': { __esModule: true, default: 'ChatIcon' },
   './ChatContext': { useChat: () => ({ role: state.role, colors: {}, openChat: state.openChat, panelOpen: false, totalUnread: 3, totalUnreadLabel: '3' }) },
   './ChatPanel': { __esModule: true, default: 'ChatPanel' },
-  '../assistant/AssistantFloatingButton': { __esModule: true, default: 'Assistant' },
   '../RequesterTutorialModal': { useRequesterTour: () => ({ active: state.active }) },
 };
 const { code } = transformSync(fs.readFileSync(filename, 'utf8'), { filename, babelrc: false, configFile: false, plugins: ['@babel/plugin-transform-react-jsx', '@babel/plugin-transform-modules-commonjs'] });
@@ -33,16 +32,14 @@ function elements(element) {
   return [element, ...React.Children.toArray(element.props.children).flatMap(elements)];
 }
 
-test('tour hides Requester floating launchers; leaving restores Assistant, unread badge and chat action', () => {
+test('tour hides Requester floating chat launcher; leaving restores unread badge and chat action', () => {
   let opened = 0;
   state.role = 'requester'; state.openChat = () => { opened++; }; state.active = true;
   let tree = elements(moduleUnderTest.exports.default());
   assert.equal(tree.some((e) => e.props.accessibilityLabel?.startsWith('Open BlueTap messages')), false);
-  assert.equal(tree.some((e) => e.type === 'Assistant'), false);
   assert.ok(tree.some((e) => e.type === 'ChatPanel'));
   state.active = false;
   tree = elements(moduleUnderTest.exports.default());
-  assert.ok(tree.some((e) => e.type === 'Assistant'));
   const launcher = tree.find((e) => e.props.accessibilityLabel?.startsWith('Open BlueTap messages'));
   assert.match(launcher.props.accessibilityLabel, /3 unread/);
   launcher.props.onPress();
@@ -54,6 +51,5 @@ test('tour visibility does not suppress the Distributor or Manager launcher', ()
     state.role = role; state.active = true;
     const tree = elements(moduleUnderTest.exports.default());
     assert.ok(tree.some((e) => e.props.accessibilityLabel?.startsWith('Open BlueTap messages')));
-    if (role === 'distributor') assert.ok(tree.some((e) => e.type === 'Assistant'));
   }
 });
