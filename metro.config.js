@@ -1,6 +1,20 @@
 const { getDefaultConfig } = require('expo/metro-config');
 const { withNativeWind } = require('nativewind/metro');
+const fs = require('node:fs');
 const path = require('node:path');
+const dotenv = require('dotenv');
+
+// Ensure explicit worktree .env.local EXPO_PUBLIC_* values override stale
+// inherited shell environment variables (e.g. production API URLs).
+const envLocalPath = path.resolve(__dirname, '.env.local');
+if (fs.existsSync(envLocalPath)) {
+  const localEnv = dotenv.parse(fs.readFileSync(envLocalPath, 'utf8'));
+  for (const [key, value] of Object.entries(localEnv)) {
+    if (key.startsWith('EXPO_PUBLIC_')) {
+      process.env[key] = value;
+    }
+  }
+}
 
 const config = getDefaultConfig(__dirname);
 config.resolver.sourceExts.push('cjs');

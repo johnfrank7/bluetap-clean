@@ -10,6 +10,15 @@ This repository is BlueTap. Before substantial work, inspect the relevant skill 
 - After substantial work run `npm test`, `npm run build`, and `git diff --check`.
 - Before committing, inspect `git diff` for unexpected large deletions. Do not push without explicit approval.
 
+## Mandatory Local Acceptance Workflow (`http://localhost:8081`)
+
+- Original BlueTap local development at `http://localhost:8081` is the PRIMARY development and manual acceptance environment.
+- The user personally tests the feature on `http://localhost:8081` before approval.
+- NO automatic `git add`, commits, pushes, merges, or production deployments before explicit user approval.
+- Do not create new staging environments or use emulator tests as a substitute for manual browser testing.
+- Preserve unrelated worktrees and features, and prevent stale Metro processes or another worktree from serving port `8081`.
+- Never modify production database records, accounts, passwords, or verification-state flags without explicit approval for a designated test account.
+
 ## Skill index
 
 | Task | Skill |

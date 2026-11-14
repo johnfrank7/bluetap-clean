@@ -55,6 +55,15 @@ Agent switching must never weaken Firebase Authentication, Admin/Manager authori
 
 Repository skills under `.agents/skills/` are the portable source of truth. When a durable architecture or workflow rule is discovered, update the relevant repository skill; do not update only a machine-local copy. Create skills only for genuinely separate, durable domains—not one-off bugs. Chat remains deferred until explicitly implemented.
 
+## Local 8081 manual acceptance workflow
+
+- Original BlueTap local development at `http://localhost:8081` is the PRIMARY development and manual acceptance environment.
+- The user personally tests each feature on `http://localhost:8081` before approval.
+- Do not perform automatic `git add`, commits, pushes, merges, or production deployments before explicit user approval.
+- Do not create new staging environments or use emulator/automated tests as a substitute for manual browser testing.
+- Preserve unrelated worktrees and features, and prevent stale Metro processes or another worktree from serving port `8081`.
+- Never modify production database records, accounts, passwords, or verification-state flags without explicit approval for a designated test account.
+
 ## Commit, push, and handoff
 
 Before a commit, run:

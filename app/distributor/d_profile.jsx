@@ -31,6 +31,7 @@ import { createShadow } from '../../components/shadowStyles';
 import { createPortalStyleSheet, useBlueTapTheme } from '../../components/BlueTapTheme';
 import BlueTapBrandMark from '../../components/BlueTapBrandMark';
 import TopToastFeedback from '../../components/TopToastFeedback';
+import ChangePasswordModal from '../../components/ChangePasswordModal';
 import { USER_PORTAL_BOTTOM_CONTENT_INSET, USER_PORTAL_LAYOUT } from '../../constants/userPortalLayout';
 import { BLUETAP_COLORS } from '../../constants/bluetapTheme';
 
@@ -225,6 +226,7 @@ export default function DistributorProfilePage() {
   const [savingProfile, setSavingProfile] = useState(false);
   const [profileDraft, setProfileDraft] = useState(() => buildProfileDraft());
   const [toast, setToast] = useState({ visible: false, message: '', type: 'success' });
+  const [changePasswordVisible, setChangePasswordVisible] = useState(false);
 
 
   useEffect(() => {
@@ -643,6 +645,16 @@ export default function DistributorProfilePage() {
             </Pressable>
 
             <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel="Change Password"
+              disabled={savingProfile}
+              onPress={() => confirmLeave(() => setChangePasswordVisible(true))}
+              style={{ minHeight: 44, justifyContent: 'center', alignItems: 'center', marginTop: 14, borderRadius: 10, backgroundColor: '#075E9E' }}
+            >
+              <Text style={{ color: '#FFFFFF', fontWeight: '800' }}>Change Password</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
               activeOpacity={0.85}
               style={styles.logoutButton}
               onPress={() => confirmLeave(handleLogout)}
@@ -662,6 +674,11 @@ export default function DistributorProfilePage() {
         message={toast.message}
         type={toast.type}
         onDismiss={() => setToast((t) => ({ ...t, visible: false }))}
+      />
+      <ChangePasswordModal
+        visible={changePasswordVisible}
+        onClose={() => setChangePasswordVisible(false)}
+        onSuccess={() => setToast({ visible: true, message: 'Password updated successfully.', type: 'success' })}
       />
       <UnsavedModal />
     </SafeAreaView>

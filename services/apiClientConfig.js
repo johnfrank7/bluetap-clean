@@ -1,4 +1,5 @@
 const DEFAULT_BACKEND_BASE_URL = 'https://bluetap-clean.onrender.com';
+import { assertStagingBackendUrl, bundledEnvironment } from './stagingConfig';
 
 function normalizeBackendBaseUrl(value) {
   try {
@@ -16,9 +17,11 @@ function normalizeBackendBaseUrl(value) {
   }
 }
 
-export const getApiBaseUrl = () => normalizeBackendBaseUrl(
-  process.env.EXPO_PUBLIC_API_BASE_URL || DEFAULT_BACKEND_BASE_URL
-) || DEFAULT_BACKEND_BASE_URL;
+export const getApiBaseUrl = (env = bundledEnvironment(), hostname) => {
+  const explicitUrl = normalizeBackendBaseUrl(env.EXPO_PUBLIC_API_BASE_URL);
+  assertStagingBackendUrl(explicitUrl, env, hostname);
+  return explicitUrl || DEFAULT_BACKEND_BASE_URL;
+};
 
 export function getApiUrl(path, createUnavailableError) {
   if (typeof path !== 'string' || !path.startsWith('/api/')) {
