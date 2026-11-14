@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { createPasswordChangeOtpHandler } = require('../passwordChangeOtpHandler');
 
-function fixture(role = 'requester') {
+function fixture(role = 'requester', { realTransportCheck = false, hashSecret = 'test-only-secret-at-least-32-chars-entropy' } = {}) {
   let time = Date.now();
   let sent = '';
   let shouldFailSend = false;
@@ -42,7 +42,7 @@ function fixture(role = 'requester') {
     revokeRefreshTokens: async () => { revocations++; if (shouldFailRevoke) throw new Error('offline'); },
   };
   const handler = createPasswordChangeOtpHandler(() => ({ auth, db }), {
-    now: () => time, secret: () => 'test-only-secret', checkTransport: () => {},
+    now: () => time, secret: () => hashSecret, checkTransport: realTransportCheck ? undefined : () => {},
     send: async ({ text }) => { if (shouldFailSend) throw new Error('offline'); sent = /\b\d{6}\b/.exec(text)?.[0]; },
   });
   const call = async (body, token = 'valid') => {
@@ -159,4 +159,57 @@ test('normal flow keeps first-login, recovery, and three role entry points separ
   assert.doesNotMatch(read('app', 'admin', 'registration-security.jsx'), /<ChangePasswordModal|Administrator password/);
   assert.match(read('app', 'required-password-change.jsx'), /completeRequiredPasswordChange/);
   assert.match(read('backend', 'auth', 'passwordRecoveryHandler.js'), /PASSWORD_RESET/);
+});
+
+test('missing OTP hash and invalid mail configuration fail before an OTP is sent', async () => {
+  const priorProvider = process.env.EMAIL_PROVIDER;
+  try {
+    process.env.EMAIL_PROVIDER = 'invalid-test-provider';
+    const missingKey = fixture('requester', { hashSecret: '' });
+    assert.equal((await missingKey.call(request)).body.error.reason, 'PASSWORD_CHANGE_UNAVAILABLE');
+    assert.equal(missingKey.code(), '');
+    const invalidMail = fixture('requester', { realTransportCheck: true });
+    assert.equal((await invalidMail.call(request)).body.error.reason, 'MAIL_PROVIDER_CONFIG_MISSING');
+    assert.equal(invalidMail.code(), '');
+    assert.equal(invalidMail.records.has('passwordChangeOtpSessions/u1'), false);
+  } finally {
+    if (priorProvider === undefined) delete process.env.EMAIL_PROVIDER; else process.env.EMAIL_PROVIDER = priorProvider;
+  }
+});
+
+test('staging mail preflight rejects unapproved relay hosts before delivery', async () => {
+  const keys = ['APP_ENV', 'EXPO_PUBLIC_APP_ENV', 'EMAIL_PROVIDER', 'VERCEL_MAIL_RELAY_URL', 'INTERNAL_MAIL_RELAY_SECRET'];
+  const prior = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+  try {
+    process.env.APP_ENV = 'staging'; delete process.env.EXPO_PUBLIC_APP_ENV;
+    process.env.EMAIL_PROVIDER = 'vercel-relay'; process.env.INTERNAL_MAIL_RELAY_SECRET = 'synthetic-secret';
+    process.env.VERCEL_MAIL_RELAY_URL = 'https://unapproved.example.test/api/internal/send-otp-email';
+    const rejected = fixture('requester', { realTransportCheck: true });
+    assert.equal((await rejected.call(request)).body.error.reason, 'MAIL_PROVIDER_CONFIG_MISSING');
+    assert.equal(rejected.code(), '');
+    process.env.VERCEL_MAIL_RELAY_URL = 'https://bluetap-staging-web.vercel.app/api/internal/send-otp-email';
+    const approved = fixture('requester', { realTransportCheck: true });
+    assert.equal((await approved.call(request)).statusCode, 200);
+    assert.match(approved.code(), /^\d{6}$/);
+  } finally { for (const key of keys) { if (prior[key] === undefined) delete process.env[key]; else process.env[key] = prior[key]; } }
+});
+
+test('malformed JSON body returns 400 INVALID_REQUEST', async () => {
+  const f = fixture();
+  const res = await f.call('not-valid-json');
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.error.reason, 'INVALID_REQUEST');
+});
+
+test('weak secret under live deployment rejects with 503 PASSWORD_CHANGE_UNAVAILABLE', async () => {
+  const prior = process.env.NODE_ENV;
+  try {
+    process.env.NODE_ENV = 'production';
+    const weak = fixture('requester', { hashSecret: 'short-secret' });
+    const res = await weak.call(request);
+    assert.equal(res.statusCode, 503);
+    assert.equal(res.body.error.reason, 'PASSWORD_CHANGE_UNAVAILABLE');
+  } finally {
+    if (prior === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = prior;
+  }
 });

@@ -13,7 +13,12 @@ const assertRecoveryTransportConfigured = (env = process.env) => {
   const ready = config.provider === 'resend'
     ? Boolean(String(env.RESEND_API_KEY || '').trim() && String(env.EMAIL_FROM_ADDRESS || '').trim())
     : config.provider === 'vercel-relay' && config.relayUrlConfigured && config.relaySecretConfigured;
-  if (!ready) throw new OtpError(503, 'MAIL_PROVIDER_CONFIG_MISSING', 'Password change email is unavailable in this environment. Please contact BlueTap support.');
+  const isStaging = String(env.APP_ENV || '').trim().toLowerCase() === 'staging' ||
+    String(env.RENDER_EXTERNAL_HOSTNAME || '').trim().toLowerCase() === 'bluetap-staging-backend.onrender.com' ||
+    String(env.RENDER_SERVICE_NAME || '').trim().toLowerCase() === 'bluetap-staging-backend';
+  const approvedRelay = !isStaging || config.provider !== 'vercel-relay' ||
+    (config.relayUrlConfigured && new URL(env.VERCEL_MAIL_RELAY_URL).hostname.toLowerCase() === 'bluetap-staging-web.vercel.app');
+  if (!ready || !approvedRelay) throw new OtpError(503, 'MAIL_PROVIDER_CONFIG_MISSING', 'Password change email is unavailable in this environment. Please contact BlueTap support.');
 };
 
 const EXPIRY_MS = 10 * 60 * 1000;
@@ -25,6 +30,14 @@ const RECENT_AUTH_MS = 10 * 60 * 1000;
 const millis = (value) => value?.toMillis?.() || (value instanceof Date ? value.getTime() : 0);
 const emailOf = (value) => String(value || '').trim().toLowerCase();
 const digest = (secret, uid, email, id, code) => createHmac('sha256', secret).update(JSON.stringify(['PASSWORD_CHANGE', uid, email, id, code])).digest('hex');
+const bodyOf = (req) => {
+  if (req.body && typeof req.body === 'object') return req.body;
+  try {
+    return JSON.parse(String(req.body || '{}'));
+  } catch {
+    throw new OtpError(400, 'INVALID_REQUEST', 'Invalid request body.');
+  }
+};
 
 function createPasswordChangeOtpHandler(getAdmin = getFirebaseAdmin, { now = Date.now, send = sendEmail, checkTransport = assertRecoveryTransportConfigured, secret = () => process.env.EMAIL_OTP_HASH_SECRET } = {}) {
   async function eligible(req, auth, db) {
@@ -51,10 +64,11 @@ function createPasswordChangeOtpHandler(getAdmin = getFirebaseAdmin, { now = Dat
     if (req.method === 'OPTIONS') return res.status(204).end();
     if (req.method !== 'POST') return res.status(405).json({ error: { reason: 'method-not-allowed', message: 'Use POST.' } });
     try {
-      const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body || {});
+      const body = bodyOf(req);
       const { auth, db } = getAdmin();
       const key = String(secret() || '');
-      if (!key) throw new OtpError(503, 'PASSWORD_CHANGE_UNAVAILABLE', 'Password change is temporarily unavailable.');
+      const isLiveDeployment = ['production', 'staging'].includes(String(process.env.APP_ENV || process.env.NODE_ENV || '').trim().toLowerCase());
+      if (!key || (isLiveDeployment && key.length < 32)) throw new OtpError(503, 'PASSWORD_CHANGE_UNAVAILABLE', 'Password change is temporarily unavailable.');
       const identity = await eligible(req, auth, db);
       const ref = db.collection('passwordChangeOtpSessions').doc(identity.uid);
       if (body.action === 'request') {
@@ -74,7 +88,7 @@ function createPasswordChangeOtpHandler(getAdmin = getFirebaseAdmin, { now = Dat
           tx.set(ref, { purpose: 'PASSWORD_CHANGE', requestId: id, uid: identity.uid, email: identity.email, role: identity.role, authTime: identity.authTime, otpHash: digest(key, identity.uid, identity.email, id, code), status: 'sending', attempts: 0, expiresAt: new Date(time + EXPIRY_MS), lastSentAt: new Date(time), sendWindowStartedAt: new Date(inWindow ? start : time), sendCount: count + 1 });
         });
         try {
-          await send({ to: identity.email, requestId: id, subject: 'BlueTap Password Change Code', text: `Your BlueTap password change code is ${code}. It expires in 10 minutes. Do not share this code.`, html: `<p>Your BlueTap password change code is <strong>${code}</strong>.</p><pp>It expires in 10 minutes. Do not share this code.</p>` });
+          await send({ to: identity.email, requestId: id, subject: 'BlueTap Password Change Code', text: `Your BlueTap password change code is ${code}. It expires in 10 minutes. Do not share this code.`, html: `<p>Your BlueTap password change code is <strong>${code}</strong>.</p><p>It expires in 10 minutes. Do not share this code.</p>` });
         } catch {
           await db.runTransaction(async (tx) => { const data = (await tx.get(ref)).data(); if (data?.requestId === id && data.status === 'sending') tx.update(ref, { status: 'send-failed', otpHash: null }); });
           throw new OtpError(503, 'EMAIL_SEND_FAILED', 'The code could not be sent. Please try again later.');
@@ -123,7 +137,7 @@ function createPasswordChangeOtpHandler(getAdmin = getFirebaseAdmin, { now = Dat
         throw error;
       }
     } catch (error) {
-      const known = error instanceof OtpError;
+      const known = error instanceof OtpError || (Boolean(error?.status) && Boolean(error?.reason));
       if (known && error.details?.retryAfterSeconds) res.setHeader('Retry-After', String(error.details.retryAfterSeconds));
       return res.status(known ? error.status : 503).json({ error: { reason: known ? error.reason : 'PASSWORD_CHANGE_UNAVAILABLE', message: known ? error.message : 'Password change could not be confirmed. Sign in with your new password or contact support.' } });
     }
