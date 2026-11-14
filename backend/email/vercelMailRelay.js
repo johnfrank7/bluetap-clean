@@ -3,8 +3,9 @@ const nodemailer = require('nodemailer');
 
 const EXPECTED_SUBJECT = 'BlueTap Email Verification Code';
 const PASSWORD_RESET_SUBJECT = 'BlueTap Password Reset Code';
+const PASSWORD_CHANGE_SUBJECT = 'BlueTap Password Change Code';
 const ACCOUNT_ACCESS_SUBJECT = 'BlueTap Account Access Notice';
-const ALLOWED_SUBJECTS = new Set([EXPECTED_SUBJECT, PASSWORD_RESET_SUBJECT, ACCOUNT_ACCESS_SUBJECT]);
+const ALLOWED_SUBJECTS = new Set([EXPECTED_SUBJECT, PASSWORD_RESET_SUBJECT, PASSWORD_CHANGE_SUBJECT, ACCOUNT_ACCESS_SUBJECT]);
 const EMAIL_PATTERN = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/;
 
 const responseError = (res, status, reason, message) =>

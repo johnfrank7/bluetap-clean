@@ -1,6 +1,18 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const vm = require('node:vm');
+const { readFileSync } = require('node:fs');
+const { resolve } = require('node:path');
 const { createEmailOtpService } = require('../emailOtp');
+
+const root = resolve(__dirname, '../../..');
+function loadDestination(auth) {
+  const source = readFileSync(resolve(root, 'services/authSession.js'), 'utf8')
+    .replace(/^import[\s\S]*?from ['"][^'"]+['"];\r?\n/gm, '')
+    .replace(/export const /g, 'const ')
+    .replace(/^export \{[^}]+\};\r?\n/gm, '');
+  return vm.runInNewContext(`${source}\ngetPostAuthenticationDestination`, { auth });
+}
 
 function fixture(role, { verified = false, mustChangePassword = false, failSync = false } = {}) {
   const uid = `mock-${role}`;
@@ -47,10 +59,12 @@ function fixture(role, { verified = false, mustChangePassword = false, failSync 
     otp: () => copy(records.get(`emailOtpVerifications/${uid}`)) };
 }
 
-test('verified OTP reconciles stale profile markers for all three roles', async () => {
-  for (const role of ['requester', 'distributor', 'manager']) {
+test('verified OTP reconciles stale profile markers before all three role dashboards', async () => {
+  for (const [role, home] of [['requester', '/requester/r_dashboard'],
+    ['distributor', '/distributor/d_dashboard'], ['manager', '/manager/dashboard']]) {
     const f = fixture(role);
-    assert.equal(f.profile().emailOtpVerification.profileSynced, false);
+    const destination = loadDestination(f.auth);
+    assert.equal(destination(f.profile()), '/email-verification');
     await f.service.request(f.uid);
     assert.equal(f.sent.length, 1);
     assert.deepEqual(await f.service.verify(f.uid, f.sent[0].code), { verified: true });
@@ -59,7 +73,7 @@ test('verified OTP reconciles stale profile markers for all three roles', async 
     assert.equal(f.profile().emailOtpVerification.status, 'verified');
     assert.equal(f.profile().emailOtpVerification.profileSynced, true);
     assert.equal(f.otp().profileSynced, true);
-    assert.equal(f.profile().role, role);
+    assert.equal(destination(f.profile()), home);
   }
 });
 
@@ -68,7 +82,7 @@ test('already verified Auth identity can reconcile its own eligible profile with
   assert.deepEqual(await f.service.request(f.uid), { alreadyVerified: true });
   assert.equal(f.sent.length, 0);
   assert.equal(f.profile().emailOtpVerification.profileSynced, true);
-  assert.equal(f.profile().emailVerified, true);
+  assert.equal(loadDestination(f.auth)(f.profile()), '/requester/r_dashboard');
 });
 
 test('pending first-login password and failed profile synchronization remain blocked', async () => {
@@ -76,7 +90,7 @@ test('pending first-login password and failed profile synchronization remain blo
     const pending = fixture(role, { mustChangePassword: true });
     await assert.rejects(pending.service.request(pending.uid), (error) => error.reason === 'PASSWORD_CHANGE_REQUIRED');
     assert.equal(pending.sent.length, 0);
-    assert.equal(pending.profile().mustChangePassword, true);
+    assert.equal(loadDestination(pending.auth)(pending.profile()), '/required-password-change');
   }
 
   const failed = fixture('distributor', { failSync: true });
@@ -85,5 +99,5 @@ test('pending first-login password and failed profile synchronization remain blo
     (error) => error.reason === 'EMAIL_VERIFICATION_SYNC_FAILED');
   assert.equal(failed.user.emailVerified, false);
   assert.equal(failed.profile().emailOtpVerification.profileSynced, false);
-  assert.equal(failed.profile().emailVerified, false);
+  assert.equal(loadDestination(failed.auth)(failed.profile()), '/email-verification');
 });

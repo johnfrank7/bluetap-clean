@@ -18,6 +18,13 @@ const validPasswordResetBody = {
   html: '<p>BlueTap password reset code: <strong>123456</strong>. It expires in 10 minutes. Do not share it.</p>',
 };
 
+const validAccountAccessNoticeBody = {
+  ...validBody,
+  subject: 'BlueTap Account Access Notice',
+  text: 'BlueTap account access notice.',
+  html: '<p>BlueTap account access notice.</p>',
+};
+
 function response() {
   return {
     headers: {},
@@ -105,6 +112,35 @@ test('Vercel relay accepts the password recovery OTP template', async () => {
   assert.equal(res.statusCode, 200);
   assert.deepEqual(res.body, { success: true });
   assert.equal(mail.subject, 'BlueTap Password Reset Code');
+});
+
+test('Vercel relay accepts the password change OTP template', async () => {
+  let mail;
+  const handler = createInternalMailRelayHandler({
+    env: { INTERNAL_MAIL_RELAY_SECRET: 'relay-secret', GMAIL_USER: 'sender@example.test', GMAIL_APP_PASSWORD: 'app-password' },
+    createTransport: () => ({
+      sendMail: async (message) => {
+        mail = message;
+        return { accepted: [message.to], rejected: [] };
+      },
+    }),
+    logger: { info() {}, error() {} },
+  });
+  const body = {
+    ...validBody,
+    subject: 'BlueTap Password Change Code',
+    text: 'Your BlueTap password change code is 123456. It expires in 10 minutes. Do not share this code.',
+    html: '<p>Your BlueTap password change code is <strong>123456</strong>.</p><p>It expires in 10 minutes. Do not share this code.</p>',
+  };
+  const res = await invoke(handler, { body });
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body, { success: true });
+  assert.equal(mail.subject, 'BlueTap Password Change Code');
+
+  const noticeRes = await invoke(handler, { body: validAccountAccessNoticeBody });
+  assert.equal(noticeRes.statusCode, 200);
+  assert.deepEqual(noticeRes.body, { success: true });
+  assert.equal(mail.subject, 'BlueTap Account Access Notice');
 });
 
 test('Vercel relay accepts only the factual account access notice template', async () => {
