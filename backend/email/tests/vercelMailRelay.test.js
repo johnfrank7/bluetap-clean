@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { createInternalMailRelayHandler } = require('../vercelMailRelay');
+const { createEmailProvider } = require('../emailProvider');
 
 const validBody = {
   to: 'recipient@example.test',
@@ -106,6 +107,58 @@ test('Vercel relay accepts the password recovery OTP template', async () => {
   assert.equal(mail.subject, 'BlueTap Password Reset Code');
 });
 
+test('Vercel relay accepts the password change OTP template', async () => {
+  let mail;
+  const handler = createInternalMailRelayHandler({
+    env: { INTERNAL_MAIL_RELAY_SECRET: 'relay-secret', GMAIL_USER: 'sender@example.test', GMAIL_APP_PASSWORD: 'app-password' },
+    createTransport: () => ({
+      sendMail: async (message) => {
+        mail = message;
+        return { accepted: [message.to], rejected: [] };
+      },
+    }),
+    logger: { info() {}, error() {} },
+  });
+  const body = {
+    ...validBody,
+    subject: 'BlueTap Password Change Code',
+    text: 'Your BlueTap password change code is 123456. It expires in 10 minutes. Do not share this code.',
+    html: '<p>Your BlueTap password change code is <strong>123456</strong>.</p><p>It expires in 10 minutes. Do not share this code.</p>',
+  };
+  const res = await invoke(handler, { body });
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body, { success: true });
+  assert.equal(mail.subject, 'BlueTap Password Change Code');
+});
+
+test('Vercel relay accepts only the factual account access notice template', async () => {
+  let mail;
+  const handler = createInternalMailRelayHandler({
+    env: { INTERNAL_MAIL_RELAY_SECRET: 'relay-secret', GMAIL_USER: 'sender@example.test', GMAIL_APP_PASSWORD: 'app-password' },
+    createTransport: () => ({ sendMail: async (message) => {
+      mail = message; return { accepted: [message.to], rejected: [] };
+    } }),
+    logger: { info() {}, error() {} },
+  });
+  const body = { ...validBody, subject: 'BlueTap Account Access Notice',
+    text: 'An Administrator has started a suspension of your BlueTap account.',
+    html: '<p>An Administrator has started a suspension of your BlueTap account.</p>' };
+  const result = await invoke(handler, { body });
+  assert.equal(result.statusCode, 200);
+  assert.equal(mail.subject, body.subject);
+});
+
+test('Vercel relay does not claim acceptance when SMTP accepted a different recipient', async () => {
+  const handler = createInternalMailRelayHandler({
+    env: { INTERNAL_MAIL_RELAY_SECRET: 'relay-secret', GMAIL_USER: 'sender@example.test', GMAIL_APP_PASSWORD: 'app-password' },
+    createTransport: () => ({ sendMail: async () => ({ accepted: ['other@example.test'], rejected: [] }) }),
+    logger: { info() {}, error() {} },
+  });
+  const result = await invoke(handler);
+  assert.equal(result.statusCode, 503);
+  assert.equal(result.body.error.reason, 'EMAIL_SEND_FAILED');
+});
+
 test('Vercel relay maps missing Gmail config and SMTP failures without leaking details', async () => {
   const quiet = { info() {}, error() {} };
   const missing = createInternalMailRelayHandler({ env: { INTERNAL_MAIL_RELAY_SECRET: 'relay-secret' }, logger: quiet });
@@ -134,4 +187,79 @@ test('Vercel relay maps missing Gmail config and SMTP failures without leaking d
     assert.equal(serialized.includes(validBody.to), false);
     assert.equal(serialized.includes('123456'), false);
   }
+});
+
+test('concurrent registration OTP delivery remains independent of a failed account notice', async () => {
+  const delivered = [];
+  const handler = createInternalMailRelayHandler({
+    env: { INTERNAL_MAIL_RELAY_SECRET: 'relay-secret', GMAIL_USER: 'sender@example.test', GMAIL_APP_PASSWORD: 'app-password' },
+    createTransport: () => ({ sendMail: async (message) => {
+      if (message.subject === 'BlueTap Account Access Notice') throw new Error('notice-only failure');
+      delivered.push(message);
+      return { accepted: [message.to], rejected: [] };
+    } }),
+    logger: { info() {}, error() {} },
+  });
+  const provider = createEmailProvider({
+    env: { EMAIL_PROVIDER: 'vercel-relay', VERCEL_MAIL_RELAY_URL: 'https://mail.example.test/api/internal/send-otp-email', INTERNAL_MAIL_RELAY_SECRET: 'relay-secret' },
+    fetchImpl: async (_url, options) => {
+      const res = await invoke(handler, { body: JSON.parse(options.body) });
+      return { ok: res.statusCode >= 200 && res.statusCode < 300, status: res.statusCode,
+        json: async () => res.body };
+    },
+    logger: { info() {}, error() {} },
+  });
+  const [otp, notice] = await Promise.allSettled([
+    provider.sendEmailOtp({ recipient: 'registrant@example.test', code: '123456', requestId: validBody.requestId }),
+    provider.sendEmail({ to: 'account@example.test', subject: 'BlueTap Account Access Notice',
+      text: 'An Administrator has started a suspension of your BlueTap account.',
+      html: '<p>An Administrator has started a suspension of your BlueTap account.</p>',
+      requestId: '223e4567-e89b-42d3-a456-426614174000' }),
+  ]);
+  assert.equal(otp.status, 'fulfilled');
+  assert.equal(otp.value.providerStatus, 200);
+  assert.equal(notice.status, 'rejected');
+  assert.equal(notice.reason.reason, 'EMAIL_SEND_FAILED');
+  assert.equal(delivered.length, 1);
+  assert.equal(delivered[0].to, 'registrant@example.test');
+  assert.equal(delivered[0].subject, 'BlueTap Email Verification Code');
+  assert.match(delivered[0].text, /123456/);
+});
+
+test('shared SMTP outage fails independently and a later registration OTP can retry', async () => {
+  let outage = true;
+  let accepted = 0;
+  const handler = createInternalMailRelayHandler({
+    env: { INTERNAL_MAIL_RELAY_SECRET: 'relay-secret', GMAIL_USER: 'sender@example.test', GMAIL_APP_PASSWORD: 'app-password' },
+    createTransport: () => ({ sendMail: async (message) => {
+      if (outage) throw Object.assign(new Error('SMTP unavailable'), { code: 'ETIMEDOUT' });
+      accepted++;
+      return { accepted: [message.to], rejected: [] };
+    } }),
+    logger: { info() {}, error() {} },
+  });
+  const provider = createEmailProvider({
+    env: { EMAIL_PROVIDER: 'vercel-relay', VERCEL_MAIL_RELAY_URL: 'https://mail.example.test/api/internal/send-otp-email', INTERNAL_MAIL_RELAY_SECRET: 'relay-secret' },
+    fetchImpl: async (_url, options) => {
+      const res = await invoke(handler, { body: JSON.parse(options.body) });
+      return { ok: res.statusCode >= 200 && res.statusCode < 300, status: res.statusCode,
+        json: async () => res.body };
+    },
+    logger: { info() {}, error() {} },
+  });
+  const failures = await Promise.allSettled([
+    provider.sendEmailOtp({ recipient: 'registrant@example.test', code: '123456', requestId: validBody.requestId }),
+    provider.sendEmail({ to: 'account@example.test', subject: 'BlueTap Account Access Notice',
+      text: 'An Administrator has started a suspension of your BlueTap account.',
+      html: '<p>An Administrator has started a suspension of your BlueTap account.</p>',
+      requestId: '223e4567-e89b-42d3-a456-426614174000' }),
+  ]);
+  assert.deepEqual(failures.map((result) => result.status), ['rejected', 'rejected']);
+  assert.deepEqual(failures.map((result) => result.reason.reason), ['EMAIL_SEND_FAILED', 'EMAIL_SEND_FAILED']);
+  assert.equal(accepted, 0);
+  outage = false;
+  const retried = await provider.sendEmailOtp({ recipient: 'registrant@example.test', code: '654321',
+    requestId: '323e4567-e89b-42d3-a456-426614174000' });
+  assert.equal(retried.providerStatus, 200);
+  assert.equal(accepted, 1);
 });

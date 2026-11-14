@@ -3,7 +3,9 @@ const nodemailer = require('nodemailer');
 
 const EXPECTED_SUBJECT = 'BlueTap Email Verification Code';
 const PASSWORD_RESET_SUBJECT = 'BlueTap Password Reset Code';
-const ALLOWED_SUBJECTS = new Set([EXPECTED_SUBJECT, PASSWORD_RESET_SUBJECT]);
+const PASSWORD_CHANGE_SUBJECT = 'BlueTap Password Change Code';
+const ACCOUNT_ACCESS_SUBJECT = 'BlueTap Account Access Notice';
+const ALLOWED_SUBJECTS = new Set([EXPECTED_SUBJECT, PASSWORD_RESET_SUBJECT, PASSWORD_CHANGE_SUBJECT, ACCOUNT_ACCESS_SUBJECT]);
 const EMAIL_PATTERN = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/;
 
 const responseError = (res, status, reason, message) =>
@@ -95,7 +97,10 @@ function createInternalMailRelayHandler({
         from: `BlueTap <${gmailUser}>`,
         ...message,
       });
-      if (!result?.accepted?.length || result.rejected?.length) throw Object.assign(new Error(), { code: 'RECIPIENT_REJECTED' });
+      const recipientAccepted = Array.isArray(result?.accepted) && result.accepted.some(
+        (address) => String(address).trim().toLowerCase() === message.to.toLowerCase()
+      );
+      if (!recipientAccepted || result.rejected?.length) throw Object.assign(new Error(), { code: 'RECIPIENT_REJECTED' });
       logger.info('[internal-mail-relay]', JSON.stringify({ stage: 'EMAIL_SEND_SUCCEEDED' }));
       return res.status(200).json({ success: true });
     } catch (error) {
