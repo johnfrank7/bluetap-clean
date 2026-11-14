@@ -17,6 +17,13 @@ const validPasswordResetBody = {
   html: '<p>BlueTap password reset code: <strong>123456</strong>. It expires in 10 minutes. Do not share it.</p>',
 };
 
+const validPasswordChangeBody = {
+  ...validBody,
+  subject: 'BlueTap Password Change Code',
+  text: 'Your BlueTap password change code is 123456. It expires in 10 minutes. Do not share this code.',
+  html: '<p>Your BlueTap password change code is <strong>123456</strong>.</p><p>It expires in 10 minutes. Do not share this code.</p>',
+};
+
 function response() {
   return {
     headers: {},
@@ -104,6 +111,26 @@ test('Vercel relay accepts the password recovery OTP template', async () => {
   assert.equal(res.statusCode, 200);
   assert.deepEqual(res.body, { success: true });
   assert.equal(mail.subject, 'BlueTap Password Reset Code');
+});
+
+test('Vercel relay accepts the password change OTP template', async () => {
+  let mail;
+  const handler = createInternalMailRelayHandler({
+    env: { INTERNAL_MAIL_RELAY_SECRET: 'relay-secret', GMAIL_USER: 'sender@example.test', GMAIL_APP_PASSWORD: 'app-password' },
+    createTransport: () => ({
+      sendMail: async (message) => {
+        mail = message;
+        return { accepted: [message.to], rejected: [] };
+      },
+    }),
+    logger: { info() {}, error() {} },
+  });
+
+  const res = await invoke(handler, { body: validPasswordChangeBody });
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body, { success: true });
+  assert.equal(mail.subject, 'BlueTap Password Change Code');
 });
 
 test('Vercel relay maps missing Gmail config and SMTP failures without leaking details', async () => {
