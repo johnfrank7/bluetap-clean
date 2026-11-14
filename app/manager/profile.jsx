@@ -9,6 +9,7 @@ import BlueTapIcon from '../../components/BlueTapIcon';
 import ManagerShell, { ManagerPill, ManagerWaterDrop } from '../../components/ManagerShell';
 import { useManagerRealtimeData } from '../../components/ManagerRealtimeData';
 import TopToastFeedback from '../../components/TopToastFeedback';
+import ChangePasswordModal from '../../components/ChangePasswordModal';
 import useUnsavedChangesGuard from '../../components/useUnsavedChangesGuard';
 import { getModuleSession } from '../../services/authSession';
 import { formatPhilippinePhone, normalizePhilippinePhone } from '../../services/phoneUtils';
@@ -52,7 +53,7 @@ function ProfileField({ editable, label, multiline, onChangeText, value, themedS
 }
 
 export default function ManagerProfilePage() {
-  const { colors } = useAdminTheme();
+  const { colors, resolvedTheme } = useAdminTheme();
   const { width } = useWindowDimensions();
   const compact = width < 700;
   const styles = useMemo(() => createStyles(colors, compact), [colors, compact]);
@@ -64,6 +65,7 @@ export default function ManagerProfilePage() {
   const [draft, setDraft] = useState(() => draftFor(manager));
   const [selectedImage, setSelectedImage] = useState(null);
   const [toast, setToast] = useState({ visible: false, message: '', type: 'info' });
+  const [changePasswordVisible, setChangePasswordVisible] = useState(false);
 
   useEffect(() => {
     if (!editing) setDraft(draftFor(manager || {}));
@@ -303,9 +305,24 @@ export default function ManagerProfilePage() {
               </TouchableOpacity>
             </View>
           )}
+          <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel="Change Password"
+            disabled={saving}
+            onPress={() => confirmLeave(() => setChangePasswordVisible(true))}
+            style={[styles.primaryButton, { marginTop: 18 }]}
+          >
+            <Text style={styles.primaryButtonText}>Change Password</Text>
+          </TouchableOpacity>
           <Text style={styles.securityNote}>Email, branch assignment, public UID, account status, and access level are managed securely by BlueTap.</Text>
         </View>
       </View>
+      <ChangePasswordModal
+        visible={changePasswordVisible}
+        onClose={() => setChangePasswordVisible(false)}
+        onSuccess={() => setToast({ visible: true, message: 'Password updated successfully.', type: 'success' })}
+        theme={{ colors, isDark: resolvedTheme === 'dark' }}
+      />
       <UnsavedModal />
     </ManagerShell>
   );

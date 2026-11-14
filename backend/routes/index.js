@@ -11,6 +11,7 @@ const { createAdminSystemMaintenanceHandler } = require('../admin/systemMaintena
 const { createAdminBranchesHandler, createAdminManagersHandler } = require('../admin/branchManagementHandler');
 const { createRequiredPasswordChangeHandler } = require('../auth/requiredPasswordChangeHandler');
 const { createPasswordRecoveryHandler } = require('../auth/passwordRecoveryHandler');
+const { createPasswordChangeOtpHandler } = require('../auth/passwordChangeOtpHandler');
 const { createManagerContextHandler } = require('../manager/managerContextHandler');
 const { createOutsideRadiusApprovalsHandler } = require('../manager/outsideRadiusApprovalHandler');
 const { createManagerDispatchHandler } = require('../manager/dispatchHandler');
@@ -71,6 +72,7 @@ const routes = new Map([
   ['/api/orders/details', createOrderDetailsHandler()],
   ['/api/auth/complete-required-password-change', createRequiredPasswordChangeHandler()],
   ['/api/auth/password-recovery', createPasswordRecoveryHandler()],
+  ['/api/auth/password-change-otp', createPasswordChangeOtpHandler()],
   ['/api/auth/session-policy', createSessionPolicyHandler()],
   ['/api/chat/conversations', createChatConversationsHandler()],
   ['/api/chat/messages', createChatMessagesHandler()],

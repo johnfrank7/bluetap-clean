@@ -32,6 +32,7 @@ import { createPortalStyleSheet, useBlueTapTheme } from '../../components/BlueTa
 import BlueTapBrandMark from '../../components/BlueTapBrandMark';
 import PortalSwipeContainer, { REQUESTER_TABS } from '../../components/PortalSwipeContainer';
 import TopToastFeedback from '../../components/TopToastFeedback';
+import ChangePasswordModal from '../../components/ChangePasswordModal';
 import { useRequesterTour } from '../../components/RequesterTutorialModal';
 import { USER_PORTAL_BOTTOM_CONTENT_INSET, USER_PORTAL_LAYOUT } from '../../constants/userPortalLayout';
 import { BLUETAP_COLORS } from '../../constants/bluetapTheme';
@@ -135,6 +136,7 @@ export default function ProfilePage() {
   const [editingProfile, setEditingProfile] = useState(false);
   const [savingProfile, setSavingProfile] = useState(false);
   const [toast, setToast] = useState({ visible: false, message: '', type: 'success' });
+  const [changePasswordVisible, setChangePasswordVisible] = useState(false);
   const [profileDraft, setProfileDraft] = useState(() =>
     buildProfileDraft(initialProfile || {})
   );
@@ -507,6 +509,25 @@ export default function ProfilePage() {
           <View style={[styles.settingsSection, width < 768 && styles.floatingActionClearance]}>
             <View style={styles.settingRow}>
               <View style={styles.settingTextWrap}>
+                <Text style={styles.settingLabel}>Account Password</Text>
+                <Text style={styles.settingSubtitle}>Update your password for security</Text>
+              </View>
+              <TouchableOpacity
+                accessibilityRole="button"
+                accessibilityLabel="Change Password"
+                dataSet={{ bluetapCta: 'true' }}
+                disabled={savingProfile}
+                onPress={() => confirmLeave(() => setChangePasswordVisible(true))}
+                style={styles.changePasswordButton}
+              >
+                <Text style={styles.changePasswordButtonText}>Change Password</Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.settingDivider} />
+
+            <View style={styles.settingRow}>
+              <View style={styles.settingTextWrap}>
                 <Text style={styles.settingLabel}>How to Use BlueTap</Text>
                 <Text style={styles.settingSubtitle}>Take a guided tour of water ordering, delivery requests, and support.</Text>
               </View>
@@ -548,6 +569,11 @@ export default function ProfilePage() {
           </ScrollView>
         </View>
         </PortalSwipeContainer>
+        <ChangePasswordModal
+          visible={changePasswordVisible}
+          onClose={() => setChangePasswordVisible(false)}
+          onSuccess={() => setToast({ visible: true, message: 'Password updated successfully.', type: 'success' })}
+        />
         <UnsavedModal />
       </SafeAreaView>
     </LinearGradient>
@@ -733,6 +759,11 @@ const styles = createPortalStyleSheet({
   },
   floatingActionClearance: {
     marginRight: 56,
+  },
+  settingDivider: {
+    height: 1,
+    backgroundColor: '#E3F2FD',
+    marginVertical: 4,
   },
   settingTextWrap: {
     flex: 1,
