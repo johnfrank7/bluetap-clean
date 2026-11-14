@@ -96,6 +96,16 @@ function checkServerEnvironment(env = process.env) {
     }
   }
 
+  // 6. EMAIL_OTP_HASH_SECRET entropy validation
+  const otpSecret = env.EMAIL_OTP_HASH_SECRET !== undefined ? String(env.EMAIL_OTP_HASH_SECRET || '').trim() : null;
+  if (otpSecret !== null) {
+    if (!otpSecret) {
+      errors.push('EMAIL_OTP_HASH_SECRET cannot be empty.');
+    } else if (otpSecret.length < 32 && (appEnv === APP_ENVIRONMENTS.STAGING || appEnv === APP_ENVIRONMENTS.PRODUCTION)) {
+      errors.push('EMAIL_OTP_HASH_SECRET must provide at least 32 characters of entropy.');
+    }
+  }
+
   return {
     appEnv,
     valid: errors.length === 0,

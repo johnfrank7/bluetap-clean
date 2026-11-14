@@ -31,6 +31,14 @@ const RECENT_AUTH_MS = 10 * 60 * 1000;
 const millis = (value) => value?.toMillis?.() || (value instanceof Date ? value.getTime() : 0);
 const emailOf = (value) => String(value || '').trim().toLowerCase();
 const digest = (secret, uid, email, id, code) => createHmac('sha256', secret).update(JSON.stringify(['PASSWORD_CHANGE', uid, email, id, code])).digest('hex');
+const bodyOf = (req) => {
+  if (req.body && typeof req.body === 'object') return req.body;
+  try {
+    return JSON.parse(String(req.body || '{}'));
+  } catch {
+    throw new OtpError(400, 'INVALID_REQUEST', 'Invalid request body.');
+  }
+};
 
 function createPasswordChangeOtpHandler(getAdmin = getFirebaseAdmin, { now = Date.now, send = sendEmail, checkTransport = assertRecoveryTransportConfigured, secret = () => process.env.EMAIL_OTP_HASH_SECRET } = {}) {
   async function eligible(req, auth, db) {
@@ -57,10 +65,11 @@ function createPasswordChangeOtpHandler(getAdmin = getFirebaseAdmin, { now = Dat
     if (req.method === 'OPTIONS') return res.status(204).end();
     if (req.method !== 'POST') return res.status(405).json({ error: { reason: 'method-not-allowed', message: 'Use POST.' } });
     try {
-      const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body || {});
+      const body = bodyOf(req);
       const { auth, db } = getAdmin();
       const key = String(secret() || '');
-      if (!key) throw new OtpError(503, 'PASSWORD_CHANGE_UNAVAILABLE', 'Password change is temporarily unavailable.');
+      const isLiveDeployment = ['production', 'staging'].includes(String(process.env.APP_ENV || process.env.NODE_ENV || '').trim().toLowerCase());
+      if (!key || (isLiveDeployment && key.length < 32)) throw new OtpError(503, 'PASSWORD_CHANGE_UNAVAILABLE', 'Password change is temporarily unavailable.');
       const identity = await eligible(req, auth, db);
       const ref = db.collection('passwordChangeOtpSessions').doc(identity.uid);
       if (body.action === 'request') {
@@ -129,7 +138,7 @@ function createPasswordChangeOtpHandler(getAdmin = getFirebaseAdmin, { now = Dat
         throw error;
       }
     } catch (error) {
-      const known = error instanceof OtpError;
+      const known = error instanceof OtpError || (Boolean(error?.status) && Boolean(error?.reason));
       if (known && error.details?.retryAfterSeconds) res.setHeader('Retry-After', String(error.details.retryAfterSeconds));
       return res.status(known ? error.status : 503).json({ error: { reason: known ? error.reason : 'PASSWORD_CHANGE_UNAVAILABLE', message: known ? error.message : 'Password change could not be confirmed. Sign in with your new password or contact support.' } });
     }

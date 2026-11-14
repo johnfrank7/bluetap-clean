@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { createPasswordChangeOtpHandler } = require('../passwordChangeOtpHandler');
 
-function fixture(role = 'requester', { realTransportCheck = false, hashSecret = 'test-only-secret' } = {}) {
+function fixture(role = 'requester', { realTransportCheck = false, hashSecret = 'test-only-secret-at-least-32-chars-entropy' } = {}) {
   let time = Date.now();
   let sent = '';
   let shouldFailSend = false;
@@ -182,4 +182,24 @@ test('staging mail preflight rejects unapproved relay hosts before delivery', as
     assert.equal((await approved.call(request)).statusCode, 200);
     assert.match(approved.code(), /^\d{6}$/);
   } finally { for (const key of keys) { if (prior[key] === undefined) delete process.env[key]; else process.env[key] = prior[key]; } }
+});
+
+test('malformed JSON body returns 400 INVALID_REQUEST', async () => {
+  const f = fixture();
+  const res = await f.call('not-valid-json');
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.error.reason, 'INVALID_REQUEST');
+});
+
+test('weak secret under live deployment rejects with 503 PASSWORD_CHANGE_UNAVAILABLE', async () => {
+  const prior = process.env.NODE_ENV;
+  try {
+    process.env.NODE_ENV = 'production';
+    const weak = fixture('requester', { hashSecret: 'short-secret' });
+    const res = await weak.call(request);
+    assert.equal(res.statusCode, 503);
+    assert.equal(res.body.error.reason, 'PASSWORD_CHANGE_UNAVAILABLE');
+  } finally {
+    if (prior === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = prior;
+  }
 });
