@@ -112,3 +112,16 @@ export async function changeAdminPromotionStatus(productId, action, expectedVers
   invalidate();
   return result.product;
 }
+
+export async function saveAndPublishAdminPromotion(productId, bundlePromotion) {
+  const result = await adminApiRequest('/api/admin/products', {
+    method: 'PATCH',
+    body: {
+      productId,
+      bundlePromotionAction: 'saveAndPublish',
+      bundlePromotion,
+    },
+  });
+  invalidate();
+  return result.product;
+}

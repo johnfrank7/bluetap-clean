@@ -1,6 +1,6 @@
 import React from 'react';
 import { Modal, Platform, ScrollView, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
-import { saveAdminPromotionDraft, changeAdminPromotionStatus } from '../services/adminProducts';
+import { saveAdminPromotionDraft, saveAndPublishAdminPromotion, changeAdminPromotionStatus } from '../services/adminProducts';
 const { manilaDateTimeFields, manilaDateTimeToIso } = require('../services/promotionSchedule');
 const { promotionStatus, samplePromotionTiers, promotionDraftFingerprint } = require('../services/adminPromotionDraft');
 
@@ -25,6 +25,7 @@ export default function AdminBundlePromotionModal({ product, branches, colors, o
   const [notice, setNotice] = React.useState('');
   const [confirmSample, setConfirmSample] = React.useState(false);
   const [confirmAction, setConfirmAction] = React.useState(null);
+  const [publishConfirmation, setPublishConfirmation] = React.useState(null);
   const initialDraft = React.useRef('');
   const [statusClock, setStatusClock] = React.useState(Date.now());
   React.useEffect(() => {
@@ -35,7 +36,7 @@ export default function AdminBundlePromotionModal({ product, branches, colors, o
     const next = { title: saved?.title || '', verified: saved?.commercialEligibility === 'refill_verified', branchIds: saved?.branchIds || [], containerChoices: saved?.containerChoices || [], tiers: saved?.tiers?.length ? saved.tiers.map((tier) => ({ quantity: String(tier.quantity), price: fromCents(tier.bundlePriceCentavos) })) : [blankTier()], startMode: saved?.startMode || (saved?.startsAt ? 'scheduled' : 'activation'), startDate: start.date, startTime: start.time, durationMode: saved?.endsAt ? 'scheduled' : 'indefinite', endDate: end.date, endTime: end.time, expectedVersion: saved?.version || 0 };
     initialDraft.current = JSON.stringify(next);
     setDraft(next);
-    setError(''); setNotice(''); setFieldErrors({}); setConfirmSample(false); setConfirmAction(null); setStatusClock(Date.now());
+    setError(''); setNotice(''); setFieldErrors({}); setConfirmSample(false); setConfirmAction(null); setPublishConfirmation(null); setStatusClock(Date.now());
   }, [product]);
   React.useEffect(() => {
     const now = Date.now();
@@ -68,8 +69,8 @@ export default function AdminBundlePromotionModal({ product, branches, colors, o
     if (draft.tiers.some((tier) => tier.quantity.trim() || tier.price.trim())) setConfirmSample(true);
     else applySample();
   };
-  const save = async () => {
-    if (!draft || saving || savingRef.current || activeRecord) return;
+  const validateForm = () => {
+    if (!draft) return null;
     const tiers = draft.tiers.map((tier) => ({ quantity: Number(tier.quantity), bundlePriceCentavos: parseCents(tier.price) }));
     const errors = {};
     if (!draft.title.trim()) errors.title = 'Enter a promotion title.';
@@ -85,15 +86,70 @@ export default function AdminBundlePromotionModal({ product, branches, colors, o
     if (draft.startMode === 'scheduled' && !startsAt) errors.start = 'Choose a valid start date and time.';
     if (draft.durationMode === 'scheduled' && !endsAt) errors.end = 'Choose a valid end date and time.';
     if (endsAt && (startsAt ? Date.parse(endsAt) <= Date.parse(startsAt) : Date.parse(endsAt) <= Date.now())) errors.end = 'The end must be after the start and, for an immediate start, in the future.';
-    const payload = { expectedVersion: draft.expectedVersion, title: draft.title.trim(), commercialEligibility: draft.verified ? 'refill_verified' : '', active: false, branchIds: draft.branchIds, containerChoices: draft.containerChoices, tiers, startMode: draft.startMode, startsAt, endsAt };
-    if (product.bundlePromotion && (draft.startMode !== 'scheduled' || startsAt) && (draft.durationMode !== 'scheduled' || endsAt) && promotionDraftFingerprint(payload) === promotionDraftFingerprint(product.bundlePromotion)) { setFieldErrors({}); setNotice('No changes to save. Your draft is already up to date.'); setError(''); return; }
-    if (Object.keys(errors).length) { setFieldErrors(errors); setNotice(''); return; }
-    savingRef.current = true; setSaving(true); setError(''); setNotice('');
+    if (Object.keys(errors).length) {
+      setFieldErrors(errors);
+      setNotice('');
+      return null;
+    }
+    return {
+      expectedVersion: draft.expectedVersion,
+      title: draft.title.trim(),
+      commercialEligibility: draft.verified ? 'refill_verified' : '',
+      branchIds: draft.branchIds,
+      containerChoices: draft.containerChoices,
+      tiers,
+      startMode: draft.startMode,
+      startsAt,
+      endsAt,
+    };
+  };
+  const save = async () => {
+    if (!draft || saving || savingRef.current || activeRecord) return;
+    const payload = validateForm();
+    if (!payload) return;
+    const draftPayload = { ...payload, active: false };
+    if (product.bundlePromotion && (draft.startMode !== 'scheduled' || draftPayload.startsAt) && (draft.durationMode !== 'scheduled' || draftPayload.endsAt) && promotionDraftFingerprint(draftPayload) === promotionDraftFingerprint(product.bundlePromotion)) {
+      setFieldErrors({});
+      setNotice('No changes to save. Your draft is already up to date.');
+      setError('');
+      return;
+    }
+    savingRef.current = true;
+    setSaving(true);
+    setError('');
+    setNotice('');
     try {
-      await saveAdminPromotionDraft(product.id, payload);
+      await saveAdminPromotionDraft(product.id, draftPayload);
       await onSaved(product.bundlePromotion ? 'updated' : 'created');
-    } catch (err) { setError(err.message || 'The draft could not be saved.'); }
-    finally { savingRef.current = false; setSaving(false); }
+    } catch (err) {
+      setError(err.message || 'The draft could not be saved.');
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+    }
+  };
+  const initiatePublish = () => {
+    if (!draft || saving || savingRef.current || activeRecord || !product?.promotionActivationAvailable) return;
+    const payload = validateForm();
+    if (!payload) return;
+    setPublishConfirmation(payload);
+  };
+  const executeSaveAndPublish = async () => {
+    if (!publishConfirmation || saving || savingRef.current || activeRecord || !product?.promotionActivationAvailable) return;
+    savingRef.current = true;
+    setSaving(true);
+    setError('');
+    try {
+      await saveAndPublishAdminPromotion(product.id, publishConfirmation);
+      setPublishConfirmation(null);
+      await onSaved('published');
+    } catch (err) {
+      setPublishConfirmation(null);
+      setError(err.message || 'The promotion could not be published.');
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+    }
   };
   const changeStatus = async () => {
     if (!confirmAction || saving || savingRef.current || !product?.bundlePromotion ||
@@ -125,7 +181,7 @@ export default function AdminBundlePromotionModal({ product, branches, colors, o
   return <><Modal visible={Boolean(product && draft)} transparent animationType="fade" onRequestClose={() => { if (!saving) onClose(); }}>
     <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', alignItems: 'center', justifyContent: 'center', padding: 12 }}>
       <View style={{ width: '100%', maxWidth: 620, maxHeight: '90%', backgroundColor: colors.surface, borderRadius: 14, borderWidth: 1, borderColor: colors.border, padding: 16 }}>
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}><Text accessibilityRole="header" style={{ color: colors.textPrimary, fontSize: 20, fontWeight: '800', flexShrink: 1 }}>Bundle Promotions</Text><Text accessibilityLabel={`Promotion status: ${status}`} style={{ color: status === 'Active' ? colors.success : colors.primaryAction, backgroundColor: colors.primarySoft, fontWeight: '800', fontSize: 12, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20 }}>{status}</Text></View>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}><Text accessibilityRole="header" style={{ color: colors.textPrimary, fontSize: 20, fontWeight: '800', flexShrink: 1 }}>Bundle Promotions</Text><Text accessibilityLabel={`Promotion status: ${status}`} style={{ color: status === 'Active' ? (colors.successAction || colors.success || '#167347') : colors.primaryAction, backgroundColor: status === 'Active' ? (colors.successSoft || '#E3F7EC') : colors.primarySoft, fontWeight: '800', fontSize: 12, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20 }}>{status}</Text></View>
         <Text style={[muted, { marginTop: 3 }]}>{product?.product_name} · {product ? money(Number(product.price)) : '—'} per unit</Text>
         {Boolean(product && draft) && <ScrollView style={{ flexShrink: 1 }} keyboardShouldPersistTaps="handled">
           <View style={panel}><Text style={heading}>Promotion Overview</Text>
@@ -152,16 +208,171 @@ export default function AdminBundlePromotionModal({ product, branches, colors, o
           <Text style={label}>Duration</Text>
           <View accessibilityRole="radiogroup" style={{ gap: 6, marginTop: 5 }}>{choice('Keep promotion running (No end date)', draft.durationMode === 'indefinite', () => patch('durationMode', 'indefinite'), 'radio')}{choice('End on selected date and time', draft.durationMode === 'scheduled', () => patch('durationMode', 'scheduled'), 'radio')}</View>
           {draft.durationMode === 'scheduled' && dateTime('end')}{issue('end')}</View>
-          <View style={panel}><Text style={heading}>Status &amp; Actions</Text><Text style={[muted, { marginTop: 5 }]}>{status === 'Draft' ? 'Saved drafts are not visible to customers.' : `Current status: ${status}.`}</Text>{!product?.promotionActivationAvailable && <Text style={[muted, { marginTop: 4 }]}>Activation is currently unavailable until an authorized release.</Text>}{product?.bundlePromotion && (activeRecord ? product?.promotionDisableAvailable : product?.promotionActivationAvailable) && <TouchableOpacity accessibilityRole="button" disabled={saving || (!activeRecord && unsavedDraft)} onPress={() => setConfirmAction(activeRecord ? 'disable' : 'publish')} style={[button, { marginTop: 8, opacity: saving || (!activeRecord && unsavedDraft) ? 0.55 : 1 }]}><Text style={{ color: colors.textPrimary, fontWeight: '700' }}>{activeRecord ? 'Disable promotion' : 'Publish saved draft'}</Text></TouchableOpacity>}{product?.promotionActivationAvailable && !activeRecord && unsavedDraft && <Text style={[muted, { marginTop: 4 }]}>Save changes before publishing.</Text>}{activeRecord && <Text style={[muted, { marginTop: 4 }]}>This active record cannot be changed from the draft editor.</Text>}</View>
+          {activeRecord ? (
+            <View style={[panel, { borderColor: colors.dangerSoft || colors.danger, borderWidth: 1.5 }]}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Text style={[heading, { color: colors.danger }]}>Promotion Management</Text>
+                <View style={{ backgroundColor: colors.successSoft || '#E3F7EC', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 }}>
+                  <Text style={{ color: colors.successAction || colors.success || '#167347', fontSize: 11, fontWeight: '800' }}>ACTIVE</Text>
+                </View>
+              </View>
+              <Text style={[muted, { marginTop: 6, fontSize: 12, lineHeight: 18 }]}>
+                This promotion is currently live. To change pricing or terms, disable the promotion first.
+              </Text>
+              <View style={{ marginTop: 10, gap: 6 }}>
+                <TouchableOpacity
+                  accessibilityRole="button"
+                  accessibilityLabel="Disable Promotion"
+                  disabled={saving}
+                  onPress={() => setConfirmAction('disable')}
+                  style={[
+                    button,
+                    {
+                      backgroundColor: colors.dangerAction || colors.danger || '#B52F2F',
+                      borderColor: colors.dangerAction || colors.danger || '#B52F2F',
+                      alignItems: 'center',
+                      opacity: saving ? 0.6 : 1,
+                    },
+                  ]}
+                >
+                  <Text style={{ color: colors.onDanger || '#FFFFFF', fontWeight: '700', fontSize: 13, textAlign: 'center' }}>
+                    {saving ? 'Disabling…' : 'Disable Promotion'}
+                  </Text>
+                </TouchableOpacity>
+                <Text style={{ color: colors.textSecondary, fontSize: 11, textAlign: 'center' }}>
+                  Stops this promotion for new eligible orders.
+                </Text>
+              </View>
+            </View>
+          ) : (
+            <View style={panel}>
+              <Text style={heading}>Status &amp; Availability</Text>
+              <Text style={[muted, { marginTop: 5, fontSize: 12, lineHeight: 17 }]}>
+                {status === 'Draft' ? 'Saved drafts are not visible to customers.' : `Current status: ${status}.`}
+              </Text>
+              {product?.promotionActivationAvailable ? (
+                <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 4 }}>
+                  Save and make this offer available to eligible customers.
+                </Text>
+              ) : (
+                <View style={{ marginTop: 8, padding: 10, borderRadius: 8, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }}>
+                  <Text style={{ color: colors.warning || colors.textPrimary, fontWeight: '700', fontSize: 12 }}>
+                    Publishing Capability Disabled
+                  </Text>
+                  <Text style={[muted, { fontSize: 11, marginTop: 2, lineHeight: 16 }]}>
+                    Publishing must first be enabled on the server to activate promotions. You can save and test your draft at any time.
+                  </Text>
+                </View>
+              )}
+            </View>
+          )}
         </ScrollView>}
         {Object.keys(fieldErrors).length > 0 && <Text accessibilityRole="alert" style={{ color: colors.danger, fontSize: 12, marginTop: 6 }}>Review the highlighted fields above.</Text>}
         {Boolean(error) && <Text accessibilityRole="alert" style={{ color: colors.danger, fontSize: 12, marginTop: 6 }}>{error}</Text>}
         {Boolean(notice) && <Text accessibilityRole="status" style={{ color: colors.textPrimary, fontSize: 12, marginTop: 6 }}>{notice}</Text>}
-        <View style={{ flexDirection: width < 360 ? 'column-reverse' : 'row', gap: 8, marginTop: 12 }}>
-          <TouchableOpacity accessibilityRole="button" disabled={saving} onPress={onClose} style={[button, { flexGrow: 1 }]}><Text style={{ color: colors.textPrimary, textAlign: 'center' }}>Cancel</Text></TouchableOpacity>
-          <TouchableOpacity accessibilityRole="button" disabled={saving || activeRecord} accessibilityState={{ disabled: saving || activeRecord }} onPress={save} style={[button, { flexGrow: 1, backgroundColor: colors.primaryAction, borderColor: colors.primaryAction, opacity: saving || activeRecord ? 0.6 : 1 }]}><Text style={{ color: colors.onPrimary, textAlign: 'center', fontWeight: '700' }}>{saving ? 'Saving…' : 'Save draft'}</Text></TouchableOpacity>
-        </View>
+        {activeRecord ? (
+          <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginTop: 12 }}>
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel="Close"
+              disabled={saving}
+              onPress={onClose}
+              style={[
+                button,
+                {
+                  minWidth: width < 480 ? '100%' : 120,
+                  backgroundColor: colors.surfaceAlt,
+                  borderColor: colors.border,
+                  alignItems: 'center',
+                },
+              ]}
+            >
+              <Text style={{ color: colors.textPrimary, textAlign: 'center', fontWeight: '600' }}>Close</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <View style={{ marginTop: 12, gap: 6 }}>
+            <View style={{ flexDirection: width < 480 ? 'column-reverse' : 'row', gap: 8 }}>
+              <TouchableOpacity
+                accessibilityRole="button"
+                accessibilityLabel="Cancel"
+                disabled={saving}
+                onPress={onClose}
+                style={[
+                  button,
+                  {
+                    flex: width < 480 ? undefined : 1,
+                    backgroundColor: colors.surfaceAlt,
+                    borderColor: colors.border,
+                    alignItems: 'center',
+                  },
+                ]}
+              >
+                <Text style={{ color: colors.textPrimary, textAlign: 'center', fontWeight: '600' }}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                accessibilityRole="button"
+                accessibilityLabel="Save Draft"
+                disabled={saving}
+                accessibilityState={{ disabled: saving }}
+                onPress={save}
+                style={[
+                  button,
+                  {
+                    flex: width < 480 ? undefined : 1,
+                    backgroundColor: colors.surface,
+                    borderColor: colors.border,
+                    alignItems: 'center',
+                    opacity: saving ? 0.6 : 1,
+                  },
+                ]}
+              >
+                <Text style={{ color: colors.textPrimary, textAlign: 'center', fontWeight: '700' }}>
+                  {saving ? 'Saving…' : 'Save Draft'}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                accessibilityRole="button"
+                accessibilityLabel="Save & Publish"
+                disabled={saving || !product?.promotionActivationAvailable}
+                accessibilityState={{ disabled: saving || !product?.promotionActivationAvailable }}
+                onPress={initiatePublish}
+                style={[
+                  button,
+                  {
+                    flex: width < 480 ? undefined : 1.3,
+                    backgroundColor: product?.promotionActivationAvailable
+                      ? (colors.successAction || colors.success || '#167347')
+                      : colors.surfaceAlt,
+                    borderColor: product?.promotionActivationAvailable
+                      ? (colors.successAction || colors.success || '#167347')
+                      : colors.border,
+                    alignItems: 'center',
+                    opacity: saving || !product?.promotionActivationAvailable ? 0.5 : 1,
+                  },
+                ]}
+              >
+                <Text
+                  style={{
+                    color: product?.promotionActivationAvailable
+                      ? (colors.onSuccess || '#FFFFFF')
+                      : (colors.disabledText || colors.textSecondary),
+                    textAlign: 'center',
+                    fontWeight: '700',
+                  }}
+                >
+                  Save &amp; Publish
+                </Text>
+              </TouchableOpacity>
+            </View>
+            {!product?.promotionActivationAvailable && (
+              <Text style={{ color: colors.textSecondary, fontSize: 11, textAlign: 'center', marginTop: 2 }}>
+                Server publishing is disabled. Use Save Draft to store your changes.
+              </Text>
+            )}
+          </View>
+        )}
       </View>
     </View>
-  </Modal><Modal visible={confirmSample} transparent animationType="fade" onRequestClose={() => setConfirmSample(false)}><View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', alignItems: 'center', justifyContent: 'center', padding: 16 }}><View style={{ width: '100%', maxWidth: 400, backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1, borderRadius: 12, padding: 16, gap: 12 }}><Text accessibilityRole="header" style={heading}>Replace current tiers?</Text><Text style={muted}>Sample tiers will replace your current entries. Nothing is saved until you choose Save draft.</Text><View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}><TouchableOpacity accessibilityRole="button" onPress={() => setConfirmSample(false)} style={[button, { flexGrow: 1 }]}><Text style={{ color: colors.textPrimary, textAlign: 'center' }}>Keep current</Text></TouchableOpacity><TouchableOpacity accessibilityRole="button" onPress={applySample} style={[button, { flexGrow: 1, backgroundColor: colors.primaryAction }]}><Text style={{ color: colors.onPrimary, textAlign: 'center', fontWeight: '700' }}>Replace tiers</Text></TouchableOpacity></View></View></View></Modal><Modal visible={Boolean(confirmAction)} transparent animationType="fade" onRequestClose={() => !saving && setConfirmAction(null)}><View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', alignItems: 'center', justifyContent: 'center', padding: 16 }}><View style={{ width: '100%', maxWidth: 400, backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1, borderRadius: 12, padding: 16, gap: 12 }}><Text accessibilityRole="header" style={heading}>{confirmAction === 'publish' ? 'Publish saved promotion?' : 'Disable promotion?'}</Text><Text style={muted}>{confirmAction === 'publish' ? 'Eligible customers can see and receive the saved offer after its start time.' : 'New orders will no longer receive this offer. Existing order prices remain unchanged.'}</Text><View style={{ flexDirection: 'row', gap: 8 }}><TouchableOpacity accessibilityRole="button" disabled={saving} onPress={() => setConfirmAction(null)} style={[button, { flex: 1 }]}><Text style={{ color: colors.textPrimary, textAlign: 'center' }}>Cancel</Text></TouchableOpacity><TouchableOpacity accessibilityRole="button" disabled={saving} onPress={changeStatus} style={[button, { flex: 1, backgroundColor: colors.primaryAction }]}><Text style={{ color: colors.onPrimary, textAlign: 'center', fontWeight: '700' }}>{saving ? 'Saving…' : 'Confirm'}</Text></TouchableOpacity></View></View></View></Modal></>;
+  </Modal><Modal visible={confirmSample} transparent animationType="fade" onRequestClose={() => setConfirmSample(false)}><View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', alignItems: 'center', justifyContent: 'center', padding: 16 }}><View style={{ width: '100%', maxWidth: 400, backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1, borderRadius: 12, padding: 16, gap: 12 }}><Text accessibilityRole="header" style={heading}>Replace current tiers?</Text><Text style={muted}>Sample tiers will replace your current entries. Nothing is saved until you choose Save draft.</Text><View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}><TouchableOpacity accessibilityRole="button" onPress={() => setConfirmSample(false)} style={[button, { flexGrow: 1 }]}><Text style={{ color: colors.textPrimary, textAlign: 'center' }}>Keep current</Text></TouchableOpacity><TouchableOpacity accessibilityRole="button" onPress={applySample} style={[button, { flexGrow: 1, backgroundColor: colors.primaryAction }]}><Text style={{ color: colors.onPrimary, textAlign: 'center', fontWeight: '700' }}>Replace tiers</Text></TouchableOpacity></View></View></View></Modal><Modal visible={Boolean(confirmAction)} transparent animationType="fade" onRequestClose={() => !saving && setConfirmAction(null)}><View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', alignItems: 'center', justifyContent: 'center', padding: 16 }}><View style={{ width: '100%', maxWidth: 400, backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1, borderRadius: 12, padding: 16, gap: 12 }}><Text accessibilityRole="header" style={heading}>{confirmAction === 'publish' ? 'Publish saved promotion?' : 'Disable promotion?'}</Text><Text style={muted}>{confirmAction === 'publish' ? 'Eligible customers can see and receive the saved offer after its start time.' : 'New orders will no longer receive this offer. Existing order prices remain unchanged.'}</Text><View style={{ flexDirection: 'row', gap: 8 }}><TouchableOpacity accessibilityRole="button" disabled={saving} onPress={() => setConfirmAction(null)} style={[button, { flex: 1 }]}><Text style={{ color: colors.textPrimary, textAlign: 'center' }}>Cancel</Text></TouchableOpacity><TouchableOpacity accessibilityRole="button" disabled={saving} onPress={changeStatus} style={[button, { flex: 1, backgroundColor: confirmAction === 'disable' ? (colors.dangerAction || colors.danger || '#B52F2F') : colors.primaryAction, borderColor: confirmAction === 'disable' ? (colors.dangerAction || colors.danger || '#B52F2F') : colors.primaryAction }]}><Text style={{ color: confirmAction === 'disable' ? (colors.onDanger || '#FFFFFF') : (colors.onPrimary || '#FFFFFF'), textAlign: 'center', fontWeight: '700' }}>{saving ? (confirmAction === 'disable' ? 'Disabling…' : 'Saving…') : (confirmAction === 'disable' ? 'Disable Promotion' : 'Confirm')}</Text></TouchableOpacity></View></View></View></Modal><Modal visible={Boolean(publishConfirmation)} transparent animationType="fade" onRequestClose={() => !saving && setPublishConfirmation(null)}><View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', alignItems: 'center', justifyContent: 'center', padding: 16 }}><View style={{ width: '100%', maxWidth: 480, maxHeight: '85%', backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1, borderRadius: 14, padding: 16, gap: 10 }}><Text accessibilityRole="header" style={heading}>Save &amp; Publish Promotion?</Text><Text style={[muted, { fontSize: 13 }]}>This promotion will be saved and published live. Eligible customers will immediately receive promotional discounts upon activation.</Text><ScrollView style={{ maxHeight: 220, borderWidth: 1, borderColor: colors.border, borderRadius: 8, padding: 10, backgroundColor: colors.surfaceAlt }} keyboardShouldPersistTaps="handled"><Text style={{ fontWeight: '700', color: colors.textPrimary, fontSize: 13 }}>{product?.product_name}</Text><Text style={[muted, { fontSize: 12, marginTop: 2 }]}>Title: {publishConfirmation?.title}</Text><Text style={[muted, { fontSize: 12, marginTop: 2 }]}>Branches: {(publishConfirmation?.branchIds || []).map((id) => branches.find((b) => b.id === id)?.name || id).join(', ')}</Text><Text style={[muted, { fontSize: 12, marginTop: 2 }]}>Containers: {(publishConfirmation?.containerChoices || []).join(', ')}</Text><Text style={[muted, { fontSize: 12, marginTop: 2 }]}>Start: {scheduleLabel(publishConfirmation?.startMode, draft?.startDate, draft?.startTime, 'Immediately upon activation')}</Text><Text style={[muted, { fontSize: 12, marginTop: 2 }]}>End: {scheduleLabel(publishConfirmation?.durationMode, draft?.endDate, draft?.endTime, 'No end date')}</Text><Text style={{ fontWeight: '700', color: colors.textPrimary, fontSize: 12, marginTop: 8, marginBottom: 4 }}>Price Tiers:</Text>{(publishConfirmation?.tiers || []).map((tier) => { const regularCents = unit !== null ? unit * tier.quantity : 0; const bundleCents = tier.bundlePriceCentavos; const savingsCents = regularCents - bundleCents; return <Text key={tier.quantity} style={{ color: colors.textPrimary, fontSize: 12, lineHeight: 18 }}>• Qty {tier.quantity}: Regular {money(regularCents / 100)} · Bundle {money(bundleCents / 100)} · Save {money(savingsCents / 100)}</Text>; })}</ScrollView><View style={{ flexDirection: 'row', gap: 8, marginTop: 4 }}><TouchableOpacity accessibilityRole="button" disabled={saving} onPress={() => setPublishConfirmation(null)} style={[button, { flex: 1 }]}><Text style={{ color: colors.textPrimary, textAlign: 'center' }}>Cancel</Text></TouchableOpacity><TouchableOpacity accessibilityRole="button" disabled={saving} onPress={executeSaveAndPublish} style={[button, { flex: 1.2, backgroundColor: colors.successAction || colors.success || '#167347', borderColor: colors.successAction || colors.success || '#167347' }]}><Text style={{ color: colors.onSuccess || '#FFFFFF', textAlign: 'center', fontWeight: '700' }}>{saving ? 'Publishing…' : 'Confirm & publish'}</Text></TouchableOpacity></View></View></View></Modal></>;
 }
