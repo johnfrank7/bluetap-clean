@@ -10,7 +10,7 @@ export function PromotionBanner({ offer, colors, onOpen, onOrder, hasActiveOrder
   const tier = bestTier(offer);
   return (
     <View style={{ borderWidth: 1, borderColor: colors.primaryAction, borderRadius: 18, overflow: 'hidden', marginTop: 12, elevation: 3, shadowColor: '#002d58', shadowOpacity: 0.14, shadowRadius: 10, shadowOffset: { width: 0, height: 4 } }}>
-      <LinearGradient colors={['#073461', '#0968aa', '#1588c8']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ minHeight: 96, overflow: 'hidden', position: 'relative' }}>
+      <LinearGradient colors={['#073461', '#0968aa', '#1588c8']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ minHeight: 80, overflow: 'hidden', position: 'relative' }}>
         <Image
           source={require('../assets/images/requester-promotion-water.png')}
           resizeMode="cover"
@@ -20,8 +20,8 @@ export function PromotionBanner({ offer, colors, onOpen, onOrder, hasActiveOrder
             right: 0,
             top: 0,
             bottom: 0,
-            width: '60%',
-            maxWidth: 280,
+            width: '52%',
+            maxWidth: 235,
             height: '100%',
             opacity: 0.55,
           }}
@@ -39,14 +39,14 @@ export function PromotionBanner({ offer, colors, onOpen, onOrder, hasActiveOrder
           end={{ x: 1, y: 0 }}
           style={StyleSheet.absoluteFill}
         />
-        <View style={{ flex: 1, paddingVertical: 12, paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+        <View style={{ flex: 1, paddingVertical: 8, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
           <Pressable accessibilityRole="button" accessibilityLabel={checkoutEnabled ? 'View bundle offer' : 'View bundle preview'} onPress={onOpen} style={{ flex: 1, minWidth: 0, minHeight: 44, justifyContent: 'center' }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 3 }}>
-              <BlueTapBrandMark size={19} color={colors.onPrimary} />
-              <Text style={{ color: '#d8f3ff', fontSize: 10, fontWeight: '800', letterSpacing: 0.7 }}>BLUETAP BUNDLE</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 2 }}>
+              <BlueTapBrandMark size={16} color={colors.onPrimary} />
+              <Text style={{ color: '#d8f3ff', fontSize: 9, fontWeight: '800', letterSpacing: 0.7 }}>BLUETAP BUNDLE</Text>
             </View>
             <Text style={{ color: colors.onPrimary, fontWeight: '900', fontSize: 15, lineHeight: 19 }}>BUY MORE, SAVE MORE!</Text>
-            <Text numberOfLines={2} style={{ color: '#e5f5ff', fontSize: 12, lineHeight: 16, marginTop: 3 }}>
+            <Text style={{ color: '#e5f5ff', fontSize: 11, lineHeight: 14, marginTop: 2 }}>
               {offer.productName} · {tier.quantity} for {money(tier.priceCentavos)}
             </Text>
           </Pressable>
