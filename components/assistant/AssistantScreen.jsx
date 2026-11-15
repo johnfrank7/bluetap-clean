@@ -151,7 +151,7 @@ export function AssistantScreen({
   const seedWelcomeConversation = useCallback(() => {
     if (isDistributor) {
       const firstName = effectiveSafeContext?.distributor?.firstName || 'there';
-      let welcomeText = `Hi ${firstName}! 👋 I'm your BlueTap Assistant. I can help with your assigned deliveries, today's schedule, delivery details, contacting customers, or station dispatch.`;
+      let welcomeText = `Hi ${firstName}! I'm your BlueTap Assistant. I can help with your assigned deliveries, today's schedule, delivery details, contacting customers, or station dispatch.`;
 
       const initialCards = [];
       const initialActions = [];
@@ -189,7 +189,7 @@ export function AssistantScreen({
 
     // Default Requester Welcome
     const firstName = effectiveSafeContext?.requester?.firstName || 'there';
-    let welcomeText = `Hi ${firstName}! 👋 I'm your BlueTap Assistant. I can help track your water requests, check delivery schedules, find nearby water stations, or answer account questions.`;
+    let welcomeText = `Hi ${firstName}! I'm your BlueTap Assistant. I can help track your water requests, check delivery schedules, find nearby water stations, or answer account questions.`;
 
     const initialCards = [];
     const initialActions = [];

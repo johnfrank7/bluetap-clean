@@ -51,9 +51,9 @@ export function handleRequesterQuery({ intent, isCeb, safeContext = {}, userInpu
   switch (intent) {
       case ASSISTANT_INTENTS.GREETING: {
         if (isCeb) {
-          message = `Maayong adlaw, ${requesterName}! 👋 Ako ang imong BlueTap Assistant. Unsay akong ikatabang nimo karon? Makatabang ko sa pagsubay sa imong order, pagtan-aw sa iskedyul sa delivery, pagpangita og water station, o mga pangutana sa account.`;
+          message = `Maayong adlaw, ${requesterName}! Ako ang imong BlueTap Assistant. Unsay akong ikatabang nimo karon? Makatabang ko sa pagsubay sa imong order, pagtan-aw sa iskedyul sa delivery, pagpangita og water station, o mga pangutana sa account.`;
         } else {
-          message = `Hello, ${requesterName}! 👋 I'm your BlueTap Assistant. How can I help you today? You can track your water requests, check delivery schedules, find nearby water stations, or ask account questions.`;
+          message = `Hello, ${requesterName}! I'm your BlueTap Assistant. How can I help you today? You can track your water requests, check delivery schedules, find nearby water stations, or ask account questions.`;
         }
 
         if (hasActive) {
@@ -1010,7 +1010,7 @@ export function handleDistributorQuery({ intent, isCeb, safeContext = {}, userIn
             message += `\n• Lugar: ${assignment.safeAddressLabel}`;
           }
           if (isFailed) {
-            message += `\n\n⚠️ Pahibalo: Napakyas kini nga delivery (${assignment.safeFailureReason || 'Issue reported'}).`;
+            message += `\n\nPahibalo: Napakyas kini nga delivery (${assignment.safeFailureReason || 'Issue reported'}).`;
           }
         } else {
           message = `Here is your current assigned delivery (${assignment.publicOrderId}):\n• Customer: ${assignment.requesterName}\n• Status: ${assignment.statusLabel}\n• Schedule: ${assignment.schedule || 'Pending schedule'}\n• Items: ${assignment.productSummary}\n• Station: ${assignment.branchName}`;
@@ -1018,7 +1018,7 @@ export function handleDistributorQuery({ intent, isCeb, safeContext = {}, userIn
             message += `\n• Area: ${assignment.safeAddressLabel}`;
           }
           if (isFailed) {
-            message += `\n\n⚠️ Note: This delivery was marked unsuccessful (${assignment.safeFailureReason || 'Issue reported'}).`;
+            message += `\n\nNote: This delivery was marked unsuccessful (${assignment.safeFailureReason || 'Issue reported'}).`;
           }
         }
 
@@ -1436,9 +1436,9 @@ export function handleDistributorQuery({ intent, isCeb, safeContext = {}, userIn
 
     case ASSISTANT_INTENTS.GREETING: {
       if (isCeb) {
-        message = `Maayong adlaw, ${distributorName}! 👋 Ako ang imong BlueTap Assistant. Makatabang ko sa imong mga gi-assign nga delivery, pagsusi sa iskedyul karon, mga patakaran sa chat, o pagkonektar sa imong station manager.`;
+        message = `Maayong adlaw, ${distributorName}! Ako ang imong BlueTap Assistant. Makatabang ko sa imong mga gi-assign nga delivery, pagsusi sa iskedyul karon, mga patakaran sa chat, o pagkonektar sa imong station manager.`;
       } else {
-        message = `Hello, ${distributorName}! 👋 I'm your BlueTap Assistant. I can help track your assigned deliveries, check today's schedule, explain customer messaging rules, or connect with your station manager.`;
+        message = `Hello, ${distributorName}! I'm your BlueTap Assistant. I can help track your assigned deliveries, check today's schedule, explain customer messaging rules, or connect with your station manager.`;
       }
 
       if (hasAssignment) {

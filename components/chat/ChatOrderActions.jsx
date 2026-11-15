@@ -96,9 +96,14 @@ export function RequesterOrderChatActions({ order, compact = false, disabled = f
   const [busy, setBusy] = React.useState('');
   const [error, setError] = React.useState('');
   const orderId = orderIdOf(order);
-  const active = orderId && !TERMINAL.has(normalizedStatus(order?.status));
+  const status = normalizedStatus(order?.status);
+  const isTerminal = TERMINAL.has(status);
+  const isDelivered = ['delivered', 'completed'].includes(status);
+  const active = orderId && !isTerminal;
   const hasDistributor = active && Boolean(clean(order?.assignedDistributorUid || order?.distributor_id));
-  if (!active) return null;
+  const branchId = clean(order?.currentBranchId || order?.branchId);
+
+  if (!orderId || (!active && !isDelivered)) return null;
 
   const open = async (kind) => {
     setBusy(kind);
@@ -106,7 +111,9 @@ export function RequesterOrderChatActions({ order, compact = false, disabled = f
     try {
       await openBlueTapConversation(
         kind === 'branch'
-          ? { type: 'requester_branch', intent: 'order_followup', orderId, order }
+          ? (isDelivered && branchId
+              ? { type: 'requester_branch', intent: 'inquiry', branchId, order }
+              : { type: 'requester_branch', intent: 'order_followup', orderId, order })
           : { type: 'requester_distributor', orderId, order }
       );
     } catch (openError) {
@@ -118,8 +125,15 @@ export function RequesterOrderChatActions({ order, compact = false, disabled = f
 
   return (
     <View style={[styles.wrap, compact && styles.compact]}>
-      <ActionButton busy={busy === 'branch'} disabled={disabled || Boolean(busy)} colors={colors} label="Follow Up" onPress={() => open('branch')} secondary />
-      {Boolean(hasDistributor) ? <ActionButton busy={busy === 'distributor'} disabled={disabled || Boolean(busy)} colors={colors} label="Message Distributor" onPress={() => open('distributor')} /> : null}
+      {active && (
+        <ActionButton busy={busy === 'branch'} disabled={disabled || Boolean(busy)} colors={colors} label="Follow Up" onPress={() => open('branch')} secondary />
+      )}
+      {active && Boolean(hasDistributor) && (
+        <ActionButton busy={busy === 'distributor'} disabled={disabled || Boolean(busy)} colors={colors} label="Message Distributor" onPress={() => open('distributor')} />
+      )}
+      {isDelivered && Boolean(branchId) && (
+        <ActionButton busy={busy === 'branch'} disabled={disabled || Boolean(busy)} colors={colors} label="Contact Branch" onPress={() => open('branch')} secondary />
+      )}
       {!!error && <Text accessibilityRole="alert" style={[styles.error, { color: colors.danger }]}>{error}</Text>}
     </View>
   );

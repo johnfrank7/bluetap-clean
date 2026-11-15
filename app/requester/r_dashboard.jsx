@@ -27,6 +27,7 @@ import SoftStatusBadge from '../../components/SoftStatusBadge';
 import { createShadow } from '../../components/shadowStyles';
 import ProductCard from '../../components/ProductCard';
 import { PromotionBanner, PromotionPopup } from '../../components/RequesterPromotion';
+import OngoingRequestFieldIcon from '../../components/OngoingRequestFieldIcon';
 import BlueTapEmptyState from '../../components/BlueTapEmptyState';
 import LocalTimeCard from '../../components/LocalTimeCard';
 import PortalSwipeContainer, { PortalSwipeIgnore, REQUESTER_TABS } from '../../components/PortalSwipeContainer';
@@ -451,8 +452,25 @@ export default function RequesterDashboard() {
     const timer = setInterval(() => { setPromotionClock(Date.now()); refresh(true); }, 30000);
     return () => { live = false; clearInterval(timer); };
   }, [requesterData.readiness, requesterData.uid]);
-  const promotionBranch = React.useMemo(() => rankProviderBranches(promotionCatalog?.branches || [], promotionCatalog?.profile?.defaultDeliveryLocation)[0], [promotionCatalog]);
-  const promotion = React.useMemo(() => eligiblePromotionPreviews(promotionCatalog, promotionBranch?.id, null, promotionClock)[0] || null, [promotionCatalog, promotionBranch?.id, promotionClock]);
+  const promotion = React.useMemo(() => {
+    if (!promotionCatalog) return null;
+    const rankedBranches = rankProviderBranches(
+      promotionCatalog.branches || [],
+      promotionCatalog.profile?.defaultDeliveryLocation
+    );
+    for (const branch of rankedBranches) {
+      if (!branch.withinServiceArea && !branch.isWithinNormalArea) continue;
+      const offers = eligiblePromotionPreviews(promotionCatalog, branch.id, null, promotionClock);
+      if (offers.length > 0) return offers[0];
+    }
+    if (!rankedBranches.length && Array.isArray(promotionCatalog.branches)) {
+      for (const branch of promotionCatalog.branches) {
+        const offers = eligiblePromotionPreviews(promotionCatalog, branch.id, null, promotionClock);
+        if (offers.length > 0) return offers[0];
+      }
+    }
+    return null;
+  }, [promotionCatalog, promotionClock]);
   useEffect(() => {
     if (!promotion?.endsAt) return undefined;
     const delay = new Date(promotion.endsAt).getTime() - Date.now();
@@ -461,18 +479,31 @@ export default function RequesterDashboard() {
     return () => clearTimeout(timer);
   }, [promotion, promotionClock]);
   const promotionRestricted = Boolean(promotion && activeRestrictions.some((notice) => notice.scope === 'platform_ordering' || (notice.scope === 'branch_ordering' && (notice.branchId === promotion.branchId || notice.branchName === promotion.branchName))));
-  const promotionBlocked = !tourReady || tourActive || tourCompletionPending || noticeOpen || noticesLoading || chatOpen || viewAllModalVisible || Boolean(detailsRequest || requestToCancel || notification) || requesterData.loading || currentRequestsLoading || Boolean(currentRequestsError) || promotionCatalog?.profile?.complete !== true;
+  const promotionBannerEligible = Boolean(promotion && promotionCatalog?.profile?.complete === true);
+  const promotionPopupBlocked = !tourReady || tourActive || tourCompletionPending || noticeOpen || noticesLoading || chatOpen || viewAllModalVisible || Boolean(detailsRequest || requestToCancel || notification) || requesterData.loading || promotionCatalog?.profile?.complete !== true;
   const closePromotion = useCallback(() => setPromotionVisible(false), []);
   useEffect(() => {
-    if (!promotion || promotionBlocked) { setPromotionVisible(false); return; }
+    if (!promotionBannerEligible || promotionPopupBlocked) { return; }
     const key = promotionSessionKey(auth.currentUser, promotion);
     if (!wasPromotionSeen(key)) { markPromotionSeen(key); setPromotionVisible(true); }
-  }, [promotion, promotionBlocked]);
+  }, [promotion, promotionBannerEligible, promotionPopupBlocked]);
   const openPromotionOrder = useCallback(() => {
     setPromotionVisible(false);
-    if (currentRequests.length) router.push('/requester/r_request');
-    else if (!promotionRestricted) router.push('/requester/requestform');
-  }, [currentRequests.length, promotionRestricted, router]);
+    if (currentRequests.length) {
+      const activeOrderId = currentRequests[0]?.id || currentRequests[0]?.request_id;
+      if (activeOrderId) {
+        router.push({ pathname: '/requester/r_request', params: { orderId: activeOrderId } });
+      } else {
+        router.push('/requester/r_request');
+      }
+    } else if (!promotionRestricted) {
+      if (promotion?.productId) {
+        router.push({ pathname: '/requester/requestform', params: { productId: promotion.productId } });
+      } else {
+        router.push('/requester/requestform');
+      }
+    }
+  }, [currentRequests, promotionRestricted, promotion?.productId, router]);
   const productCarouselWidth = Math.max(
     1,
     Math.min(windowWidth, REQUESTER_APP_MAX_WIDTH) -
@@ -742,7 +773,7 @@ export default function RequesterDashboard() {
             </View>
             <ModerationNoticeBanner />
 
-            {Boolean(promotion && !promotionBlocked) && <PromotionBanner offer={promotion} colors={colors} onOpen={() => setPromotionVisible(true)} onOrder={openPromotionOrder} hasActiveOrder={currentRequests.length > 0} restricted={promotionRestricted} checkoutEnabled={promotionCatalog?.promotionCheckoutEnabled === true} />}
+            {promotionBannerEligible && <PromotionBanner offer={promotion} colors={colors} onOpen={() => setPromotionVisible(true)} onOrder={openPromotionOrder} hasActiveOrder={currentRequests.length > 0} restricted={promotionRestricted} checkoutEnabled={promotionCatalog?.promotionCheckoutEnabled === true} />}
 
             <View ref={productsTourRef} collapsable={false} style={styles.productsSection}>
               {productsLoading ? (
@@ -853,22 +884,32 @@ export default function RequesterDashboard() {
                       style={[
                         styles.currentRequestCard,
                         index > 0 && styles.currentRequestCardGap,
+                        isDark && {
+                          backgroundColor: colors.surface,
+                          borderColor: colors.border,
+                        },
                       ]}
                       key={request.id}
                     >
-                      <View style={styles.requestCardHeader}>
-                        <Text style={styles.requestId} numberOfLines={1}>
-                          Request ID: {request.request_id || request.id}
-                        </Text>
+                      <View style={[styles.requestCardHeader, isDark && { borderBottomColor: colors.border }]}>
+                        <View style={styles.requestIdWrap}>
+                          <OngoingRequestFieldIcon name="Receipt" size={16} color={isDark ? (colors.primaryLight || colors.primary) : BLUE} />
+                          <Text style={[styles.requestId, isDark && { color: colors.primaryLight || colors.primary }]} numberOfLines={1}>
+                            Request ID: {request.request_id || request.id}
+                          </Text>
+                        </View>
                         <SoftStatusBadge status={request.status} />
                       </View>
 
                       <View style={styles.requestDetailsGrid}>
                         <View style={styles.requestInfoRow}>
                           <View style={styles.requestInfoBlock}>
-                            <Text style={styles.requestInfoLabel}>Product</Text>
+                            <View style={styles.requestInfoLabelRow}>
+                              <OngoingRequestFieldIcon name="Droplets" size={13} color={colors.textSecondary} />
+                              <Text style={[styles.requestInfoLabel, isDark && { color: colors.textSecondary }]}>Product</Text>
+                            </View>
                             <Text
-                              style={styles.requestInfoPrimaryValue}
+                              style={[styles.requestInfoPrimaryValue, isDark && { color: colors.primaryLight || colors.primary }]}
                               numberOfLines={2}
                             >
                               {getCardProductSummary(request)}
@@ -876,26 +917,35 @@ export default function RequesterDashboard() {
                           </View>
 
                           <View style={styles.requestInfoBlock}>
-                            <Text style={styles.requestInfoLabel}>
-                              Container Type
-                            </Text>
-                            <Text style={styles.requestInfoValue} numberOfLines={2}>
+                            <View style={styles.requestInfoLabelRow}>
+                              <OngoingRequestFieldIcon name="Package" size={13} color={colors.textSecondary} />
+                              <Text style={[styles.requestInfoLabel, isDark && { color: colors.textSecondary }]}>
+                                Container Type
+                              </Text>
+                            </View>
+                            <Text style={[styles.requestInfoValue, isDark && { color: colors.textPrimary }]} numberOfLines={2}>
                               {request.container || 'Not set'}
                             </Text>
                           </View>
                         </View>
 
-                        <View style={[styles.requestInfoRow, styles.requestInfoRowSpaced]}>
+                        <View style={[styles.requestInfoRow, styles.requestInfoRowSpaced, isDark && { borderTopColor: colors.border }]}>
                           <View style={styles.requestInfoBlock}>
-                            <Text style={styles.requestInfoLabel}>Quantity</Text>
-                            <Text style={styles.requestInfoValue}>
+                            <View style={styles.requestInfoLabelRow}>
+                              <OngoingRequestFieldIcon name="Layers" size={13} color={colors.textSecondary} />
+                              <Text style={[styles.requestInfoLabel, isDark && { color: colors.textSecondary }]}>Quantity</Text>
+                            </View>
+                            <Text style={[styles.requestInfoValue, isDark && { color: colors.textPrimary }]}>
                               {getRequestQuantityText(request)}
                             </Text>
                           </View>
 
                           <View style={styles.requestInfoBlock}>
-                            <Text style={styles.requestInfoLabel}>Total Amount</Text>
-                            <Text style={styles.requestInfoValue}>
+                            <View style={styles.requestInfoLabelRow}>
+                              <OngoingRequestFieldIcon name="Wallet" size={13} color={colors.textSecondary} />
+                              <Text style={[styles.requestInfoLabel, isDark && { color: colors.textSecondary }]}>Total Amount</Text>
+                            </View>
+                            <Text style={[styles.requestInfoValue, isDark && { color: colors.textPrimary }]}>
                               {formatPrice(getRequestTotalAmount(request))}
                             </Text>
                           </View>
@@ -904,11 +954,12 @@ export default function RequesterDashboard() {
 
                       <View style={styles.cardActionsRow}>
                         <TouchableOpacity
-                          style={styles.viewDetailsButton}
+                          style={[styles.viewDetailsButton, isDark && { backgroundColor: colors.surfaceAlt, borderColor: colors.primaryAction }]}
                           activeOpacity={0.75}
                           onPress={() => setDetailsRequest(request)}
                         >
-                          <Text style={styles.viewDetailsText}>View Details</Text>
+                          <OngoingRequestFieldIcon name="Eye" size={15} color={isDark ? colors.textPrimary : '#2563EB'} />
+                          <Text style={[styles.viewDetailsText, isDark && { color: colors.textPrimary }]}>View Details</Text>
                         </TouchableOpacity>
 
                         {isRequestPending && (
@@ -922,6 +973,7 @@ export default function RequesterDashboard() {
                             onPress={() => confirmCancelRequest(request)}
                             disabled={cancellingRequestId === request.id}
                           >
+                            <OngoingRequestFieldIcon name="XCircle" size={15} color="#FFFFFF" />
                             <Text style={styles.cancelRequestText}>
                               {cancellingRequestId === request.id
                                 ? 'Cancelling...'
@@ -938,7 +990,7 @@ export default function RequesterDashboard() {
             </View>
 
           </ScrollView>
-          {Boolean(promotion && promotionVisible && !promotionBlocked) && <PromotionPopup offer={promotion} colors={colors} onClose={closePromotion} onOrder={openPromotionOrder} hasActiveOrder={currentRequests.length > 0} restricted={promotionRestricted} checkoutEnabled={promotionCatalog?.promotionCheckoutEnabled === true} />}
+          {Boolean(promotionBannerEligible && promotionVisible && !promotionPopupBlocked) && <PromotionPopup offer={promotion} colors={colors} onClose={closePromotion} onOrder={openPromotionOrder} hasActiveOrder={currentRequests.length > 0} restricted={promotionRestricted} checkoutEnabled={promotionCatalog?.promotionCheckoutEnabled === true} />}
 
         </View>
         </PortalSwipeContainer>
@@ -1075,7 +1127,7 @@ const styles = createPortalStyleSheet({
     flexGrow: 1,
     paddingHorizontal: DASHBOARD_HORIZONTAL_PADDING,
     paddingTop: 20,
-    paddingBottom: USER_PORTAL_BOTTOM_CONTENT_INSET,
+    paddingBottom: USER_PORTAL_BOTTOM_CONTENT_INSET + 96,
   },
   welcomeRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 },
   welcomeSection: {
@@ -1258,6 +1310,7 @@ const styles = createPortalStyleSheet({
   },
   currentRequestSection: {
     marginTop: 16,
+    marginBottom: 16,
   },
   currentRequestLabel: {
     color: '#FFFFFF',
@@ -1285,12 +1338,19 @@ const styles = createPortalStyleSheet({
   },
   requestCardHeader: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     justifyContent: 'space-between',
     gap: 10,
     paddingBottom: 12,
     borderBottomWidth: 1,
     borderBottomColor: BLUE_LIGHT,
+  },
+  requestIdWrap: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
   },
   requestId: {
     flex: 1,
@@ -1315,11 +1375,16 @@ const styles = createPortalStyleSheet({
   requestInfoBlock: {
     flex: 1,
   },
+  requestInfoLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    marginBottom: 4,
+  },
   requestInfoLabel: {
     color: TEXT_MUTED,
     fontSize: 11,
     fontWeight: 'bold',
-    marginBottom: 4,
   },
   requestInfoPrimaryValue: {
     color: BLUE,
@@ -1348,8 +1413,10 @@ const styles = createPortalStyleSheet({
     borderWidth: 1.5,
     borderColor: '#2563EB',
     borderRadius: 12,
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 6,
     paddingHorizontal: 10,
   },
   viewDetailsText: {
@@ -1365,8 +1432,10 @@ const styles = createPortalStyleSheet({
     minHeight: 42,
     backgroundColor: '#EF4444',
     borderRadius: 16,
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 6,
     paddingHorizontal: 10,
     ...createShadow({
       color: '#EF4444',

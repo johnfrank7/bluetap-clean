@@ -573,6 +573,27 @@ async function requesterBranchAuthorityCurrent(tx, db, conversation, nowMs) {
       if (reason === AUTHORITY_REASONS.POST_ORDER_FOLLOWUP && ['delivered', 'completed'].includes(status) && timeOf(accessEndsAt) > nowMs) historicalRead = true;
     }
   }
+  const requesterUid = clean(conversation.requesterUid);
+  const branchId = clean(conversation.branchIds?.[0] || conversation.participantBranchIds?.[0]);
+  if (requesterUid && branchId) {
+    try {
+      const guardSnap = await tx.get(db.collection('requesterActiveOrders').doc(requesterUid));
+      if (guardSnap?.exists) {
+        const activeOrderId = clean(guardSnap.data()?.orderId);
+        if (activeOrderId && !validOrderIds.has(activeOrderId)) {
+          const activeSnap = await tx.get(db.collection('requests').doc(activeOrderId));
+          if (activeSnap?.exists) {
+            const activeOrder = withId(activeSnap);
+            if (orderRequesterUid(activeOrder) === requesterUid &&
+                owningBranchId(activeOrder) === branchId &&
+                !TERMINAL_ORDER_STATUSES.has(normalizedStatus(activeOrder.status))) {
+              validOrderIds.add(activeOrderId);
+            }
+          }
+        }
+      }
+    } catch {}
+  }
   return { current: inquiryCurrent || validOrderIds.size > 0 || historicalRead, sendCurrent: inquiryCurrent || validOrderIds.size > 0, inquiryCurrent, validOrderIds };
 }
 

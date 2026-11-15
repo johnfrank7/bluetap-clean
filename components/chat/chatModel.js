@@ -99,10 +99,13 @@ function sendContextOrderId(conversation = {}) {
   if (conversation.type !== 'requester_branch') return '';
   const orderId = clean(conversation.orderContext?.id || conversation.orderContext?.orderId);
   if (!orderId) return '';
-  const authorizedOrderIds = Object.values(conversation.authorityReasons || {})
-    .flatMap((reason) => Array.isArray(reason?.orderIds) ? reason.orderIds : [])
-    .map(clean);
-  return authorizedOrderIds.includes(orderId) ? orderId : '';
+  const status = clean(conversation.orderStatus || conversation.orderContext?.status).toLowerCase().replace(/[\s_-]+/g, '_');
+  const isTerminal = ['delivered', 'completed', 'cancelled', 'canceled', 'rejected', 'declined', 'declined_outside_service_area'].includes(status);
+  if (isTerminal) return '';
+  const activeOrderIds = Array.isArray(conversation.authorityReasons?.active_order?.orderIds)
+    ? conversation.authorityReasons.active_order.orderIds.map(clean)
+    : [];
+  return activeOrderIds.includes(orderId) ? orderId : '';
 }
 
 function messageFailurePresentation(code) {

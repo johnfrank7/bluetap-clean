@@ -19,6 +19,7 @@ import { useLocalSearchParams, usePathname, useRouter } from 'expo-router';
 import { auth } from '../../firebase';
 import { findLocalUserForAuthRole } from '../../localUsers';
 import RequestDetailsModal from '../../components/RequestDetailsModal';
+import OngoingRequestFieldIcon from '../../components/OngoingRequestFieldIcon';
 import RequesterDeliveryReportDialog from '../../components/RequesterDeliveryReportDialog';
 import { useRequesterData } from '../../components/RoleDataProviders';
 import RequesterEditOrderModal from '../../components/RequesterEditOrderModal';
@@ -260,17 +261,28 @@ const RequestCard = ({
   onBuyAgain,
   actionsDisabled = false,
 }) => {
-  const { colors } = useBlueTapTheme();
+  const { colors, isDark } = useBlueTapTheme();
   const canCancel = !actionsDisabled && !isHistory && isPendingRequest(request);
   const canEdit = !actionsDisabled && !isHistory && isPendingRequest(request) && typeof onEdit === 'function';
   const canBuyAgain = !actionsDisabled && isBuyAgainEligible(request, isHistory);
 
   return (
-    <View style={styles.requestCard}>
-      <View style={styles.requestCardHeader}>
-        <Text style={styles.requestId} numberOfLines={1}>
-          Request ID: {getRequestId(request)}
-        </Text>
+    <View
+      style={[
+        styles.requestCard,
+        isDark && {
+          backgroundColor: colors.surface,
+          borderColor: colors.border,
+        },
+      ]}
+    >
+      <View style={[styles.requestCardHeader, isDark && { borderBottomColor: colors.border }]}>
+        <View style={styles.requestIdWrap}>
+          <OngoingRequestFieldIcon name="Receipt" size={16} color={isDark ? (colors.primaryLight || colors.primary) : BLUE} />
+          <Text style={[styles.requestId, isDark && { color: colors.primaryLight || colors.primary }]} numberOfLines={1}>
+            Request ID: {getRequestId(request)}
+          </Text>
+        </View>
 
         <SoftStatusBadge status={request.status} />
       </View>
@@ -283,46 +295,64 @@ const RequestCard = ({
 
       <View style={styles.compactInfoGrid}>
         <View style={styles.compactInfoColumn}>
-          <Text style={styles.compactLabel}>Product Ordered</Text>
-          <Text style={styles.compactPrimaryValue} numberOfLines={2}>
+          <View style={styles.requestInfoLabelRow}>
+            <OngoingRequestFieldIcon name="Droplets" size={13} color={colors.textSecondary} />
+            <Text style={[styles.compactLabel, isDark && { color: colors.textSecondary }]}>Product Ordered</Text>
+          </View>
+          <Text style={[styles.compactPrimaryValue, isDark && { color: colors.primaryLight || colors.primary }]} numberOfLines={2}>
             {getProductSummary(request)}
           </Text>
         </View>
 
         <View style={styles.compactInfoColumn}>
-          <Text style={styles.compactLabel}>Container Type</Text>
-          <Text style={styles.compactValue} numberOfLines={2}>
+          <View style={styles.requestInfoLabelRow}>
+            <OngoingRequestFieldIcon name="Package" size={13} color={colors.textSecondary} />
+            <Text style={[styles.compactLabel, isDark && { color: colors.textSecondary }]}>Container Type</Text>
+          </View>
+          <Text style={[styles.compactValue, isDark && { color: colors.textPrimary }]} numberOfLines={2}>
             {request.container || 'Not set'}
           </Text>
         </View>
       </View>
 
-      <View style={[styles.compactInfoGrid, styles.infoGridDivider]}>
+      <View style={[styles.compactInfoGrid, styles.infoGridDivider, isDark && { borderTopColor: colors.border }]}>
         <View style={styles.compactInfoColumn}>
-          <Text style={styles.compactLabel}>Order Date</Text>
-          <Text style={styles.compactValue} numberOfLines={1}>
+          <View style={styles.requestInfoLabelRow}>
+            <OngoingRequestFieldIcon name="CalendarClock" size={13} color={colors.textSecondary} />
+            <Text style={[styles.compactLabel, isDark && { color: colors.textSecondary }]}>Order Date</Text>
+          </View>
+          <Text style={[styles.compactValue, isDark && { color: colors.textPrimary }]} numberOfLines={1}>
             {formatDateValue(request.created_at, 'Order date not set')}
           </Text>
         </View>
 
         <View style={styles.compactInfoColumn}>
-          <Text style={styles.compactLabel}>Total Amount</Text>
-          <Text style={styles.compactValue} numberOfLines={1}>
+          <View style={styles.requestInfoLabelRow}>
+            <OngoingRequestFieldIcon name="Wallet" size={13} color={colors.textSecondary} />
+            <Text style={[styles.compactLabel, isDark && { color: colors.textSecondary }]}>Total Amount</Text>
+          </View>
+          <Text style={[styles.compactValue, isDark && { color: colors.textPrimary }]} numberOfLines={1}>
             {formatPrice(getTotalAmount(request))}
           </Text>
         </View>
       </View>
 
-      <View style={[styles.compactInfoGrid, styles.infoGridDivider]}>
+      <View style={[styles.compactInfoGrid, styles.infoGridDivider, isDark && { borderTopColor: colors.border }]}>
         <View style={styles.compactInfoColumn}>
-          <Text style={styles.compactLabel}>Provider</Text>
-          <Text style={styles.compactValue} numberOfLines={2}>
+          <View style={styles.requestInfoLabelRow}>
+            <OngoingRequestFieldIcon name="Building2" size={13} color={colors.textSecondary} />
+            <Text style={[styles.compactLabel, isDark && { color: colors.textSecondary }]}>Provider</Text>
+          </View>
+          <Text style={[styles.compactValue, isDark && { color: colors.textPrimary }]} numberOfLines={2}>
             {request.branchNameSnapshot || request.water_station || 'Not provided'}
           </Text>
         </View>
         <View style={styles.compactInfoColumn}>
-          <Text style={styles.compactLabel}>Quantity · Expected</Text>
-          <Text style={styles.compactValue} numberOfLines={2}>
+          <View style={styles.requestInfoLabelRow}>
+            <OngoingRequestFieldIcon name="Layers" size={13} color={colors.textSecondary} />
+            <Text style={[styles.compactLabel, isDark && { color: colors.textSecondary }]}>Quantity · Expected</Text>
+          </View>
+          <Text style={[styles.compactValue, isDark && { color: colors.textPrimary }]} numberOfLines={2}>
             {getQuantityText(request)} · {formatDateValue(request.delivery_date || request.expectedDeliveryDate, 'Not scheduled')}
           </Text>
         </View>
@@ -331,19 +361,49 @@ const RequestCard = ({
       <View style={styles.cardActionsRow}>
         <Pressable
           disabled={actionsDisabled}
-          style={({ focused, hovered, pressed }) => [styles.secondaryActionButton, hovered && !actionsDisabled && styles.cardActionHovered, focused && { borderColor: colors.primaryLight || colors.primary, borderWidth: 2 }, pressed && styles.cardActionPressed, actionsDisabled && styles.actionButtonDisabled]}
+          style={({ focused, hovered, pressed }) => [
+            styles.secondaryActionButton,
+            isDark && { backgroundColor: colors.surfaceAlt, borderColor: colors.primaryAction },
+            hovered && !actionsDisabled && styles.cardActionHovered,
+            focused && { borderColor: colors.primaryLight || colors.primary, borderWidth: 2 },
+            pressed && styles.cardActionPressed,
+            actionsDisabled && styles.actionButtonDisabled,
+          ]}
           onPress={() => onViewDetails(request)}
         >
-          <Text style={styles.secondaryActionText}>View Details</Text>
+          <OngoingRequestFieldIcon name="Eye" size={15} color={isDark ? colors.textPrimary : '#2563EB'} />
+          <Text style={[styles.secondaryActionText, isDark && { color: colors.textPrimary }]}>View Details</Text>
         </Pressable>
 
-        {canBuyAgain && <Pressable accessibilityRole="button" accessibilityLabel={`Buy again from order ${getRequestId(request)}`} style={({ focused, hovered, pressed }) => [styles.secondaryActionButton, hovered && styles.cardActionHovered, focused && { borderColor: colors.primaryLight || colors.primary, borderWidth: 2 }, pressed && styles.cardActionPressed]} onPress={() => onBuyAgain(request)}><Text style={styles.secondaryActionText}>Buy Again</Text></Pressable>}
+        {canBuyAgain && (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Buy again from order ${getRequestId(request)}`}
+            style={({ focused, hovered, pressed }) => [
+              styles.secondaryActionButton,
+              isDark && { backgroundColor: colors.surfaceAlt, borderColor: colors.primaryAction },
+              hovered && styles.cardActionHovered,
+              focused && { borderColor: colors.primaryLight || colors.primary, borderWidth: 2 },
+              pressed && styles.cardActionPressed,
+            ]}
+            onPress={() => onBuyAgain(request)}
+          >
+            <OngoingRequestFieldIcon name="Droplets" size={14} color={isDark ? colors.textPrimary : '#2563EB'} />
+            <Text style={[styles.secondaryActionText, isDark && { color: colors.textPrimary }]}>Buy Again</Text>
+          </Pressable>
+        )}
 
         {canEdit && (
           <Pressable
-            style={({ focused, hovered, pressed }) => [styles.editActionButton, hovered && styles.cardActionHovered, focused && { borderColor: colors.primaryLight || colors.primary, borderWidth: 2 }, pressed && styles.cardActionPressed]}
+            style={({ focused, hovered, pressed }) => [
+              styles.editActionButton,
+              hovered && styles.cardActionHovered,
+              focused && { borderColor: colors.primaryLight || colors.primary, borderWidth: 2 },
+              pressed && styles.cardActionPressed,
+            ]}
             onPress={() => onEdit(request)}
           >
+            <OngoingRequestFieldIcon name="Package" size={14} color="#0284C7" />
             <Text style={styles.editActionText}>Edit Order</Text>
           </Pressable>
         )}
@@ -360,13 +420,14 @@ const RequestCard = ({
             onPress={() => onCancel(request)}
             disabled={isCancelling}
           >
+            <OngoingRequestFieldIcon name="XCircle" size={15} color="#FFFFFF" />
             <Text style={styles.cancelActionText}>
               {isCancelling ? 'Cancelling...' : 'Cancel Request'}
             </Text>
           </Pressable>
         )}
       </View>
-      {!isHistory && <RequesterOrderChatActions order={request} compact disabled={actionsDisabled} />}
+      <RequesterOrderChatActions order={request} compact disabled={actionsDisabled} />
     </View>
   );
 };
@@ -646,7 +707,7 @@ export default function RequesterRequests() {
 
         <PortalSwipeContainer tabs={REQUESTER_TABS} currentRoute="/requester/r_request">
           <View style={styles.phoneWrapper}>
-            <View style={[styles.fixedHeaderArea, { backgroundColor: isDark ? colors.background : colors.primary }]}>
+            <View style={styles.fixedHeaderArea}>
               <Text style={[styles.pageTitle, { color: isDark ? colors.textPrimary : colors.onPrimary }]}>MY ORDERS</Text>
               <Text style={[styles.subtitle, { color: isDark ? colors.textSecondary : colors.onPrimary }]}>View and manage your water orders.</Text>
 
@@ -850,14 +911,15 @@ const styles = createPortalStyleSheet({
   fixedHeaderArea: {
     paddingHorizontal: USER_PORTAL_LAYOUT.gutter,
     paddingTop: 16,
-    paddingBottom: 10,
+    paddingBottom: 6,
+    backgroundColor: 'transparent',
     zIndex: 10,
   },
   scrollContent: {
     flexGrow: 1,
     paddingHorizontal: USER_PORTAL_LAYOUT.gutter,
-    paddingTop: 8,
-    paddingBottom: USER_PORTAL_BOTTOM_CONTENT_INSET,
+    paddingTop: 4,
+    paddingBottom: USER_PORTAL_BOTTOM_CONTENT_INSET + 96,
   },
   pageTitle: {
     fontSize: 24,
@@ -940,6 +1002,13 @@ const styles = createPortalStyleSheet({
     borderBottomWidth: 1,
     borderBottomColor: BLUE_LIGHT,
   },
+  requestIdWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flex: 1,
+    minWidth: 0,
+  },
   requestId: {
     flex: 1,
     color: BLUE,
@@ -999,11 +1068,16 @@ const styles = createPortalStyleSheet({
     flex: 1,
     minWidth: 0,
   },
+  requestInfoLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    marginBottom: 4,
+  },
   compactLabel: {
     color: TEXT_MUTED,
     fontSize: 11,
     fontWeight: 'bold',
-    marginBottom: 3,
   },
   compactPrimaryValue: {
     color: BLUE,
@@ -1032,6 +1106,8 @@ const styles = createPortalStyleSheet({
     borderColor: '#2563EB',
     backgroundColor: '#FFFFFF',
     borderRadius: 12,
+    flexDirection: 'row',
+    gap: 6,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1046,6 +1122,8 @@ const styles = createPortalStyleSheet({
     minWidth: 0,
     minHeight: 44,
     borderRadius: 12,
+    flexDirection: 'row',
+    gap: 6,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#E0F2FE',
@@ -1064,6 +1142,8 @@ const styles = createPortalStyleSheet({
     minHeight: 44,
     backgroundColor: '#EF4444',
     borderRadius: 16,
+    flexDirection: 'row',
+    gap: 6,
     alignItems: 'center',
     justifyContent: 'center',
     ...createShadow({

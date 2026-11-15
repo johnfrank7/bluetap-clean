@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, useWindowDimensions } from 'react-native';
 import { useBlueTapTheme } from '../BlueTapTheme';
 import { createShadow } from '../shadowStyles';
+import OngoingRequestFieldIcon from '../OngoingRequestFieldIcon';
 
 export function OrderCard({ card = {}, onAction }) {
   const { colors, isDark } = useBlueTapTheme();
@@ -73,45 +74,59 @@ export function OrderCard({ card = {}, onAction }) {
       <View style={styles.gridContainer}>
         <View style={[styles.gridCell, isNarrow && styles.gridCellNarrow, { backgroundColor: isDark ? colors.surfaceAlt : '#F8FAFD', borderColor: isDark ? colors.border : '#E6F0F9' }]}>
           <Text style={[styles.gridCellLabel, { color: colors.textSecondary }]}>STATION</Text>
-          <Text style={[styles.gridCellValue, { color: colors.textPrimary }]} numberOfLines={1}>
-            📍 {branchName || 'BlueTap Station'}
-          </Text>
+          <View style={styles.gridValueWithIcon}>
+            <OngoingRequestFieldIcon name="Building2" size={13} color={colors.iconSecondary || colors.textSecondary} />
+            <Text style={[styles.gridCellValue, { color: colors.textPrimary }]} numberOfLines={1}>
+              {branchName || 'BlueTap Station'}
+            </Text>
+          </View>
         </View>
 
         <View style={[styles.gridCell, isNarrow && styles.gridCellNarrow, { backgroundColor: isDark ? colors.surfaceAlt : '#F8FAFD', borderColor: isDark ? colors.border : '#E6F0F9' }]}>
           <Text style={[styles.gridCellLabel, { color: colors.textSecondary }]}>CONTAINER / ITEM</Text>
-          <Text style={[styles.gridCellValue, { color: colors.textPrimary }]} numberOfLines={1}>
-            🪣 {productSummary || 'Standard 5-Gal'}
-          </Text>
+          <View style={styles.gridValueWithIcon}>
+            <OngoingRequestFieldIcon name="Package" size={13} color={colors.iconSecondary || colors.textSecondary} />
+            <Text style={[styles.gridCellValue, { color: colors.textPrimary }]} numberOfLines={1}>
+              {productSummary || 'Standard 5-Gal'}
+            </Text>
+          </View>
         </View>
 
         <View style={[styles.gridCell, isNarrow && styles.gridCellNarrow, { backgroundColor: isDark ? colors.surfaceAlt : '#F8FAFD', borderColor: isDark ? colors.border : '#E6F0F9' }]}>
           <Text style={[styles.gridCellLabel, { color: colors.textSecondary }]}>SCHEDULE</Text>
-          <Text style={[styles.gridCellValue, { color: colors.textPrimary }]} numberOfLines={1}>
-            🕒 {schedule || 'Pending schedule'}
-          </Text>
+          <View style={styles.gridValueWithIcon}>
+            <OngoingRequestFieldIcon name="CalendarClock" size={13} color={colors.iconSecondary || colors.textSecondary} />
+            <Text style={[styles.gridCellValue, { color: colors.textPrimary }]} numberOfLines={1}>
+              {schedule || 'Pending schedule'}
+            </Text>
+          </View>
         </View>
 
         <View style={[styles.gridCell, isNarrow && styles.gridCellNarrow, { backgroundColor: isDark ? colors.surfaceAlt : '#F8FAFD', borderColor: isDark ? colors.border : '#E6F0F9' }]}>
           <Text style={[styles.gridCellLabel, { color: colors.textSecondary }]}>TOTAL</Text>
-          <Text style={[styles.gridCellValue, { color: colors.primary, fontWeight: '700' }]} numberOfLines={1}>
-            💵 {total || '—'}
-          </Text>
+          <View style={styles.gridValueWithIcon}>
+            <OngoingRequestFieldIcon name="Wallet" size={13} color={colors.primary} />
+            <Text style={[styles.gridCellValue, { color: colors.primary, fontWeight: '700' }]} numberOfLines={1}>
+              {total || '—'}
+            </Text>
+          </View>
         </View>
       </View>
 
       {Boolean(isOutsideRadius) && (
         <View style={[styles.noticeBox, { backgroundColor: isDark ? '#3D2A00' : '#FFF9E6', borderColor: isDark ? '#705300' : '#FFE082' }]}>
+          <OngoingRequestFieldIcon name="MapPin" size={14} color={isDark ? '#FFD54F' : '#8D6E00'} />
           <Text style={[styles.noticeText, { color: isDark ? '#FFD54F' : '#8D6E00' }]}>
-            📍 Outside regular delivery radius — pending branch review.
+            Outside regular delivery radius — pending branch review.
           </Text>
         </View>
       )}
 
       {Boolean(isFailed && safeFailureReason) && (
         <View style={[styles.noticeBox, { backgroundColor: isDark ? '#3E181B' : '#FEECEC', borderColor: isDark ? '#7F2327' : '#FCA5A5' }]}>
+          <OngoingRequestFieldIcon name="ShieldAlert" size={14} color={isDark ? '#FCA5A5' : '#B91C1C'} />
           <Text style={[styles.noticeText, { color: isDark ? '#FCA5A5' : '#B91C1C' }]}>
-            ⚠️ Delivery unsuccessful: {safeFailureReason}
+            Delivery unsuccessful: {safeFailureReason}
           </Text>
         </View>
       )}
@@ -126,6 +141,7 @@ export function OrderCard({ card = {}, onAction }) {
               accessibilityRole="button"
               accessibilityLabel="View Order Details"
             >
+              <OngoingRequestFieldIcon name="Eye" size={14} color="#FFFFFF" />
               <Text style={styles.primaryActionText}>View Details</Text>
             </TouchableOpacity>
           )}
@@ -144,6 +160,7 @@ export function OrderCard({ card = {}, onAction }) {
               accessibilityRole="button"
               accessibilityLabel="Contact Station"
             >
+              <OngoingRequestFieldIcon name="MessageCircle" size={14} color={isDark ? colors.primaryLight : colors.primary} />
               <Text style={[styles.secondaryActionText, { color: isDark ? colors.primaryLight : colors.primary }]}>
                 Contact Station
               </Text>
@@ -164,6 +181,7 @@ export function OrderCard({ card = {}, onAction }) {
               accessibilityRole="button"
               accessibilityLabel="Cancel Order"
             >
+              <OngoingRequestFieldIcon name="XCircle" size={14} color={isDark ? '#FCA5A5' : '#B91C1C'} />
               <Text style={[styles.secondaryActionText, { color: isDark ? '#FCA5A5' : '#B91C1C' }]}>
                 Cancel Order
               </Text>
@@ -189,7 +207,10 @@ export function ProviderCard({ card = {}, onAction }) {
       </View>
 
       {Boolean(address) && (
-        <Text style={[styles.providerAddress, { color: colors.textSecondary }]}>📍 {address}</Text>
+        <View style={styles.rowWithIcon}>
+          <OngoingRequestFieldIcon name="MapPin" size={13} color={colors.textSecondary} />
+          <Text style={[styles.providerAddress, { color: colors.textSecondary }]}>{address}</Text>
+        </View>
       )}
 
       {Boolean(coverageRadius) && (
@@ -205,6 +226,7 @@ export function ProviderCard({ card = {}, onAction }) {
             style={[styles.primaryActionBtn, { backgroundColor: colors.primary }]}
             onPress={() => onAction({ type: 'START_ORDER', branchId: id })}
           >
+            <OngoingRequestFieldIcon name="Droplets" size={14} color="#FFFFFF" />
             <Text style={styles.primaryActionText}>Order from Station</Text>
           </TouchableOpacity>
         </View>
@@ -255,9 +277,12 @@ export function RestrictionCard({ card = {}, onAction }) {
           </View>
         )}
 
-        <Text style={[styles.restrictionPrivacyNote, { color: colors.textSecondary }]}>
-          🔒 Reporter identity and private moderator notes are never disclosed.
-        </Text>
+        <View style={styles.rowWithIcon}>
+          <OngoingRequestFieldIcon name="ShieldCheck" size={13} color={colors.textSecondary} />
+          <Text style={[styles.restrictionPrivacyNote, { color: colors.textSecondary }]}>
+            Reporter identity and private moderator notes are never disclosed.
+          </Text>
+        </View>
       </View>
 
       {Boolean(branchId) && onAction && (
@@ -267,6 +292,7 @@ export function RestrictionCard({ card = {}, onAction }) {
             style={[styles.secondaryActionBtn, { borderColor: colors.warning }]}
             onPress={() => onAction({ type: 'CONTACT_STATION', branchId, branchName })}
           >
+            <OngoingRequestFieldIcon name="MessageCircle" size={14} color={colors.warning} />
             <Text style={[styles.secondaryActionText, { color: colors.warning }]}>Contact Station</Text>
           </TouchableOpacity>
         </View>
@@ -365,37 +391,50 @@ export function DeliveryCard({ card = {}, onAction }) {
       <View style={styles.gridContainer}>
         <View style={[styles.gridCell, isNarrow && styles.gridCellNarrow, { backgroundColor: isDark ? colors.surfaceAlt : '#F8FAFD', borderColor: isDark ? colors.border : '#E6F0F9' }]}>
           <Text style={[styles.gridCellLabel, { color: colors.textSecondary }]}>CUSTOMER</Text>
-          <Text style={[styles.gridCellValue, { color: colors.textPrimary }]} numberOfLines={1}>
-            👤 {requesterName || 'Requester'}
-          </Text>
+          <View style={styles.gridValueWithIcon}>
+            <OngoingRequestFieldIcon name="User" size={13} color={colors.textSecondary} />
+            <Text style={[styles.gridCellValue, { color: colors.textPrimary }]} numberOfLines={1}>
+              {requesterName || 'Requester'}
+            </Text>
+          </View>
         </View>
 
         <View style={[styles.gridCell, isNarrow && styles.gridCellNarrow, { backgroundColor: isDark ? colors.surfaceAlt : '#F8FAFD', borderColor: isDark ? colors.border : '#E6F0F9' }]}>
           <Text style={[styles.gridCellLabel, { color: colors.textSecondary }]}>SCHEDULE</Text>
-          <Text style={[styles.gridCellValue, { color: colors.textPrimary }]} numberOfLines={1}>
-            🕒 {schedule || 'Pending'}
-          </Text>
+          <View style={styles.gridValueWithIcon}>
+            <OngoingRequestFieldIcon name="CalendarClock" size={13} color={colors.textSecondary} />
+            <Text style={[styles.gridCellValue, { color: colors.textPrimary }]} numberOfLines={1}>
+              {schedule || 'Pending'}
+            </Text>
+          </View>
         </View>
 
         <View style={[styles.gridCell, isNarrow && styles.gridCellNarrow, { backgroundColor: isDark ? colors.surfaceAlt : '#F8FAFD', borderColor: isDark ? colors.border : '#E6F0F9' }]}>
           <Text style={[styles.gridCellLabel, { color: colors.textSecondary }]}>ITEMS</Text>
-          <Text style={[styles.gridCellValue, { color: colors.textPrimary }]} numberOfLines={1}>
-            🪣 {productSummary || 'Mineral Water'}
-          </Text>
+          <View style={styles.gridValueWithIcon}>
+            <OngoingRequestFieldIcon name="Package" size={13} color={colors.textSecondary} />
+            <Text style={[styles.gridCellValue, { color: colors.textPrimary }]} numberOfLines={1}>
+              {productSummary || 'Mineral Water'}
+            </Text>
+          </View>
         </View>
 
         <View style={[styles.gridCell, isNarrow && styles.gridCellNarrow, { backgroundColor: isDark ? colors.surfaceAlt : '#F8FAFD', borderColor: isDark ? colors.border : '#E6F0F9' }]}>
           <Text style={[styles.gridCellLabel, { color: colors.textSecondary }]}>STATION / AREA</Text>
-          <Text style={[styles.gridCellValue, { color: colors.textPrimary }]} numberOfLines={1}>
-            📍 {safeAddressLabel || branchName || 'BlueTap Station'}
-          </Text>
+          <View style={styles.gridValueWithIcon}>
+            <OngoingRequestFieldIcon name="MapPin" size={13} color={colors.textSecondary} />
+            <Text style={[styles.gridCellValue, { color: colors.textPrimary }]} numberOfLines={1}>
+              {safeAddressLabel || branchName || 'BlueTap Station'}
+            </Text>
+          </View>
         </View>
       </View>
 
       {Boolean(isFailed && safeFailureReason) && (
         <View style={[styles.noticeBox, { backgroundColor: isDark ? '#3E181B' : '#FEECEC', borderColor: isDark ? '#7F2327' : '#FCA5A5' }]}>
+          <OngoingRequestFieldIcon name="ShieldAlert" size={14} color={isDark ? '#FCA5A5' : '#B91C1C'} />
           <Text style={[styles.noticeText, { color: isDark ? '#FCA5A5' : '#B91C1C' }]}>
-            ⚠️ Delivery unsuccessful: {safeFailureReason}
+            Delivery unsuccessful: {safeFailureReason}
           </Text>
         </View>
       )}
@@ -410,6 +449,7 @@ export function DeliveryCard({ card = {}, onAction }) {
               accessibilityRole="button"
               accessibilityLabel="View Delivery Details"
             >
+              <OngoingRequestFieldIcon name="Eye" size={14} color="#FFFFFF" />
               <Text style={styles.primaryActionText}>View Details</Text>
             </TouchableOpacity>
           )}
@@ -428,6 +468,7 @@ export function DeliveryCard({ card = {}, onAction }) {
               accessibilityRole="button"
               accessibilityLabel="Contact Requester"
             >
+              <OngoingRequestFieldIcon name="MessageCircle" size={14} color={isDark ? colors.primaryLight : colors.primary} />
               <Text style={[styles.secondaryActionText, { color: isDark ? colors.primaryLight : colors.primary }]}>
                 Contact Customer
               </Text>
@@ -536,6 +577,17 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
   },
+  gridValueWithIcon: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
+  rowWithIcon: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 6,
+  },
   cardBody: {
     gap: 6,
   },
@@ -559,11 +611,15 @@ const styles = StyleSheet.create({
     padding: 8,
     borderRadius: 8,
     borderWidth: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
   },
   noticeText: {
     fontSize: 12,
     lineHeight: 16,
     fontWeight: '600',
+    flex: 1,
   },
   cardActions: {
     flexDirection: 'row',
@@ -576,8 +632,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 8,
     borderRadius: 8,
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 6,
   },
   primaryActionText: {
     color: '#FFFFFF',
@@ -589,8 +647,10 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
     borderRadius: 8,
     borderWidth: 1.5,
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 6,
   },
   secondaryActionText: {
     fontSize: 12,

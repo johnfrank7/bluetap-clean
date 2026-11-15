@@ -3,8 +3,19 @@ import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { useBlueTapTheme } from '../BlueTapTheme';
 import BlueTapBrandMark from '../BlueTapBrandMark';
 import { createShadow } from '../shadowStyles';
+import OngoingRequestFieldIcon from '../OngoingRequestFieldIcon';
 import AssistantCardRenderer, { AssistantCardRenderer as NamedRenderer } from './AssistantCards';
 import useAssistantTypewriterDefault, { useAssistantTypewriter as namedTypewriter } from './useAssistantTypewriter';
+
+const getActionButtonIcon = (type = '') => {
+  if (type === 'START_ORDER') return 'Droplets';
+  if (type === 'OPEN_REQUESTS') return 'Receipt';
+  if (type === 'OPEN_SCHEDULE') return 'CalendarClock';
+  if (type === 'VIEW_ORDER' || type === 'VIEW_DELIVERY') return 'Eye';
+  if (type === 'CONTACT_STATION' || type === 'CONTACT_REQUESTER') return 'MessageCircle';
+  if (type === 'CANCEL_ORDER') return 'XCircle';
+  return 'Receipt';
+};
 
 const CardRenderer = AssistantCardRenderer || NamedRenderer;
 const defaultHookFallback = () => ({
@@ -143,6 +154,7 @@ export function AssistantMessageBubble({
                 accessibilityRole="button"
                 accessibilityLabel={act.label}
               >
+                <OngoingRequestFieldIcon name={getActionButtonIcon(act.type)} size={14} color="#FFFFFF" />
                 <Text style={styles.actionButtonText}>{act.label}</Text>
               </TouchableOpacity>
             ))}
@@ -247,8 +259,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 8,
     borderRadius: 10,
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 6,
   },
   actionButtonText: {
     color: '#FFFFFF',

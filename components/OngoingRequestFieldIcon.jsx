@@ -16,6 +16,19 @@ const icons = Object.freeze({
   CalendarClock: require('../assets/icons/ongoing/calendar-clock.svg'),
   MapPin: require('../assets/icons/ongoing/map-pin.svg'),
   ClockHistory: require('../assets/icons/ongoing/clock-history.svg'),
+  Receipt: require('../assets/icons/ongoing/receipt.svg'),
+  Droplets: require('../assets/icons/ongoing/droplets.svg'),
+  Wallet: require('../assets/icons/sidebar/circle-dollar-sign.svg'),
+  Eye: require('../assets/icons/ongoing/eye.svg'),
+  XCircle: require('../assets/icons/ongoing/x-circle.svg'),
+  MessageCircle: require('../assets/icons/chat/message-circle.svg'),
+  Building2: require('../assets/icons/sidebar/building-2.svg'),
+  Truck: require('../assets/icons/sidebar/truck.svg'),
+  ShieldCheck: require('../assets/icons/sidebar/shield-check.svg'),
+  ShieldAlert: require('../assets/icons/sidebar/shield-alert.svg'),
+  User: require('../assets/icons/portal/user-round.svg'),
+  Phone: require('../assets/icons/ongoing/phone.svg'),
+  Tag: require('../assets/icons/ongoing/tag.svg'),
 });
 
 export default function OngoingRequestFieldIcon({

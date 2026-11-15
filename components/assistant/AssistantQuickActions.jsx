@@ -12,18 +12,21 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useBlueTapTheme } from '../BlueTapTheme';
 import { createShadow } from '../shadowStyles';
 import { ASSISTANT_INTENTS } from '../../services/assistant/assistantIntents';
-import BlueTapIcon from '../BlueTapIcon';
+import OngoingRequestFieldIcon from '../OngoingRequestFieldIcon';
 
-const quickActionIcon = (id = '') => {
-  if (id.includes('notification')) return 'notifications';
-  if (id.includes('contact') || id.includes('chat')) return 'message';
-  if (id.includes('schedule') || id.includes('next')) return 'schedule';
-  if (id.includes('history') || id.includes('past')) return 'history';
-  if (id.includes('delivery') || id.includes('track') || id.includes('current')) return 'delivery';
-  if (id.includes('detail') || id.includes('status')) return 'orders';
-  if (id.includes('failed') || id.includes('cancel') || id.includes('restriction')) return 'warning';
-  if (id.includes('order')) return 'add';
-  return 'info';
+const quickActionIconName = (id = '') => {
+  if (id.includes('failed') || id.includes('cancel') || id.includes('restriction')) return 'ShieldAlert';
+  if (id.includes('schedule') || id.includes('rules')) return 'CalendarClock';
+  if (id.includes('contact') || id.includes('chat') || id.includes('notification')) return 'MessageCircle';
+  if (id.includes('delivery') || id.includes('track')) return 'Truck';
+  if (id.includes('detail') || id.includes('status') || id.includes('how_works')) return 'Receipt';
+  if (id.includes('history')) return 'ClockHistory';
+  if (id.includes('station')) return 'Building2';
+  if (id.includes('payment')) return 'Wallet';
+  if (id.includes('container')) return 'Package';
+  if (id.includes('order')) return 'Droplets';
+  if (id.includes('appeal')) return 'ShieldCheck';
+  return 'Receipt';
 };
 
 const quickActionLabel = (label = '') => String(label).replace(/^[^A-Za-z0-9]+/, '').trim();
@@ -45,42 +48,42 @@ export function AssistantQuickActions({ safeContext, onSelectAction, disabled, r
         return [
           {
             id: 'failed_help',
-            label: '⚠️ Failed Delivery Help',
+            label: 'Failed Delivery Help',
             intent: ASSISTANT_INTENTS.FAILED_DELIVERY_HELP,
             prompt: 'What should I do if the customer cannot be reached?',
             query: 'What should I do if the customer cannot be reached?',
           },
           {
             id: 'chat_rules',
-            label: '🕒 Chat Availability',
+            label: 'Chat Availability',
             intent: ASSISTANT_INTENTS.CHAT_AVAILABILITY,
             prompt: 'Why can\'t I message the customer anymore?',
             query: 'Why can\'t I message the customer anymore?',
           },
           ...(safeContext?.currentAssignment?.chatAllowed ? [{
             id: 'contact_requester',
-            label: '💬 Contact Requester',
+            label: 'Contact Requester',
             intent: ASSISTANT_INTENTS.CONTACT_REQUESTER,
             prompt: 'How do I contact the customer?',
             query: 'How do I contact the customer?',
           }] : []),
           {
             id: 'contact_station',
-            label: '🏢 Contact Station',
+            label: 'Contact Station',
             intent: ASSISTANT_INTENTS.CONTACT_STATION,
             prompt: 'How do I contact the station manager?',
             query: 'How do I contact the station manager?',
           },
           {
             id: 'today_schedule',
-            label: '📅 Today\'s Deliveries',
+            label: 'Today\'s Deliveries',
             intent: ASSISTANT_INTENTS.TODAY_SCHEDULE,
             prompt: 'What are my deliveries today?',
             query: 'What are my deliveries today?',
           },
           {
             id: 'details',
-            label: '📋 Delivery Details',
+            label: 'Delivery Details',
             intent: ASSISTANT_INTENTS.DELIVERY_DETAILS,
             prompt: 'Show delivery details',
             query: 'Show delivery details',
@@ -92,56 +95,56 @@ export function AssistantQuickActions({ safeContext, onSelectAction, disabled, r
         return [
           {
             id: 'current_delivery',
-            label: '🚚 Current Delivery',
+            label: 'Current Delivery',
             intent: ASSISTANT_INTENTS.CURRENT_DELIVERY,
             prompt: 'What is my current delivery?',
             query: 'What is my current delivery?',
           },
           {
             id: 'today_schedule',
-            label: '📅 Today\'s Deliveries',
+            label: 'Today\'s Deliveries',
             intent: ASSISTANT_INTENTS.TODAY_SCHEDULE,
             prompt: 'What are my deliveries today?',
             query: 'What are my deliveries today?',
           },
           ...(safeContext?.currentAssignment?.chatAllowed ? [{
             id: 'contact_requester',
-            label: '💬 Contact Requester',
+            label: 'Contact Requester',
             intent: ASSISTANT_INTENTS.CONTACT_REQUESTER,
             prompt: 'How do I contact the customer?',
             query: 'How do I contact the customer?',
           }] : []),
           {
             id: 'delivery_details',
-            label: '📋 Delivery Details',
+            label: 'Delivery Details',
             intent: ASSISTANT_INTENTS.DELIVERY_DETAILS,
             prompt: 'Show delivery details',
             query: 'Show delivery details',
           },
           {
             id: 'contact_station',
-            label: '🏢 Contact Station',
+            label: 'Contact Station',
             intent: ASSISTANT_INTENTS.CONTACT_STATION,
             prompt: 'How do I contact the station manager?',
             query: 'How do I contact the station manager?',
           },
           {
             id: 'failed_help',
-            label: '⚠️ Failed Delivery Help',
+            label: 'Failed Delivery Help',
             intent: ASSISTANT_INTENTS.FAILED_DELIVERY_HELP,
             prompt: 'What should I do if the customer cannot be reached?',
             query: 'What should I do if the customer cannot be reached?',
           },
           {
             id: 'chat_rules',
-            label: '🕒 Chat Availability',
+            label: 'Chat Availability',
             intent: ASSISTANT_INTENTS.CHAT_AVAILABILITY,
             prompt: 'Why can\'t I message the customer anymore?',
             query: 'Why can\'t I message the customer anymore?',
           },
           {
             id: 'notifications',
-            label: '🔔 Notifications',
+            label: 'Notifications',
             intent: ASSISTANT_INTENTS.VIEW_NOTIFICATIONS,
             prompt: 'Show my notifications',
             query: 'Show my notifications',
@@ -152,49 +155,49 @@ export function AssistantQuickActions({ safeContext, onSelectAction, disabled, r
       return [
         {
           id: 'today_schedule',
-          label: '📅 Today\'s Deliveries',
+          label: 'Today\'s Deliveries',
           intent: ASSISTANT_INTENTS.TODAY_SCHEDULE,
           prompt: 'What are my deliveries today?',
           query: 'What are my deliveries today?',
         },
         {
           id: 'next_delivery',
-          label: '➡️ Next Delivery',
+          label: 'Next Delivery',
           intent: ASSISTANT_INTENTS.NEXT_DELIVERY,
           prompt: 'What is my next delivery?',
           query: 'What is my next delivery?',
         },
         {
           id: 'contact_station',
-          label: '🏢 Contact Station',
+          label: 'Contact Station',
           intent: ASSISTANT_INTENTS.CONTACT_STATION,
           prompt: 'How do I contact the station manager?',
           query: 'How do I contact the station manager?',
         },
         {
           id: 'how_works',
-          label: 'ℹ️ How Delivery Works',
+          label: 'How Delivery Works',
           intent: ASSISTANT_INTENTS.HOW_DISTRIBUTOR_WORKS,
           prompt: 'How does distributor delivery work?',
           query: 'How does distributor delivery work?',
         },
         {
           id: 'history',
-          label: '📜 Delivery History',
+          label: 'Delivery History',
           intent: ASSISTANT_INTENTS.DELIVERY_HISTORY,
           prompt: 'Where can I see my past deliveries?',
           query: 'Where can I see my past deliveries?',
         },
         {
           id: 'notifications',
-          label: '🔔 Notifications',
+          label: 'Notifications',
           intent: ASSISTANT_INTENTS.VIEW_NOTIFICATIONS,
           prompt: 'Show my notifications',
           query: 'Show my notifications',
         },
         {
           id: 'chat_rules',
-          label: '🕒 Chat Availability',
+          label: 'Chat Availability',
           intent: ASSISTANT_INTENTS.CHAT_AVAILABILITY,
           prompt: 'Why can\'t I message the customer anymore?',
           query: 'Why can\'t I message the customer anymore?',
@@ -205,35 +208,35 @@ export function AssistantQuickActions({ safeContext, onSelectAction, disabled, r
       return [
         {
           id: 'track',
-          label: '🚚 Track my delivery',
+          label: 'Track my delivery',
           intent: ASSISTANT_INTENTS.TRACK_ORDER,
           prompt: 'Where is my current order?',
           query: 'Where is my current order?',
         },
         {
           id: 'schedule',
-          label: '🕒 Delivery schedule',
+          label: 'Delivery schedule',
           intent: ASSISTANT_INTENTS.DELIVERY_SCHEDULE,
           prompt: 'When is my delivery scheduled?',
           query: 'When is my delivery scheduled?',
         },
         {
           id: 'cancel',
-          label: '❌ Can I cancel?',
+          label: 'Can I cancel?',
           intent: ASSISTANT_INTENTS.CANCEL_ORDER_ELIGIBILITY,
           prompt: 'Can I cancel my current order?',
           query: 'Can I cancel my current order?',
         },
         {
           id: 'contact',
-          label: '💬 Contact station',
+          label: 'Contact station',
           intent: ASSISTANT_INTENTS.CONTACT_STATION,
           prompt: 'How do I contact my water station?',
           query: 'How do I contact my water station?',
         },
         {
           id: 'status',
-          label: '📋 Order details',
+          label: 'Order details',
           intent: ASSISTANT_INTENTS.ORDER_STATUS,
           prompt: 'Show my order details',
           query: 'Show my order details',
@@ -245,7 +248,7 @@ export function AssistantQuickActions({ safeContext, onSelectAction, disabled, r
       return [
         {
           id: 'restriction',
-          label: '⚠️ Account notice',
+          label: 'Account notice',
           intent: safeContext?.restrictions?.chat?.length
             ? ASSISTANT_INTENTS.EXPLAIN_CHAT_RESTRICTION
             : ASSISTANT_INTENTS.EXPLAIN_ORDERING_RESTRICTION,
@@ -254,21 +257,21 @@ export function AssistantQuickActions({ safeContext, onSelectAction, disabled, r
         },
         {
           id: 'order_status',
-          label: '💧 Can I still order?',
+          label: 'Can I still order?',
           intent: ASSISTANT_INTENTS.EXPLAIN_ORDERING_RESTRICTION,
           prompt: 'Can I still order water with this restriction?',
           query: 'Can I still order water with this restriction?',
         },
         {
           id: 'contact_station',
-          label: '💬 Contact station',
+          label: 'Contact station',
           intent: ASSISTANT_INTENTS.CONTACT_STATION,
           prompt: 'How do I contact my water station?',
           query: 'How do I contact my water station?',
         },
         {
           id: 'appeal',
-          label: '🛡️ How to resolve',
+          label: 'How to resolve',
           intent: ASSISTANT_INTENTS.EXPLAIN_ORDERING_RESTRICTION,
           prompt: 'How do I resolve this restriction?',
           query: 'How do I resolve this restriction?',
@@ -279,42 +282,42 @@ export function AssistantQuickActions({ safeContext, onSelectAction, disabled, r
     return [
       {
         id: 'order',
-        label: '💧 How to order water',
+        label: 'How to order water',
         intent: ASSISTANT_INTENTS.HOW_BLUETAP_WORKS,
         prompt: 'How do I order water on BlueTap?',
         query: 'How do I order water on BlueTap?',
       },
       {
         id: 'stations',
-        label: '📍 Nearby stations',
+        label: 'Nearby stations',
         intent: ASSISTANT_INTENTS.FIND_PROVIDER,
         prompt: 'Find nearby water stations',
         query: 'Find nearby water stations',
       },
       {
         id: 'schedule',
-        label: '🕒 Delivery hours',
+        label: 'Delivery hours',
         intent: ASSISTANT_INTENTS.DELIVERY_SCHEDULE,
         prompt: 'What are the delivery hours and schedule?',
         query: 'What are the delivery hours and schedule?',
       },
       {
         id: 'payment',
-        label: '💵 Payment options',
+        label: 'Payment options',
         intent: ASSISTANT_INTENTS.PAYMENT_HELP,
         prompt: 'What payment methods are supported?',
         query: 'What payment methods are supported?',
       },
       {
         id: 'containers',
-        label: '🪣 Container types',
+        label: 'Container types',
         intent: ASSISTANT_INTENTS.CONTAINER_HELP,
         prompt: 'What container types and sizes do you deliver?',
         query: 'What container types and sizes do you deliver?',
       },
       {
         id: 'history',
-        label: '📜 Past orders',
+        label: 'Past orders',
         intent: ASSISTANT_INTENTS.TRACK_ORDER,
         prompt: 'Where can I see my past orders?',
         query: 'Where can I see my past orders?',
@@ -445,7 +448,7 @@ export function AssistantQuickActions({ safeContext, onSelectAction, disabled, r
             accessibilityRole="button"
             accessibilityLabel={visibleLabel}
           >
-            <BlueTapIcon name={quickActionIcon(chip.id)} size={17} color={colors.iconInteractive || colors.primary} />
+            <OngoingRequestFieldIcon name={quickActionIconName(chip.id)} size={15} color={colors.iconInteractive || colors.primary} />
             <Text
               style={[
                 styles.chipText,

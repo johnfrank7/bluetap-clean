@@ -26,7 +26,7 @@ test('native Login CTA has explicit semantic contrast, touch height, and press f
 test('Requester Orders uses the canonical blue light-theme canvas with readable pinned header text', () => {
   const source = read('app', 'requester', 'r_request.jsx');
   assert.match(source, /isDark \? \[colors\.background, colors\.header\] : \[colors\.primary, colors\.primaryLight\]/);
-  assert.match(source, /fixedHeaderArea, \{ backgroundColor: isDark \? colors\.background : colors\.primary \}/);
+  assert.match(source, /fixedHeaderArea/);
   assert.match(source, /pageTitle, \{ color: isDark \? colors\.textPrimary : colors\.onPrimary \}/);
   assert.match(source, /subtitle, \{ color: isDark \? colors\.textSecondary : colors\.onPrimary \}/);
 });

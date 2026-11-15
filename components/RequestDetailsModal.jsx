@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import SoftStatusBadge from './SoftStatusBadge';
 import SavedOrderPricing from './SavedOrderPricing';
+import OngoingRequestFieldIcon from './OngoingRequestFieldIcon';
 import { createShadow } from './shadowStyles';
 import { createPortalStyleSheet, useBlueTapTheme } from './BlueTapTheme';
 import { formatDisplayUniqueId } from '../services/uniqueIds';
@@ -67,16 +68,16 @@ export default function RequestDetailsModal({
   );
   const topRows = [
     [
-      { label: 'Request ID', value: requestReference },
-      { label: 'Status', status: activeRequest?.status || request?.status },
+      { label: 'Request ID', value: requestReference, icon: 'Receipt' },
+      { label: 'Status', status: activeRequest?.status || request?.status, icon: 'Layers' },
     ],
     [
-      { label: 'Order Date', value: activeRequest?.orderDate },
-      { label: 'Delivery Date', value: activeRequest?.deliveryDate },
+      { label: 'Order Date', value: activeRequest?.orderDate, icon: 'CalendarClock' },
+      { label: 'Delivery Date', value: activeRequest?.deliveryDate, icon: 'ClockHistory' },
     ],
     [
-      { label: 'Water Station', value: waterStation },
-      { label: 'Payment Method', value: activeRequest?.paymentMethod || 'Cash on Delivery' },
+      { label: 'Water Station', value: waterStation, icon: 'Building2' },
+      { label: 'Payment Method', value: activeRequest?.paymentMethod || 'Cash on Delivery', icon: 'Wallet' },
     ],
     ...(Boolean(activeRequest?.tripNumber || activeRequest?.tripId) ? [
       [
@@ -86,21 +87,22 @@ export default function RequestDetailsModal({
             const cargo = analyzeOrderCargo(activeRequest);
             return `Trip #${activeRequest?.tripNumber || 1}${cargo.badgeLabel ? ` · ${cargo.badgeLabel}` : ''}`;
           })(),
+          icon: 'Truck',
         },
-        { label: 'Trip Status', value: activeRequest?.tripStatus ? activeRequest.tripStatus.replace(/_/g, ' ').toUpperCase() : 'APPROVED' },
+        { label: 'Trip Status', value: activeRequest?.tripStatus ? activeRequest.tripStatus.replace(/_/g, ' ').toUpperCase() : 'APPROVED', icon: 'Layers' },
       ],
     ] : []),
   ];
   const customerRows = [
     [
-      { label: 'Requester Name', value: activeRequest?.requesterName || activeRequest?.customerName },
-      { label: 'Requester ID', value: requesterUniqueId },
+      { label: 'Requester Name', value: activeRequest?.requesterName || activeRequest?.customerName, icon: 'User' },
+      { label: 'Requester ID', value: requesterUniqueId, icon: 'ShieldCheck' },
     ],
     [
-      { label: 'Distributor Name', value: distributorName || 'Not assigned' },
-      { label: 'Distributor ID', value: distributorUniqueId },
+      { label: 'Distributor Name', value: distributorName || 'Not assigned', icon: 'Truck' },
+      { label: 'Distributor ID', value: distributorUniqueId, icon: 'ShieldCheck' },
     ],
-    [{ label: 'Contact Number', value: activeRequest?.contactNumber }],
+    [{ label: 'Contact Number', value: activeRequest?.contactNumber, icon: 'Phone' }],
   ];
 
   return (
@@ -146,7 +148,16 @@ export default function RequestDetailsModal({
                         compact && itemIndex > 0 && styles.compactGridCellDivider,
                       ]}
                     >
-                      <Text style={styles.summaryLabel}>{item.label}</Text>
+                      <View style={styles.labelWithIcon}>
+                        {!!item.icon && (
+                          <OngoingRequestFieldIcon
+                            name={item.icon}
+                            size={13}
+                            tintColor={colors.iconSecondary || TEXT_MUTED}
+                          />
+                        )}
+                        <Text style={styles.summaryLabel}>{item.label}</Text>
+                      </View>
                       {item.status ? (
                         <SoftStatusBadge status={item.status} />
                       ) : (
@@ -161,7 +172,10 @@ export default function RequestDetailsModal({
             </View>
 
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Customer Information</Text>
+              <View style={styles.sectionTitleRow}>
+                <OngoingRequestFieldIcon name="User" size={15} tintColor={BLUE} />
+                <Text style={styles.sectionTitle}>Customer Information</Text>
+              </View>
               <View style={styles.customerGrid}>
                 {customerRows.map((row, rowIndex) => (
                   <View
@@ -181,7 +195,16 @@ export default function RequestDetailsModal({
                           compact && itemIndex > 0 && styles.compactGridCellDivider,
                         ]}
                       >
-                        <Text style={styles.summaryLabel}>{item.label}</Text>
+                        <View style={styles.labelWithIcon}>
+                          {!!item.icon && (
+                            <OngoingRequestFieldIcon
+                              name={item.icon}
+                              size={13}
+                              tintColor={colors.iconSecondary || TEXT_MUTED}
+                            />
+                          )}
+                          <Text style={styles.summaryLabel}>{item.label}</Text>
+                        </View>
                         <Text style={styles.summaryValue} numberOfLines={2}>
                           {displayValue(item.value)}
                         </Text>
@@ -191,7 +214,14 @@ export default function RequestDetailsModal({
                 ))}
 
                 <View style={[styles.customerCell, styles.addressCell]}>
-                  <Text style={styles.summaryLabel}>Delivery Address</Text>
+                  <View style={styles.labelWithIcon}>
+                    <OngoingRequestFieldIcon
+                      name="MapPin"
+                      size={13}
+                      tintColor={colors.iconSecondary || TEXT_MUTED}
+                    />
+                    <Text style={styles.summaryLabel}>Delivery Address</Text>
+                  </View>
                   <Text style={styles.summaryValue}>
                     {displayValue(deliveryAddress)}
                   </Text>
@@ -201,7 +231,10 @@ export default function RequestDetailsModal({
 
             {!!failureReason && (
               <View style={styles.section}>
-                <Text style={styles.sectionTitle}>Delivery Attempt</Text>
+                <View style={styles.sectionTitleRow}>
+                  <OngoingRequestFieldIcon name="ShieldAlert" size={15} tintColor="#DC2626" />
+                  <Text style={[styles.sectionTitle, { color: '#DC2626' }]}>Delivery Attempt</Text>
+                </View>
                 <View style={styles.failureCard}>
                   <Text style={styles.summaryLabel}>Failure reason</Text>
                   <Text style={styles.failureValue}>{failureReason}</Text>
@@ -228,7 +261,10 @@ export default function RequestDetailsModal({
             )}
 
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Delivery Location Map</Text>
+              <View style={styles.sectionTitleRow}>
+                <OngoingRequestFieldIcon name="MapPin" size={15} tintColor={BLUE} />
+                <Text style={styles.sectionTitle}>Delivery Location Map</Text>
+              </View>
               {Number.isFinite(request?.deliveryLocation?.latitude) && Number.isFinite(request?.deliveryLocation?.longitude) ? (
                 <View style={styles.mapContainer}>
                   <React.Suspense fallback={<View style={styles.mapLoading}><Text style={styles.mapLoadingText}>Loading delivery map…</Text></View>}>
@@ -248,7 +284,10 @@ export default function RequestDetailsModal({
             </View>
 
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Ordered Products</Text>
+              <View style={styles.sectionTitleRow}>
+                <OngoingRequestFieldIcon name="Package" size={15} tintColor={BLUE} />
+                <Text style={styles.sectionTitle}>Ordered Products</Text>
+              </View>
 
               <SavedOrderPricing order={request} colors={colors} />
 
@@ -385,11 +424,16 @@ const styles = createPortalStyleSheet({
     borderTopWidth: 1,
     borderTopColor: BLUE_LIGHT,
   },
+  labelWithIcon: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    marginBottom: 4,
+  },
   summaryLabel: {
     color: TEXT_MUTED,
     fontSize: 10,
     fontWeight: '600',
-    marginBottom: 4,
   },
   summaryValue: {
     color: TEXT_DARK,
@@ -400,11 +444,16 @@ const styles = createPortalStyleSheet({
   section: {
     marginTop: 14,
   },
+  sectionTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 9,
+  },
   sectionTitle: {
     color: BLUE,
     fontSize: 14,
     fontWeight: 'bold',
-    marginBottom: 9,
   },
   customerGrid: {
     borderWidth: 1,
