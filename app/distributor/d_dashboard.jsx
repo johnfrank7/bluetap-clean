@@ -340,13 +340,11 @@ function CurrentRequestCard({ actionsDisabled = false, colors, request, distribu
     </View>
     <View style={styles.cardActionsGrid}>
       <Pressable disabled={actionsDisabled} onPress={onDetails} style={({ hovered, pressed }) => [styles.viewDetailsButton, styles.actionGridItem, hovered && { backgroundColor: colors.primarySoft }, pressed && styles.actionButtonPressed, actionsDisabled && styles.actionButtonDisabled]}>
-        <OngoingRequestFieldIcon name="Eye" size={14} color={BLUE} />
         <Text style={styles.viewDetailsText}>View Details</Text>
       </Pressable>
       {hasAction && <Pressable disabled={actionsDisabled} onPress={onAction} style={({ hovered, pressed }) => [styles.primaryActionButton, styles.actionGridItem, isDeliveryCompletion && { backgroundColor: colors.successAction }, hovered && styles.actionButtonHovered, pressed && styles.actionButtonPressed, actionsDisabled && styles.actionButtonDisabled]}><Text style={[styles.primaryActionText, isDeliveryCompletion && { color: colors.onSuccess }]}>{actionLabel}</Text></Pressable>}
       <DistributorOrderChatAction order={request} disabled={actionsDisabled} style={styles.actionGridItem} />
       <Pressable disabled={processing || actionsDisabled} accessibilityRole="button" onPress={onFailure} style={({ hovered, pressed }) => [styles.viewDetailsButton, styles.failureActionButton, styles.actionGridItem, hovered && { backgroundColor: colors.dangerSoft }, pressed && styles.actionButtonPressed, (processing || actionsDisabled) && styles.actionButtonDisabled]}>
-        <OngoingRequestFieldIcon name="XCircle" size={14} color={BLUETAP_COLORS.danger} />
         <Text style={styles.failureActionText}>Delivery Failed</Text>
       </Pressable>
     </View>
@@ -1081,6 +1079,7 @@ const styles = createPortalStyleSheet({
     color: BLUE,
     fontSize: 13,
     fontWeight: '600',
+    textAlign: 'center',
   },
   secondaryActionItem: {
     flexGrow: 1,
@@ -1094,6 +1093,7 @@ const styles = createPortalStyleSheet({
     color: BLUETAP_COLORS.danger,
     fontSize: 13,
     fontWeight: '700',
+    textAlign: 'center',
   },
   primaryActionButton: {
     flexGrow: 1,
