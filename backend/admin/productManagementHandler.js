@@ -187,6 +187,7 @@ function createAdminProductsHandler(getAdmin = getFirebaseAdmin, options = {}) {
       const contentType = requireJsonProductRequest(req);
       logger.info?.('[product-create]', { stage: 'PRODUCT_CREATE_CONTENT_TYPE', contentType });
       const body = bodyOf(req);
+      if (options.promotionDraftOnly && Object.prototype.hasOwnProperty.call(body, 'bundlePromotionAction')) throw new OtpError(400, 'INVALID_BUNDLE_PROMOTION', 'Promotion publishing is not supported on the draft-only endpoint.');
       if (options.promotionDraftOnly && !Object.prototype.hasOwnProperty.call(body, 'bundlePromotion')) throw new OtpError(400, 'INVALID_BUNDLE_PROMOTION', 'Provide a promotion draft.');
       logger.info?.('[product-create]', { stage: 'PRODUCT_CREATE_PAYLOAD_RECEIVED', ...safeRequestMetadata(body) });
       if (req.method === 'POST') {
@@ -220,8 +221,16 @@ function createAdminProductsHandler(getAdmin = getFirebaseAdmin, options = {}) {
       const snapshot = await ref.get();
       if (!snapshot.exists) throw new OtpError(404, 'PRODUCT_NOT_FOUND', 'Product not found.');
       if (Object.prototype.hasOwnProperty.call(body, 'bundlePromotionAction')) {
-        if (Object.keys(body).some((key) => !['productId', 'bundlePromotionAction', 'expectedVersion'].includes(key)) || !['publish', 'disable'].includes(body.bundlePromotionAction)) throw new OtpError(400, 'INVALID_BUNDLE_PROMOTION', 'Choose a valid promotion action.');
-        if (!allowPublication && body.bundlePromotionAction === 'publish') throw new OtpError(409, 'BUNDLE_PROMOTIONS_UNAVAILABLE', 'Promotion activation is unavailable.');
+        const action = body.bundlePromotionAction;
+        if (!['publish', 'disable', 'saveAndPublish'].includes(action)) throw new OtpError(400, 'INVALID_BUNDLE_PROMOTION', 'Choose a valid promotion action.');
+        if (action === 'saveAndPublish') {
+          if (Object.keys(body).some((key) => !['productId', 'bundlePromotionAction', 'bundlePromotion', 'expectedVersion'].includes(key)) || !body.bundlePromotion || typeof body.bundlePromotion !== 'object' || Array.isArray(body.bundlePromotion)) {
+            throw new OtpError(400, 'INVALID_BUNDLE_PROMOTION', 'Provide a promotion configuration to save and publish.');
+          }
+        } else if (Object.keys(body).some((key) => !['productId', 'bundlePromotionAction', 'expectedVersion'].includes(key))) {
+          throw new OtpError(400, 'INVALID_BUNDLE_PROMOTION', 'Choose a valid promotion action.');
+        }
+        if (!allowPublication && ['publish', 'saveAndPublish'].includes(action)) throw new OtpError(409, 'BUNDLE_PROMOTIONS_UNAVAILABLE', 'Promotion activation is unavailable.');
         let savedPromotion;
         await db.runTransaction(async (tx) => {
           const now = new Date();
@@ -230,12 +239,45 @@ function createAdminProductsHandler(getAdmin = getFirebaseAdmin, options = {}) {
           if (!latest.exists) throw new OtpError(404, 'PRODUCT_NOT_FOUND', 'Product not found.');
           const product = latest.data() || {};
           const previous = product.bundlePromotion;
-          if (!previous || Array.isArray(previous)) throw new OtpError(409, 'INVALID_BUNDLE_PROMOTION', 'A single saved promotion draft is required.');
-          if (!Number.isSafeInteger(body.expectedVersion) || body.expectedVersion !== previous.version || previous.version < 1 || !Number.isSafeInteger(previous.version + 1)) throw new OtpError(409, 'BUNDLE_PROMOTION_STALE', 'This promotion changed. Refresh before saving.');
-          if (body.bundlePromotionAction === 'disable') {
+          if (Array.isArray(previous)) throw new OtpError(409, 'PROMOTION_CONFLICT', 'Conflicting promotions must be resolved before saving.');
+          if (action === 'disable') {
+            if (!previous || Array.isArray(previous)) throw new OtpError(409, 'INVALID_BUNDLE_PROMOTION', 'A single saved promotion draft is required.');
+            if (!Number.isSafeInteger(body.expectedVersion) || body.expectedVersion !== previous.version || previous.version < 1 || !Number.isSafeInteger(previous.version + 1)) throw new OtpError(409, 'BUNDLE_PROMOTION_STALE', 'This promotion changed. Refresh before saving.');
             if (previous.active !== true) throw new OtpError(409, 'BUNDLE_PROMOTION_INACTIVE', 'This promotion is already inactive.');
             savedPromotion = { ...previous, active: false, disabledAt: now.toISOString(), disabledBy: admin.uid, version: previous.version + 1, updatedAt: now, updatedBy: admin.uid };
+          } else if (action === 'saveAndPublish') {
+            if (product.active === false) throw new OtpError(409, 'PRODUCT_UNAVAILABLE', 'An inactive product cannot have an active promotion.');
+            if (previous?.active === true) throw new OtpError(409, 'BUNDLE_PROMOTION_ACTIVE', 'This promotion is already active. Disable it before saving changes.');
+            const raw = body.bundlePromotion;
+            const expectedVersion = Number.isSafeInteger(raw.expectedVersion) ? raw.expectedVersion : body.expectedVersion;
+            if (!Number.isSafeInteger(expectedVersion) || expectedVersion !== (previous?.version || 0)) {
+              throw new OtpError(409, 'BUNDLE_PROMOTION_STALE', 'This promotion changed. Refresh before saving.');
+            }
+            cents(product.price);
+            const startsAt = (raw.startMode === 'activation' || !raw.startsAt) ? now.toISOString() : raw.startsAt;
+            savedPromotion = validateBundlePromotion(
+              { ...raw, expectedVersion, startsAt, active: true },
+              {
+                productId,
+                productPrice: product.price,
+                allowedBranches: branchIdsFor(product.branchIds || (product.branchId ? [product.branchId] : [])),
+                previous,
+                actorUid: admin.uid,
+                now,
+                allowActivation: true
+              }
+            );
+            if (savedPromotion.endsAt && new Date(savedPromotion.endsAt).getTime() <= now.getTime()) {
+              throw new OtpError(409, 'INVALID_BUNDLE_PROMOTION', 'An expired promotion cannot be published.');
+            }
+            const branches = await Promise.all(savedPromotion.branchIds.map((id) => tx.get(db.collection('branches').doc(id))));
+            if (branches.some((branch) => !branch.exists || safeBranch(branch.id, branch.data()).status !== 'active')) {
+              throw new OtpError(409, 'INVALID_PRODUCT_BRANCH', 'An eligible branch is unavailable.');
+            }
+            assertPromotionOrderLimits(productId, product, branches, savedPromotion);
           } else {
+            if (!previous || Array.isArray(previous)) throw new OtpError(409, 'INVALID_BUNDLE_PROMOTION', 'A single saved promotion draft is required.');
+            if (!Number.isSafeInteger(body.expectedVersion) || body.expectedVersion !== previous.version || previous.version < 1 || !Number.isSafeInteger(previous.version + 1)) throw new OtpError(409, 'BUNDLE_PROMOTION_STALE', 'This promotion changed. Refresh before saving.');
             if (product.active === false) throw new OtpError(409, 'PRODUCT_UNAVAILABLE', 'An inactive product cannot have an active promotion.');
             cents(product.price);
             savedPromotion = validateBundlePromotion({ ...previous, startsAt: previous.startMode === 'activation' || !previous.startsAt ? now.toISOString() : previous.startsAt, expectedVersion: body.expectedVersion, active: true }, { productId, productPrice: product.price, allowedBranches: branchIdsFor(product.branchIds || (product.branchId ? [product.branchId] : [])), previous, actorUid: admin.uid, now, allowActivation: true });
@@ -245,7 +287,7 @@ function createAdminProductsHandler(getAdmin = getFirebaseAdmin, options = {}) {
             assertPromotionOrderLimits(productId, product, branches, savedPromotion);
           }
           tx.update(ref, { bundlePromotion: savedPromotion, updatedAt: now, updatedBy: admin.uid });
-          tx.set(db.collection('adminAuditLogs').doc(), { action: savedPromotion.active ? 'BUNDLE_PROMOTION_PUBLISHED' : 'BUNDLE_PROMOTION_DISABLED', adminUid: admin.uid, productId, before: previous, after: savedPromotion, createdAt: now });
+          tx.set(db.collection('adminAuditLogs').doc(), { action: savedPromotion.active ? 'BUNDLE_PROMOTION_PUBLISHED' : 'BUNDLE_PROMOTION_DISABLED', adminUid: admin.uid, productId, before: previous || null, after: savedPromotion, createdAt: now });
         });
         return res.status(200).json({ product: { ...safeProduct(productId, snapshot.data()), bundlePromotion: savedPromotion }, pricingApplicationAvailable: allowPublication });
       }

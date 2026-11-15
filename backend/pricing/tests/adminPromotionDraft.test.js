@@ -96,3 +96,71 @@ test('promotion writes reject an Admin deactivated before the transaction', asyn
   await createAdminProductsHandler(() => ({ auth, db }), { logger: {} })({ method: 'PATCH', headers: { authorization: 'Bearer test', 'content-type': 'application/json' }, body: { productId: 'refill', bundlePromotionAction: 'disable', expectedVersion: 1 } }, res);
   assert.equal(res.statusCode, 403); assert.equal(writes, 0);
 });
+
+test('saveAndPublish is blocked when publication capability is disabled', async () => {
+  let writes = 0;
+  const admin = { exists: true, data: () => ({ role: 'admin', accountStatus: 'active' }) };
+  const product = { exists: true, data: () => ({ product_name: 'Refill', price: 25, active: true, branchIds: ['branch-1'], bundlePromotion: { active: false, version: 1 } }) };
+  const branch = { exists: true, id: 'branch-1', data: () => ({ status: 'active', name: 'Branch 1' }) };
+  const productRef = { get: async () => product };
+  const db = {
+    collection: (name) => ({
+      doc: (id) => name === 'users' ? { get: async () => admin } : name === 'branches' ? { get: async () => branch } : productRef,
+    }),
+    runTransaction: async (fn) => fn({
+      get: async (target) => target === productRef ? product : admin,
+      update: () => { writes++; },
+      set: () => { writes++; },
+    }),
+  };
+  const auth = { verifyIdToken: async () => ({ uid: 'admin', admin: true }) };
+  const res = { statusCode: 200, setHeader() {}, status(value) { this.statusCode = value; return this; }, json(value) { this.body = value; return this; }, end() { return this; } };
+  const validDraft = {
+    expectedVersion: 1,
+    title: 'Atomic Refill Saver',
+    commercialEligibility: 'refill_verified',
+    branchIds: ['branch-1'],
+    containerChoices: ['Exchange'],
+    tiers: [{ quantity: 3, bundlePriceCentavos: 7000 }],
+    startMode: 'activation',
+    startsAt: null,
+    endsAt: null,
+  };
+  await createAdminProductsHandler(() => ({ auth, db }), { logger: {} })({
+    method: 'PATCH',
+    headers: { authorization: 'Bearer test', 'content-type': 'application/json' },
+    body: { productId: 'refill', bundlePromotionAction: 'saveAndPublish', bundlePromotion: validDraft },
+  }, res);
+  assert.equal(res.statusCode, 409);
+  assert.equal(res.body.error.reason, 'BUNDLE_PROMOTIONS_UNAVAILABLE');
+  assert.equal(writes, 0);
+});
+
+test('saveAndPublish rejects extra product properties and rejects on draft-only endpoint', async () => {
+  const admin = { exists: true, data: () => ({ role: 'admin', accountStatus: 'active' }) };
+  const db = {
+    collection: () => ({ doc: () => ({ get: async () => admin }) }),
+    runTransaction: async () => {},
+  };
+  const auth = { verifyIdToken: async () => ({ uid: 'admin', admin: true }) };
+
+  // Rejects on draft-only endpoint
+  const res1 = { statusCode: 200, setHeader() {}, status(value) { this.statusCode = value; return this; }, json(value) { this.body = value; return this; }, end() { return this; } };
+  await createAdminProductsHandler(() => ({ auth, db }), { promotionDraftOnly: true, logger: {} })({
+    method: 'PATCH',
+    headers: { authorization: 'Bearer test', 'content-type': 'application/json' },
+    body: { productId: 'refill', bundlePromotionAction: 'saveAndPublish', bundlePromotion: { expectedVersion: 0 } },
+  }, res1);
+  assert.equal(res1.statusCode, 400);
+  assert.equal(res1.body.error.reason, 'INVALID_BUNDLE_PROMOTION');
+
+  // Rejects extra properties
+  const res2 = { statusCode: 200, setHeader() {}, status(value) { this.statusCode = value; return this; }, json(value) { this.body = value; return this; }, end() { return this; } };
+  await createAdminProductsHandler(() => ({ auth, db }), { logger: {} })({
+    method: 'PATCH',
+    headers: { authorization: 'Bearer test', 'content-type': 'application/json' },
+    body: { productId: 'refill', bundlePromotionAction: 'saveAndPublish', bundlePromotion: { expectedVersion: 0 }, price: 50 },
+  }, res2);
+  assert.equal(res2.statusCode, 400);
+  assert.equal(res2.body.error.reason, 'INVALID_BUNDLE_PROMOTION');
+});
