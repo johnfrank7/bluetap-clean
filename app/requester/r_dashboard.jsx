@@ -44,7 +44,7 @@ import {
 } from '../../constants/requesterOrderStatus';
 import { getActiveProducts, getCachedActiveProducts, getRequesterCatalog } from '../../services/requesterOrdering';
 import { rankProviderBranches } from '../../services/location';
-const { eligiblePromotionPreviews, promotionSessionKey, wasPromotionSeen, markPromotionSeen } = require('../../services/promotionPresentation');
+const { eligiblePromotionPreviews, promotionSessionKey, wasPromotionSeen, markPromotionSeen, selectDashboardPromotion } = require('../../services/promotionPresentation');
 import { useLiveGreeting } from '../../services/liveTime';
 import {
   cancelRequest,
@@ -458,18 +458,10 @@ export default function RequesterDashboard() {
       promotionCatalog.branches || [],
       promotionCatalog.profile?.defaultDeliveryLocation
     );
-    for (const branch of rankedBranches) {
-      if (!branch.withinServiceArea && !branch.isWithinNormalArea) continue;
-      const offers = eligiblePromotionPreviews(promotionCatalog, branch.id, null, promotionClock);
-      if (offers.length > 0) return offers[0];
-    }
-    if (!rankedBranches.length && Array.isArray(promotionCatalog.branches)) {
-      for (const branch of promotionCatalog.branches) {
-        const offers = eligiblePromotionPreviews(promotionCatalog, branch.id, null, promotionClock);
-        if (offers.length > 0) return offers[0];
-      }
-    }
-    return null;
+    return selectDashboardPromotion(promotionCatalog, {
+      rankedBranches,
+      now: promotionClock,
+    });
   }, [promotionCatalog, promotionClock]);
   useEffect(() => {
     if (!promotion?.endsAt) return undefined;

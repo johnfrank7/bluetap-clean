@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { eligiblePromotionPreviews, estimatedPromotionSavings, promotionSessionKey, wasPromotionSeen, markPromotionSeen } = require('../../../services/promotionPresentation');
+const { eligiblePromotionPreviews, estimatedPromotionSavings, promotionSessionKey, wasPromotionSeen, markPromotionSeen, selectDashboardPromotion } = require('../../../services/promotionPresentation');
 const offer = { id: 'p', version: 2, branchId: 'b', container: 'Exchange', tiers: [{ quantity: 3, regularCentavos: 6000, priceCentavos: 5500, savingsCentavos: 500 }] };
 test('previews require explicit isolated data and exact branch and container', () => {
   assert.deepEqual(eligiblePromotionPreviews({ promotionPreviews: [offer] }, 'b', 'Exchange'), []);
@@ -34,4 +34,32 @@ test('once per login and promotion version without persisting across login ident
   assert.equal(wasPromotionSeen(promotionSessionKey({ ...user, metadata: { lastSignInTime: 'second' } }, offer)), false);
   assert.equal(wasPromotionSeen(promotionSessionKey(user, { ...offer, version: 3 })), false);
   assert.equal(wasPromotionSeen(promotionSessionKey({ uid: 'u' }, offer)), true);
+});
+
+test('selectDashboardPromotion prefers in-radius and falls back to outside-radius branches', () => {
+  const nearOffer = { ...offer, branchId: 'near', id: 'p-near' };
+  const farOffer = { ...offer, branchId: 'far', id: 'p-far' };
+  const catalog = {
+    promotionCheckoutEnabled: true,
+    promotionPreviews: [nearOffer, farOffer],
+    branches: [{ id: 'near' }, { id: 'far' }],
+  };
+
+  // Both near and far ranked: near in-radius is preferred
+  const rankedBoth = [
+    { id: 'near', distanceKm: 2, isWithinNormalArea: true, withinServiceArea: true },
+    { id: 'far', distanceKm: 8.7, isWithinNormalArea: false, withinServiceArea: false },
+  ];
+  assert.equal(selectDashboardPromotion(catalog, { rankedBranches: rankedBoth })?.id, 'p-near');
+
+  // Near branch has no promotion; far branch is outside radius (8.7km > 5km) with promotion
+  const catalogFarOnly = { ...catalog, promotionPreviews: [farOffer] };
+  assert.equal(selectDashboardPromotion(catalogFarOnly, { rankedBranches: rankedBoth })?.id, 'p-far');
+
+  // Fallback when branches cannot be ranked
+  assert.equal(selectDashboardPromotion(catalogFarOnly, { rankedBranches: [] })?.id, 'p-far');
+
+  // Null when catalog or offers are missing
+  assert.equal(selectDashboardPromotion(null), null);
+  assert.equal(selectDashboardPromotion({ ...catalog, promotionPreviews: [] }, { rankedBranches: rankedBoth }), null);
 });

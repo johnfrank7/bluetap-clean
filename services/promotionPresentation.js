@@ -54,4 +54,34 @@ function markPromotionSeen(key) {
   try { globalThis.sessionStorage?.setItem(key, '1'); } catch { /* The in-memory marker remains available. */ }
 }
 
-module.exports = { eligiblePromotionPreviews, estimatedPromotionSavings, promotionSessionKey, wasPromotionSeen, markPromotionSeen };
+function selectDashboardPromotion(catalog, { rankedBranches = null, now = Date.now() } = {}) {
+  if (!catalog) return null;
+  const branches = Array.isArray(catalog.branches) ? catalog.branches : [];
+  const ranked = Array.isArray(rankedBranches) ? rankedBranches : [];
+
+  // 1. Prefer in-radius branches in distance order
+  for (const branch of ranked) {
+    if (!branch?.withinServiceArea && !branch?.isWithinNormalArea) continue;
+    const offers = eligiblePromotionPreviews(catalog, branch?.id, null, now);
+    if (offers.length > 0) return offers[0];
+  }
+
+  // 2. When no in-radius branch qualifies, consider outside-radius branches in distance order
+  for (const branch of ranked) {
+    if (branch?.withinServiceArea || branch?.isWithinNormalArea) continue;
+    const offers = eligiblePromotionPreviews(catalog, branch?.id, null, now);
+    if (offers.length > 0) return offers[0];
+  }
+
+  // 3. Fallback to unranked / catalog branches
+  const checkedBranchIds = new Set(ranked.map((b) => b?.id).filter(Boolean));
+  for (const branch of branches) {
+    if (checkedBranchIds.has(branch?.id)) continue;
+    const offers = eligiblePromotionPreviews(catalog, branch?.id, null, now);
+    if (offers.length > 0) return offers[0];
+  }
+
+  return null;
+}
+
+module.exports = { eligiblePromotionPreviews, estimatedPromotionSavings, promotionSessionKey, wasPromotionSeen, markPromotionSeen, selectDashboardPromotion };
