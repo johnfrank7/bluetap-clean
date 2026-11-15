@@ -31,6 +31,7 @@
   --bluetap-pagination-hover-border: #187bcd;
   --bluetap-pagination-disabled: #eef3f7;
   --bluetap-pagination-disabled-text: #526579;
+  --bluetap-action-fill: #0b67ad;
 }
 
 [data-bluetap-theme='dark'] {
@@ -46,6 +47,7 @@
   --bluetap-pagination-hover-border: #70bdf2;
   --bluetap-pagination-disabled: #112a40;
   --bluetap-pagination-disabled-text: #9fb4c8;
+  --bluetap-action-fill: #1565c0;
 }
 
 /* Theme-safe pagination colors across Admin and Manager web pages. */
@@ -223,6 +225,31 @@ button#registration-primary-action[aria-disabled='true'] {
 }
 
 /* Keep empty state and action CTA buttons visible across web CSS resets. */
+button[aria-label='Override Distributor Assignment'],
+button[aria-label='Save product'],
+button[aria-label='Change Password'] {
+  background-color: var(--bluetap-action-fill) !important;
+  border-color: var(--bluetap-action-fill) !important;
+}
+
+button[aria-label='Override Distributor Assignment'] > div,
+button[aria-label='Save product'] > div,
+button[aria-label='Change Password'] > div {
+  color: #ffffff !important;
+}
+
+button[aria-label='Save product']:disabled,
+button[aria-label='Save product'][aria-disabled='true'] {
+  background-color: var(--bluetap-pagination-disabled) !important;
+  border-color: var(--bluetap-pagination-border) !important;
+  opacity: 1 !important;
+}
+
+button[aria-label='Save product']:disabled > div,
+button[aria-label='Save product'][aria-disabled='true'] > div {
+  color: var(--bluetap-pagination-disabled-text) !important;
+}
+
 button[data-bluetap-cta='true'],
 button[aria-label='Order Water Now'],
 button[aria-label='Place an Order'],
