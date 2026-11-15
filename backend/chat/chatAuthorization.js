@@ -23,11 +23,41 @@ const orderRequesterUid = (order = {}) => clean(order.requester_id || order.requ
 const orderAssignmentVersion = (order = {}) => getAssignmentVersion(order);
 const profileMembershipVersion = (profile = {}) => getBranchMembershipVersion(profile);
 
+function earliestUnrescheduledFailedAt(order = {}) {
+  const history = Array.isArray(order.distributorDeliveryHistory) ? order.distributorDeliveryHistory : [];
+  let earliest = null;
+  for (let index = history.length - 1; index >= 0; index -= 1) {
+    const entry = history[index];
+    const event = normalizedStatus(entry?.event);
+    if (event === 'delivery_failed') {
+      const timestamp = entry?.failedAt || entry?.deliveryFailedAt || entry?.createdAt || entry?.at || null;
+      if (timeOf(timestamp) > 0) earliest = timestamp;
+      continue;
+    }
+    if (['delivery_rescheduled', 'delivery_started', 'assignment_accepted', 'distributor_assigned', 'distributor_reassigned'].includes(event)) {
+      break;
+    }
+  }
+  return earliest;
+}
+
 function failedDeliveryChatEndsAt(order = {}) {
+  const candidates = [];
   const persisted = order.distributorChatGraceUntil || order.deliveryFailureChatEndsAt || null;
-  if (timeOf(persisted) > 0) return persisted;
+  if (timeOf(persisted) > 0) candidates.push({ value: persisted, ms: timeOf(persisted) });
+  const initialFailedAt = order.firstDeliveryFailedAt || order.initialDeliveryFailedAt || earliestUnrescheduledFailedAt(order);
+  if (timeOf(initialFailedAt) > 0) {
+    const ms = timeOf(initialFailedAt) + FAILED_DELIVERY_CHAT_GRACE_MS;
+    candidates.push({ value: new Date(ms), ms });
+  }
   const failedAt = order.deliveryFailedAt || order.delivery_failed_at || null;
-  return timeOf(failedAt) > 0 ? new Date(timeOf(failedAt) + FAILED_DELIVERY_CHAT_GRACE_MS) : null;
+  if (timeOf(failedAt) > 0) {
+    const ms = timeOf(failedAt) + FAILED_DELIVERY_CHAT_GRACE_MS;
+    candidates.push({ value: new Date(ms), ms });
+  }
+  if (!candidates.length) return null;
+  candidates.sort((left, right) => left.ms - right.ms);
+  return candidates[0].value;
 }
 
 function denied(reason, message) {
@@ -139,7 +169,7 @@ function authorizeExistingRequesterBranchForManager({ manager, branch, requester
   return { branchId, requesterUid: clean(requesterUid), conversationId: clean(conversation.id) };
 }
 
-function authorizeRequesterDistributor({ requester, distributor, branch, order, assignmentVersion, now = Date.now() } = {}) {
+function authorizeRequesterDistributor({ requester, distributor, branch, order, assignmentVersion, now = Date.now(), mode = 'send' } = {}) {
   requireRole(requester, 'requester');
   requireActiveDistributor(distributor);
   const requesterUid = clean(requester.uid || requester.id);
@@ -155,11 +185,20 @@ function authorizeRequesterDistributor({ requester, distributor, branch, order, 
   if (['delivered', 'completed'].includes(status)) denied('CHAT_ASSIGNMENT_NOT_WRITABLE', 'Delivery completion ends direct messaging immediately.');
   if (TERMINAL_ORDER_STATUSES.has(status)) denied('CHAT_ASSIGNMENT_NOT_WRITABLE', 'This assignment no longer grants send authority.');
   const accessEndsAt = status === 'delivery_failed' ? failedDeliveryChatEndsAt(order) : null;
-  if (status === 'delivery_failed' && (!accessEndsAt || timeOf(accessEndsAt) <= timeOf(now))) {
+  const sendExpired = status === 'delivery_failed' && (!accessEndsAt || timeOf(accessEndsAt) <= timeOf(now));
+  if (status === 'delivery_failed' && (!accessEndsAt || (mode !== 'read' && sendExpired))) {
     denied('CHAT_ASSIGNMENT_NOT_WRITABLE', 'The failed-delivery messaging window has ended.');
   }
 
-  return { requesterUid, distributorUid, branchId, orderId: clean(order.id || order.requestId), assignmentVersion: expectedVersion, ...(accessEndsAt ? { accessEndsAt } : {}) };
+  return {
+    requesterUid,
+    distributorUid,
+    branchId,
+    orderId: clean(order.id || order.requestId),
+    assignmentVersion: expectedVersion,
+    ...(accessEndsAt ? { accessEndsAt } : {}),
+    ...(sendExpired ? { sendExpired: true } : {}),
+  };
 }
 
 function authorizeDistributorBranch({ distributor, branch, branchMembershipVersion } = {}) {

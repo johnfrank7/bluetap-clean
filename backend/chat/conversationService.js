@@ -206,12 +206,16 @@ function reconcileOrderAuthorityTransition({ before = {}, after = {}, event = 'o
   const afterBranch = requesterBranchAuthority(after);
   const branchChanged = beforeBranch?.branchId !== afterBranch?.branchId;
   if (branchChanged && beforeBranch) append({ action: 'remove_authority_reason', authorityReason: AUTHORITY_REASONS.ACTIVE_ORDER, orderId: beforeAssignment?.orderId || clean(before.id || before.requestId), authority: beforeBranch });
-  if (branchChanged && afterBranch) append({ action: 'add_authority_reason', authorityReason: AUTHORITY_REASONS.ACTIVE_ORDER, orderId: afterAssignment?.orderId || clean(after.id || after.requestId), authority: afterBranch });
 
   const afterStatus = normalizedStatus(after.status);
   const beforeStatus = normalizedStatus(before.status);
   const delivered = ['delivered', 'completed'].includes(afterStatus);
   const terminal = TERMINAL_ORDER_STATUSES.has(afterStatus);
+  const deliveryStarted = (afterStatus === 'out_for_delivery' && beforeStatus !== 'out_for_delivery') || event === 'DELIVERY_STARTED';
+  const orderCreated = event === 'ORDER_CREATED' || !beforeBranch;
+  if (afterBranch && !terminal && (branchChanged || orderCreated || deliveryStarted)) {
+    append({ action: 'add_authority_reason', authorityReason: AUTHORITY_REASONS.ACTIVE_ORDER, orderId: afterAssignment?.orderId || clean(after.id || after.requestId), authority: afterBranch });
+  }
   if (afterStatus === 'delivery_failed' && afterAssignment) {
     const graceActive = timeOf(accessEndsAt) > Number(now);
     append({ action: graceActive ? 'eligible' : 'read_only', reason: 'delivery_failed_grace', ...(graceActive ? { accessEndsAt } : {}), authority: afterAssignment });

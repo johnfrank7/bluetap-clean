@@ -271,6 +271,7 @@ export default function ChatDataProvider({ children, role }) {
 
   React.useEffect(() => {
     if (!panelOpen || !selectedSeed?.id || selectedSeed.historyId || loading || accessReadiness !== 'ready') return;
+    if (selectedSeed.status === 'active') return;
     if (conversations.some((conversation) => conversation.id === selectedSeed.id)) return;
     setSelectedSeed(null);
     setChatListTab('history');
