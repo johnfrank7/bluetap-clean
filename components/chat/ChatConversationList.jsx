@@ -96,47 +96,96 @@ export default function ChatConversationList() {
   const historyScrollRef = React.useRef(null);
   const historyScrollOffsetRef = React.useRef(0);
   const needle = search.trim().toLowerCase();
-  const historyRows = history.map((conversation) => {
-    const order = conversation.orderContext || {};
-    const displayName = role === 'manager'
-      ? (meaningfulName(conversation.requesterDisplayName, order.requesterName) || 'Requester')
-      : role === 'distributor'
+
+  const historyBaseRows = React.useMemo(() => {
+    return history.map((conversation) => {
+      const order = conversation.orderContext || {};
+      const displayName = role === 'manager'
         ? (meaningfulName(conversation.requesterDisplayName, order.requesterName) || 'Requester')
-        : conversation.type === 'requester_distributor'
-          ? (meaningfulName(conversation.distributorDisplayName, order.assignedDistributorName) || 'Assigned Distributor')
-          : (conversation.branchNameSnapshot || order.currentBranchName || 'BlueTap Station');
-    const orderReference = conversation.orderReference || order.requestId || '';
-    return { ...conversation, key: conversation.historyId, displayName,
-      contextLabel: orderReference ? `Order ${orderReference}` : 'Order history', orderReference, orderStatus: order.status === 'completed' ? 'delivered' : order.status,
-      orderContextLocal: order, unreadCount: 0, unreadLabel: '0',
-      lastMessagePreview: conversation.lastMessagePreview, emptyPreview: 'No messages for this order' };
-  }).filter((row) => matchesSearch(row, needle));
-  const filtered = conversations.filter((conversation) => matchesSearch(conversation, needle));
-  const managerDistributorRows = role === 'manager' ? branchDistributors.map((user) => {
-    const distributorId = user.uid || user.id;
-    const existing = conversations.find((conversation) => conversation.type === 'distributor_branch' && conversation.distributorUid === distributorId);
-    return {
-      ...(existing || {}),
-      key: existing?.id || `pinned-${distributorId}`,
-      displayName: meaningfulName(user.fullName, `${user.firstName || ''} ${user.lastName || ''}`, user.displayName, existing?.distributorDisplayName, existing?.displayName) || 'Branch Distributor',
-      contextLabel: existing?.contextLabel || 'Distributor · Your branch',
-      emptyPreview: 'Message this Distributor',
-      ...(existing ? {} : { resolveIntent: { type: 'distributor_branch', distributorId }, unreadCount: 0 }),
-    };
-  }).filter((row) => matchesSearch(row, needle)) : [];
-  const managerRequesterRows = role === 'manager' ? filtered.filter((conversation) => conversation.type === 'requester_branch') : [];
-  const managerCoordinationRows = role === 'manager' ? filtered.filter((conversation) => conversation.type === 'branch_coordination') : [];
-  const stationConversation = role === 'distributor' ? conversations.find((conversation) => conversation.type === 'distributor_branch') : null;
-  const distributorStationRows = role === 'distributor' ? [{
-    ...(stationConversation || {}),
-    key: stationConversation?.id || 'message-station',
-    displayName: stationConversation?.displayName || stationName || 'Your BlueTap Station',
-    contextLabel: stationConversation?.contextLabel || 'Your current station',
-    emptyPreview: 'Message your station',
-    ...(stationConversation ? {} : { resolveIntent: { type: 'distributor_branch' }, unreadCount: 0 }),
-  }].filter((row) => matchesSearch(row, needle)) : [];
-  const distributorRequesterRows = role === 'distributor' ? (() => {
-    const existingRows = filtered.filter((conversation) => conversation.type === 'requester_distributor');
+        : role === 'distributor'
+          ? (meaningfulName(conversation.requesterDisplayName, order.requesterName) || 'Requester')
+          : conversation.type === 'requester_distributor'
+            ? (meaningfulName(conversation.distributorDisplayName, order.assignedDistributorName) || 'Assigned Distributor')
+            : (conversation.branchNameSnapshot || order.currentBranchName || 'BlueTap Station');
+      const orderReference = conversation.orderReference || order.requestId || '';
+      return {
+        ...conversation,
+        key: conversation.historyId,
+        displayName,
+        contextLabel: orderReference ? `Order ${orderReference}` : 'Order history',
+        orderReference,
+        orderStatus: order.status === 'completed' ? 'delivered' : order.status,
+        orderContextLocal: order,
+        unreadCount: 0,
+        unreadLabel: '0',
+        lastMessagePreview: conversation.lastMessagePreview,
+        emptyPreview: 'No messages for this order',
+      };
+    });
+  }, [history, role]);
+
+  const historyRows = React.useMemo(() => {
+    if (!needle) return historyBaseRows;
+    return historyBaseRows.filter((row) => matchesSearch(row, needle));
+  }, [historyBaseRows, needle]);
+
+  const filtered = React.useMemo(() => {
+    if (!needle) return conversations;
+    return conversations.filter((conversation) => matchesSearch(conversation, needle));
+  }, [conversations, needle]);
+
+  const managerDistributorBaseRows = React.useMemo(() => {
+    if (role !== 'manager') return [];
+    return branchDistributors.map((user) => {
+      const distributorId = user.uid || user.id;
+      const existing = conversations.find((conversation) => conversation.type === 'distributor_branch' && conversation.distributorUid === distributorId);
+      return {
+        ...(existing || {}),
+        key: existing?.id || `pinned-${distributorId}`,
+        displayName: meaningfulName(user.fullName, `${user.firstName || ''} ${user.lastName || ''}`, user.displayName, existing?.distributorDisplayName, existing?.displayName) || 'Branch Distributor',
+        contextLabel: existing?.contextLabel || 'Distributor · Your branch',
+        emptyPreview: 'Message this Distributor',
+        ...(existing ? {} : { resolveIntent: { type: 'distributor_branch', distributorId }, unreadCount: 0 }),
+      };
+    });
+  }, [branchDistributors, conversations, role]);
+
+  const managerDistributorRows = React.useMemo(() => {
+    if (!needle) return managerDistributorBaseRows;
+    return managerDistributorBaseRows.filter((row) => matchesSearch(row, needle));
+  }, [managerDistributorBaseRows, needle]);
+
+  const managerRequesterRows = React.useMemo(() => {
+    if (role !== 'manager') return [];
+    return filtered.filter((conversation) => conversation.type === 'requester_branch');
+  }, [filtered, role]);
+
+  const managerCoordinationRows = React.useMemo(() => {
+    if (role !== 'manager') return [];
+    return filtered.filter((conversation) => conversation.type === 'branch_coordination');
+  }, [filtered, role]);
+
+  const distributorStationBaseRows = React.useMemo(() => {
+    if (role !== 'distributor') return [];
+    const stationConversation = conversations.find((conversation) => conversation.type === 'distributor_branch');
+    return [{
+      ...(stationConversation || {}),
+      key: stationConversation?.id || 'message-station',
+      displayName: stationConversation?.displayName || stationName || 'Your BlueTap Station',
+      contextLabel: stationConversation?.contextLabel || 'Your current station',
+      emptyPreview: 'Message your station',
+      ...(stationConversation ? {} : { resolveIntent: { type: 'distributor_branch' }, unreadCount: 0 }),
+    }];
+  }, [conversations, role, stationName]);
+
+  const distributorStationRows = React.useMemo(() => {
+    if (!needle) return distributorStationBaseRows;
+    return distributorStationBaseRows.filter((row) => matchesSearch(row, needle));
+  }, [distributorStationBaseRows, needle]);
+
+  const distributorRequesterBaseRows = React.useMemo(() => {
+    if (role !== 'distributor') return [];
+    const existingRows = conversations.filter((conversation) => conversation.type === 'requester_distributor');
     const existingMap = new Map();
     existingRows.forEach((c) => {
       const orderId = String(c.orderId || '').trim();
@@ -188,11 +237,27 @@ export default function ChatConversationList() {
       }
     });
 
-    return rows.filter((row) => matchesSearch(row, needle));
-  })() : [];
-  const requesterGroups = role === 'requester' ? buildRequesterConversationGroups(conversations, requesterBranches) : { branchRows: [], distributorRows: [] };
-  const requesterBranchRows = requesterGroups.branchRows.filter((row) => matchesSearch(row, needle));
-  const requesterDistributorRows = requesterGroups.distributorRows.filter((row) => matchesSearch(row, needle));
+    return rows;
+  }, [conversations, distributorOrders, role]);
+
+  const distributorRequesterRows = React.useMemo(() => {
+    if (!needle) return distributorRequesterBaseRows;
+    return distributorRequesterBaseRows.filter((row) => matchesSearch(row, needle));
+  }, [distributorRequesterBaseRows, needle]);
+
+  const requesterGroups = React.useMemo(() => {
+    return role === 'requester' ? buildRequesterConversationGroups(conversations, requesterBranches) : { branchRows: [], distributorRows: [] };
+  }, [conversations, requesterBranches, role]);
+
+  const requesterBranchRows = React.useMemo(() => {
+    if (!needle) return requesterGroups.branchRows;
+    return requesterGroups.branchRows.filter((row) => matchesSearch(row, needle));
+  }, [needle, requesterGroups.branchRows]);
+
+  const requesterDistributorRows = React.useMemo(() => {
+    if (!needle) return requesterGroups.distributorRows;
+    return requesterGroups.distributorRows.filter((row) => matchesSearch(row, needle));
+  }, [needle, requesterGroups.distributorRows]);
   const groupedCount = role === 'manager'
     ? managerDistributorRows.length + managerRequesterRows.length + managerCoordinationRows.length
     : role === 'distributor'

@@ -12,8 +12,8 @@ import { useCurrentPageRequestDetails } from '../useCurrentPageRequestDetails';
 
 export default function ChatConversationView() {
   const {
-    backToList, closeChat, colors, currentConversation, hasEarlierMessages, loadEarlierMessages,
-    loadingEarlier, messages, retryMessage, role, sendCurrentMessage, threadError,
+    backToList, closeChat, colors, isDark, currentConversation, hasEarlierMessages, loadEarlierMessages,
+    loadingEarlier, threadLoading, messages, retryMessage, role, sendCurrentMessage, threadError,
     messageActionError,
     isOwnMessage, receiptForMessage, canSend, sendUnavailableReason, conversationNotice,
     editCurrentMessage, deleteCurrentMessage,
@@ -165,7 +165,15 @@ export default function ChatConversationView() {
             {loadingEarlier ? <ActivityIndicator color={colors.primary} /> : <Text style={[styles.earlierText, { color: colors.primary }]}>Load earlier messages</Text>}
           </Pressable>
         )}
-        {messages.length === 0 && !threadError && <Text style={[styles.empty, { color: colors.textSecondary }]}>Start a secure BlueTap conversation.</Text>}
+        {threadLoading && messages.length === 0 ? (
+          <View style={styles.threadSkeletonContainer} accessibilityLabel="Loading conversation messages">
+            <View style={[styles.skeletonBubble, styles.skeletonBubbleIncoming, { backgroundColor: isDark ? (colors.surfaceAlt || '#1e293b') : '#E2E8F0' }]} />
+            <View style={[styles.skeletonBubble, styles.skeletonBubbleOutgoing, { backgroundColor: isDark ? (colors.surfaceAlt || '#1e293b') : '#DBEAFE' }]} />
+            <View style={[styles.skeletonBubble, styles.skeletonBubbleIncoming, { width: '55%', backgroundColor: isDark ? (colors.surfaceAlt || '#1e293b') : '#E2E8F0' }]} />
+          </View>
+        ) : messages.length === 0 && !threadError ? (
+          <Text style={[styles.empty, { color: colors.textSecondary }]}>Start a secure BlueTap conversation.</Text>
+        ) : null}
         {!!threadError && <Text accessibilityRole="alert" style={[styles.error, { color: colors.danger }]}>{threadError}</Text>}
         {!!messageActionError && <Text accessibilityRole="alert" style={[styles.error, { color: colors.danger }]}>{messageActionError}</Text>}
         {messages.map((message) => (
@@ -299,4 +307,8 @@ const styles = StyleSheet.create({
   replyPreviewText: { fontSize: 12, lineHeight: 16 },
   replyCancelButton: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center', marginLeft: 8 },
   replyCancelText: { fontSize: 14, fontWeight: '900' },
+  threadSkeletonContainer: { paddingVertical: 14, paddingHorizontal: 6, gap: 10 },
+  skeletonBubble: { height: 38, borderRadius: 16, opacity: 0.6 },
+  skeletonBubbleIncoming: { width: '68%', alignSelf: 'flex-start', borderBottomLeftRadius: 4 },
+  skeletonBubbleOutgoing: { width: '60%', alignSelf: 'flex-end', borderBottomRightRadius: 4 },
 });

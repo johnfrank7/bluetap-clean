@@ -18,6 +18,7 @@ import BlueTapHeader from '../../components/BlueTapHeader';
 import DistributorPortalBackground from '../../components/DistributorPortalBackground';
 import RequestDetailsModal from '../../components/RequestDetailsModal';
 import SoftStatusBadge from '../../components/SoftStatusBadge';
+import OngoingRequestFieldIcon from '../../components/OngoingRequestFieldIcon';
 import { createShadow } from '../../components/shadowStyles';
 import BlueTapEmptyState from '../../components/BlueTapEmptyState';
 import DistributorProfileBanner from '../../components/DistributorProfileBanner';
@@ -123,40 +124,61 @@ const ScheduledRequestCard = ({
   return (
     <View style={styles.requestCard}>
       <View style={styles.requestCardHeader}>
-        <Text style={styles.requestId}>Request ID: {request.id}</Text>
+        <View style={styles.requestIdWrap}>
+          <OngoingRequestFieldIcon name="Receipt" size={15} color={BLUE} />
+          <Text style={styles.requestId}>Request ID: {request.id}</Text>
+        </View>
         <SoftStatusBadge status={request.status} />
       </View>
 
       <View style={styles.compactInfoGrid}>
         <View style={styles.compactInfoColumn}>
-          <Text style={styles.compactLabel}>Customer Name</Text>
+          <View style={styles.compactLabelRow}>
+            <OngoingRequestFieldIcon name="User" size={13} color={colors.textSecondary} />
+            <Text style={styles.compactLabel}>Customer Name</Text>
+          </View>
           <Text style={styles.compactPrimaryValue} numberOfLines={1}>
             {request.requester}
           </Text>
 
-          <Text style={[styles.compactLabel, styles.compactLabelGap]}>Requester ID</Text>
+          <View style={[styles.compactLabelRow, styles.compactLabelGap]}>
+            <OngoingRequestFieldIcon name="ShieldCheck" size={13} color={colors.textSecondary} />
+            <Text style={styles.compactLabel}>Requester ID</Text>
+          </View>
           <Text style={styles.compactValue} numberOfLines={1}>
             {formatDisplayUniqueId(request.requesterId || request.requester_unique_id || request.requesterUniqueId, 'Not assigned')}
           </Text>
 
-          <Text style={[styles.compactLabel, styles.compactLabelGap]}>Contact Number</Text>
+          <View style={[styles.compactLabelRow, styles.compactLabelGap]}>
+            <OngoingRequestFieldIcon name="Phone" size={13} color={colors.textSecondary} />
+            <Text style={styles.compactLabel}>Contact Number</Text>
+          </View>
           <Text style={styles.compactValue} numberOfLines={1}>
             {request.contact}
           </Text>
         </View>
 
         <View style={styles.compactInfoColumn}>
-          <Text style={styles.compactLabel}>Product Ordered</Text>
+          <View style={styles.compactLabelRow}>
+            <OngoingRequestFieldIcon name="Droplets" size={13} color={colors.textSecondary} />
+            <Text style={styles.compactLabel}>Product Ordered</Text>
+          </View>
           <Text style={styles.compactPrimaryValue} numberOfLines={1}>
             {request.productName}
           </Text>
 
-          <Text style={[styles.compactLabel, styles.compactLabelGap]}>Container Type</Text>
+          <View style={[styles.compactLabelRow, styles.compactLabelGap]}>
+            <OngoingRequestFieldIcon name="Package" size={13} color={colors.textSecondary} />
+            <Text style={styles.compactLabel}>Container Type</Text>
+          </View>
           <Text style={styles.compactValue} numberOfLines={1}>
             {request.container || 'Standard'}
           </Text>
 
-          <Text style={[styles.compactLabel, styles.compactLabelGap]}>Quantity</Text>
+          <View style={[styles.compactLabelRow, styles.compactLabelGap]}>
+            <OngoingRequestFieldIcon name="Layers" size={13} color={colors.textSecondary} />
+            <Text style={styles.compactLabel}>Quantity</Text>
+          </View>
           <Text style={styles.compactValue} numberOfLines={1}>
             {request.quantity} · {analyzeOrderCargo(request).badgeLabel}
           </Text>
@@ -164,12 +186,18 @@ const ScheduledRequestCard = ({
       </View>
 
       <View style={styles.fullWidthInfoBlock}>
-        <Text style={styles.compactLabel}>Delivery Address</Text>
+        <View style={styles.compactLabelRow}>
+          <OngoingRequestFieldIcon name="MapPin" size={13} color={colors.textSecondary} />
+          <Text style={styles.compactLabel}>Delivery Address</Text>
+        </View>
         <Text style={styles.compactAddressValue} numberOfLines={2}>
           {request.address}
         </Text>
 
-        <Text style={[styles.compactLabel, styles.compactLabelGap]}>{statusNorm === 'accepted' ? 'Ready to Start' : 'Scheduled Delivery Date & Time'}</Text>
+        <View style={[styles.compactLabelRow, styles.compactLabelGap]}>
+          <OngoingRequestFieldIcon name="CalendarClock" size={13} color={colors.textSecondary} />
+          <Text style={styles.compactLabel}>{statusNorm === 'accepted' ? 'Ready to Start' : 'Scheduled Delivery Date & Time'}</Text>
+        </View>
         <Text style={styles.compactValue} numberOfLines={1}>
           {statusNorm === 'accepted' ? 'Accepted — start delivery when ready.' : request.scheduledDateTime || 'Not set'}
         </Text>
@@ -189,6 +217,7 @@ const ScheduledRequestCard = ({
           style={[styles.secondaryActionButton, actionsDisabled && styles.actionButtonDisabled]}
           onPress={() => onViewDetails(request)}
         >
+          <OngoingRequestFieldIcon name="Eye" size={14} color={BLUE} />
           <Text style={styles.secondaryActionText}>View Details</Text>
         </TouchableOpacity>
         <DistributorOrderChatAction order={request} disabled={actionsDisabled} style={styles.secondaryActionButton} />
@@ -604,6 +633,13 @@ const styles = createPortalStyleSheet({
     alignItems: 'center',
     marginBottom: 12,
   },
+  requestIdWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flex: 1,
+    minWidth: 0,
+  },
   requestId: {
     fontSize: 13,
     fontWeight: 'bold',
@@ -616,6 +652,12 @@ const styles = createPortalStyleSheet({
   },
   compactInfoColumn: {
     flex: 1,
+  },
+  compactLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    marginBottom: 2,
   },
   compactLabel: {
     fontSize: 11,
@@ -687,6 +729,8 @@ const styles = createPortalStyleSheet({
     borderWidth: 1,
     borderColor: BLUE,
     backgroundColor: BLUETAP_COLORS.surface,
+    flexDirection: 'row',
+    gap: 5,
     alignItems: 'center',
     justifyContent: 'center',
   },

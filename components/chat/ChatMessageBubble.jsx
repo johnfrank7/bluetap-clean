@@ -48,7 +48,7 @@ const formatTime = (value) => {
   return new Date(timestamp).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 };
 
-export default function ChatMessageBubble({ message, own, receipt, colors, onRetry, onReport, onEdit, onDelete, onReply, desktopMenuOpen = false, onToggleDesktopMenu }) {
+function ChatMessageBubble({ message, own, receipt, colors, onRetry, onReport, onEdit, onDelete, onReply, desktopMenuOpen = false, onToggleDesktopMenu }) {
   const [menuOpen, setMenuOpen] = React.useState(false);
   const [hovered, setHovered] = React.useState(false);
   const [focused, setFocused] = React.useState(false);
@@ -376,3 +376,5 @@ const styles = StyleSheet.create({
   sheetAction: { minHeight: 52, borderTopWidth: StyleSheet.hairlineWidth, justifyContent: 'center', paddingHorizontal: 18 },
   sheetActionText: { fontSize: 15, fontWeight: '800' },
 });
+
+export default React.memo(ChatMessageBubble);

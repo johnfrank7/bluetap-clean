@@ -14,6 +14,7 @@ import BlueTapHeader from '../../components/BlueTapHeader';
 import DistributorPortalBackground from '../../components/DistributorPortalBackground';
 import RequestDetailsModal from '../../components/RequestDetailsModal';
 import SoftStatusBadge from '../../components/SoftStatusBadge';
+import OngoingRequestFieldIcon from '../../components/OngoingRequestFieldIcon';
 import { createShadow } from '../../components/shadowStyles';
 import BlueTapEmptyState from '../../components/BlueTapEmptyState';
 import PortalSwipeContainer, { DISTRIBUTOR_TABS } from '../../components/PortalSwipeContainer';
@@ -94,20 +95,29 @@ const HistoryRequestCard = ({ actionsDisabled = false, request, onViewDetails })
   return (
     <View style={styles.requestCard}>
       <View style={styles.requestCardHeader}>
-        <Text style={styles.requestId}>Request ID: {request.id}</Text>
+        <View style={styles.requestIdWrap}>
+          <OngoingRequestFieldIcon name="Receipt" size={15} color={BLUE} />
+          <Text style={styles.requestId}>Request ID: {request.id}</Text>
+        </View>
         <SoftStatusBadge status={request.status} />
       </View>
 
       <View style={styles.compactInfoGrid}>
         <View style={styles.compactInfoColumn}>
-          <Text style={styles.compactLabel}>Customer Name</Text>
+          <View style={styles.compactLabelRow}>
+            <OngoingRequestFieldIcon name="User" size={13} color={TEXT_MUTED} />
+            <Text style={styles.compactLabel}>Customer Name</Text>
+          </View>
           <Text style={styles.compactPrimaryValue} numberOfLines={1}>
             {request.requester}
           </Text>
 
-          <Text style={[styles.compactLabel, styles.compactLabelGap]}>
-            Requester ID
-          </Text>
+          <View style={[styles.compactLabelRow, styles.compactLabelGap]}>
+            <OngoingRequestFieldIcon name="ShieldCheck" size={13} color={TEXT_MUTED} />
+            <Text style={styles.compactLabel}>
+              Requester ID
+            </Text>
+          </View>
           <Text style={styles.compactValue} numberOfLines={1}>
             {formatDisplayUniqueId(
               request.requesterId ||
@@ -117,23 +127,32 @@ const HistoryRequestCard = ({ actionsDisabled = false, request, onViewDetails })
             )}
           </Text>
 
-          <Text style={[styles.compactLabel, styles.compactLabelGap]}>
-            Contact Number
-          </Text>
+          <View style={[styles.compactLabelRow, styles.compactLabelGap]}>
+            <OngoingRequestFieldIcon name="Phone" size={13} color={TEXT_MUTED} />
+            <Text style={styles.compactLabel}>
+              Contact Number
+            </Text>
+          </View>
           <Text style={styles.compactValue} numberOfLines={1}>
             {request.contact}
           </Text>
         </View>
 
         <View style={styles.compactInfoColumn}>
-          <Text style={styles.compactLabel}>Product Ordered</Text>
+          <View style={styles.compactLabelRow}>
+            <OngoingRequestFieldIcon name="Droplets" size={13} color={TEXT_MUTED} />
+            <Text style={styles.compactLabel}>Product Ordered</Text>
+          </View>
           <Text style={styles.compactPrimaryValue} numberOfLines={1}>
             {request.productName}
           </Text>
 
-          <Text style={[styles.compactLabel, styles.compactLabelGap]}>
-            Distributor ID
-          </Text>
+          <View style={[styles.compactLabelRow, styles.compactLabelGap]}>
+            <OngoingRequestFieldIcon name="Truck" size={13} color={TEXT_MUTED} />
+            <Text style={styles.compactLabel}>
+              Distributor ID
+            </Text>
+          </View>
           <Text style={styles.compactValue} numberOfLines={1}>
             {formatDisplayUniqueId(
               request.distributorId ||
@@ -143,9 +162,12 @@ const HistoryRequestCard = ({ actionsDisabled = false, request, onViewDetails })
             )}
           </Text>
 
-          <Text style={[styles.compactLabel, styles.compactLabelGap]}>
-            Container Type
-          </Text>
+          <View style={[styles.compactLabelRow, styles.compactLabelGap]}>
+            <OngoingRequestFieldIcon name="Package" size={13} color={TEXT_MUTED} />
+            <Text style={styles.compactLabel}>
+              Container Type
+            </Text>
+          </View>
           <Text style={styles.compactValue} numberOfLines={1}>
             {request.container}
           </Text>
@@ -153,14 +175,20 @@ const HistoryRequestCard = ({ actionsDisabled = false, request, onViewDetails })
       </View>
 
       <View style={styles.fullWidthInfoBlock}>
-        <Text style={styles.compactLabel}>Delivery Address</Text>
+        <View style={styles.compactLabelRow}>
+          <OngoingRequestFieldIcon name="MapPin" size={13} color={TEXT_MUTED} />
+          <Text style={styles.compactLabel}>Delivery Address</Text>
+        </View>
         <Text style={styles.compactAddressValue} numberOfLines={2}>
           {request.address}
         </Text>
 
-        <Text style={[styles.compactLabel, styles.compactLabelGap]}>
-          Delivered Date & Time
-        </Text>
+        <View style={[styles.compactLabelRow, styles.compactLabelGap]}>
+          <OngoingRequestFieldIcon name="CalendarClock" size={13} color={TEXT_MUTED} />
+          <Text style={styles.compactLabel}>
+            Delivered Date & Time
+          </Text>
+        </View>
         <Text style={styles.compactValue} numberOfLines={1}>
           {request.deliveredDateTime}
         </Text>
@@ -172,6 +200,7 @@ const HistoryRequestCard = ({ actionsDisabled = false, request, onViewDetails })
         style={[styles.fullWidthActionButton, actionsDisabled && styles.actionButtonDisabled]}
         onPress={() => onViewDetails(request)}
       >
+        <OngoingRequestFieldIcon name="Eye" size={14} color={BLUE} />
         <Text style={styles.secondaryActionText}>View Details</Text>
       </TouchableOpacity>
     </View>
@@ -356,6 +385,13 @@ const styles = createPortalStyleSheet({
     borderBottomWidth: 1,
     borderBottomColor: BLUE_LIGHT,
   },
+  requestIdWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flex: 1,
+    minWidth: 0,
+  },
   requestId: {
     flex: 1,
     color: BLUE,
@@ -371,11 +407,16 @@ const styles = createPortalStyleSheet({
     flex: 1,
     minWidth: 0,
   },
+  compactLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    marginBottom: 3,
+  },
   compactLabel: {
     color: TEXT_MUTED,
     fontSize: 11,
     fontWeight: 'bold',
-    marginBottom: 3,
   },
   compactLabelGap: {
     marginTop: 10,
@@ -410,6 +451,8 @@ const styles = createPortalStyleSheet({
     borderColor: BLUE,
     backgroundColor: BLUETAP_COLORS.surface,
     borderRadius: 12,
+    flexDirection: 'row',
+    gap: 6,
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 16,

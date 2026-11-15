@@ -17,6 +17,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { saveLocalUser } from '../../localUsers';
 import { useAdminTheme } from '../../components/AdminTheme';
 import BlueTapIcon from '../../components/BlueTapIcon';
+import OngoingRequestFieldIcon from '../../components/OngoingRequestFieldIcon';
 import ManagerShell, { ManagerPill, ManagerWaterDrop } from '../../components/ManagerShell';
 import { useManagerRealtimeData } from '../../components/ManagerRealtimeData';
 import TopToastFeedback from '../../components/TopToastFeedback';
@@ -42,10 +43,13 @@ const draftFor = (profile = {}) => {
   };
 };
 
-function ProfileField({ editable, label, multiline, onChangeText, value, themedStyles }) {
+function ProfileField({ editable, icon, label, multiline, onChangeText, value, themedStyles, colors }) {
   return (
     <View style={themedStyles.fieldWrap}>
-      <Text style={themedStyles.detailLabel}>{label}</Text>
+      <View style={themedStyles.fieldLabelRow}>
+        {icon && <OngoingRequestFieldIcon name={icon} size={14} color={colors?.textSecondary || '#64748B'} />}
+        <Text style={themedStyles.detailLabel}>{label}</Text>
+      </View>
       {editable ? (
         <TextInput
           accessibilityLabel={label}
@@ -304,18 +308,18 @@ export default function ManagerSettingsPage() {
               <View style={styles.detailSection}>
                 <Text style={styles.sectionTitle}>Personal information</Text>
                 <View style={styles.sectionGrid}>
-                  <ProfileField editable={editing} label="Full Name" onChangeText={(value) => changeDraft('fullName', value)} themedStyles={styles} value={editing ? draft.fullName : managerFullName || 'Not set'} />
-                  <ProfileField editable={editing} label="Contact Number" onChangeText={(value) => changeDraft('phone', value)} themedStyles={styles} value={editing ? draft.phone : managerContact} />
-                  <ProfileField label="Email Address" themedStyles={styles} value={managerEmail} />
-                  <ProfileField editable={editing} label="Complete Address / Location" multiline onChangeText={(value) => changeDraft('address', value)} themedStyles={styles} value={editing ? draft.address : managerAddress} />
+                  <ProfileField colors={colors} editable={editing} icon="User" label="Full Name" onChangeText={(value) => changeDraft('fullName', value)} themedStyles={styles} value={editing ? draft.fullName : managerFullName || 'Not set'} />
+                  <ProfileField colors={colors} editable={editing} icon="Phone" label="Contact Number" onChangeText={(value) => changeDraft('phone', value)} themedStyles={styles} value={editing ? draft.phone : managerContact} />
+                  <ProfileField colors={colors} icon="Mail" label="Email Address" themedStyles={styles} value={managerEmail} />
+                  <ProfileField colors={colors} editable={editing} icon="MapPin" label="Complete Address / Location" multiline onChangeText={(value) => changeDraft('address', value)} themedStyles={styles} value={editing ? draft.address : managerAddress} />
                 </View>
               </View>
               <View style={styles.detailSection}>
                 <Text style={styles.sectionTitle}>Branch & access</Text>
                 <View style={styles.sectionGrid}>
-                  <ProfileField label="UID" themedStyles={styles} value={managerUid} />
-                  <ProfileField label="Branch" themedStyles={styles} value={branchName} />
-                  <ProfileField label="Access Level" themedStyles={styles} value="Manager panel" />
+                  <ProfileField colors={colors} icon="ShieldCheck" label="UID" themedStyles={styles} value={managerUid} />
+                  <ProfileField colors={colors} icon="Building2" label="Branch" themedStyles={styles} value={branchName} />
+                  <ProfileField colors={colors} icon="ShieldCheck" label="Access Level" themedStyles={styles} value="Manager panel" />
                 </View>
               </View>
             </View>
@@ -515,6 +519,11 @@ const createStyles = (colors, compact) =>
       borderWidth: 1,
       paddingHorizontal: 14,
       paddingVertical: 10,
+    },
+    fieldLabelRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
     },
     detailLabel: { color: colors.textSecondary, fontSize: 11, fontWeight: '700' },
     detailValue: { color: colors.textPrimary, fontSize: 14, fontWeight: '600', marginTop: 3 },

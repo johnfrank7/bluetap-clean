@@ -29,6 +29,7 @@ import { getProfileUniqueId } from '../../services/uniqueIds';
 import { formatPhilippinePhone, normalizePhilippinePhone } from '../../services/phoneUtils';
 import BlueTapHeader from '../../components/BlueTapHeader';
 import DistributorPortalBackground from '../../components/DistributorPortalBackground';
+import OngoingRequestFieldIcon from '../../components/OngoingRequestFieldIcon';
 import PortalSwipeContainer, { DISTRIBUTOR_TABS } from '../../components/PortalSwipeContainer';
 import { createShadow } from '../../components/shadowStyles';
 import { createPortalStyleSheet,
@@ -189,6 +190,7 @@ const buildChangedProfileUpdate = (currentProfile = {}, draft = {}) => {
 
 const ProfileField = memo(function ProfileField({
   editable = false,
+  icon,
   keyboardType = 'default',
   label,
   multiline = false,
@@ -200,7 +202,10 @@ const ProfileField = memo(function ProfileField({
   const { colors } = useBlueTapTheme();
   return (
     <View style={styles.profileField}>
-      <Text style={styles.label}>{label}</Text>
+      <View style={styles.fieldLabelRow}>
+        {icon && <OngoingRequestFieldIcon name={icon} size={14} color={colors.textSecondary || '#64748B'} />}
+        <Text style={styles.label}>{label}</Text>
+      </View>
       {editable ? (
         <TextInput
           style={[styles.input, multiline && styles.multilineInput]}
@@ -575,11 +580,13 @@ export default function DistributorProfilePage() {
             ) : (
               <>
                 <ProfileField
+                  icon="ShieldCheck"
                   label="Public ID"
                   value={profileDisplay.distributorId}
                 />
 
                 <ProfileField
+                  icon="User"
                   label="Full Name"
                   value={editingProfile ? profileDraft.fullName : profileDisplay.fullName}
                   editable={editingProfile}
@@ -588,6 +595,7 @@ export default function DistributorProfilePage() {
                 />
 
                 <ProfileField
+                  icon="Phone"
                   label="Contact Number"
                   value={
                     editingProfile
@@ -601,11 +609,13 @@ export default function DistributorProfilePage() {
                 />
 
                 <ProfileField
+                  icon="Mail"
                   label="Email Address"
                   value={profileDisplay.email}
                 />
 
                 <ProfileField
+                  icon="MapPin"
                   label="Complete Address"
                   value={editingProfile ? profileDraft.address : profileDisplay.address}
                   editable={editingProfile}
@@ -615,11 +625,13 @@ export default function DistributorProfilePage() {
                 />
 
                 <ProfileField
+                  icon="Building2"
                   label="Water Station"
                   value={profileDisplay.waterStation}
                 />
 
                 <ProfileField
+                  icon="Truck"
                   label="Account Role"
                   value={profileDisplay.role}
                 />
@@ -852,11 +864,16 @@ const styles = createPortalStyleSheet({
   profileField: {
     marginTop: 14,
   },
+  fieldLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 4,
+  },
   label: {
     fontSize: 12,
     color: TEXT_MUTED,
     fontWeight: 'bold',
-    marginBottom: 4,
   },
   value: {
     fontSize: 15,

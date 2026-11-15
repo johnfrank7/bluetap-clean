@@ -31,6 +31,7 @@ import { normalizeRole, signOutAndClearSessions } from '../../services/authSessi
 import { getProfileUniqueId } from '../../services/uniqueIds';
 import { formatPhilippinePhone, normalizePhilippinePhone } from '../../services/phoneUtils';
 import { createShadow } from '../../components/shadowStyles';
+import OngoingRequestFieldIcon from '../../components/OngoingRequestFieldIcon';
 import { createPortalStyleSheet,
   useBlueTapTheme } from '../../components/BlueTapTheme';
 import BlueTapBrandMark from '../../components/BlueTapBrandMark';
@@ -100,6 +101,7 @@ const splitFullName = (fullName) => {
 
 const ProfileField = memo(function ProfileField({
   editable = false,
+  icon,
   keyboardType = 'default',
   label,
   multiline = false,
@@ -108,10 +110,13 @@ const ProfileField = memo(function ProfileField({
   saving = false,
   value,
 }) {
-  const { colors } = useBlueTapTheme();
+  const { colors, isDark } = useBlueTapTheme();
   return (
     <View style={styles.profileField}>
-      <Text style={styles.label}>{label}</Text>
+      <View style={styles.fieldLabelRow}>
+        {icon && <OngoingRequestFieldIcon name={icon} size={14} color={isDark ? colors.textSecondary : '#64748B'} />}
+        <Text style={styles.label}>{label}</Text>
+      </View>
       {editable ? (
         <TextInput
           style={[styles.input, multiline && styles.multilineInput]}
@@ -462,11 +467,13 @@ export default function ProfilePage() {
             ) : (
               <>
                 <ProfileField
+                  icon="ShieldCheck"
                   label="Public ID"
                   value={profileDisplay.uniqueId}
                 />
 
                 <ProfileField
+                  icon="User"
                   label="Full Name"
                   value={editingProfile ? profileDraft.fullName : profileDisplay.fullName}
                   editable={editingProfile}
@@ -475,6 +482,7 @@ export default function ProfilePage() {
                 />
 
                 <ProfileField
+                  icon="Phone"
                   label="Contact Number"
                   value={editingProfile ? profileDraft.phone : profileDisplay.phone}
                   editable={editingProfile}
@@ -484,11 +492,13 @@ export default function ProfilePage() {
                 />
 
                 <ProfileField
+                  icon="Mail"
                   label="Email Address"
                   value={profileDisplay.email}
                 />
 
                 <ProfileField
+                  icon="MapPin"
                   label="Complete Address"
                   value={editingProfile ? profileDraft.address : profileDisplay.address}
                   editable={editingProfile}
@@ -733,11 +743,16 @@ const styles = createPortalStyleSheet({
   profileField: {
     marginTop: 14,
   },
+  fieldLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 4,
+  },
   label: {
     fontSize: 12,
     color: TEXT_MUTED,
     fontWeight: 'bold',
-    marginBottom: 4,
   },
   value: {
     fontSize: 15,

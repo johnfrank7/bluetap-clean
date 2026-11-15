@@ -6,10 +6,10 @@ import { saveLocalUser } from '../../localUsers';
 
 import { useAdminTheme } from '../../components/AdminTheme';
 import BlueTapIcon from '../../components/BlueTapIcon';
+import OngoingRequestFieldIcon from '../../components/OngoingRequestFieldIcon';
 import ManagerShell, { ManagerPill, ManagerWaterDrop } from '../../components/ManagerShell';
 import { useManagerRealtimeData } from '../../components/ManagerRealtimeData';
 import TopToastFeedback from '../../components/TopToastFeedback';
-import ChangePasswordModal from '../../components/ChangePasswordModal';
 import useUnsavedChangesGuard from '../../components/useUnsavedChangesGuard';
 import { getModuleSession } from '../../services/authSession';
 import { formatPhilippinePhone, normalizePhilippinePhone } from '../../services/phoneUtils';
@@ -33,10 +33,13 @@ const draftFor = (profile = {}) => {
   };
 };
 
-function ProfileField({ editable, label, multiline, onChangeText, value, themedStyles }) {
+function ProfileField({ editable, icon, label, multiline, onChangeText, value, themedStyles, colors }) {
   return (
     <View style={themedStyles.fieldWrap}>
-      <Text style={themedStyles.detailLabel}>{label}</Text>
+      <View style={themedStyles.fieldLabelRow}>
+        {icon && <OngoingRequestFieldIcon name={icon} size={14} color={colors?.textSecondary || '#64748B'} />}
+        <Text style={themedStyles.detailLabel}>{label}</Text>
+      </View>
       {editable ? (
         <TextInput
           accessibilityLabel={label}
@@ -53,7 +56,7 @@ function ProfileField({ editable, label, multiline, onChangeText, value, themedS
 }
 
 export default function ManagerProfilePage() {
-  const { colors, resolvedTheme } = useAdminTheme();
+  const { colors } = useAdminTheme();
   const { width } = useWindowDimensions();
   const compact = width < 700;
   const styles = useMemo(() => createStyles(colors, compact), [colors, compact]);
@@ -65,7 +68,6 @@ export default function ManagerProfilePage() {
   const [draft, setDraft] = useState(() => draftFor(manager));
   const [selectedImage, setSelectedImage] = useState(null);
   const [toast, setToast] = useState({ visible: false, message: '', type: 'info' });
-  const [changePasswordVisible, setChangePasswordVisible] = useState(false);
 
   useEffect(() => {
     if (!editing) setDraft(draftFor(manager || {}));
@@ -271,18 +273,18 @@ export default function ManagerProfilePage() {
               <View style={styles.detailSection}>
                 <Text style={styles.sectionTitle}>Personal information</Text>
                 <View style={styles.sectionGrid}>
-                  <ProfileField editable={editing} label="Full Name" onChangeText={(value) => changeDraft('fullName', value)} themedStyles={styles} value={editing ? draft.fullName : managerFullName || 'Not set'} />
-                  <ProfileField editable={editing} label="Contact Number" onChangeText={(value) => changeDraft('phone', value)} themedStyles={styles} value={editing ? draft.phone : managerContact} />
-                  <ProfileField label="Email Address" themedStyles={styles} value={managerEmail} />
-                  <ProfileField editable={editing} label="Complete Address / Location" multiline onChangeText={(value) => changeDraft('address', value)} themedStyles={styles} value={editing ? draft.address : managerAddress} />
+                  <ProfileField colors={colors} editable={editing} icon="User" label="Full Name" onChangeText={(value) => changeDraft('fullName', value)} themedStyles={styles} value={editing ? draft.fullName : managerFullName || 'Not set'} />
+                  <ProfileField colors={colors} editable={editing} icon="Phone" label="Contact Number" onChangeText={(value) => changeDraft('phone', value)} themedStyles={styles} value={editing ? draft.phone : managerContact} />
+                  <ProfileField colors={colors} icon="Mail" label="Email Address" themedStyles={styles} value={managerEmail} />
+                  <ProfileField colors={colors} editable={editing} icon="MapPin" label="Complete Address / Location" multiline onChangeText={(value) => changeDraft('address', value)} themedStyles={styles} value={editing ? draft.address : managerAddress} />
                 </View>
               </View>
               <View style={styles.detailSection}>
                 <Text style={styles.sectionTitle}>Branch &amp; access</Text>
                 <View style={styles.sectionGrid}>
-                  <ProfileField label="UID" themedStyles={styles} value={managerUid} />
-                  <ProfileField label="Branch" themedStyles={styles} value={branchName} />
-                  <ProfileField label="Access Level" themedStyles={styles} value="Manager panel" />
+                  <ProfileField colors={colors} icon="ShieldCheck" label="UID" themedStyles={styles} value={managerUid} />
+                  <ProfileField colors={colors} icon="Building2" label="Branch" themedStyles={styles} value={branchName} />
+                  <ProfileField colors={colors} icon="ShieldCheck" label="Access Level" themedStyles={styles} value="Manager panel" />
                 </View>
               </View>
             </View>
@@ -305,24 +307,9 @@ export default function ManagerProfilePage() {
               </TouchableOpacity>
             </View>
           )}
-          <TouchableOpacity
-            accessibilityRole="button"
-            accessibilityLabel="Change Password"
-            disabled={saving}
-            onPress={() => confirmLeave(() => setChangePasswordVisible(true))}
-            style={[styles.primaryButton, { marginTop: 18 }]}
-          >
-            <Text style={styles.primaryButtonText}>Change Password</Text>
-          </TouchableOpacity>
           <Text style={styles.securityNote}>Email, branch assignment, public UID, account status, and access level are managed securely by BlueTap.</Text>
         </View>
       </View>
-      <ChangePasswordModal
-        visible={changePasswordVisible}
-        onClose={() => setChangePasswordVisible(false)}
-        onSuccess={() => setToast({ visible: true, message: 'Password updated successfully.', type: 'success' })}
-        theme={{ colors, isDark: resolvedTheme === 'dark' }}
-      />
       <UnsavedModal />
     </ManagerShell>
   );
@@ -370,6 +357,7 @@ const createStyles = (colors, compact) => StyleSheet.create({
   sectionTitle: { color: colors.textPrimary, fontSize: 14, fontWeight: '800', paddingBottom: 9, marginBottom: 2, borderBottomWidth: 1, borderBottomColor: colors.border },
   sectionGrid: { flexDirection: 'row', flexWrap: 'wrap', columnGap: 12, rowGap: 2 },
   fieldWrap: { flexBasis: compact ? '100%' : '48%', flexGrow: 1, minWidth: compact ? 0 : 220, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: colors.border },
+  fieldLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   detailLabel: { color: colors.textSecondary, fontSize: 11, fontWeight: '800', letterSpacing: 0.35, textTransform: 'uppercase' },
   detailValue: { color: colors.textPrimary, fontSize: 15, fontWeight: '700', lineHeight: 21, marginTop: 6 },
   input: { backgroundColor: colors.input || colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: 10, color: colors.textPrimary, fontSize: 15, marginTop: 7, minHeight: 44, paddingHorizontal: 12, paddingVertical: 10 },

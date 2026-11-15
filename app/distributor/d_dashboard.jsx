@@ -17,6 +17,7 @@ import BlueTapHeader from '../../components/BlueTapHeader';
 import DistributorPortalBackground from '../../components/DistributorPortalBackground';
 import RequestDetailsModal from '../../components/RequestDetailsModal';
 import SoftStatusBadge from '../../components/SoftStatusBadge';
+import OngoingRequestFieldIcon from '../../components/OngoingRequestFieldIcon';
 import { createShadow } from '../../components/shadowStyles';
 import BlueTapEmptyState from '../../components/BlueTapEmptyState';
 import BlueTapIcon from '../../components/BlueTapIcon';
@@ -280,16 +281,74 @@ function CurrentRequestCard({ actionsDisabled = false, colors, request, distribu
   const hasAction = ['distributor assigned', 'pending', 'accepted', 'scheduled', 'out for delivery'].includes(normalizeStatus(request.status));
   const isDeliveryCompletion = actionLabel === 'Delivered';
   return <View style={styles.currentRequestCard}>
-    <View style={styles.requestCardHeader}><View style={styles.requestTitleBlock}><Text style={styles.requestId}>Request ID: {request.requestId}</Text></View><SoftStatusBadge status={request.status} /></View>
+    <View style={styles.requestCardHeader}>
+      <View style={styles.requestIdWrap}>
+        <OngoingRequestFieldIcon name="Receipt" size={15} color={BLUE} />
+        <Text style={styles.requestId}>Request ID: {request.requestId}</Text>
+      </View>
+      <SoftStatusBadge status={request.status} />
+    </View>
     <View style={styles.compactRequestBody}>
-      <View style={[styles.infoGridRow, styles.infoGridRowDivider]}><View style={styles.infoGridColumn}><Text style={styles.infoGridLabel}>Customer Name</Text><Text style={styles.infoGridPrimaryValue} numberOfLines={1}>{request.customerName}</Text><Text style={[styles.infoGridLabel, styles.infoGridLabelGap]}>Requester ID</Text><Text style={styles.infoGridValue} numberOfLines={1}>{requesterUid}</Text></View><View style={styles.infoGridColumn}><Text style={styles.infoGridLabel}>Amount Due</Text><Text style={styles.infoGridValue} numberOfLines={1}>{formatAmountDue(request.total_cost)}</Text><Text style={[styles.infoGridLabel, styles.infoGridLabelGap]}>Distributor ID</Text><Text style={styles.infoGridValue} numberOfLines={1}>{distributorUid}</Text></View></View>
-      <View style={styles.infoGridRow}><View style={styles.infoGridColumn}><Text style={styles.infoGridLabel}>Address</Text><Text style={styles.infoGridValue} numberOfLines={2}>{request.deliveryAddress}</Text><Text style={[styles.infoGridLabel, styles.infoGridLabelGap]}>Scheduled delivery</Text><Text style={styles.infoGridValue} numberOfLines={1}>{request.scheduledDateTime || request.deliveryDate || 'Not set'}</Text></View><View style={styles.infoGridColumn}><Text style={styles.infoGridLabel}>Product Ordered</Text><Text style={styles.infoGridPrimaryValue} numberOfLines={2}>{request.productsOrdered}</Text><Text style={styles.infoGridSubValue} numberOfLines={1}>{request.quantity} | {request.containerType} · {analyzeOrderCargo(request).badgeLabel}</Text></View></View>
+      <View style={[styles.infoGridRow, styles.infoGridRowDivider]}>
+        <View style={styles.infoGridColumn}>
+          <View style={styles.fieldLabelRow}>
+            <OngoingRequestFieldIcon name="User" size={13} color={colors.textSecondary} />
+            <Text style={styles.infoGridLabel}>Customer Name</Text>
+          </View>
+          <Text style={styles.infoGridPrimaryValue} numberOfLines={1}>{request.customerName}</Text>
+          <View style={[styles.fieldLabelRow, styles.fieldLabelRowGap]}>
+            <OngoingRequestFieldIcon name="ShieldCheck" size={13} color={colors.textSecondary} />
+            <Text style={styles.infoGridLabel}>Requester ID</Text>
+          </View>
+          <Text style={styles.infoGridValue} numberOfLines={1}>{requesterUid}</Text>
+        </View>
+        <View style={styles.infoGridColumn}>
+          <View style={styles.fieldLabelRow}>
+            <OngoingRequestFieldIcon name="Wallet" size={13} color={colors.textSecondary} />
+            <Text style={styles.infoGridLabel}>Amount Due</Text>
+          </View>
+          <Text style={styles.infoGridValue} numberOfLines={1}>{formatAmountDue(request.total_cost)}</Text>
+          <View style={[styles.fieldLabelRow, styles.fieldLabelRowGap]}>
+            <OngoingRequestFieldIcon name="Truck" size={13} color={colors.textSecondary} />
+            <Text style={styles.infoGridLabel}>Distributor ID</Text>
+          </View>
+          <Text style={styles.infoGridValue} numberOfLines={1}>{distributorUid}</Text>
+        </View>
+      </View>
+      <View style={styles.infoGridRow}>
+        <View style={styles.infoGridColumn}>
+          <View style={styles.fieldLabelRow}>
+            <OngoingRequestFieldIcon name="MapPin" size={13} color={colors.textSecondary} />
+            <Text style={styles.infoGridLabel}>Address</Text>
+          </View>
+          <Text style={styles.infoGridValue} numberOfLines={2}>{request.deliveryAddress}</Text>
+          <View style={[styles.fieldLabelRow, styles.fieldLabelRowGap]}>
+            <OngoingRequestFieldIcon name="CalendarClock" size={13} color={colors.textSecondary} />
+            <Text style={styles.infoGridLabel}>Scheduled delivery</Text>
+          </View>
+          <Text style={styles.infoGridValue} numberOfLines={1}>{request.scheduledDateTime || request.deliveryDate || 'Not set'}</Text>
+        </View>
+        <View style={styles.infoGridColumn}>
+          <View style={styles.fieldLabelRow}>
+            <OngoingRequestFieldIcon name="Droplets" size={13} color={colors.textSecondary} />
+            <Text style={styles.infoGridLabel}>Product Ordered</Text>
+          </View>
+          <Text style={styles.infoGridPrimaryValue} numberOfLines={2}>{request.productsOrdered}</Text>
+          <Text style={styles.infoGridSubValue} numberOfLines={1}>{request.quantity} | {request.containerType} · {analyzeOrderCargo(request).badgeLabel}</Text>
+        </View>
+      </View>
     </View>
     <View style={styles.cardActionsGrid}>
-      <Pressable disabled={actionsDisabled} onPress={onDetails} style={({ hovered, pressed }) => [styles.viewDetailsButton, styles.actionGridItem, hovered && { backgroundColor: colors.primarySoft }, pressed && styles.actionButtonPressed, actionsDisabled && styles.actionButtonDisabled]}><Text style={styles.viewDetailsText}>View Details</Text></Pressable>
+      <Pressable disabled={actionsDisabled} onPress={onDetails} style={({ hovered, pressed }) => [styles.viewDetailsButton, styles.actionGridItem, hovered && { backgroundColor: colors.primarySoft }, pressed && styles.actionButtonPressed, actionsDisabled && styles.actionButtonDisabled]}>
+        <OngoingRequestFieldIcon name="Eye" size={14} color={BLUE} />
+        <Text style={styles.viewDetailsText}>View Details</Text>
+      </Pressable>
       {hasAction && <Pressable disabled={actionsDisabled} onPress={onAction} style={({ hovered, pressed }) => [styles.primaryActionButton, styles.actionGridItem, isDeliveryCompletion && { backgroundColor: colors.successAction }, hovered && styles.actionButtonHovered, pressed && styles.actionButtonPressed, actionsDisabled && styles.actionButtonDisabled]}><Text style={[styles.primaryActionText, isDeliveryCompletion && { color: colors.onSuccess }]}>{actionLabel}</Text></Pressable>}
       <DistributorOrderChatAction order={request} disabled={actionsDisabled} style={styles.actionGridItem} />
-      <Pressable disabled={processing || actionsDisabled} accessibilityRole="button" onPress={onFailure} style={({ hovered, pressed }) => [styles.viewDetailsButton, styles.failureActionButton, styles.actionGridItem, hovered && { backgroundColor: colors.dangerSoft }, pressed && styles.actionButtonPressed, (processing || actionsDisabled) && styles.actionButtonDisabled]}><Text style={styles.failureActionText}>Delivery Failed</Text></Pressable>
+      <Pressable disabled={processing || actionsDisabled} accessibilityRole="button" onPress={onFailure} style={({ hovered, pressed }) => [styles.viewDetailsButton, styles.failureActionButton, styles.actionGridItem, hovered && { backgroundColor: colors.dangerSoft }, pressed && styles.actionButtonPressed, (processing || actionsDisabled) && styles.actionButtonDisabled]}>
+        <OngoingRequestFieldIcon name="XCircle" size={14} color={BLUETAP_COLORS.danger} />
+        <Text style={styles.failureActionText}>Delivery Failed</Text>
+      </Pressable>
     </View>
   </View>;
 }
@@ -930,6 +989,13 @@ const styles = createPortalStyleSheet({
   requestTitleBlock: {
     flex: 1,
   },
+  requestIdWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flex: 1,
+    minWidth: 0,
+  },
   requestId: {
     color: BLUE,
     fontSize: 15,
@@ -950,11 +1016,19 @@ const styles = createPortalStyleSheet({
   infoGridColumn: {
     flex: 1,
   },
+  fieldLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    marginBottom: 3,
+  },
+  fieldLabelRowGap: {
+    marginTop: 8,
+  },
   infoGridLabel: {
     color: TEXT_MUTED,
     fontSize: 11,
     fontWeight: 'bold',
-    marginBottom: 3,
   },
   infoGridLabelGap: {
     marginTop: 8,
@@ -998,6 +1072,8 @@ const styles = createPortalStyleSheet({
     borderWidth: 1.5,
     borderColor: BLUE,
     borderRadius: 12,
+    flexDirection: 'row',
+    gap: 6,
     alignItems: 'center',
     justifyContent: 'center',
   },

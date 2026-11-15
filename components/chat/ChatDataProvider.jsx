@@ -77,6 +77,22 @@ export function presentationFor(conversation, role, roleData) {
   return { ...presented, ...avatarForConversation(presented, role) };
 }
 
+const MAX_THREAD_CACHE_ENTRIES = 25;
+const threadMessagesCache = new Map();
+
+function setThreadCache(key, value) {
+  if (!key) return;
+  if (threadMessagesCache.size >= MAX_THREAD_CACHE_ENTRIES) {
+    const oldestKey = threadMessagesCache.keys().next().value;
+    if (oldestKey) threadMessagesCache.delete(oldestKey);
+  }
+  threadMessagesCache.set(key, value);
+}
+
+function clearThreadCache() {
+  threadMessagesCache.clear();
+}
+
 export default function ChatDataProvider({ children, role }) {
   const portalTheme = useBlueTapTheme();
   const managerTheme = useAdminTheme();
@@ -102,6 +118,7 @@ export default function ChatDataProvider({ children, role }) {
   const [localMessages, setLocalMessages] = React.useState([]);
   const [hasEarlierMessages, setHasEarlierMessages] = React.useState(false);
   const [loadingEarlier, setLoadingEarlier] = React.useState(false);
+  const [threadLoading, setThreadLoading] = React.useState(false);
   const [threadError, setThreadError] = React.useState('');
   const [messageActionError, setMessageActionError] = React.useState('');
   const [resolvingConversation, setResolvingConversation] = React.useState(false);
@@ -136,9 +153,22 @@ export default function ChatDataProvider({ children, role }) {
     readCursorRef.current.clear();
     hydratedSummariesRef.current = false;
     summaryIncomingSeqsRef.current.clear();
+    clearThreadCache();
+    setLiveMessages([]);
+    setOlderMessages([]);
+    setLocalMessages([]);
   }, [uid, branchId, role]);
 
   const accessReadiness = chatAccessReadiness({ authReady, branchId, role, roleData, uid });
+
+  React.useEffect(() => {
+    if (accessReadiness === 'denied') {
+      clearThreadCache();
+      setLiveMessages([]);
+      setOlderMessages([]);
+      setLocalMessages([]);
+    }
+  }, [accessReadiness]);
   const historyBranchId = role === 'distributor' ? clean(distributorData.profile?.branchId || distributorData.branch?.id) : branchId;
   const historyScope = accessReadiness === 'ready' ? JSON.stringify([role, uid, historyBranchId]) : '';
   const historyScopeRef = React.useRef(historyScope);
@@ -305,13 +335,31 @@ export default function ChatDataProvider({ children, role }) {
     return () => { clearTimeout(expiryTimer); clearInterval(minuteTimer); };
   }, [currentConversation?.accessEndsAt]);
 
+  const activeThreadCacheKey = currentConversation?.id && uid
+    ? `${uid}:${role}:${branchId || 'nobranch'}:${currentConversation.id}:${currentConversation.historyId || 'active'}`
+    : '';
+
   React.useEffect(() => {
     threadUnsubscribeRef.current?.();
     threadUnsubscribeRef.current = null;
-    setLiveMessages([]);
-    setOlderMessages([]);
+    if (!availability.readable && activeThreadCacheKey) {
+      threadMessagesCache.delete(activeThreadCacheKey);
+    }
+    const cached = (activeThreadCacheKey && availability.readable) ? threadMessagesCache.get(activeThreadCacheKey) : null;
+    if (cached) {
+      setLiveMessages(cached.messages || []);
+      setOlderMessages(cached.olderMessages || []);
+      setHasEarlierMessages(Boolean(cached.hasEarlier));
+      setBackendBeforeSeq(cached.beforeSeq || null);
+      setThreadLoading(false);
+    } else {
+      setLiveMessages([]);
+      setOlderMessages([]);
+      setBackendBeforeSeq(null);
+      setHasEarlierMessages(false);
+      setThreadLoading(Boolean(currentConversation?.id && availability.readable));
+    }
     setLocalMessages([]);
-    setBackendBeforeSeq(null);
     setThreadError('');
     setMessageActionError('');
     hydratedOpenThreadRef.current = false;
@@ -335,11 +383,24 @@ export default function ChatDataProvider({ children, role }) {
             }
           }
         }
+        if (activeThreadCacheKey) {
+          setThreadCache(activeThreadCacheKey, {
+            messages: items,
+            olderMessages: [],
+            hasEarlier: items.length === 40,
+            beforeSeq: null,
+          });
+        }
         setLiveMessages(items);
         setHasEarlierMessages(items.length === 40);
+        setThreadLoading(false);
         setThreadError('');
       },
       onError: (listenerError) => {
+        if (activeThreadCacheKey) threadMessagesCache.delete(activeThreadCacheKey);
+        setLiveMessages([]);
+        setOlderMessages([]);
+        setThreadLoading(false);
         setThreadError(listenerError?.code === 'permission-denied' ? 'This conversation is no longer available.' : 'New messages could not be loaded.');
         if (typeof __DEV__ !== 'undefined' && __DEV__) console.warn('[BlueTapChat] thread listener failed', { code: listenerError?.code || 'unknown' });
       },
@@ -349,7 +410,7 @@ export default function ChatDataProvider({ children, role }) {
       if (threadUnsubscribeRef.current === unsubscribe) threadUnsubscribeRef.current = null;
       unsubscribe?.();
     };
-  }, [accessReadiness, availability.readable, currentConversation?.id, currentConversation?.historyId, currentConversation?.type, panelOpen, threadVersion]);
+  }, [accessReadiness, activeThreadCacheKey, availability.readable, branchId, currentConversation?.id, currentConversation?.historyId, currentConversation?.type, panelOpen, role, threadVersion, uid]);
 
   React.useEffect(() => {
     if (!panelOpen || !currentConversation?.id || accessReadiness !== 'ready' || !availability.readable ||
@@ -358,16 +419,32 @@ export default function ChatDataProvider({ children, role }) {
     loadMessageHistory({ conversationId: currentConversation.id, historyId: currentConversation.historyId, limit: 40 })
       .then((page) => {
         if (cancelled) return;
-        setLiveMessages(page.messages || []);
+        const pageMessages = page.messages || [];
+        if (activeThreadCacheKey) {
+          setThreadCache(activeThreadCacheKey, {
+            messages: pageMessages,
+            olderMessages: [],
+            hasEarlier: Boolean(page.nextBeforeSeq),
+            beforeSeq: page.nextBeforeSeq || null,
+          });
+        }
+        setLiveMessages(pageMessages);
         setBackendBeforeSeq(page.nextBeforeSeq || null);
         setHasEarlierMessages(Boolean(page.nextBeforeSeq));
+        setThreadLoading(false);
         setThreadError('');
       })
       .catch((loadError) => {
-        if (!cancelled) setThreadError(loadError?.message || 'Messages could not be loaded.');
+        if (!cancelled) {
+          if (activeThreadCacheKey) threadMessagesCache.delete(activeThreadCacheKey);
+          setLiveMessages([]);
+          setOlderMessages([]);
+          setThreadLoading(false);
+          setThreadError(loadError?.message || 'Messages could not be loaded.');
+        }
       });
     return () => { cancelled = true; };
-  }, [accessReadiness, availability.readable, currentConversation?.id, currentConversation?.historyId, currentConversation?.type, panelOpen, summaryVersion, threadVersion]);
+  }, [accessReadiness, activeThreadCacheKey, availability.readable, currentConversation?.id, currentConversation?.historyId, currentConversation?.type, panelOpen, summaryVersion, threadVersion]);
 
   const messages = React.useMemo(() => mergeMessages(olderMessages, liveMessages, localMessages), [liveMessages, localMessages, olderMessages]);
 
@@ -580,7 +657,7 @@ export default function ChatDataProvider({ children, role }) {
         ? conversationNotice.body
         : '',
     conversationNotice,
-    hasEarlierMessages, loadingEarlier, threadError, messageActionError, resolvingConversation, resolveError,
+    hasEarlierMessages, loadingEarlier, threadLoading, threadError, messageActionError, resolvingConversation, resolveError,
     totalUnread: totalUnread(conversations, role, uid, branchId),
     totalUnreadLabel: formatBadge(totalUnread(conversations, role, uid, branchId)),
     openChat,
@@ -598,7 +675,7 @@ export default function ChatDataProvider({ children, role }) {
     loadEarlierMessages,
     isOwnMessage: (message) => isOwnMessage(message, role, uid, branchId),
     receiptForMessage: (message) => receiptFor(message, currentConversation, role, uid, branchId),
-  }), [accessReadiness, roleData.users, roleData.orders, branchId, chatRestriction, chatListTab, colors, isDark, conversationNotice, conversations, currentConversation, deleteCurrentMessage, editCurrentMessage, error, hasEarlierMessages, history, historyState, historyScope, loading, loadingEarlier, loadMoreHistory, messageActionError, messages, openChat, closeChat, openStationChat, openConversation, openBlueTapConversation, panelOpen, refreshHistory, requesterBranches, resolveAndOpen, resolveError, resolvingConversation, retryMessage, role, sendCurrentMessage, summaryVersion, threadError, uid, loadEarlierMessages]);
+  }), [accessReadiness, roleData.users, roleData.orders, branchId, chatRestriction, chatListTab, colors, isDark, conversationNotice, conversations, currentConversation, deleteCurrentMessage, editCurrentMessage, error, hasEarlierMessages, history, historyState, historyScope, loading, loadingEarlier, loadMoreHistory, messageActionError, messages, openChat, closeChat, openStationChat, openConversation, openBlueTapConversation, panelOpen, refreshHistory, requesterBranches, resolveAndOpen, resolveError, resolvingConversation, retryMessage, role, sendCurrentMessage, summaryVersion, threadError, threadLoading, uid, loadEarlierMessages]);
 
   return (
     <ChatContext.Provider value={value}>

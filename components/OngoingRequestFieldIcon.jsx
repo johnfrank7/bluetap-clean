@@ -28,6 +28,7 @@ const icons = Object.freeze({
   ShieldAlert: require('../assets/icons/sidebar/shield-alert.svg'),
   User: require('../assets/icons/portal/user-round.svg'),
   Phone: require('../assets/icons/ongoing/phone.svg'),
+  Mail: require('../assets/icons/ongoing/mail.svg'),
   Tag: require('../assets/icons/ongoing/tag.svg'),
 });
 

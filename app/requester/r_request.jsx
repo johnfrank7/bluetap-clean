@@ -350,10 +350,12 @@ const RequestCard = ({
         <View style={styles.compactInfoColumn}>
           <View style={styles.requestInfoLabelRow}>
             <OngoingRequestFieldIcon name="Layers" size={13} color={colors.textSecondary} />
-            <Text style={[styles.compactLabel, isDark && { color: colors.textSecondary }]}>Quantity · Expected</Text>
+            <Text style={[styles.compactLabel, isDark && { color: colors.textSecondary }]}>
+              {isHistory ? 'Quantity · Delivered' : 'Quantity · Expected'}
+            </Text>
           </View>
           <Text style={[styles.compactValue, isDark && { color: colors.textPrimary }]} numberOfLines={2}>
-            {getQuantityText(request)} · {formatDateValue(request.delivery_date || request.expectedDeliveryDate, 'Not scheduled')}
+            {getQuantityText(request)} · {formatDateValue(request.delivery_date || request.expectedDeliveryDate, isHistory ? 'Delivered' : 'Not scheduled')}
           </Text>
         </View>
       </View>
