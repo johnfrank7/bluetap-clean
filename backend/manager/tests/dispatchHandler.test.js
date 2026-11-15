@@ -729,13 +729,13 @@ test('Manager assignment prevents conflicting schedule slots but permits non-con
   assert.equal(nonConflictAssign.body.order.status, 'distributor_assigned');
 });
 
-test('Manager assignment enforces maximum active workload capacity', async () => {
+test('Manager assignment permits more than 5 valid non-overlapping trips without arbitrary limits', async () => {
   const f = fixture();
   const dispatch = createManagerDispatchHandler(f.getAdmin);
 
-  // Create 5 existing active orders assigned to distributor-a with non-conflicting times
+  // Create 5 existing active orders assigned to distributor-a with non-conflicting times (2 hours apart)
   for (let i = 1; i <= 5; i++) {
-    const time = new Date(Date.now() + (i * 3600000) + 86400000).toISOString();
+    const time = new Date(Date.now() + (i * 2 * 3600000) + 86400000).toISOString();
     f.records.set(`requests/active-order-${i}`, {
       requestId: `BT-ACT-${i}`,
       branchId: 'branch-a',
@@ -743,16 +743,221 @@ test('Manager assignment enforces maximum active workload capacity', async () =>
       status: 'scheduled',
       assignedDistributorUid: 'distributor-a',
       scheduledAt: time,
+      items: [{ productNameSnapshot: 'Purified Water Refill', quantity: 10 }],
     });
   }
 
-  // Attempting to assign another order to distributor-a should be rejected due to capacity
-  const overloadAssign = await call(dispatch, 'PATCH', 'manager-a-token', {
+  // Attempting to assign a 6th valid non-overlapping trip must succeed under the removed 5-trip cap policy
+  const sixthAssignTime = new Date(Date.now() + 86400000 + (12 * 3600000)).toISOString();
+  const sixthAssign = await call(dispatch, 'PATCH', 'manager-a-token', {
     orderId: 'order-a',
     action: 'assign-distributor',
     distributorUid: 'distributor-a',
-    scheduledAt: new Date(Date.now() + 86400000 + 36000000).toISOString(),
+    scheduledAt: sixthAssignTime,
   });
-  assert.equal(overloadAssign.statusCode, 409);
-  assert.equal(overloadAssign.body.error.reason, 'DISTRIBUTOR_WORKLOAD_EXCEEDED');
+  assert.equal(sixthAssign.statusCode, 200);
+  assert.equal(sixthAssign.body.order.assignedDistributorUid, 'distributor-a');
+  assert.equal(sixthAssign.body.order.tripNumber, 6);
+
+  // However, attempting to schedule a trip that overlaps with an existing trip must remain blocked
+  const overlappingTime = new Date(Date.now() + (1 * 2 * 3600000) + 86400000 + (15 * 60 * 1000)).toISOString();
+  f.records.set('requests/order-overlap', {
+    id: 'order-overlap',
+    requestId: 'BT-OVL-1',
+    branchId: 'branch-a',
+    currentBranchId: 'branch-a',
+    status: 'awaiting_distributor_assignment',
+    items: [{ productNameSnapshot: 'Purified Water Refill', quantity: 5 }],
+    totalAtOrder: 150,
+  });
+  const overlapAssign = await call(dispatch, 'PATCH', 'manager-a-token', {
+    orderId: 'order-overlap',
+    action: 'assign-distributor',
+    distributorUid: 'distributor-a',
+    scheduledAt: overlappingTime,
+  });
+  assert.equal(overlapAssign.statusCode, 409);
+  assert.equal(overlapAssign.body.error.reason, 'DISTRIBUTOR_SCHEDULE_CONFLICT');
+});
+
+test('Multi-Trip System: multiple orders can be co-loaded into one trip up to 60 containers with tripId and remaining capacity', async () => {
+  const f = fixture();
+  const dispatch = createManagerDispatchHandler(f.getAdmin);
+
+  const slotTime = new Date(Date.now() + 86400000);
+  slotTime.setHours(9, 0, 0, 0);
+
+  // Set order-a with 35 containers
+  f.records.set('requests/order-a', {
+    ...f.records.get('requests/order-a'),
+    items: [{ productId: 'product-1', productNameSnapshot: 'Refill', quantity: 35 }],
+  });
+
+  // Assign order-a to distributor-a at 9:00 AM
+  const assign1 = await call(dispatch, 'PATCH', 'manager-a-token', {
+    orderId: 'order-a',
+    action: 'assign-distributor',
+    distributorUid: 'distributor-a',
+    scheduledAt: slotTime.toISOString(),
+  });
+  assert.equal(assign1.statusCode, 200);
+  assert.equal(assign1.body.order.status, 'distributor_assigned');
+  assert.equal(assign1.body.order.orderContainers, 35);
+  assert.ok(assign1.body.order.tripId);
+  const tripId = assign1.body.order.tripId;
+
+  // Add order-decline with 20 containers to the SAME trip/slot
+  f.records.set('requests/order-decline', {
+    ...f.records.get('requests/order-decline'),
+    items: [{ productId: 'product-1', productNameSnapshot: 'Refill', quantity: 20 }],
+  });
+
+  const assign2 = await call(dispatch, 'PATCH', 'manager-a-token', {
+    orderId: 'order-decline',
+    action: 'assign-distributor',
+    distributorUid: 'distributor-a',
+    scheduledAt: slotTime.toISOString(),
+    tripId,
+  });
+  assert.equal(assign2.statusCode, 200);
+  assert.equal(assign2.body.order.status, 'distributor_assigned');
+  assert.equal(assign2.body.order.tripId, tripId);
+  assert.equal(assign2.body.order.orderContainers, 20);
+
+  // Verify GET /api/manager/dispatch-orders returns grouped trips
+  const getRes = await call(dispatch, 'GET', 'manager-a-token');
+  assert.equal(getRes.statusCode, 200);
+  assert.ok(Array.isArray(getRes.body.trips));
+  const trip = getRes.body.trips.find((t) => t.tripId === tripId);
+  assert.ok(trip);
+  assert.equal(trip.totalContainers, 55, '35 + 20 = 55 containers');
+  assert.equal(trip.remainingCapacity, 5, '60 - 55 = 5 remaining');
+});
+
+test('Multi-Trip System: rejects co-loading an order that would exceed the 60-container maximum', async () => {
+  const f = fixture();
+  const dispatch = createManagerDispatchHandler(f.getAdmin);
+
+  const slotTime = new Date(Date.now() + 86400000);
+  slotTime.setHours(9, 0, 0, 0);
+
+  // order-a has 45 containers
+  f.records.set('requests/order-a', {
+    ...f.records.get('requests/order-a'),
+    items: [{ productId: 'product-1', productNameSnapshot: 'Refill', quantity: 45 }],
+  });
+
+  const assign1 = await call(dispatch, 'PATCH', 'manager-a-token', {
+    orderId: 'order-a',
+    action: 'assign-distributor',
+    distributorUid: 'distributor-a',
+    scheduledAt: slotTime.toISOString(),
+  });
+  assert.equal(assign1.statusCode, 200);
+
+  // order-decline has 20 containers (45 + 20 = 65 > 60)
+  f.records.set('requests/order-decline', {
+    ...f.records.get('requests/order-decline'),
+    items: [{ productId: 'product-1', productNameSnapshot: 'Refill', quantity: 20 }],
+  });
+
+  const assign2 = await call(dispatch, 'PATCH', 'manager-a-token', {
+    orderId: 'order-decline',
+    action: 'assign-distributor',
+    distributorUid: 'distributor-a',
+    scheduledAt: slotTime.toISOString(),
+  });
+  assert.equal(assign2.statusCode, 409);
+  assert.equal(assign2.body.error.reason, 'TRIP_CAPACITY_EXCEEDED');
+});
+
+test('Multi-Trip System: unapproved trip cannot be started by distributor until Manager final approval', async () => {
+  const f = fixture();
+  const dispatch = createManagerDispatchHandler(f.getAdmin);
+  const distributorHandler = createDistributorAssignedOrdersHandler(f.getAdmin);
+
+  const slotTime = new Date(Date.now() + 86400000);
+  slotTime.setHours(9, 0, 0, 0);
+
+  // Set order as awaiting assignment with 5 containers
+  f.records.set('requests/order-a', {
+    ...f.records.get('requests/order-a'),
+    assignedDistributorUid: 'distributor-a',
+    status: 'distributor_assigned',
+    scheduledAt: slotTime.toISOString(),
+    managerApproved: false, // Unapproved draft
+    tripStatus: 'planning',
+  });
+
+  // Distributor accepts the assignment
+  const acceptRes = await call(distributorHandler, 'PATCH', 'distributor-a-token', {
+    orderId: 'order-a',
+    action: 'accept-assignment',
+  });
+  assert.equal(acceptRes.statusCode, 200);
+
+  // Attempt to start delivery without Manager approval -> must fail
+  const startFail = await call(distributorHandler, 'PATCH', 'distributor-a-token', {
+    orderId: 'order-a',
+    action: 'start-delivery',
+  });
+  assert.equal(startFail.statusCode, 409);
+  assert.equal(startFail.body.error.reason, 'TRIP_APPROVAL_REQUIRED');
+
+  // Manager provides final approval
+  const approveRes = await call(dispatch, 'PATCH', 'manager-a-token', {
+    orderId: 'order-a',
+    action: 'approve-trip',
+  });
+  assert.equal(approveRes.statusCode, 200);
+
+  // Distributor can now start delivery
+  const startSuccess = await call(distributorHandler, 'PATCH', 'distributor-a-token', {
+    orderId: 'order-a',
+    action: 'start-delivery',
+  });
+  assert.equal(startSuccess.statusCode, 200);
+  assert.equal(startSuccess.body.order.status, 'out_for_delivery');
+});
+
+test('Multi-Trip System: missing managerApproved does not grant approval to newly created trip; legacy order starts safely', async () => {
+  const f = fixture();
+  const distributorHandler = createDistributorAssignedOrdersHandler(f.getAdmin);
+
+  // Case 1: Newly created trip with missing managerApproved field
+  f.records.set('requests/order-new-trip', {
+    ...f.records.get('requests/order-a'),
+    id: 'order-new-trip',
+    assignedDistributorUid: 'distributor-a',
+    status: 'scheduled',
+    scheduledAt: new Date(Date.now() + 86400000).toISOString(),
+    tripId: 'trip-draft-1',
+    tripNumber: 1,
+    tripStatus: 'planning',
+    // managerApproved is omitted (undefined)
+  });
+
+  const missingApprovalStart = await call(distributorHandler, 'PATCH', 'distributor-a-token', {
+    orderId: 'order-new-trip',
+    action: 'start-delivery',
+  });
+  assert.equal(missingApprovalStart.statusCode, 409, 'Missing managerApproved on new trip must reject delivery start');
+  assert.equal(missingApprovalStart.body.error.reason, 'TRIP_APPROVAL_REQUIRED');
+
+  // Case 2: Legacy delivery record without trip fields or managerApproved
+  f.records.set('requests/order-legacy', {
+    ...f.records.get('requests/order-a'),
+    id: 'order-legacy',
+    assignedDistributorUid: 'distributor-a',
+    status: 'scheduled',
+    scheduledAt: new Date(Date.now() + 86400000).toISOString(),
+    // No tripId, no tripNumber, no tripStatus, no managerApproved
+  });
+
+  const legacyStart = await call(distributorHandler, 'PATCH', 'distributor-a-token', {
+    orderId: 'order-legacy',
+    action: 'start-delivery',
+  });
+  assert.equal(legacyStart.statusCode, 200, 'Legacy order without trip fields must be permitted to start delivery');
+  assert.equal(legacyStart.body.order.status, 'out_for_delivery');
 });

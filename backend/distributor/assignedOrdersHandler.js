@@ -209,8 +209,17 @@ function createDistributorAssignedOrdersHandler(getAdmin = getFirebaseAdmin) {
           if (!['accepted', 'scheduled'].includes(currentStatus)) {
             throw new OtpError(409, 'ORDER_NOT_STARTABLE', 'This delivery is not ready to start.');
           }
+          const isMultiTripOrder = Boolean(current.tripId || current.tripNumber || ['planning', 'draft'].includes(current.tripStatus));
+          const isUnapproved = current.managerApproved === false || (isMultiTripOrder && current.managerApproved !== true);
+          if (isUnapproved) {
+            throw new OtpError(409, 'TRIP_APPROVAL_REQUIRED', 'This trip requires Manager final approval before delivery can start.');
+          }
           event = 'DELIVERY_STARTED';
-          update = { status: 'out_for_delivery', deliveryStartedAt: now };
+          update = {
+            status: 'out_for_delivery',
+            deliveryStartedAt: now,
+            ...(isMultiTripOrder ? { tripStatus: 'in_transit' } : {}),
+          };
         } else if (action === 'fail-delivery') {
           if (currentStatus !== 'out_for_delivery') {
             throw new OtpError(409, 'ORDER_NOT_FAILABLE', 'Only deliveries that are out for delivery can be reported as failed.');

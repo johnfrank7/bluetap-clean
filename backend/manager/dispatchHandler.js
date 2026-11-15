@@ -11,6 +11,13 @@ const { calculateOrderTotal } = require('../../services/deliveryPricing');
 const { isMaterialEdit, savedPricingSnapshot, validateLegacyEditPricing, validateSavedPromotion, pricePromotionalEdit, assertPromotionalQuote } = require('../pricing/orderEditPricing');
 const { promotionCapability } = require('../pricing/promotionCapability');
 const { safeProduct } = require('../admin/productManagementHandler');
+const {
+  TRIP_MAX_CONTAINERS,
+  SCHEDULE_CONFLICT_WINDOW_MS,
+  calculateOrderContainers,
+  groupOrdersIntoTrips,
+  validateTripAssignment,
+} = require('../../services/managerTripCapacity');
 
 const AWAITING_ASSIGNMENT = 'awaiting_distributor_assignment';
 const DISTRIBUTOR_ASSIGNED = 'distributor_assigned';
@@ -101,6 +108,9 @@ function safeOrder(id, data = {}, branchNames = new Map()) {
       productId: clean(item.productId || item.product_id || item.id, 128),
       productNameSnapshot: clean(item.productNameSnapshot || item.product_name || item.name, 160),
       ...(item.containerTypeSnapshot || item.containerType || item.container_type ? { containerTypeSnapshot: clean(item.containerTypeSnapshot || item.containerType || item.container_type, 80) } : {}),
+      ...(item.sizeSnapshot || item.size ? { sizeSnapshot: clean(item.sizeSnapshot || item.size, 80) } : {}),
+      ...(item.loadClassificationSnapshot ? { loadClassificationSnapshot: clean(item.loadClassificationSnapshot, 80) } : {}),
+      ...(item.deliveryLoad && typeof item.deliveryLoad === 'object' ? { deliveryLoad: item.deliveryLoad } : {}),
       quantity: Number(item.quantity) || 0,
       unitPriceAtOrder: safeNumber(item.unitPriceAtOrder ?? item.unitPrice ?? item.product_price ?? item.price) || 0,
       totalAtOrder: safeNumber(item.totalAtOrder ?? item.line_total) || 0,
@@ -148,6 +158,15 @@ function safeOrder(id, data = {}, branchNames = new Map()) {
     failureReasonNote: clean(data.failureReasonNote, 240),
     deliveryFailedAt: data.deliveryFailedAt || data.delivery_failed_at || null,
     distributorChatGraceUntil: data.distributorChatGraceUntil || null,
+    tripId: clean(data.tripId, 128),
+    tripNumber: safeNumber(data.tripNumber),
+    orderContainers: safeNumber(data.orderContainers) ?? calculateOrderContainers(data),
+    tripContainers: safeNumber(data.tripContainers),
+    loadClassificationSnapshot: clean(data.loadClassificationSnapshot, 80),
+    managerApproved: Boolean(data.tripId || data.tripNumber || ['planning', 'draft'].includes(data.tripStatus))
+      ? data.managerApproved === true
+      : data.managerApproved !== false,
+    tripStatus: clean(data.tripStatus, 40) || (data.assignedDistributorUid ? 'approved' : 'planning'),
     createdAt: data.createdAt || data.created_at || null,
     updatedAt: data.updatedAt || data.updated_at || null,
   };
@@ -219,39 +238,19 @@ async function resolveEligibleDistributor(db, auth, distributorUid, branchId) {
   return { uid, data: snapshot.data() };
 }
 
-const MAX_ACTIVE_ASSIGNMENTS = 5;
-const SCHEDULE_CONFLICT_WINDOW_MS = 30 * 60 * 1000;
-
-async function checkDistributorWorkloadAndSchedule(db, distributorUid, currentOrderId, targetScheduledAt) {
+async function checkDistributorWorkloadAndSchedule(db, distributorUid, currentOrderId, targetScheduledAt, targetTripId = '', orderToAssign = {}) {
   const snapshot = await db.collection('requests').where('assignedDistributorUid', '==', distributorUid).get();
-  const activeOrders = (snapshot.docs || [])
-    .map((doc) => ({ id: doc.id, ...doc.data() }))
-    .filter((order) => order.id !== currentOrderId && ACTIVE_ASSIGNMENT_STATUSES.has(clean(order.status, 80).toLowerCase()));
+  const activeOrders = (snapshot.docs || []).map((doc) => ({ id: doc.id, ...doc.data() }));
 
-  if (activeOrders.length >= MAX_ACTIVE_ASSIGNMENTS) {
-    throw new OtpError(
-      409,
-      'DISTRIBUTOR_WORKLOAD_EXCEEDED',
-      `Distributor has reached the maximum active capacity of ${MAX_ACTIVE_ASSIGNMENTS} deliveries.`
-    );
-  }
-
-  if (targetScheduledAt) {
-    const targetTime = targetScheduledAt.getTime();
-    for (const order of activeOrders) {
-      const scheduledRaw = order.scheduledAt || order.scheduled_at;
-      if (scheduledRaw) {
-        const existingTime = new Date(scheduledRaw).getTime();
-        if (!Number.isNaN(existingTime) && Math.abs(existingTime - targetTime) < SCHEDULE_CONFLICT_WINDOW_MS) {
-          throw new OtpError(
-            409,
-            'DISTRIBUTOR_SCHEDULE_CONFLICT',
-            'Distributor already has an active delivery scheduled within 30 minutes of this time slot.'
-          );
-        }
-      }
-    }
-  }
+  return validateTripAssignment({
+    activeOrders,
+    currentOrderId,
+    targetDistributorUid: distributorUid,
+    targetScheduledAt,
+    targetTripId,
+    orderToAssign,
+    OtpErrorClass: OtpError,
+  });
 }
 
 async function getAvailableDistributors(db, auth, branchId) {
@@ -298,6 +297,7 @@ async function updateOrder(db, orderId, prepare) {
         const guard = await tx.get(guardRef);
         if (guard.exists && guard.data()?.orderId === orderId) guardsToDelete.push(guardRef);
       }
+      const guardWrites = prepared?.guardWrites || (prepared?.guardWrite ? [prepared.guardWrite] : []);
       const lifecycleEvent = prepared?.lifecycleEvent
         || update.dispatchEventHistory?.[update.dispatchEventHistory.length - 1]?.event
         || 'ORDER_UPDATED';
@@ -313,6 +313,7 @@ async function updateOrder(db, orderId, prepare) {
       tx.update(ref, update);
       for (const sideEffect of newSideEffects) tx.set(sideEffect.ref, sideEffect.data);
       for (const guardRef of guardsToDelete) tx.delete(guardRef);
+      for (const gw of guardWrites) tx.set(gw.ref, gw.data, { merge: true });
       return { ...current, ...update };
     });
   }
@@ -360,13 +361,14 @@ function createManagerDispatchHandler(getAdmin = getFirebaseAdmin, options = {})
         const sourceDecisionEvents = sourceDecisionSnapshot.docs
           .map((item) => safeSourceDecisionEvent(item.id, item.data()))
           .sort((left, right) => String(right.decidedAt || '').localeCompare(String(left.decidedAt || '')));
-        return res.status(200).json({ orders, incomingTransfers, sourceDecisionEvents, distributors, branches: branches.filter((branch) => branch.id !== managerBranchId) });
+        const trips = groupOrdersIntoTrips(orders);
+        return res.status(200).json({ orders, incomingTransfers, sourceDecisionEvents, distributors, branches: branches.filter((branch) => branch.id !== managerBranchId), trips });
       }
 
       const body = bodyOf(req);
       const orderId = clean(body.orderId, 128);
       const action = clean(body.action, 48).toLowerCase();
-      if (!orderId || !['accept-order', 'reject-order', 'assign-distributor', 'reassign-distributor', 'request-transfer', 'accept-transfer', 'decline-transfer', 'edit-order', 'quote-edit'].includes(action)) {
+      if (!orderId || !['accept-order', 'reject-order', 'assign-distributor', 'reassign-distributor', 'request-transfer', 'accept-transfer', 'decline-transfer', 'edit-order', 'quote-edit', 'approve-trip'].includes(action)) {
         throw new OtpError(400, 'INVALID_DISPATCH_ACTION', 'Choose a valid order dispatch action.');
       }
       const requestedOrderSnapshot = await db.collection('requests').doc(orderId).get();
@@ -402,19 +404,122 @@ function createManagerDispatchHandler(getAdmin = getFirebaseAdmin, options = {})
           throw new OtpError(400, 'INVALID_DELIVERY_SCHEDULE', 'Choose a current or future delivery time.');
         }
         const target = await resolveEligibleDistributor(db, auth, body.distributorUid, managerBranchId);
-        await checkDistributorWorkloadAndSchedule(db, target.uid, orderId, scheduledAt);
-        result = await updateOrder(db, orderId, async (current) => {
+        const tripAllocation = await checkDistributorWorkloadAndSchedule(
+          db,
+          target.uid,
+          orderId,
+          scheduledAt,
+          clean(body.tripId, 128),
+          { id: orderId, ...requestedOrder }
+        );
+        result = await updateOrder(db, orderId, async (current, tx) => {
           requireOwningManager(manager, current);
           const assignedUid = clean(current.assignedDistributorUid || current.distributor_id, 128);
           const currentStatus = clean(current.status, 80).toLowerCase();
           const assigning = action === 'assign-distributor';
           const assignableStatuses = new Set([AWAITING_ASSIGNMENT, 'accepted']);
           const reassignableStatuses = new Set([DISTRIBUTOR_ASSIGNED, 'accepted', 'scheduled', 'delivery_failed']);
+          const isIdenticalAssignRetry = assigning && assignedUid === target.uid && currentStatus === DISTRIBUTOR_ASSIGNED;
+          if (isIdenticalAssignRetry) {
+            return { replay: current };
+          }
           if ((assigning && (assignedUid || !assignableStatuses.has(currentStatus))) || (!assigning && (!assignedUid || !reassignableStatuses.has(currentStatus)))) {
             throw new OtpError(409, 'ORDER_NOT_ASSIGNABLE', 'This order is not ready for that Distributor action.');
           }
           const allowedDays = Array.isArray(current.effectiveDeliveryDaysSnapshot) ? current.effectiveDeliveryDaysSnapshot : effectiveDeliveryDays(current.items || []);
           if (!isAllowedDeliveryDate(scheduledAt, allowedDays)) throw new OtpError(409, 'PRODUCT_DELIVERY_DAY_UNAVAILABLE', allowedDays.length ? 'Choose a delivery day allowed for every product in this order.' : 'These products have no common delivery day. Ask Admin to update the product schedules.');
+
+          // --- TRANSACTIONAL DISTRIBUTOR DISPATCH GUARD ---
+          const guardRef = db.collection('distributorDispatchGuards').doc(target.uid);
+          const guardSnap = await tx.get(guardRef);
+          const guardData = guardSnap && guardSnap.exists ? guardSnap.data() || {} : null;
+          const targetTripId = tripAllocation.tripId;
+          const orderContainers = tripAllocation.orderContainers;
+
+          let updatedGuardData;
+          if (guardData && guardData.initialized && guardData.trips) {
+            const trips = { ...guardData.trips };
+            const existingTrip = trips[targetTripId];
+            const isIdempotentReplay = existingTrip?.orderIds?.includes(orderId);
+
+            if (!isIdempotentReplay) {
+              const currentTripContainers = existingTrip?.containers || 0;
+              if (currentTripContainers + orderContainers > 60) {
+                throw new OtpError(409, 'TRIP_CAPACITY_EXCEEDED', `Trip #${tripAllocation.tripNumber} capacity exceeded (current: ${currentTripContainers}, additional: ${orderContainers}, maximum: 60 containers).`);
+              }
+
+              // Check 45-min turnaround schedule conflict against other trips
+              const targetTime = scheduledAt.getTime();
+              for (const trip of Object.values(trips)) {
+                if (trip.tripId && trip.tripId !== targetTripId && typeof trip.scheduledAt === 'number') {
+                  const diff = Math.abs(trip.scheduledAt - targetTime);
+                  if (diff < 45 * 60 * 1000) {
+                    throw new OtpError(409, 'DISTRIBUTOR_SCHEDULE_CONFLICT', `Distributor schedule conflict with Trip #${trip.tripNumber}. Allow at least 45 minutes between trips.`);
+                  }
+                }
+              }
+
+              const newTripContainers = currentTripContainers + orderContainers;
+              trips[targetTripId] = {
+                tripId: targetTripId,
+                tripNumber: tripAllocation.tripNumber,
+                scheduledAt: scheduledAt.getTime(),
+                containers: newTripContainers,
+                orderIds: Array.from(new Set([...(existingTrip?.orderIds || []), orderId])),
+              };
+            }
+
+            updatedGuardData = {
+              ...guardData,
+              revision: (guardData.revision || 0) + 1,
+              updatedAt: now,
+              trips,
+            };
+          } else {
+            // Initialize guard document for target distributor
+            updatedGuardData = {
+              schemaVersion: 1,
+              initialized: true,
+              distributorUid: target.uid,
+              revision: 1,
+              updatedAt: now,
+              trips: {
+                [targetTripId]: {
+                  tripId: targetTripId,
+                  tripNumber: tripAllocation.tripNumber,
+                  scheduledAt: scheduledAt.getTime(),
+                  containers: tripAllocation.tripContainers,
+                  orderIds: [orderId],
+                },
+              },
+            };
+          }
+
+          const guardWrites = [{ ref: guardRef, data: updatedGuardData }];
+
+          // If reassigning away from previous distributor, clean up previous guard
+          if (!assigning && assignedUid && assignedUid !== target.uid) {
+            const prevGuardRef = db.collection('distributorDispatchGuards').doc(assignedUid);
+            const prevSnap = await tx.get(prevGuardRef);
+            if (prevSnap && prevSnap.exists) {
+              const prevData = prevSnap.data() || {};
+              if (prevData.trips) {
+                const prevTrips = { ...prevData.trips };
+                for (const [tId, tVal] of Object.entries(prevTrips)) {
+                  if (tVal.orderIds?.includes(orderId)) {
+                    const remainingOrders = tVal.orderIds.filter((id) => id !== orderId);
+                    const remContainers = Math.max(0, (tVal.containers || 0) - orderContainers);
+                    prevTrips[tId] = { ...tVal, containers: remContainers, orderIds: remainingOrders };
+                  }
+                }
+                guardWrites.push({
+                  ref: prevGuardRef,
+                  data: { ...prevData, revision: (prevData.revision || 0) + 1, updatedAt: now, trips: prevTrips },
+                });
+              }
+            }
+          }
+
           const event = assigning ? 'DISTRIBUTOR_ASSIGNED' : 'DISTRIBUTOR_REASSIGNED';
           const assignmentEpoch = assignmentVersionForTransition(current, target.uid);
           const rawDistributorUid = clean(target.data?.publicUid || target.data?.displayUid || target.data?.unique_id, 80);
@@ -422,24 +527,45 @@ function createManagerDispatchHandler(getAdmin = getFirebaseAdmin, options = {})
           const entry = assigning
             ? { event, distributorUid: target.uid, distributorNameSnapshot: fullName(target.data), distributorUniqueIdSnapshot: targetDistributorUniqueId, assignedByManagerUid: manager.decoded.uid, assignedAt: now, scheduledAt }
             : { event, previousDistributorUid: assignedUid, previousDistributorNameSnapshot: clean(current.assignedDistributorNameSnapshot || current.distributor_name, 160), distributorUid: target.uid, distributorNameSnapshot: fullName(target.data), distributorUniqueIdSnapshot: targetDistributorUniqueId, assignedByManagerUid: manager.decoded.uid, assignedAt: now, scheduledAt };
-          return updateWithEvent(current, event, manager.decoded.uid, managerBranchId, now, {
-            status: DISTRIBUTOR_ASSIGNED,
-            assignmentVersion: assignmentEpoch.assignmentVersion,
-            assignedDistributorUid: target.uid,
-            assignedDistributorNameSnapshot: fullName(target.data),
-            assignedDistributorUniqueIdSnapshot: targetDistributorUniqueId,
-            distributorUniqueId: targetDistributorUniqueId,
-            distributor_unique_id: targetDistributorUniqueId,
-            assignedAt: now,
-            assignedByManagerUid: manager.decoded.uid,
-            distributor_id: target.uid,
-            distributor_name: fullName(target.data),
-            scheduledAt,
-            scheduled_at: scheduledAt,
-            expectedDeliveryDate: scheduledAt.toISOString(),
-            delivery_date: scheduledAt.toISOString(),
-            distributorChatGraceUntil: null,
-            assignmentHistory: [...history(current.assignmentHistory), entry],
+          return {
+            orderUpdate: updateWithEvent(current, event, manager.decoded.uid, managerBranchId, now, {
+              status: DISTRIBUTOR_ASSIGNED,
+              assignmentVersion: assignmentEpoch.assignmentVersion,
+              assignedDistributorUid: target.uid,
+              assignedDistributorNameSnapshot: fullName(target.data),
+              assignedDistributorUniqueIdSnapshot: targetDistributorUniqueId,
+              distributorUniqueId: targetDistributorUniqueId,
+              distributor_unique_id: targetDistributorUniqueId,
+              assignedAt: now,
+              assignedByManagerUid: manager.decoded.uid,
+              distributor_id: target.uid,
+              distributor_name: fullName(target.data),
+              scheduledAt,
+              scheduled_at: scheduledAt,
+              expectedDeliveryDate: scheduledAt.toISOString(),
+              delivery_date: scheduledAt.toISOString(),
+              distributorChatGraceUntil: null,
+              tripId: tripAllocation.tripId,
+              tripNumber: tripAllocation.tripNumber,
+              orderContainers: tripAllocation.orderContainers,
+              tripContainers: updatedGuardData?.trips?.[targetTripId]?.containers || tripAllocation.tripContainers,
+              managerApproved: true,
+              managerApprovedAt: now,
+              managerApprovedBy: manager.decoded.uid,
+              tripStatus: 'approved',
+              assignmentHistory: [...history(current.assignmentHistory), entry],
+            }),
+            guardWrites,
+          };
+        });
+      } else if (action === 'approve-trip') {
+        result = await updateOrder(db, orderId, async (current) => {
+          requireOwningManager(manager, current);
+          return updateWithEvent(current, 'TRIP_APPROVED_BY_MANAGER', manager.decoded.uid, managerBranchId, now, {
+            managerApproved: true,
+            managerApprovedAt: now,
+            managerApprovedBy: manager.decoded.uid,
+            tripStatus: 'approved',
           });
         });
       } else if (action === 'edit-order' || action === 'quote-edit') {
