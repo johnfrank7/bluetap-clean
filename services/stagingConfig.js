@@ -71,18 +71,20 @@ export function resolveLocalQaClient(env = bundledEnvironment(), hostname = glob
 export function isStagingClient(env = bundledEnvironment(), hostname = globalThis.location?.hostname) {
   const appEnv = String(env.APP_ENV || '').trim().toLowerCase();
   const publicEnv = String(env.EXPO_PUBLIC_APP_ENV || '').trim().toLowerCase();
+  const projectId = String(env.EXPO_PUBLIC_FIREBASE_PROJECT_ID || '').trim();
   if ([appEnv, publicEnv].some((value) => value && !['development', 'staging', 'production'].includes(value))) {
     throw new Error('Invalid application environment setting.');
   }
   const stagingHost = String(hostname || '').toLowerCase() === STAGING_WEB_HOST;
+  const stagingProject = projectId === STAGING_PROJECT_ID;
   if ((appEnv && publicEnv && appEnv !== publicEnv) ||
-      (stagingHost && (appEnv && appEnv !== 'staging' || publicEnv && publicEnv !== 'staging'))) {
+      ((stagingHost || stagingProject) && (appEnv && appEnv !== 'staging' || publicEnv && publicEnv !== 'staging'))) {
     throw new Error('Conflicting staging application environment.');
   }
-  return stagingHost || appEnv === 'staging' || publicEnv === 'staging';
+  return stagingHost || stagingProject || appEnv === 'staging' || publicEnv === 'staging';
 }
 
-export function resolveFirebaseWebConfig(env = bundledEnvironment(), hostname) {
+export function resolveFirebaseWebConfig(env = bundledEnvironment(), hostname = globalThis.location?.hostname) {
   const localQa = resolveLocalQaClient(env, hostname);
   if (localQa) return localQa.firebase;
   if (!isStagingClient(env, hostname)) return productionFirebaseConfig;
@@ -103,13 +105,18 @@ export function resolveFirebaseWebConfig(env = bundledEnvironment(), hostname) {
     ...(storageBucket ? { storageBucket } : {}) };
 }
 
-export function assertStagingBackendUrl(url, env = bundledEnvironment(), hostname) {
+export function assertStagingBackendUrl(url, env = bundledEnvironment(), hostname = globalThis.location?.hostname) {
   const localQa = resolveLocalQaClient(env, hostname);
   if (localQa) {
     if (url !== localQa.apiUrl) throw new Error('Local QA backend must use the exact loopback API target.');
     return;
   }
-  if (!isStagingClient(env, hostname)) return;
+  if (!isStagingClient(env, hostname)) {
+    if (url && new URL(url).hostname.toLowerCase() === STAGING_BACKEND_HOST) {
+      throw new Error('Production client cannot connect to the staging backend.');
+    }
+    return;
+  }
   if (!String(env.EXPO_PUBLIC_API_BASE_URL || '').trim() || !url) {
     throw new Error('Staging backend URL is missing or invalid.');
   }

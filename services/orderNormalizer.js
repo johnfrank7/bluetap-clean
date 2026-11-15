@@ -372,6 +372,10 @@ export function normalizeRequestDetails(order) {
     formattedDeliveryFee: formatCurrency(deliveryFee),
     formattedGrandTotal: formatCurrency(grandTotal),
     failureReason,
+    tripId: order.tripId || null,
+    tripNumber: order.tripNumber || null,
+    orderContainers: order.orderContainers || null,
+    tripStatus: order.tripStatus || null,
   };
 }
 
