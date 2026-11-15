@@ -22,6 +22,15 @@
   --bluetap-input-error-ring: rgba(181, 47, 47, 0.16);
   --bluetap-radius: 16px;
   --bluetap-shadow: 0 5px 14px rgba(18, 48, 74, 0.07);
+  --bluetap-pagination-selected: #0b67ad;
+  --bluetap-pagination-on-selected: #ffffff;
+  --bluetap-pagination-surface: #f8fcff;
+  --bluetap-pagination-text: #12304a;
+  --bluetap-pagination-border: #d7ecff;
+  --bluetap-pagination-hover: #eaf6ff;
+  --bluetap-pagination-hover-border: #187bcd;
+  --bluetap-pagination-disabled: #eef3f7;
+  --bluetap-pagination-disabled-text: #526579;
 }
 
 [data-bluetap-theme='dark'] {
@@ -29,6 +38,60 @@
   --bluetap-input-focus-ring: rgba(112, 189, 242, 0.22);
   --bluetap-input-error: #ff8a91;
   --bluetap-input-error-ring: rgba(255, 138, 145, 0.2);
+  --bluetap-pagination-selected: #1565c0;
+  --bluetap-pagination-surface: #112a40;
+  --bluetap-pagination-text: #f5faff;
+  --bluetap-pagination-border: #1c3c55;
+  --bluetap-pagination-hover: #163b59;
+  --bluetap-pagination-hover-border: #70bdf2;
+  --bluetap-pagination-disabled: #112a40;
+  --bluetap-pagination-disabled-text: #9fb4c8;
+}
+
+/* Theme-safe pagination colors across Admin and Manager web pages. */
+button[data-bluetap-pagination-state='idle'],
+button[aria-label^='Go to page '],
+button[aria-label='Previous page']:not(:disabled),
+button[aria-label='Next page']:not(:disabled) {
+  background-color: var(--bluetap-pagination-surface) !important;
+  border-color: var(--bluetap-pagination-border) !important;
+}
+
+button[data-bluetap-pagination-state='idle'] > div,
+button[aria-label^='Go to page '] > div,
+button[aria-label='Previous page']:not(:disabled) > div,
+button[aria-label='Next page']:not(:disabled) > div {
+  color: var(--bluetap-pagination-text) !important;
+}
+
+button[data-bluetap-pagination-state='idle']:hover,
+button[aria-label^='Go to page ']:hover,
+button[aria-label='Previous page']:not(:disabled):hover,
+button[aria-label='Next page']:not(:disabled):hover {
+  background-color: var(--bluetap-pagination-hover) !important;
+  border-color: var(--bluetap-pagination-hover-border) !important;
+}
+
+button[data-bluetap-pagination-state='selected'],
+button[aria-label^='Current page, page'] {
+  background-color: var(--bluetap-pagination-selected) !important;
+  border-color: var(--bluetap-pagination-selected) !important;
+}
+
+button[data-bluetap-pagination-state='selected'] > div,
+button[aria-label^='Current page, page'] > div {
+  color: var(--bluetap-pagination-on-selected) !important;
+}
+
+button[aria-label='Previous page']:disabled,
+button[aria-label='Next page']:disabled {
+  background-color: var(--bluetap-pagination-disabled) !important;
+  opacity: 1 !important;
+}
+
+button[aria-label='Previous page']:disabled > div,
+button[aria-label='Next page']:disabled > div {
+  color: var(--bluetap-pagination-disabled-text) !important;
 }
 
 *:focus-visible {
@@ -103,6 +166,26 @@ button:disabled,
   transform: none !important;
 }
 
+/* Portal tabs keep fixed geometry and one keyboard-focus outline. */
+[data-bluetap-bottom-nav='true'] {
+  transform: none !important;
+}
+
+[data-bluetap-bottom-nav='true']:focus:not(:focus-visible) {
+  outline: none;
+}
+
+[data-bluetap-bottom-nav='true']:focus-visible {
+  outline: 2px solid var(--bluetap-primary);
+  outline-offset: 2px;
+  /* The focus ring replaces only the decorative selection border. */
+  border-color: transparent !important;
+}
+
+[data-bluetap-theme='dark'] [data-bluetap-bottom-nav='true']:focus-visible {
+  outline-color: var(--bluetap-primary-light);
+}
+
 input:disabled,
 textarea:disabled,
 select:disabled,
@@ -170,6 +253,387 @@ button[aria-label='Edit branch delivery pricing'] > div {
 [data-bluetap-theme='dark'] button[aria-label='Place an Order'] > div,
 [data-bluetap-theme='dark'] button[aria-label='Edit branch delivery pricing'] > div {
   color: #ffffff !important;
+}
+
+/* Keep Manager Assign & Schedule modal action buttons visible across web CSS resets. */
+#bluetap-modal-coload-action,
+button#bluetap-modal-coload-action,
+#bluetap-modal-coload-action-inner,
+div#bluetap-modal-coload-action-inner,
+button[data-bluetap-coload-btn='true'],
+[role='button'][data-bluetap-coload-btn='true'],
+button[aria-label^='Co-Load and Approve'],
+button[aria-label*='Co-Load'],
+[role='button'][aria-label*='Co-Load'] {
+  background-color: #15803d !important;
+  border-color: #166534 !important;
+  color: #ffffff !important;
+}
+
+#bluetap-modal-coload-action > div,
+button#bluetap-modal-coload-action > div,
+#bluetap-modal-coload-action-inner,
+div#bluetap-modal-coload-action-inner,
+button[data-bluetap-coload-btn='true'] > div,
+[role='button'][data-bluetap-coload-btn='true'] > div,
+button[aria-label*='Co-Load'] > div,
+[role='button'][aria-label*='Co-Load'] > div {
+  background-color: #15803d !important;
+}
+
+#bluetap-modal-coload-action div,
+button#bluetap-modal-coload-action div,
+#bluetap-modal-coload-action-inner,
+div#bluetap-modal-coload-action-inner,
+button[data-bluetap-coload-btn='true'] div,
+[role='button'][data-bluetap-coload-btn='true'] div,
+button[aria-label^='Co-Load and Approve'] div,
+button[aria-label*='Co-Load'] div,
+[role='button'][aria-label*='Co-Load'] div {
+  color: #ffffff !important;
+}
+
+[data-bluetap-theme='dark'] #bluetap-modal-coload-action,
+[data-bluetap-theme='dark'] button#bluetap-modal-coload-action,
+[data-bluetap-theme='dark'] #bluetap-modal-coload-action-inner,
+[data-bluetap-theme='dark'] div#bluetap-modal-coload-action-inner,
+[data-bluetap-theme='dark'] button[data-bluetap-coload-btn='true'],
+[data-bluetap-theme='dark'] [role='button'][data-bluetap-coload-btn='true'],
+[data-bluetap-theme='dark'] button[aria-label^='Co-Load and Approve'],
+[data-bluetap-theme='dark'] button[aria-label*='Co-Load'],
+[data-bluetap-theme='dark'] [role='button'][aria-label*='Co-Load'] {
+  background-color: #059669 !important;
+  border-color: #34d399 !important;
+  color: #ffffff !important;
+}
+
+[data-bluetap-theme='dark'] #bluetap-modal-coload-action > div,
+[data-bluetap-theme='dark'] button#bluetap-modal-coload-action > div,
+[data-bluetap-theme='dark'] #bluetap-modal-coload-action-inner,
+[data-bluetap-theme='dark'] div#bluetap-modal-coload-action-inner,
+[data-bluetap-theme='dark'] button[data-bluetap-coload-btn='true'] > div,
+[data-bluetap-theme='dark'] [role='button'][data-bluetap-coload-btn='true'] > div,
+[data-bluetap-theme='dark'] button[aria-label*='Co-Load'] > div,
+[data-bluetap-theme='dark'] [role='button'][aria-label*='Co-Load'] > div {
+  background-color: #059669 !important;
+}
+
+[data-bluetap-theme='dark'] #bluetap-modal-coload-action div,
+[data-bluetap-theme='dark'] button#bluetap-modal-coload-action div,
+[data-bluetap-theme='dark'] #bluetap-modal-coload-action-inner,
+[data-bluetap-theme='dark'] div#bluetap-modal-coload-action-inner,
+[data-bluetap-theme='dark'] button[data-bluetap-coload-btn='true'] div,
+[data-bluetap-theme='dark'] [role='button'][data-bluetap-coload-btn='true'] div,
+[data-bluetap-theme='dark'] button[aria-label^='Co-Load and Approve'] div,
+[data-bluetap-theme='dark'] button[aria-label*='Co-Load'] div,
+[data-bluetap-theme='dark'] [role='button'][aria-label*='Co-Load'] div {
+  color: #ffffff !important;
+}
+
+#bluetap-modal-assign-action,
+button#bluetap-modal-assign-action,
+#bluetap-modal-assign-action-inner,
+div#bluetap-modal-assign-action-inner,
+button[data-bluetap-assign-btn='true'],
+[role='button'][data-bluetap-assign-btn='true'],
+button[aria-label^='Approve and Assign'],
+button[aria-label*='Approve and Assign'],
+[role='button'][aria-label*='Approve and Assign'] {
+  background-color: #0b67ad !important;
+  border-color: #084b7d !important;
+  color: #ffffff !important;
+}
+
+#bluetap-modal-assign-action > div,
+button#bluetap-modal-assign-action > div,
+#bluetap-modal-assign-action-inner,
+div#bluetap-modal-assign-action-inner,
+button[data-bluetap-assign-btn='true'] > div,
+[role='button'][data-bluetap-assign-btn='true'] > div,
+button[aria-label*='Approve and Assign'] > div,
+[role='button'][aria-label*='Approve and Assign'] > div {
+  background-color: #0b67ad !important;
+}
+
+#bluetap-modal-assign-action div,
+button#bluetap-modal-assign-action div,
+#bluetap-modal-assign-action-inner,
+div#bluetap-modal-assign-action-inner,
+button[data-bluetap-assign-btn='true'] div,
+[role='button'][data-bluetap-assign-btn='true'] div,
+button[aria-label^='Approve and Assign'] div,
+button[aria-label*='Approve and Assign'] div,
+[role='button'][aria-label*='Approve and Assign'] div {
+  color: #ffffff !important;
+}
+
+[data-bluetap-theme='dark'] #bluetap-modal-assign-action,
+[data-bluetap-theme='dark'] button#bluetap-modal-assign-action,
+[data-bluetap-theme='dark'] #bluetap-modal-assign-action-inner,
+[data-bluetap-theme='dark'] div#bluetap-modal-assign-action-inner,
+[data-bluetap-theme='dark'] button[data-bluetap-assign-btn='true'],
+[data-bluetap-theme='dark'] [role='button'][data-bluetap-assign-btn='true'],
+[data-bluetap-theme='dark'] button[aria-label^='Approve and Assign'],
+[data-bluetap-theme='dark'] button[aria-label*='Approve and Assign'],
+[data-bluetap-theme='dark'] [role='button'][aria-label*='Approve and Assign'] {
+  background-color: #0284c7 !important;
+  border-color: #38bdf8 !important;
+  color: #ffffff !important;
+}
+
+[data-bluetap-theme='dark'] #bluetap-modal-assign-action > div,
+[data-bluetap-theme='dark'] button#bluetap-modal-assign-action > div,
+[data-bluetap-theme='dark'] #bluetap-modal-assign-action-inner,
+[data-bluetap-theme='dark'] div#bluetap-modal-assign-action-inner,
+[data-bluetap-theme='dark'] button[data-bluetap-assign-btn='true'] > div,
+[data-bluetap-theme='dark'] [role='button'][data-bluetap-assign-btn='true'] > div,
+[data-bluetap-theme='dark'] button[aria-label*='Approve and Assign'] > div,
+[data-bluetap-theme='dark'] [role='button'][aria-label*='Approve and Assign'] > div {
+  background-color: #0284c7 !important;
+}
+
+[data-bluetap-theme='dark'] #bluetap-modal-assign-action div,
+[data-bluetap-theme='dark'] button#bluetap-modal-assign-action div,
+[data-bluetap-theme='dark'] button[data-bluetap-assign-btn='true'] div,
+[data-bluetap-theme='dark'] [role='button'][data-bluetap-assign-btn='true'] div,
+[data-bluetap-theme='dark'] button[aria-label^='Approve and Assign'] div,
+[data-bluetap-theme='dark'] button[aria-label*='Approve and Assign'] div,
+[data-bluetap-theme='dark'] [role='button'][aria-label*='Approve and Assign'] div {
+  color: #ffffff !important;
+}
+
+/* Disabled submit state in Assign & Schedule Modal */
+#bluetap-modal-coload-action:disabled,
+#bluetap-modal-coload-action[aria-disabled='true'],
+#bluetap-modal-assign-action:disabled,
+#bluetap-modal-assign-action[aria-disabled='true'],
+button#bluetap-modal-coload-action:disabled,
+button#bluetap-modal-coload-action[aria-disabled='true'],
+button#bluetap-modal-assign-action:disabled,
+button#bluetap-modal-assign-action[aria-disabled='true'],
+button[data-bluetap-coload-btn='true']:disabled,
+button[data-bluetap-coload-btn='true'][aria-disabled='true'],
+[role='button'][data-bluetap-coload-btn='true'][aria-disabled='true'],
+button[aria-label^='Co-Load and Approve']:disabled,
+button[aria-label^='Co-Load and Approve'][aria-disabled='true'],
+button[aria-label*='Co-Load']:disabled,
+button[aria-label*='Co-Load'][aria-disabled='true'],
+[role='button'][aria-label*='Co-Load'][aria-disabled='true'],
+button[data-bluetap-assign-btn='true']:disabled,
+button[data-bluetap-assign-btn='true'][aria-disabled='true'],
+[role='button'][data-bluetap-assign-btn='true'][aria-disabled='true'],
+button[aria-label^='Approve and Assign']:disabled,
+button[aria-label^='Approve and Assign'][aria-disabled='true'],
+button[aria-label*='Approve and Assign']:disabled,
+button[aria-label*='Approve and Assign'][aria-disabled='true'],
+[role='button'][aria-label*='Approve and Assign'][aria-disabled='true'] {
+  background-color: #e2e8f0 !important;
+  border-color: #cbd5e1 !important;
+  color: #64748b !important;
+  opacity: 0.7 !important;
+  cursor: not-allowed !important;
+}
+
+#bluetap-modal-coload-action:disabled > div,
+#bluetap-modal-coload-action[aria-disabled='true'] > div,
+#bluetap-modal-assign-action:disabled > div,
+#bluetap-modal-assign-action[aria-disabled='true'] > div,
+button#bluetap-modal-coload-action:disabled > div,
+button#bluetap-modal-coload-action[aria-disabled='true'] > div,
+button#bluetap-modal-assign-action:disabled > div,
+button#bluetap-modal-assign-action[aria-disabled='true'] > div,
+button[data-bluetap-coload-btn='true']:disabled > div,
+button[data-bluetap-coload-btn='true'][aria-disabled='true'] > div,
+[role='button'][data-bluetap-coload-btn='true'][aria-disabled='true'] > div,
+button[aria-label*='Co-Load']:disabled > div,
+button[aria-label*='Co-Load'][aria-disabled='true'] > div,
+[role='button'][aria-label*='Co-Load'][aria-disabled='true'] > div,
+button[data-bluetap-assign-btn='true']:disabled > div,
+button[data-bluetap-assign-btn='true'][aria-disabled='true'] > div,
+[role='button'][data-bluetap-assign-btn='true'][aria-disabled='true'] > div,
+button[aria-label*='Approve and Assign']:disabled > div,
+button[aria-label*='Approve and Assign'][aria-disabled='true'] > div,
+[role='button'][aria-label*='Approve and Assign'][aria-disabled='true'] > div {
+  background-color: #e2e8f0 !important;
+}
+
+#bluetap-modal-coload-action:disabled div,
+#bluetap-modal-coload-action[aria-disabled='true'] div,
+#bluetap-modal-assign-action:disabled div,
+#bluetap-modal-assign-action[aria-disabled='true'] div,
+button#bluetap-modal-coload-action:disabled div,
+button#bluetap-modal-coload-action[aria-disabled='true'] div,
+button#bluetap-modal-assign-action:disabled div,
+button#bluetap-modal-assign-action[aria-disabled='true'] div,
+button[data-bluetap-coload-btn='true']:disabled div,
+button[data-bluetap-coload-btn='true'][aria-disabled='true'] div,
+[role='button'][data-bluetap-coload-btn='true'][aria-disabled='true'] div,
+button[aria-label^='Co-Load and Approve']:disabled div,
+button[aria-label^='Co-Load and Approve'][aria-disabled='true'] div,
+button[aria-label*='Co-Load']:disabled div,
+button[aria-label*='Co-Load'][aria-disabled='true'] div,
+[role='button'][aria-label*='Co-Load'][aria-disabled='true'] div,
+button[data-bluetap-assign-btn='true']:disabled div,
+button[data-bluetap-assign-btn='true'][aria-disabled='true'] div,
+[role='button'][data-bluetap-assign-btn='true'][aria-disabled='true'] div,
+button[aria-label^='Approve and Assign']:disabled div,
+button[aria-label^='Approve and Assign'][aria-disabled='true'] div,
+button[aria-label*='Approve and Assign']:disabled div,
+button[aria-label*='Approve and Assign'][aria-disabled='true'] div,
+[role='button'][aria-label*='Approve and Assign'][aria-disabled='true'] div {
+  color: #64748b !important;
+}
+
+[data-bluetap-theme='dark'] #bluetap-modal-coload-action:disabled,
+[data-bluetap-theme='dark'] #bluetap-modal-coload-action[aria-disabled='true'],
+[data-bluetap-theme='dark'] #bluetap-modal-assign-action:disabled,
+[data-bluetap-theme='dark'] #bluetap-modal-assign-action[aria-disabled='true'],
+[data-bluetap-theme='dark'] button#bluetap-modal-coload-action:disabled,
+[data-bluetap-theme='dark'] button#bluetap-modal-coload-action[aria-disabled='true'],
+[data-bluetap-theme='dark'] button#bluetap-modal-assign-action:disabled,
+[data-bluetap-theme='dark'] button#bluetap-modal-assign-action[aria-disabled='true'],
+[data-bluetap-theme='dark'] button[data-bluetap-coload-btn='true']:disabled,
+[data-bluetap-theme='dark'] button[data-bluetap-coload-btn='true'][aria-disabled='true'],
+[data-bluetap-theme='dark'] [role='button'][data-bluetap-coload-btn='true'][aria-disabled='true'],
+[data-bluetap-theme='dark'] button[aria-label^='Co-Load and Approve']:disabled,
+[data-bluetap-theme='dark'] button[aria-label^='Co-Load and Approve'][aria-disabled='true'],
+[data-bluetap-theme='dark'] button[aria-label*='Co-Load']:disabled,
+[data-bluetap-theme='dark'] button[aria-label*='Co-Load'][aria-disabled='true'],
+[data-bluetap-theme='dark'] [role='button'][aria-label*='Co-Load'][aria-disabled='true'],
+[data-bluetap-theme='dark'] button[data-bluetap-assign-btn='true']:disabled,
+[data-bluetap-theme='dark'] button[data-bluetap-assign-btn='true'][aria-disabled='true'],
+[data-bluetap-theme='dark'] [role='button'][data-bluetap-assign-btn='true'][aria-disabled='true'],
+[data-bluetap-theme='dark'] button[aria-label^='Approve and Assign']:disabled,
+[data-bluetap-theme='dark'] button[aria-label^='Approve and Assign'][aria-disabled='true'],
+[data-bluetap-theme='dark'] button[aria-label*='Approve and Assign']:disabled,
+[data-bluetap-theme='dark'] button[aria-label*='Approve and Assign'][aria-disabled='true'],
+[data-bluetap-theme='dark'] [role='button'][aria-label*='Approve and Assign'][aria-disabled='true'] {
+  background-color: rgba(148, 163, 184, 0.16) !important;
+  border-color: rgba(148, 163, 184, 0.28) !important;
+  color: #94a3b8 !important;
+  opacity: 0.7 !important;
+  cursor: not-allowed !important;
+}
+
+[data-bluetap-theme='dark'] #bluetap-modal-coload-action:disabled > div,
+[data-bluetap-theme='dark'] #bluetap-modal-coload-action[aria-disabled='true'] > div,
+[data-bluetap-theme='dark'] #bluetap-modal-assign-action:disabled > div,
+[data-bluetap-theme='dark'] #bluetap-modal-assign-action[aria-disabled='true'] > div,
+[data-bluetap-theme='dark'] button#bluetap-modal-coload-action:disabled > div,
+[data-bluetap-theme='dark'] button#bluetap-modal-coload-action[aria-disabled='true'] > div,
+[data-bluetap-theme='dark'] button#bluetap-modal-assign-action:disabled > div,
+[data-bluetap-theme='dark'] button#bluetap-modal-assign-action[aria-disabled='true'] > div,
+[data-bluetap-theme='dark'] button[data-bluetap-coload-btn='true']:disabled > div,
+[data-bluetap-theme='dark'] button[data-bluetap-coload-btn='true'][aria-disabled='true'] > div,
+[data-bluetap-theme='dark'] [role='button'][data-bluetap-coload-btn='true'][aria-disabled='true'] > div,
+[data-bluetap-theme='dark'] button[aria-label*='Co-Load']:disabled > div,
+[data-bluetap-theme='dark'] button[aria-label*='Co-Load'][aria-disabled='true'] > div,
+[data-bluetap-theme='dark'] [role='button'][aria-label*='Co-Load'][aria-disabled='true'] > div,
+[data-bluetap-theme='dark'] button[data-bluetap-assign-btn='true']:disabled > div,
+[data-bluetap-theme='dark'] button[data-bluetap-assign-btn='true'][aria-disabled='true'] > div,
+[data-bluetap-theme='dark'] [role='button'][data-bluetap-assign-btn='true'][aria-disabled='true'] > div,
+[data-bluetap-theme='dark'] button[aria-label*='Approve and Assign']:disabled > div,
+[data-bluetap-theme='dark'] button[aria-label*='Approve and Assign'][aria-disabled='true'] > div,
+[data-bluetap-theme='dark'] [role='button'][aria-label*='Approve and Assign'][aria-disabled='true'] > div {
+  background-color: rgba(148, 163, 184, 0.16) !important;
+}
+
+[data-bluetap-theme='dark'] #bluetap-modal-coload-action:disabled div,
+[data-bluetap-theme='dark'] #bluetap-modal-coload-action[aria-disabled='true'] div,
+[data-bluetap-theme='dark'] #bluetap-modal-assign-action:disabled div,
+[data-bluetap-theme='dark'] #bluetap-modal-assign-action[aria-disabled='true'] div,
+[data-bluetap-theme='dark'] button#bluetap-modal-coload-action:disabled div,
+[data-bluetap-theme='dark'] button#bluetap-modal-coload-action[aria-disabled='true'] div,
+[data-bluetap-theme='dark'] button#bluetap-modal-assign-action:disabled div,
+[data-bluetap-theme='dark'] button#bluetap-modal-assign-action[aria-disabled='true'] div,
+[data-bluetap-theme='dark'] button[data-bluetap-coload-btn='true']:disabled div,
+[data-bluetap-theme='dark'] button[data-bluetap-coload-btn='true'][aria-disabled='true'] div,
+[data-bluetap-theme='dark'] [role='button'][data-bluetap-coload-btn='true'][aria-disabled='true'] div,
+[data-bluetap-theme='dark'] button[aria-label^='Co-Load and Approve']:disabled div,
+[data-bluetap-theme='dark'] button[aria-label^='Co-Load and Approve'][aria-disabled='true'] div,
+[data-bluetap-theme='dark'] button[aria-label*='Co-Load']:disabled div,
+[data-bluetap-theme='dark'] button[aria-label*='Co-Load'][aria-disabled='true'] div,
+[data-bluetap-theme='dark'] [role='button'][aria-label*='Co-Load'][aria-disabled='true'] div,
+[data-bluetap-theme='dark'] button[data-bluetap-assign-btn='true']:disabled div,
+[data-bluetap-theme='dark'] button[data-bluetap-assign-btn='true'][aria-disabled='true'] div,
+[data-bluetap-theme='dark'] [role='button'][data-bluetap-assign-btn='true'][aria-disabled='true'] div,
+[data-bluetap-theme='dark'] button[aria-label^='Approve and Assign']:disabled div,
+[data-bluetap-theme='dark'] button[aria-label^='Approve and Assign'][aria-disabled='true'] div,
+[data-bluetap-theme='dark'] button[aria-label*='Approve and Assign']:disabled div,
+[data-bluetap-theme='dark'] button[aria-label*='Approve and Assign'][aria-disabled='true'] div,
+[data-bluetap-theme='dark'] [role='button'][aria-label*='Approve and Assign'][aria-disabled='true'] div {
+  color: #94a3b8 !important;
+}
+
+/* Modal Cancel and Close action buttons */
+#bluetap-modal-cancel-action,
+button#bluetap-modal-cancel-action,
+button[data-bluetap-modal-cancel='true'],
+[role='button'][data-bluetap-modal-cancel='true'],
+button[aria-label='Cancel assignment'],
+[role='button'][aria-label='Cancel assignment'],
+button[aria-label='Close workload details'],
+[role='button'][aria-label='Close workload details'] {
+  background-color: #f1f5f9 !important;
+  border-color: #94a3b8 !important;
+  color: #0f172a !important;
+}
+
+#bluetap-modal-cancel-action > div,
+button#bluetap-modal-cancel-action > div,
+button[data-bluetap-modal-cancel='true'] > div,
+[role='button'][data-bluetap-modal-cancel='true'] > div,
+button[aria-label='Cancel assignment'] > div,
+[role='button'][aria-label='Cancel assignment'] > div,
+button[aria-label='Close workload details'] > div,
+[role='button'][aria-label='Close workload details'] > div {
+  background-color: #f1f5f9 !important;
+}
+
+#bluetap-modal-cancel-action div,
+button#bluetap-modal-cancel-action div,
+button[data-bluetap-modal-cancel='true'] div,
+[role='button'][data-bluetap-modal-cancel='true'] div,
+button[aria-label='Cancel assignment'] div,
+[role='button'][aria-label='Cancel assignment'] div,
+button[aria-label='Close workload details'] div,
+[role='button'][aria-label='Close workload details'] div {
+  color: #0f172a !important;
+}
+
+[data-bluetap-theme='dark'] #bluetap-modal-cancel-action,
+[data-bluetap-theme='dark'] button#bluetap-modal-cancel-action,
+[data-bluetap-theme='dark'] button[data-bluetap-modal-cancel='true'],
+[data-bluetap-theme='dark'] [role='button'][data-bluetap-modal-cancel='true'],
+[data-bluetap-theme='dark'] button[aria-label='Cancel assignment'],
+[data-bluetap-theme='dark'] [role='button'][aria-label='Cancel assignment'],
+[data-bluetap-theme='dark'] button[aria-label='Close workload details'],
+[data-bluetap-theme='dark'] [role='button'][aria-label='Close workload details'] {
+  background-color: rgba(255, 255, 255, 0.08) !important;
+  border-color: #475569 !important;
+  color: #f8fafc !important;
+}
+
+[data-bluetap-theme='dark'] #bluetap-modal-cancel-action > div,
+[data-bluetap-theme='dark'] button#bluetap-modal-cancel-action > div,
+[data-bluetap-theme='dark'] button[data-bluetap-modal-cancel='true'] > div,
+[data-bluetap-theme='dark'] [role='button'][data-bluetap-modal-cancel='true'] > div,
+[data-bluetap-theme='dark'] button[aria-label='Cancel assignment'] > div,
+[data-bluetap-theme='dark'] [role='button'][aria-label='Cancel assignment'] > div,
+[data-bluetap-theme='dark'] button[aria-label='Close workload details'] > div,
+[data-bluetap-theme='dark'] [role='button'][aria-label='Close workload details'] > div {
+  background-color: rgba(255, 255, 255, 0.08) !important;
+}
+
+[data-bluetap-theme='dark'] #bluetap-modal-cancel-action div,
+[data-bluetap-theme='dark'] button#bluetap-modal-cancel-action div,
+[data-bluetap-theme='dark'] button[data-bluetap-modal-cancel='true'] div,
+[data-bluetap-theme='dark'] [role='button'][data-bluetap-modal-cancel='true'] div,
+[data-bluetap-theme='dark'] button[aria-label='Cancel assignment'] div,
+[data-bluetap-theme='dark'] [role='button'][aria-label='Cancel assignment'] div,
+[data-bluetap-theme='dark'] button[aria-label='Close workload details'] div,
+[data-bluetap-theme='dark'] [role='button'][aria-label='Close workload details'] div {
+  color: #f8fafc !important;
 }
 
 /* Custom scrollbar for horizontal product selection on web */

@@ -14,6 +14,7 @@ import { formatDisplayUniqueId } from '../services/uniqueIds';
 import { formatCurrency, normalizeRequestDetails } from '../services/orderNormalizer';
 const { formatDeliveryFailureReason } = require('../constants/deliveryFailureReasons');
 const { branchMapDataForRequest } = require('./locationMapModel');
+const { analyzeOrderCargo } = require('../services/managerTripCapacity');
 
 const BLUE = '#187BCD';
 const BLUE_LIGHT = '#E3F2FD';
@@ -85,6 +86,18 @@ export default function RequestDetailsModal({
       { label: 'Water Station', value: waterStation },
       { label: 'Payment Method', value: activeRequest?.paymentMethod || 'Cash on Delivery' },
     ],
+    ...(Boolean(activeRequest?.tripNumber || activeRequest?.tripId) ? [
+      [
+        {
+          label: 'Trip Allocation',
+          value: (() => {
+            const cargo = analyzeOrderCargo(activeRequest);
+            return `Trip #${activeRequest?.tripNumber || 1}${cargo.badgeLabel ? ` · ${cargo.badgeLabel}` : ''}`;
+          })(),
+        },
+        { label: 'Trip Status', value: activeRequest?.tripStatus ? activeRequest.tripStatus.replace(/_/g, ' ').toUpperCase() : 'APPROVED' },
+      ],
+    ] : []),
   ];
   const customerRows = [
     [

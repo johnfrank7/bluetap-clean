@@ -267,7 +267,7 @@ export function normalizeRequestDetails(order) {
       quantity: order.quantity,
       containerType: order.container || order.containerType,
       unitPrice: order.unitPriceAtOrder ?? order.unitPrice ?? order.product_price ?? order.price,
-      subtotal: order.totalAtOrder ?? order.total_cost ?? order.subtotal,
+      subtotal: order.subtotalAtOrder ?? order.subtotal,
     }];
   }
   const items = rawItems.map(normalizeProductItem);
@@ -276,15 +276,16 @@ export function normalizeRequestDetails(order) {
   const rawSubtotal = order.subtotalAtOrder ?? order.subtotal;
   let subtotal = rawSubtotal !== undefined && rawSubtotal !== null && rawSubtotal !== ''
     ? Number(rawSubtotal)
-    : items.reduce((sum, item) => sum + (Number.isFinite(item.subtotal) ? item.subtotal : 0), 0);
-  if (!Number.isFinite(subtotal)) subtotal = 0;
+    : (items.length && items.every((item) => Number.isFinite(item.subtotal))
+      ? items.reduce((sum, item) => sum + item.subtotal, 0) : undefined);
+  if (!Number.isFinite(subtotal)) subtotal = undefined;
 
   // Authoritative Delivery Fee
   const rawDeliveryFee = order.deliveryFeeAtOrder ?? order.deliveryFee ?? order.delivery_fee;
   let deliveryFee = rawDeliveryFee !== undefined && rawDeliveryFee !== null && rawDeliveryFee !== ''
     ? Number(rawDeliveryFee)
-    : 0;
-  if (!Number.isFinite(deliveryFee)) deliveryFee = 0;
+    : undefined;
+  if (!Number.isFinite(deliveryFee)) deliveryFee = undefined;
 
   // Authoritative Grand Total
   // Priority: totalAtOrder -> total_cost -> grandTotalAmount -> grandTotal -> totalAmount -> total
@@ -307,7 +308,7 @@ export function normalizeRequestDetails(order) {
       } else {
         num = Number(candidate);
       }
-      if (Number.isFinite(num) && num > 0) {
+      if (Number.isFinite(num) && num >= 0) {
         grandTotal = num;
         break;
       }
@@ -317,7 +318,8 @@ export function normalizeRequestDetails(order) {
   // Fallback line-item computation if no explicit authoritative total is found
   if (grandTotal === undefined) {
     const discount = Number.isFinite(Number(order.discount)) ? Number(order.discount) : 0;
-    const computed = Math.round((subtotal + deliveryFee - discount) * 100) / 100;
+    const computed = Number.isFinite(subtotal) && Number.isFinite(deliveryFee)
+      ? Math.round((subtotal + deliveryFee - discount) * 100) / 100 : NaN;
     if (computed > 0 || (items.length > 0 && computed >= 0)) {
       grandTotal = computed;
     } else if (order.price !== undefined && Number.isFinite(Number(order.price))) {
@@ -370,6 +372,10 @@ export function normalizeRequestDetails(order) {
     formattedDeliveryFee: formatCurrency(deliveryFee),
     formattedGrandTotal: formatCurrency(grandTotal),
     failureReason,
+    tripId: order.tripId || null,
+    tripNumber: order.tripNumber || null,
+    orderContainers: order.orderContainers || null,
+    tripStatus: order.tripStatus || null,
   };
 }
 
