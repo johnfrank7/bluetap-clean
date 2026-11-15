@@ -66,6 +66,19 @@ function withId(snapshot) {
   return snapshot?.exists ? { id: snapshot.id, ...(snapshot.data() || {}) } : null;
 }
 
+async function mapConcurrent(items, limit, fn) {
+  const results = new Array(items.length);
+  let index = 0;
+  const workers = new Array(Math.min(limit, items.length)).fill(0).map(async () => {
+    while (index < items.length) {
+      const current = index++;
+      results[current] = await fn(items[current], current);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
 function requiredId(value, reason, message) {
   const id = clean(value, 128);
   if (!id) throw new OtpError(400, reason, message);
@@ -1192,28 +1205,34 @@ async function listConversations({ db, callerUid, callerClaims, now }) {
       }
       docs.sort((left, right) => timeOf(right.data()?.updatedAt) - timeOf(left.data()?.updatedAt));
     }
-    const conversations = [];
-    for (const item of docs.slice(0, 50)) {
-      const conversation = withId(item);
-      try {
-        const authorization = await authorizeConversation(tx, db, conversation, callerUid, callerClaims, 'read', timeOf(now));
-        const presentation = await conversationPresentation(tx, db, conversation, authorization);
-        if (conversation.type === CONVERSATION_TYPES.REQUESTER_DISTRIBUTOR && ['delivered', 'completed'].includes(normalizedStatus(presentation.orderContext?.status))) continue;
-        if (conversation.type === CONVERSATION_TYPES.REQUESTER_BRANCH && !authorization.inquiryCurrent && authorization.validContextOrderIds.size === 0) continue;
-        if (conversation.type === CONVERSATION_TYPES.BRANCH_COORDINATION) {
-          const branchNameSnapshots = {};
-          for (const branchId of conversation.participantBranchIds || []) {
-            const branchSnapshot = await tx.get(db.collection('branches').doc(branchId));
-            if (branchSnapshot.exists) branchNameSnapshots[branchId] = clean(branchSnapshot.data()?.name, 160);
-          }
-          conversations.push({ ...conversation, ...presentation, branchNameSnapshots });
-        } else if (conversation.type === CONVERSATION_TYPES.REQUESTER_BRANCH) {
-          const branchId = clean(conversation.branchIds?.[0] || conversation.participantBranchIds?.[0], 128);
-          const branchSnapshot = await tx.get(db.collection('branches').doc(branchId));
-          let activePreview = '';
-          if (conversation.lastMessageId) {
-            const lastMessage = await tx.get(db.collection('chatConversations').doc(conversation.id)
-              .collection('messages').doc(clean(conversation.lastMessageId, 128)));
+    const candidateResults = await mapConcurrent(
+      docs.slice(0, 50),
+      10,
+      async (item) => {
+        const conversation = withId(item);
+        try {
+          const authorization = await authorizeConversation(tx, db, conversation, callerUid, callerClaims, 'read', timeOf(now));
+          const presentation = await conversationPresentation(tx, db, conversation, authorization);
+          if (conversation.type === CONVERSATION_TYPES.REQUESTER_DISTRIBUTOR && ['delivered', 'completed'].includes(normalizedStatus(presentation.orderContext?.status))) return null;
+          if (conversation.type === CONVERSATION_TYPES.REQUESTER_BRANCH && !authorization.inquiryCurrent && authorization.validContextOrderIds.size === 0) return null;
+          if (conversation.type === CONVERSATION_TYPES.BRANCH_COORDINATION) {
+            const branchIds = conversation.participantBranchIds || [];
+            const branchSnapshots = await Promise.all(branchIds.map((branchId) => tx.get(db.collection('branches').doc(branchId))));
+            const branchNameSnapshots = {};
+            branchIds.forEach((branchId, i) => {
+              if (branchSnapshots[i].exists) branchNameSnapshots[branchId] = clean(branchSnapshots[i].data()?.name, 160);
+            });
+            return { ...conversation, ...presentation, branchNameSnapshots };
+          } else if (conversation.type === CONVERSATION_TYPES.REQUESTER_BRANCH) {
+            const branchId = clean(conversation.branchIds?.[0] || conversation.participantBranchIds?.[0], 128);
+            const [branchSnapshot, lastMessage] = await Promise.all([
+              tx.get(db.collection('branches').doc(branchId)),
+              conversation.lastMessageId
+                ? tx.get(db.collection('chatConversations').doc(conversation.id)
+                    .collection('messages').doc(clean(conversation.lastMessageId, 128)))
+                : Promise.resolve({ exists: false }),
+            ]);
+            let activePreview = '';
             if (lastMessage.exists) {
               const message = lastMessage.data() || {};
               const orderId = clean(message.orderId, 128);
@@ -1221,32 +1240,38 @@ async function listConversations({ db, callerUid, callerClaims, now }) {
                 activePreview = message.deletedAt ? 'Message deleted' : messagePreview(message.body);
               }
             }
-          }
-          conversations.push({ ...conversation, ...presentation, lastMessagePreview: activePreview,
-            branchNameSnapshot: branchSnapshot.exists ? clean(branchSnapshot.data()?.name, 160) : '' });
-        } else {
-          const isFailedDelivery = conversation.type === CONVERSATION_TYPES.REQUESTER_DISTRIBUTOR
-            && normalizedStatus(presentation.orderContext?.status) === 'delivery_failed';
-          const failedDeadline = isFailedDelivery
-            ? (presentation.orderContext?.distributorChatGraceUntil || conversation.accessEndsAt || null)
-            : null;
-          const failedExpired = Boolean(failedDeadline && timeOf(failedDeadline) <= timeOf(now));
-          conversations.push(failedExpired
-            ? {
+            return {
               ...conversation,
               ...presentation,
-              status: CONVERSATION_STATUS.READ_ONLY,
-              accessEndsAt: conversation.accessEndsAt || failedDeadline,
-              readAccessEndsAt: conversation.readAccessEndsAt || failedDeadline,
-              lifecycleReason: conversation.lifecycleReason || 'delivery_failed_grace',
-              ...participantAccessProjection(conversation, 'read_only'),
-            }
-            : { ...conversation, ...presentation });
+              lastMessagePreview: activePreview,
+              branchNameSnapshot: branchSnapshot.exists ? clean(branchSnapshot.data()?.name, 160) : '',
+            };
+          } else {
+            const isFailedDelivery = conversation.type === CONVERSATION_TYPES.REQUESTER_DISTRIBUTOR
+              && normalizedStatus(presentation.orderContext?.status) === 'delivery_failed';
+            const failedDeadline = isFailedDelivery
+              ? (presentation.orderContext?.distributorChatGraceUntil || conversation.accessEndsAt || null)
+              : null;
+            const failedExpired = Boolean(failedDeadline && timeOf(failedDeadline) <= timeOf(now));
+            return failedExpired
+              ? {
+                ...conversation,
+                ...presentation,
+                status: CONVERSATION_STATUS.READ_ONLY,
+                accessEndsAt: conversation.accessEndsAt || failedDeadline,
+                readAccessEndsAt: conversation.readAccessEndsAt || failedDeadline,
+                lifecycleReason: conversation.lifecycleReason || 'delivery_failed_grace',
+                ...participantAccessProjection(conversation, 'read_only'),
+              }
+              : { ...conversation, ...presentation };
+          }
+        } catch (error) {
+          if (!(error instanceof OtpError) || ![403, 404, 409].includes(error.status)) throw error;
+          return null;
         }
-      } catch (error) {
-        if (!(error instanceof OtpError) || ![403, 404, 409].includes(error.status)) throw error;
       }
-    }
+    );
+    const conversations = candidateResults.filter(Boolean);
     return { conversations };
   });
 }
