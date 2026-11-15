@@ -1,8 +1,5 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useMemo } from 'react';
 import {
-  AccessibilityInfo,
-  Animated,
-  Easing,
   Pressable,
   StyleSheet,
   Text,
@@ -10,20 +7,25 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { usePathname, useSegments } from 'expo-router';
-import { BLUETAP_COLORS } from '../constants/bluetapTheme';
+import { Image as ExpoImage } from 'expo-image';
 import { USER_PORTAL_LAYOUT } from '../constants/userPortalLayout';
 import { createShadow } from './shadowStyles';
 import { useBlueTapTheme } from './BlueTapTheme';
 import { useRoleNotifications } from './RoleNotifications';
-import BlueTapIcon from './BlueTapIcon';
 import useSingleFlightNavigation from './useSingleFlightNavigation';
 const { formatNotificationBadge } = require('../services/orderNotifications');
 
-const BLUE = BLUETAP_COLORS.primary;
-const ICON_SIZE = 26;
-const ACTIVE_SCALE = 1.1;
+const ICON_SIZE = 27;
 const NAV_HORIZONTAL_PADDING = 28;
-const ANIMATION_DURATION = 250;
+// A 24-unit canvas with 2-unit strokes renders at 27px with 2.25px strokes.
+// Reuse the existing matching clipboard artwork (license in icons/sidebar).
+const PORTAL_NAV_ICONS = Object.freeze({
+  house: require('../assets/icons/portal/house.svg'),
+  plus: require('../assets/icons/portal/plus.svg'),
+  userRound: require('../assets/icons/portal/user-round.svg'),
+  clipboardList: require('../assets/icons/sidebar/clipboard-list.svg'),
+  calendarClock: require('../assets/icons/portal/calendar-clock.svg'),
+});
 
 const requesterItems = [
   {
@@ -32,8 +34,7 @@ const requesterItems = [
     route: '/requester/r_dashboard',
     matches: ['/requester/r_dashboard'],
     segments: ['r_dashboard'],
-    icon: require('../assets/icons/home.png'),
-    activeIcon: require('../assets/icons/home1.png'),
+    icon: PORTAL_NAV_ICONS.house,
   },
   {
     key: 'add',
@@ -41,8 +42,7 @@ const requesterItems = [
     route: '/requester/r_request',
     matches: ['/requester/r_request', '/requester/requestform'],
     segments: ['r_request', 'requestform'],
-    icon: require('../assets/icons/square-plus (1).png'),
-    activeIcon: require('../assets/icons/square-plus.png'),
+    icon: PORTAL_NAV_ICONS.plus,
   },
   {
     key: 'profile',
@@ -50,8 +50,7 @@ const requesterItems = [
     route: '/requester/r_profile',
     matches: ['/requester/r_profile'],
     segments: ['r_profile'],
-    icon: require('../assets/icons/user (2).png'),
-    activeIcon: require('../assets/icons/user.png'),
+    icon: PORTAL_NAV_ICONS.userRound,
   },
 ];
 
@@ -62,8 +61,7 @@ const distributorItems = [
     route: '/distributor/d_dashboard',
     matches: ['/distributor/d_dashboard'],
     segments: ['d_dashboard'],
-    icon: require('../assets/icons/home.png'),
-    activeIcon: require('../assets/icons/home1.png'),
+    icon: PORTAL_NAV_ICONS.house,
   },
   {
     key: 'requests',
@@ -71,8 +69,7 @@ const distributorItems = [
     route: '/distributor/d_requests',
     matches: ['/distributor/d_requests'],
     segments: ['d_requests'],
-    icon: require('../assets/icons/ballot (1).png'),
-    activeIcon: require('../assets/icons/ballot.png'),
+    icon: PORTAL_NAV_ICONS.clipboardList,
   },
   {
     key: 'schedule',
@@ -80,9 +77,7 @@ const distributorItems = [
     route: '/distributor/d_scheduled_requests',
     matches: ['/distributor/d_scheduled_requests', '/distributor/d_history'],
     segments: ['d_scheduled_requests', 'd_history'],
-    icon: require('../assets/icons/calendar-clock (2).png'),
-    activeIcon: require('../assets/icons/calendar-clock.png'),
-    inactiveScale: 1.24,
+    icon: PORTAL_NAV_ICONS.calendarClock,
   },
   {
     key: 'profile',
@@ -90,36 +85,9 @@ const distributorItems = [
     route: '/distributor/d_profile',
     matches: ['/distributor/d_profile'],
     segments: ['d_profile'],
-    icon: require('../assets/icons/user (2).png'),
-    activeIcon: require('../assets/icons/user.png'),
+    icon: PORTAL_NAV_ICONS.userRound,
   },
 ];
-
-function useReduceMotion() {
-  const [reduceMotion, setReduceMotion] = useState(false);
-
-  useEffect(() => {
-    let isMounted = true;
-
-    const reduceMotionPromise = AccessibilityInfo.isReduceMotionEnabled?.();
-
-    reduceMotionPromise?.then((enabled) => {
-      if (isMounted) setReduceMotion(Boolean(enabled));
-    });
-
-    const subscription = AccessibilityInfo.addEventListener?.(
-      'reduceMotionChanged',
-      setReduceMotion
-    );
-
-    return () => {
-      isMounted = false;
-      subscription?.remove?.();
-    };
-  }, []);
-
-  return reduceMotion;
-}
 
 function normalizePath(path = '') {
   const normalizedPath = path.split('?')[0].replace(/\/+$/, '');
@@ -139,67 +107,16 @@ function routeMatches(item, pathname, segments) {
   );
 }
 
-function NavIcon({
-  activeIcon,
-  icon,
-  inactiveScale = 1,
-  isActive,
-  keepIconFixed,
-  reduceMotion,
-  tintColor = BLUE,
-  primaryAction = false,
-}) {
-  const progress = useRef(new Animated.Value(isActive ? 1 : 0)).current;
-
-  useEffect(() => {
-    Animated.timing(progress, {
-      toValue: isActive ? 1 : 0,
-      duration: reduceMotion ? 0 : ANIMATION_DURATION,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: true,
-    }).start();
-  }, [isActive, progress, reduceMotion]);
-
-  if (primaryAction) {
-    return <Text style={[styles.primaryActionIcon, { color: tintColor }]}>+</Text>;
-  }
-
-  const activeOpacity = keepIconFixed
-    ? 1
-    : progress;
-  const inactiveOpacity = keepIconFixed
-    ? 1
-    : progress.interpolate({
-        inputRange: [0, 1],
-        outputRange: [1, 0],
-      });
-  const scale = keepIconFixed
-    ? 1
-    : progress.interpolate({
-        inputRange: [0, 1],
-        outputRange: [inactiveScale, ACTIVE_SCALE],
-      });
-
-  if (keepIconFixed) {
-    return (
-      <BlueTapIcon
-        name="navigation"
-        source={icon}
-        size={ICON_SIZE}
-        color={tintColor}
-      />
-    );
-  }
-
+function NavIcon({ source, color }) {
   return (
-    <Animated.View style={[styles.iconFrame, { transform: [{ scale }] }]}>
-      <Animated.View style={[styles.iconLayer, { opacity: inactiveOpacity }]}>
-        <BlueTapIcon name="navigation" source={icon} size={ICON_SIZE} color={tintColor} />
-      </Animated.View>
-      <Animated.View style={[styles.iconLayer, { opacity: activeOpacity }]}>
-        <BlueTapIcon name="navigation" source={activeIcon} size={ICON_SIZE} color={tintColor} />
-      </Animated.View>
-    </Animated.View>
+    <ExpoImage
+      source={source}
+      contentFit="contain"
+      tintColor={color}
+      transition={0}
+      accessible={false}
+      style={styles.navIcon}
+    />
   );
 }
 
@@ -207,13 +124,12 @@ function BottomNav({ items, floating = true }) {
   const pathname = usePathname();
   const { replaceOnce } = useSingleFlightNavigation();
   const segments = useSegments();
-  const reduceMotion = useReduceMotion();
   const { colors } = useBlueTapTheme();
   const { attentionCounts } = useRoleNotifications();
   const insets = useSafeAreaInsets();
   const navSurface = colors.navSurface;
   const navBorder = colors.border;
-  const navIconColor = colors.navIcon;
+  const navIconColor = colors.navIconMuted;
 
   const activeIndex = useMemo(
     () =>
@@ -232,42 +148,30 @@ function BottomNav({ items, floating = true }) {
     >
       {items.map((item, index) => {
         const isActive = index === activeIndex;
-        const isPrimaryAction = item.key === 'add';
         const badgeCount = item.key === 'requests' ? attentionCounts.requests : item.key === 'schedule' ? attentionCounts.schedule : 0;
 
         return (
           <View key={item.key} style={styles.navSlot}>
             <Pressable
+              dataSet={{ bluetapBottomNav: 'true' }}
               accessibilityRole="button"
               accessibilityState={{ selected: isActive }}
               accessibilityLabel={badgeCount > 0 ? `${item.label}, ${badgeCount} items require attention` : item.label}
               onPress={() => replaceOnce(item.route)}
               style={({ hovered, pressed }) => [
                 styles.navButton,
-                isPrimaryAction && styles.primaryNavButton,
-                isPrimaryAction && {
-                  backgroundColor: isActive || pressed ? (colors.primaryDark || colors.primary) : (colors.primaryAction || colors.primary),
-                  borderColor: isActive || pressed ? colors.primaryLight : colors.primary,
-                },
-                isActive && !isPrimaryAction && {
+                (hovered || pressed) && { backgroundColor: colors.surfaceAlt },
+                isActive && {
                   backgroundColor: colors.primarySoft,
-                  borderColor: colors.primary,
-                  borderWidth: 1,
+                  borderColor: colors.navSelectedBorder,
                 },
-                hovered && styles.navButtonHovered,
                 pressed && styles.navButtonPressed,
               ]}
             >
               <View style={styles.navIconWrap}>
                 <NavIcon
-                  activeIcon={item.activeIcon}
-                  icon={item.icon}
-                  inactiveScale={item.inactiveScale}
-                  isActive={isActive}
-                  keepIconFixed={item.keepIconFixed}
-                  reduceMotion={reduceMotion}
-                  tintColor={isPrimaryAction ? (colors.iconOnPrimary || colors.onPrimary) : (isActive ? colors.iconPrimary : navIconColor)}
-                  primaryAction={isPrimaryAction}
+                  source={item.icon}
+                  color={isActive ? colors.iconPrimary : navIconColor}
                 />
                 {badgeCount > 0 && <View style={[styles.navBadge, { borderColor: navSurface }]}><Text style={styles.navBadgeText}>{formatNotificationBadge(badgeCount)}</Text></View>}
               </View>
@@ -322,42 +226,20 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 11,
+    borderWidth: 1,
+    borderColor: 'transparent',
+    backgroundColor: 'transparent',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  navButtonHovered: { transform: [{ translateY: -1 }, { scale: 1.02 }] },
-  navButtonPressed: { opacity: 0.88, transform: [{ scale: 0.96 }] },
-  primaryNavButton: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: BLUE,
-    borderWidth: 3,
-    borderColor: BLUETAP_COLORS.surface,
-    ...createShadow({ color: BLUE, elevation: 4, opacity: 0.2, radius: 6, offset: { width: 0, height: 3 } }),
-  },
-  iconFrame: {
-    width: ICON_SIZE,
-    height: ICON_SIZE,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  iconLayer: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-  },
+  // Immediate feedback for every tab; no scaling, cross-fade or motion to reduce.
+  navButtonPressed: { opacity: 0.88 },
   navIcon: {
     width: ICON_SIZE,
     height: ICON_SIZE,
+    flexShrink: 0,
   },
-  navIconWrap: { position: 'relative', alignItems: 'center', justifyContent: 'center' },
-  navBadge: { position: 'absolute', top: -9, right: -12, minWidth: 18, height: 18, paddingHorizontal: 4, borderRadius: 9, borderWidth: 1.5, backgroundColor: '#EF4444', alignItems: 'center', justifyContent: 'center' },
+  navIconWrap: { position: 'relative', width: ICON_SIZE, height: ICON_SIZE, alignItems: 'center', justifyContent: 'center' },
+  navBadge: { position: 'absolute', top: -18, right: -12, minWidth: 18, height: 18, paddingHorizontal: 4, borderRadius: 9, borderWidth: 1.5, backgroundColor: '#EF4444', alignItems: 'center', justifyContent: 'center' },
   navBadgeText: { color: '#FFFFFF', fontSize: 9, fontWeight: '900' },
-  primaryActionIcon: {
-    fontSize: 32,
-    fontWeight: '500',
-    lineHeight: 34,
-    marginTop: -2,
-  },
 });

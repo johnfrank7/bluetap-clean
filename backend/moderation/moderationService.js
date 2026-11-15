@@ -1,5 +1,6 @@
 const { createHash } = require('node:crypto');
 const { OtpError } = require('../utils/otpError');
+const { attemptIdFor } = require('../delivery/deliveryAttemptService');
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const REPORT_RATE_LIMIT = 5;
@@ -85,6 +86,28 @@ async function assertChatSendAllowed(reader, db, uid, branchId, now = Date.now()
 
 async function assertOrderingAllowed(reader, db, uid, branchId, now = Date.now()) {
   const { data } = await restrictionRecord(reader, db, 'orderingRestrictions', uid);
+  const penalty = data.deliveryPenalty;
+  if (penalty?.state === 'active' && penalty.schemaVersion === 1
+    && /^[a-f0-9]{64}$/.test(penalty.eventId || '')
+    && Array.isArray(penalty.supportingAttemptIds)
+    && penalty.supportingAttemptIds.length === 3
+    && new Set(penalty.supportingAttemptIds).size === 3
+    && penalty.supportingAttemptIds.every((id) => /^[a-f0-9]{64}$/.test(id))
+    && timeOf(penalty.endsAt) > timeOf(now)) {
+    const evidenceSnapshot = await reader.get(db.collection('deliveryPenaltyEvents').doc(penalty.eventId));
+    const evidence = evidenceSnapshot.exists ? evidenceSnapshot.data() || {} : null;
+    if (!evidence || evidence.kind !== 'FIRST_VERIFIED_DELIVERY_ORDERING_RESTRICTION'
+      || evidence.requesterUid !== uid || timeOf(evidence.startsAt) !== timeOf(penalty.startsAt)
+      || timeOf(evidence.endsAt) !== timeOf(penalty.endsAt)
+      || JSON.stringify(evidence.supportingAttemptIds) !== JSON.stringify(penalty.supportingAttemptIds)) {
+      throw new OtpError(403, 'DELIVERY_PENALTY_EVIDENCE_UNAVAILABLE',
+        'Ordering is temporarily unavailable while this delivery restriction is reviewed.',
+        { scope: 'platform_ordering', endsAt: penalty.endsAt });
+    }
+    throw new OtpError(403, 'VERIFIED_DELIVERY_ORDERING_RESTRICTED',
+      'New orders are temporarily unavailable after three verified failed deliveries. You can still review and appeal the findings.',
+      { scope: 'platform_ordering', endsAt: penalty.endsAt });
+  }
   const platform = restrictionPlatform(data, now);
   if (platform) throw new OtpError(403, 'ORDERING_SUSPENDED', 'You cannot place new BlueTap orders while this restriction is active.', { scope: 'platform_ordering', endsAt: platform.endsAt });
   const branch = restrictionBranch(data, branchId, now);
@@ -102,6 +125,7 @@ function nextRestrictionProjection(current = {}, restriction, now) {
     schemaVersion: 1,
     platform,
     branches,
+    ...(current.deliveryPenalty ? { deliveryPenalty: current.deliveryPenalty } : {}),
     nextExpiryAt: expiries.length ? new Date(Math.min(...expiries)) : null,
     updatedAt: now,
   };
@@ -129,27 +153,62 @@ function cancellationConcern(stage) {
   return 'low';
 }
 
-async function recordOrderAbuseIncidentInTransaction({ tx, db, orderId, order = {}, incidentType, category, stage, now = new Date() }) {
+function linkedFailedOutcome(writes, { orderId, order, requesterUid, branchId, category, now }) {
+  const invalid = () => new OtpError(409, 'DELIVERY_INCIDENT_SOURCE_INVALID', 'The delivery report could not be linked to its attempt.');
+  if (!Array.isArray(writes)) throw invalid();
+  const outcomes = writes.filter(({ data }) => data?.kind === 'ATTEMPT_FAILED');
+  if (outcomes.length !== 1) throw invalid();
+  const { ref, method, data } = outcomes[0];
+  const number = data.attemptNumber;
+  const attemptId = data.attemptId;
+  const eventId = `${attemptId}_outcome`;
+  const expectedNumber = clean(order.activeDeliveryAttemptId) ? order.deliveryAttemptSeq : 1;
+  if (method !== 'create' || !Number.isSafeInteger(number) || number < 1
+    || number !== expectedNumber || attemptId !== attemptIdFor(orderId, number)
+    || ref?.path !== `deliveryAttemptEvents/${eventId}`
+    || data.orderId !== orderId || data.branchId !== branchId
+    || data.outcome !== 'failed' || data.reportedReasonCode !== category
+    || timeOf(data.createdAt) !== timeOf(now)) throw invalid();
+  const attempts = writes.filter((write) => write.ref?.path === `deliveryAttempts/${attemptId}`);
+  if (attempts.length !== 1 || !['create', 'update'].includes(attempts[0].method)
+    || (attempts[0].method === 'create' && (clean(order.activeDeliveryAttemptId)
+      || ![undefined, 0].includes(order.deliveryAttemptSeq)))
+    || (attempts[0].method === 'update' && order.activeDeliveryAttemptId !== attemptId)
+    || attempts[0].data?.outcome !== 'failed'
+    || attempts[0].data?.reportedReasonCode !== category
+    || timeOf(attempts[0].data?.reportReceivedAt) !== timeOf(now)
+    || (attempts[0].method === 'create' && (attempts[0].data.requesterUid !== requesterUid
+      || attempts[0].data.orderId !== orderId || attempts[0].data.branchId !== branchId))) throw invalid();
+  return { attemptId, eventId };
+}
+
+async function prepareOrderAbuseIncidentInTransaction({ tx, db, orderId, order = {}, incidentType, category, stage, now = new Date(), deliveryAttemptWrites }) {
   const requesterUid = clean(order.requesterUid || order.requester_id, 128);
   const branchId = clean(order.currentBranchId || order.branchId, 128);
-  if (!requesterUid || !branchId) return { recorded: false, reason: 'missing-authority' };
+  if (!requesterUid || !branchId) return { result: { recorded: false, reason: 'missing-authority' }, write: null };
   const normalizedCategory = clean(category, 80).toUpperCase();
   if (incidentType === 'delivery_failure' && !requesterAttributableFailure(normalizedCategory)) {
-    return { recorded: false, reason: NON_ATTRIBUTABLE_FAILURE_CODES.has(normalizedCategory) ? 'non-attributable' : 'unclassified' };
+    return { result: { recorded: false, reason: NON_ATTRIBUTABLE_FAILURE_CODES.has(normalizedCategory) ? 'non-attributable' : 'unclassified' }, write: null };
   }
   const concern = incidentType === 'cancellation' ? cancellationConcern(stage) : 'moderate';
-  if (incidentType === 'cancellation' && concern === 'low') return { recorded: false, reason: 'low-concern-cancellation' };
+  if (incidentType === 'cancellation' && concern === 'low') return { result: { recorded: false, reason: 'low-concern-cancellation' }, write: null };
+  const source = incidentType === 'delivery_failure'
+    ? linkedFailedOutcome(deliveryAttemptWrites, { orderId, order, requesterUid, branchId, category: normalizedCategory, now })
+    : null;
 
   const ref = db.collection('orderAbuseReviews').doc(hashId(branchId, requesterUid));
   const snapshot = await tx.get(ref);
   const current = snapshot.exists ? snapshot.data() || {} : {};
   const cutoff = timeOf(now) - ABUSE_REVIEW_WINDOW_DAYS * DAY_MS;
-  const incidentKey = hashId(orderId, incidentType, normalizedCategory, stage, timeOf(now));
+  const incidentKey = source ? hashId('delivery_failure', source.attemptId)
+    : hashId(orderId, incidentType, normalizedCategory, stage, timeOf(now));
   const incidents = (Array.isArray(current.incidents) ? current.incidents : [])
     .filter((incident) => timeOf(incident.at) > cutoff && incident.key !== incidentKey)
     .slice(-49);
   incidents.push({
     key: incidentKey,
+    ...(source ? { incidentId: incidentKey, attemptId: source.attemptId,
+      sourceEventId: source.eventId, requesterUid, reportingBranchId: branchId } : {}),
     orderId: clean(orderId, 128),
     orderReference: clean(order.requestId || order.request_id || orderId, 80),
     type: incidentType,
@@ -160,7 +219,7 @@ async function recordOrderAbuseIncidentInTransaction({ tx, db, orderId, order = 
   });
   const incidentCount = incidents.length;
   const severity = incidentCount >= ABUSE_STRONG_THRESHOLD ? 'strong_review' : incidentCount >= ABUSE_REVIEW_THRESHOLD ? 'review' : 'monitor';
-  tx.set(ref, {
+  const data = {
     schemaVersion: 1,
     requesterUid,
     requesterPublicUidSnapshot: clean(order.requesterPublicUidSnapshot || order.requesterUniqueId || order.requester_unique_id, 80),
@@ -177,8 +236,14 @@ async function recordOrderAbuseIncidentInTransaction({ tx, db, orderId, order = 
     status: current.status || 'open',
     reviewedAt: current.reviewedAt || null,
     actionTaken: current.actionTaken || null,
-  }, { merge: true });
-  return { recorded: true, incidentCount, severity };
+  };
+  return { result: { recorded: true, incidentCount, severity }, write: { ref, data } };
+}
+
+async function recordOrderAbuseIncidentInTransaction(args) {
+  const prepared = await prepareOrderAbuseIncidentInTransaction(args);
+  if (prepared.write) args.tx.set(prepared.write.ref, prepared.write.data, { merge: true });
+  return prepared.result;
 }
 
 function noticeForAction({ actionId, action, scope, category, branchId, branchName, startsAt, endsAt, createdAt }) {
@@ -208,11 +273,18 @@ function noticeForAction({ actionId, action, scope, category, branchId, branchNa
 }
 
 function safeNotice(id, notice = {}) {
+  const type = clean(notice.type, 60);
+  const appealNotice = ['delivery_appeal_submitted', 'delivery_appeal_resolved'].includes(type)
+    && /^[a-f0-9]{64}$/.test(notice.attemptId || '')
+    && typeof notice.orderId === 'string' && notice.orderId.length > 0
+    && notice.orderId.length <= 128 && !notice.orderId.includes('/');
   return {
     id,
-    type: clean(notice.type, 60),
+    type,
     title: clean(notice.title, 160),
     category: clean(notice.category, 80),
+    ...(notice.category === 'verified_failed_delivery'
+      ? { reasonLabel: 'Three verified requester-attributable failed deliveries' } : {}),
     scope: clean(notice.scope, 40),
     branchId: clean(notice.branchId, 128) || null,
     branchName: clean(notice.branchName, 160) || null,
@@ -221,6 +293,11 @@ function safeNotice(id, notice = {}) {
     createdAt: isoTimestamp(notice.createdAt),
     acknowledgedAt: isoTimestamp(notice.acknowledgedAt),
     seenAt: isoTimestamp(notice.seenAt),
+    ...(appealNotice ? {
+      attemptId: notice.attemptId,
+      orderId: notice.orderId,
+      message: clean(notice.message, 180),
+    } : {}),
   };
 }
 
@@ -249,6 +326,7 @@ module.exports = {
   nextRestrictionProjection,
   noticeForAction,
   publicUidOf,
+  prepareOrderAbuseIncidentInTransaction,
   recordOrderAbuseIncidentInTransaction,
   requesterAttributableFailure,
   restrictionBranch,

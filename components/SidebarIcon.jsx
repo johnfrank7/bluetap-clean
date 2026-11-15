@@ -10,6 +10,7 @@ const icons = Object.freeze({
   UsersRound: require('../assets/icons/sidebar/users-round.svg'),
   Package: require('../assets/icons/sidebar/package.svg'),
   BarChart3: require('../assets/icons/sidebar/chart-column.svg'),
+  CircleDollarSign: require('../assets/icons/sidebar/circle-dollar-sign.svg'),
   ShieldCheck: require('../assets/icons/sidebar/shield-check.svg'),
   UserCircle2: require('../assets/icons/sidebar/circle-user-round.svg'),
   Building2: require('../assets/icons/sidebar/building-2.svg'),
@@ -27,7 +28,7 @@ const icons = Object.freeze({
 export const MANAGER_SIDEBAR_ICONS = Object.freeze({
   dashboard: 'LayoutDashboard', requests: 'ClipboardList', distributors: 'Truck',
   accounts: 'UsersRound', products: 'Package', analytics: 'BarChart3',
-  reports: 'ShieldCheck', profile: 'UserCircle2',
+  reports: 'ShieldCheck', profile: 'UserCircle2', settings: 'Settings2',
 });
 
 export const ADMIN_SIDEBAR_ICONS = Object.freeze({
@@ -36,7 +37,7 @@ export const ADMIN_SIDEBAR_ICONS = Object.freeze({
   analytics: 'BarChart3', reports: 'ShieldAlert', security: 'ShieldCog', maintenance: 'Settings2',
 });
 
-export default function SidebarIcon({ name, size = 20, color = '#FFFFFF' }) {
+export default function SidebarIcon({ name, size = 20, tintColor = '#FFFFFF', color = tintColor }) {
   return (
     <View pointerEvents="none" accessibilityElementsHidden importantForAccessibility="no-hide-descendants"
       style={[styles.frame, { width: size, height: size }]}>

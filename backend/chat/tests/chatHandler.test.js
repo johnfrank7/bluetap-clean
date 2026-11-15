@@ -7,6 +7,8 @@ const {
   createChatReadStateHandler,
 } = require('../chatHandler');
 const { createChatReportsHandler } = require('../reportHandler');
+const { reconcileOrderLifecycleInTransaction } = require('../conversationLifecycleService');
+const { historyId } = require('../chatHistory');
 
 const clone = (value) => value === undefined ? undefined : structuredClone(value);
 
@@ -49,15 +51,20 @@ function fixture() {
       const [field, direction] = query.order;
       docs.sort((left, right) => (left.data?.[field] - right.data?.[field]) * (direction === 'desc' ? -1 : 1));
     }
+    if (query.cursorId) {
+      const cursorIndex = docs.findIndex(({ path }) => path.endsWith(`/${query.cursorId}`));
+      docs = cursorIndex < 0 ? [] : docs.slice(cursorIndex + 1);
+    }
     if (Number.isSafeInteger(query.limitValue)) docs = docs.slice(0, query.limitValue);
     return { docs: docs.map(({ path }) => snapshot(store, path)), empty: docs.length === 0, size: docs.length };
   };
 
-  const makeQuery = (path, filters = [], order = null, limitValue = null) => ({
-    kind: 'query', path, filters, order, limitValue,
-    where(field, operator, value) { return makeQuery(path, [...filters, [field, operator, value]], order, limitValue); },
-    orderBy(field, direction = 'asc') { return makeQuery(path, filters, [field, direction], limitValue); },
-    limit(value) { return makeQuery(path, filters, order, value); },
+  const makeQuery = (path, filters = [], order = null, limitValue = null, cursorId = '') => ({
+    kind: 'query', path, filters, order, limitValue, cursorId,
+    where(field, operator, value) { return makeQuery(path, [...filters, [field, operator, value]], order, limitValue, cursorId); },
+    orderBy(field, direction = 'asc') { return makeQuery(path, filters, [field, direction], limitValue, cursorId); },
+    limit(value) { return makeQuery(path, filters, order, value, cursorId); },
+    startAfter(snapshot) { return makeQuery(path, filters, order, limitValue, snapshot.id); },
     get: async () => querySnapshot(records, this),
   });
 
@@ -170,6 +177,174 @@ async function directConversation(f) {
   return response.body.conversation.id;
 }
 
+test('delivery archives each original order thread while a new branch inquiry and order use current context', async () => {
+  const f = fixture();
+  const directId = await directConversation(f);
+  const branchResult = await resolve(f, 'requester-a-token', { type: 'requester_branch', intent: 'order_followup', orderId: 'order-a' });
+  const branchId = branchResult.body.conversation.id;
+  assert.equal((await call(f.messages, 'POST', 'requester-a-token', { conversationId: directId, clientMutationId: 'archive-direct', body: 'Direct order message' })).statusCode, 201);
+  assert.equal((await call(f.messages, 'POST', 'requester-a-token', { conversationId: branchId, clientMutationId: 'archive-branch', body: 'Branch order message', orderId: 'order-a' })).statusCode, 201);
+  const before = { id: 'order-a', ...f.records.get('requests/order-a') };
+  const deliveredAt = new Date('2026-01-02T00:00:00Z');
+  const accessEndsAt = new Date(deliveredAt.getTime() + 7 * 24 * 60 * 60 * 1000);
+  const after = { ...before, status: 'delivered', deliveredAt, chatAccessEndsAt: accessEndsAt };
+  await f.db.runTransaction(async (tx) => {
+    await reconcileOrderLifecycleInTransaction({ tx, db: f.db, before, after, event: 'DELIVERY_COMPLETED', now: deliveredAt });
+    tx.update(f.db.collection('requests').doc('order-a'), { status: 'delivered', deliveredAt, chatAccessEndsAt: accessEndsAt });
+  });
+  f.setTime(deliveredAt.getTime());
+  assert.equal(f.records.get('requests/order-a').status, 'delivered');
+  assert.equal(f.records.get(`chatConversations/${directId}`).status, 'read_only');
+  assert.equal(f.records.get(`chatConversations/${branchId}`).status, 'read_only');
+  const archivedManagerState = f.records.get(`chatConversations/${branchId}`).participantState.find((state) => state.principalId === 'branch-a');
+  assert.equal(archivedManagerState.unreadCount, 0);
+  assert.equal(archivedManagerState.archivedIncomingCount, 1);
+  assert.equal(archivedManagerState.lastReadSeq, 0);
+  assert.equal((await call(f.conversations, 'GET', 'requester-a-token')).body.conversations.length, 0);
+  assert.equal((await call(f.conversations, 'GET', 'manager-a-token')).body.conversations.length, 0);
+  const requesterHistory = await call(f.conversations, 'GET', 'requester-a-token', {}, '?view=history');
+  assert.equal(requesterHistory.statusCode, 200);
+  assert.equal(requesterHistory.body.conversations.length, 2);
+  const archivedDirect = requesterHistory.body.conversations.find((item) => item.id === directId);
+  const archivedBranch = requesterHistory.body.conversations.find((item) => item.id === branchId);
+  assert.equal(archivedDirect.lastMessagePreview, 'Direct order message');
+  assert.equal(archivedBranch.lastMessagePreview, 'Branch order message');
+  assert.equal(archivedBranch.orderContext.status, 'delivered');
+  assert.equal(archivedBranch.requesterDisplayName, 'John Franz Caliguid');
+  const firstHistoryPage = await call(f.conversations, 'GET', 'requester-a-token', {}, '?view=history&limit=1');
+  assert.equal(firstHistoryPage.body.conversations.length, 1);
+  assert.ok(firstHistoryPage.body.nextCursor);
+  const secondHistoryPage = await call(f.conversations, 'GET', 'requester-a-token', {}, `?view=history&limit=1&cursor=${firstHistoryPage.body.nextCursor}`);
+  assert.equal(secondHistoryPage.body.conversations.length, 1);
+  assert.notEqual(secondHistoryPage.body.conversations[0].historyId, firstHistoryPage.body.conversations[0].historyId);
+  assert.equal((await call(f.conversations, 'GET', 'distributor-a-token', {}, '?view=history')).body.conversations.length, 1);
+  assert.equal((await call(f.conversations, 'GET', 'manager-a-token', {}, '?view=history')).body.conversations.length, 1);
+  assert.equal((await call(f.conversations, 'GET', 'manager-b-token', {}, '?view=history')).body.conversations.length, 0);
+  const directHistoryId = historyId(directId, 'order-a');
+  const branchHistoryId = historyId(branchId, 'order-a');
+  const directPage = await call(f.messages, 'GET', 'requester-a-token', {}, `?conversationId=${directId}&historyId=${directHistoryId}`);
+  const branchPage = await call(f.messages, 'GET', 'manager-a-token', {}, `?conversationId=${branchId}&historyId=${branchHistoryId}`);
+  assert.equal(directPage.body.messages[0].body, 'Direct order message');
+  assert.equal(branchPage.body.messages[0].body, 'Branch order message');
+  assert.equal((await call(f.messages, 'GET', 'manager-b-token', {}, `?conversationId=${branchId}&historyId=${branchHistoryId}`)).statusCode, 403);
+  assert.equal((await call(f.messages, 'POST', 'requester-a-token', { conversationId: directId, clientMutationId: 'archive-direct', body: 'Direct order message' })).statusCode, 200);
+  assert.equal((await call(f.messages, 'POST', 'requester-a-token', { conversationId: branchId, clientMutationId: 'archive-branch', body: 'Branch order message', orderId: 'order-a' })).statusCode, 200);
+  assert.equal(f.records.get(`chatConversations/${directId}`).lastMessageSeq, 1);
+  assert.equal(f.records.get(`chatConversations/${branchId}`).lastMessageSeq, 1);
+  assert.equal((await call(f.messages, 'POST', 'requester-a-token', { conversationId: directId, clientMutationId: 'archived-send', body: 'No' })).statusCode, 409);
+  assert.ok([403, 409].includes((await call(f.messages, 'POST', 'requester-a-token', { conversationId: branchId, clientMutationId: 'archived-branch-send', body: 'No', orderId: 'order-a' })).statusCode));
+  assert.ok([403, 409].includes((await call(f.messages, 'PATCH', 'requester-a-token', { conversationId: branchId, messageId: branchPage.body.messages[0].id, clientMutationId: 'archived-edit', body: 'No' })).statusCode));
+  const inquiry = await resolve(f, 'requester-a-token', { type: 'requester_branch', intent: 'inquiry', branchId: 'branch-a' });
+  assert.equal(inquiry.statusCode, 200);
+  assert.equal(inquiry.body.conversation.orderContext, null);
+  assert.equal(inquiry.body.conversation.lastMessagePreview, '');
+  const activeInquiry = (await call(f.conversations, 'GET', 'manager-a-token')).body.conversations[0];
+  assert.equal(activeInquiry.orderContext, null);
+  assert.equal(activeInquiry.lastMessagePreview, '');
+  assert.equal((await call(f.messages, 'POST', 'requester-a-token', { conversationId: branchId, clientMutationId: 'fresh-inquiry', body: 'New question' })).statusCode, 201);
+  const freshManagerConversation = (await call(f.conversations, 'GET', 'manager-a-token')).body.conversations[0];
+  assert.equal(freshManagerConversation.lastMessagePreview, 'New question');
+  const freshManagerState = freshManagerConversation.participantState.find((state) => state.principalId === 'branch-a');
+  assert.equal(freshManagerState.unreadCount, 1);
+  const activeMessages = await call(f.messages, 'GET', 'manager-a-token', {}, `?conversationId=${branchId}`);
+  assert.deepEqual(activeMessages.body.messages.map((message) => message.body), ['New question']);
+  f.records.set('requests/order-c', { requester_id: 'requester-a', requestId: 'BT-2026-C', branchId: 'branch-a', currentBranchId: 'branch-a', status: 'scheduled', assignedDistributorUid: 'distributor-a', assignmentVersion: 1 });
+  const newOrder = await resolve(f, 'requester-a-token', { type: 'requester_branch', intent: 'order_followup', orderId: 'order-c' });
+  assert.equal(newOrder.body.conversation.orderContext.status, 'scheduled');
+  assert.equal((await call(f.conversations, 'GET', 'manager-a-token')).body.conversations.find((item) => item.id === branchId).orderContext.status, 'scheduled');
+  const newDirect = await resolve(f, 'requester-a-token', { type: 'requester_distributor', orderId: 'order-c' });
+  assert.equal(newDirect.statusCode, 201);
+  assert.notEqual(newDirect.body.conversation.id, directId);
+  assert.equal((await call(f.conversations, 'GET', 'distributor-a-token')).body.conversations[0].orderContext.status, 'scheduled');
+  const newDirectMessage = await call(f.messages, 'POST', 'requester-a-token', { conversationId: newDirect.body.conversation.id, clientMutationId: 'new-direct-order', body: 'New delivery' });
+  assert.equal(newDirectMessage.statusCode, 201);
+  assert.equal(newDirectMessage.body.message.orderId, 'order-c');
+  assert.equal((await call(f.conversations, 'GET', 'requester-a-token', {}, '?view=history')).body.conversations.length, 2);
+  const unchangedHistory = (await call(f.conversations, 'GET', 'requester-a-token', {}, '?view=history')).body.conversations.find((item) => item.id === branchId);
+  assert.equal(unchangedHistory.lastMessagePreview, 'Branch order message');
+  assert.equal((await call(f.messages, 'POST', 'requester-a-token', { conversationId: branchId, clientMutationId: 'second-order-branch', body: 'Second order question', orderId: 'order-c' })).statusCode, 201);
+  assert.equal((await call(f.conversations, 'GET', 'manager-a-token')).body.conversations[0].lastMessagePreview, 'Second order question');
+  const beforeSecondDelivery = { id: 'order-c', ...f.records.get('requests/order-c') };
+  const secondDeliveredAt = new Date(deliveredAt.getTime() + 24 * 60 * 60 * 1000);
+  const secondAccessEndsAt = new Date(secondDeliveredAt.getTime() + 7 * 24 * 60 * 60 * 1000);
+  const afterSecondDelivery = { ...beforeSecondDelivery, status: 'delivered', deliveredAt: secondDeliveredAt, chatAccessEndsAt: secondAccessEndsAt };
+  await f.db.runTransaction(async (tx) => {
+    await reconcileOrderLifecycleInTransaction({ tx, db: f.db, before: beforeSecondDelivery, after: afterSecondDelivery, event: 'DELIVERY_COMPLETED', now: secondDeliveredAt });
+    tx.update(f.db.collection('requests').doc('order-c'), { status: 'delivered', deliveredAt: secondDeliveredAt, chatAccessEndsAt: secondAccessEndsAt });
+  });
+  f.setTime(secondDeliveredAt.getTime());
+  const branchHistory = (await call(f.conversations, 'GET', 'manager-a-token', {}, '?view=history')).body.conversations;
+  assert.deepEqual(new Set(branchHistory.map((item) => item.historyOrderId)), new Set(['order-a', 'order-c']));
+  assert.equal(branchHistory.find((item) => item.historyOrderId === 'order-a').lastMessagePreview, 'Branch order message');
+  assert.equal(branchHistory.find((item) => item.historyOrderId === 'order-c').lastMessagePreview, 'Second order question');
+  assert.deepEqual((await call(f.messages, 'GET', 'manager-a-token', {}, `?conversationId=${branchId}&historyId=${historyId(branchId, 'order-c')}`)).body.messages.map((item) => item.body), ['Second order question']);
+  assert.deepEqual((await call(f.messages, 'GET', 'manager-a-token', {}, `?conversationId=${branchId}&historyId=${branchHistoryId}`)).body.messages.map((item) => item.body), ['Branch order message']);
+  assert.equal((await call(f.conversations, 'GET', 'manager-a-token')).body.conversations[0].orderContext, null);
+  assert.equal((await call(f.conversations, 'GET', 'manager-a-token')).body.conversations[0].lastMessagePreview, '');
+  assert.equal((await call(f.conversations, 'GET', 'requester-a-token', {}, '?view=history')).body.conversations.length, 4);
+  assert.equal((await call(f.conversations, 'GET', 'distributor-a-token', {}, '?view=history')).body.conversations.length, 2);
+  f.records.get('users/requester-a').fullName = 'Updated Requester Name';
+  const refreshedHistory = (await call(f.conversations, 'GET', 'manager-a-token', {}, '?view=history')).body.conversations[0];
+  assert.equal(refreshedHistory.requesterDisplayName, 'Updated Requester Name');
+  f.setTime(accessEndsAt.getTime());
+  assert.deepEqual(new Set((await call(f.conversations, 'GET', 'requester-a-token', {}, '?view=history')).body.conversations.map((item) => item.historyOrderId)), new Set(['order-c']));
+  assert.equal((await call(f.messages, 'GET', 'requester-a-token', {}, `?conversationId=${directId}&historyId=${directHistoryId}`)).statusCode, 403);
+  f.setTime(secondAccessEndsAt.getTime());
+  assert.equal((await call(f.conversations, 'GET', 'requester-a-token', {}, '?view=history')).body.conversations.length, 0);
+});
+
+test('delivery archives message-free legacy canonical chats without a registry and leaves no delivered-only Active row', async () => {
+  const f = fixture();
+  const directId = await directConversation(f);
+  const branch = await resolve(f, 'requester-a-token', { type: 'requester_branch', intent: 'order_followup', orderId: 'order-a' });
+  const branchId = branch.body.conversation.id;
+  for (const id of [directId, branchId]) {
+    const conversation = f.records.get(`chatConversations/${id}`);
+    f.records.delete(`chatAuthorityRegistry/${conversation.authorityKeyHash}`);
+  }
+  const before = { id: 'order-a', ...f.records.get('requests/order-a') };
+  const deliveredAt = new Date('2026-01-02T00:00:00Z');
+  const chatAccessEndsAt = new Date(deliveredAt.getTime() + 7 * 24 * 60 * 60 * 1000);
+  const after = { ...before, status: 'delivered', deliveredAt, chatAccessEndsAt };
+  await f.db.runTransaction(async (tx) => {
+    await reconcileOrderLifecycleInTransaction({ tx, db: f.db, before, after, event: 'DELIVERY_COMPLETED', now: deliveredAt });
+    tx.update(f.db.collection('requests').doc('order-a'), { status: 'delivered', deliveredAt, chatAccessEndsAt });
+  });
+  f.setTime(deliveredAt.getTime());
+  for (const token of ['manager-a-token', 'requester-a-token', 'distributor-a-token']) {
+    const active = await call(f.conversations, 'GET', token);
+    assert.equal(active.body.conversations.length, 0);
+  }
+  const managerHistory = await call(f.conversations, 'GET', 'manager-a-token', {}, '?view=history');
+  const requesterHistory = await call(f.conversations, 'GET', 'requester-a-token', {}, '?view=history');
+  const distributorHistory = await call(f.conversations, 'GET', 'distributor-a-token', {}, '?view=history');
+  assert.deepEqual(managerHistory.body.conversations.map((item) => item.historyOrderId), ['order-a']);
+  assert.equal(requesterHistory.body.conversations.length, 2);
+  assert.equal(distributorHistory.body.conversations.length, 1);
+  assert.equal(managerHistory.body.conversations[0].lastMessagePreview, '');
+  assert.equal(managerHistory.body.conversations[0].orderReference, 'BT-2026-8B4B75BE');
+  for (let index = 1; index <= 2; index += 1) {
+    f.records.set(`chatOrderHistory/ineligible-${index}`, {
+      conversationId: 'missing-conversation', orderId: 'order-a', type: 'requester_branch',
+      participantBranchIds: ['branch-a'], participantUserUids: [],
+      archivedAt: new Date(deliveredAt.getTime() + index * 1000), readAccessEndsAt: chatAccessEndsAt,
+    });
+  }
+  const filledPage = await call(f.conversations, 'GET', 'manager-a-token', {}, '?view=history&limit=1');
+  assert.deepEqual(filledPage.body.conversations.map((item) => item.historyOrderId), ['order-a']);
+  assert.equal(filledPage.body.nextCursor, null);
+  f.records.delete('chatOrderHistory/ineligible-1');
+  f.records.delete('chatOrderHistory/ineligible-2');
+  assert.equal((await call(f.messages, 'GET', 'manager-a-token', {}, `?conversationId=${branchId}&historyId=${historyId(branchId, 'order-a')}`)).body.messages.length, 0);
+  const inquiry = await resolve(f, 'requester-a-token', { type: 'requester_branch', intent: 'inquiry', branchId: 'branch-a' });
+  assert.equal(inquiry.statusCode, 200);
+  const current = (await call(f.conversations, 'GET', 'manager-a-token')).body.conversations;
+  assert.equal(current.length, 1);
+  assert.equal(current[0].orderContext, null);
+  assert.equal(current[0].id, branchId);
+  assert.equal((await call(f.conversations, 'GET', 'manager-a-token', {}, '?view=history')).body.conversations.length, 1);
+});
+
 test('cold summary discovery returns the same authorized conversation to both users without resolve', async () => {
   const f = fixture();
   const id = await directConversation(f);
@@ -208,6 +383,12 @@ test('Manager cold summaries and pinned Distributor resolution enforce own activ
   assert.equal(pinned.statusCode, 201);
   const own = await resolve(f, 'distributor-a-token', { type: 'distributor_branch' });
   assert.equal(own.body.conversation.id, pinned.body.conversation.id);
+  f.records.get('users/distributor-a').fullName = 'Updated Distributor Name';
+  const distributorSummary = (await call(f.conversations, 'GET', 'manager-a-token')).body.conversations.find((item) => item.id === pinned.body.conversation.id);
+  assert.equal(distributorSummary.distributorDisplayName, 'Updated Distributor Name');
+  Object.assign(f.records.get('users/distributor-a'), { fullName: 'Branch Distributor', firstName: 'Real', lastName: 'Distributor' });
+  const namedSummary = (await call(f.conversations, 'GET', 'manager-a-token')).body.conversations.find((item) => item.id === pinned.body.conversation.id);
+  assert.equal(namedSummary.distributorDisplayName, 'Real Distributor');
   assert.equal((await resolve(f, 'manager-b-token', { type: 'distributor_branch', distributorId: 'distributor-a' })).statusCode, 403);
   assert.equal((await resolve(f, 'manager-no-claim-token', { type: 'distributor_branch', distributorId: 'distributor-a' })).statusCode, 403);
   f.records.get('users/distributor-a').branchMembershipVersion++;

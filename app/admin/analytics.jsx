@@ -1,7 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import {
   ActivityIndicator,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -17,6 +16,7 @@ import { useAdminRealtimeData } from '../../components/AdminDataProvider';
 import { getBranches } from '../../services/branchManagement';
 import { ADMIN_CACHE_KEYS, useAdminData } from '../../services/adminDataCache';
 import { BLUETAP_LAYOUT } from '../../constants/bluetapTheme';
+import AnalyticsMetricCard from '../../components/AnalyticsMetricCard';
 
 const ACTIVE_STATUSES = new Set([
   'awaiting_distributor_assignment',
@@ -180,7 +180,6 @@ export default function AdminAnalyticsPage() {
 
   const [stationFilter, setStationFilter] = useState('all');
   const [dateFilter, setDateFilter] = useState('recent');
-  const [hoveredMetric, setHoveredMetric] = useState(null);
 
   const { data: branchesData, loading: loadingBranches } = useAdminData(
     ADMIN_CACHE_KEYS.branches,
@@ -380,23 +379,6 @@ export default function AdminAnalyticsPage() {
 
   const stationLoading = loadingRequests || loadingBranches;
 
-  const metricCardProps = (id, label, value, detail, accent) => ({
-    accessible: true,
-    accessibilityRole: 'text',
-    accessibilityLabel: `${label}: ${value}. ${detail}`,
-    focusable: true,
-    onPointerEnter: () => setHoveredMetric(id),
-    onPointerLeave: () => setHoveredMetric(null),
-    onFocus: () => setHoveredMetric(id),
-    onBlur: () => setHoveredMetric(null),
-    style: [
-      styles.statCard,
-      metricCardResponsiveStyle,
-      { borderTopColor: accent },
-      hoveredMetric === id && [styles.statCardActive, { borderColor: accent, borderTopColor: accent }],
-    ],
-  });
-
   return (
     <AdminShell
       title="Analytics & Reporting"
@@ -510,7 +492,7 @@ export default function AdminAnalyticsPage() {
       <View style={styles.sectionHeading}>
         <Text style={styles.sectionTitle}>Summary Metrics</Text>
         <Text style={styles.sectionMeta}>
-          {filteredRequests.length} orders analyzed · {metrics.deliveredCount} delivered
+          {filteredRequests.length} orders analyzed {'\u00b7'} {metrics.deliveredCount} delivered
         </Text>
       </View>
 
@@ -522,86 +504,14 @@ export default function AdminAnalyticsPage() {
         </View>
       ) : (
         <View style={styles.statGrid}>
-          <View {...metricCardProps('revenue', 'Snapshot Revenue', formatCurrency(metrics.totalRevenue), 'Revenue from delivered order price snapshots', colors.success)}>
-            <View style={[styles.statIconWrap, { backgroundColor: colors.successSoft }]}>
-              <Text style={[styles.statIconGlyph, { color: colors.success }]}>₱</Text>
-            </View>
-            <Text style={styles.statLabel}>SNAPSHOT REVENUE</Text>
-            <Text style={[styles.statValue, { color: colors.success }]}>
-              {formatCurrency(metrics.totalRevenue)}
-            </Text>
-            <Text style={styles.statDetail}>
-              From {formatNumber(metrics.deliveredCount)} delivered orders
-            </Text>
-          </View>
-
-          <View {...metricCardProps('units', 'Units Sold', formatNumber(metrics.unitsSold), 'Delivered water containers or items', colors.primary)}>
-            <View style={[styles.statIconWrap, { backgroundColor: colors.primarySoft }]}>
-              <Text style={[styles.statIconGlyph, { color: colors.primary }]}>◇</Text>
-            </View>
-            <Text style={styles.statLabel}>UNITS SOLD</Text>
-            <Text style={[styles.statValue, { color: colors.textPrimary }]}>
-              {formatNumber(metrics.unitsSold)}
-            </Text>
-            <Text style={styles.statDetail}>
-              Delivered water containers / items
-            </Text>
-          </View>
-
-          <View {...metricCardProps('orders', 'Total Orders', formatNumber(metrics.totalOrders), `Fulfillment rate: ${metrics.fulfillmentRate.toFixed(1)}%`, colors.textSecondary)}>
-            <View style={[styles.statIconWrap, { backgroundColor: colors.neutral }]}>
-              <Text style={[styles.statIconGlyph, { color: colors.textPrimary }]}>▤</Text>
-            </View>
-            <Text style={styles.statLabel}>TOTAL ORDERS</Text>
-            <Text style={[styles.statValue, { color: colors.textPrimary }]}>
-              {formatNumber(metrics.totalOrders)}
-            </Text>
-            <Text style={styles.statDetail}>
-              Fulfillment rate: {metrics.fulfillmentRate.toFixed(1)}%
-            </Text>
-          </View>
-
-          <View {...metricCardProps('delivered', 'Delivered', formatNumber(metrics.deliveredCount), 'Successfully completed orders', colors.success)}>
-            <View style={[styles.statIconWrap, { backgroundColor: colors.successSoft }]}>
-              <Text style={[styles.statIconGlyph, { color: colors.success }]}>✓</Text>
-            </View>
-            <Text style={styles.statLabel}>DELIVERED</Text>
-            <Text style={[styles.statValue, { color: colors.textPrimary }]}>
-              {formatNumber(metrics.deliveredCount)}
-            </Text>
-            <Text style={styles.statDetail}>
-              Successfully completed orders
-            </Text>
-          </View>
-
-          <View {...metricCardProps('ongoing', 'Ongoing Deliveries', formatNumber(metrics.ongoingCount), 'Assigned, scheduled, or in transit', colors.warning)}>
-            <View style={[styles.statIconWrap, { backgroundColor: colors.warningSoft }]}>
-              <Text style={[styles.statIconGlyph, { color: colors.warning }]}>◉</Text>
-            </View>
-            <Text style={styles.statLabel}>ONGOING DELIVERIES</Text>
-            <Text style={[styles.statValue, { color: colors.textPrimary }]}>
-              {formatNumber(metrics.ongoingCount)}
-            </Text>
-            <Text style={styles.statDetail}>
-              Assigned, scheduled, or in transit
-            </Text>
-          </View>
-
-          <View {...metricCardProps('issues', 'Issues & Cancelled', formatNumber(metrics.issuesCount), 'Cancelled, failed, or declined orders', colors.danger)}>
-            <View style={[styles.statIconWrap, { backgroundColor: colors.dangerSoft }]}>
-              <Text style={[styles.statIconGlyph, { color: colors.danger }]}>×</Text>
-            </View>
-            <Text style={styles.statLabel}>ISSUES & CANCELLED</Text>
-            <Text style={[styles.statValue, { color: colors.textPrimary }]}>
-              {formatNumber(metrics.issuesCount)}
-            </Text>
-            <Text style={styles.statDetail}>
-              Cancelled, failed, or declined
-            </Text>
-          </View>
+          <AnalyticsMetricCard label="SNAPSHOT REVENUE" value={formatCurrency(metrics.totalRevenue)} valueColor={colors.success} detail={`${formatNumber(metrics.deliveredCount)} delivered orders`} icon="CircleDollarSign" accent={colors.success} iconBackground={colors.successSoft} colors={colors} style={metricCardResponsiveStyle} />
+          <AnalyticsMetricCard label="UNITS SOLD" value={formatNumber(metrics.unitsSold)} detail="Delivered water containers / items" icon="Package" accent={colors.primary} iconBackground={colors.primarySoft} colors={colors} style={metricCardResponsiveStyle} />
+          <AnalyticsMetricCard label="TOTAL ORDERS" value={formatNumber(metrics.totalOrders)} detail={`Fulfillment rate: ${metrics.fulfillmentRate.toFixed(1)}%`} icon="ClipboardList" accent={colors.textSecondary} iconBackground={colors.neutral} colors={colors} style={metricCardResponsiveStyle} />
+          <AnalyticsMetricCard label="DELIVERED" value={formatNumber(metrics.deliveredCount)} detail="Successfully completed orders" icon="ShieldCheck" accent={colors.success} iconBackground={colors.successSoft} colors={colors} style={metricCardResponsiveStyle} />
+          <AnalyticsMetricCard label="ONGOING DELIVERIES" value={formatNumber(metrics.ongoingCount)} detail="Assigned, scheduled, or in transit" icon="Truck" accent={colors.warning} iconBackground={colors.warningSoft} colors={colors} style={metricCardResponsiveStyle} />
+          <AnalyticsMetricCard label="ISSUES & CANCELLED" value={formatNumber(metrics.issuesCount)} detail="Cancelled, failed, or declined" icon="ShieldAlert" accent={colors.danger} iconBackground={colors.dangerSoft} colors={colors} style={metricCardResponsiveStyle} />
         </View>
       )}
-
       {!loadingRequests || requests.length > 0 ? <OrderStatusMiniGraph metrics={metrics} colors={colors} styles={styles} /> : null}
 
       {operationalHighlights.length > 0 ? (
@@ -1035,26 +945,6 @@ const createStyles = (colors) =>
       minHeight: 150,
       flexGrow: 1,
     },
-    statCard: {
-      flexGrow: 1,
-      minWidth: 0,
-      minHeight: 150,
-      backgroundColor: colors.surface,
-      borderWidth: 1,
-      borderColor: colors.border,
-      borderTopWidth: 4,
-      borderRadius: 14,
-      padding: 16,
-      ...BLUETAP_LAYOUT.shadow,
-      ...Platform.select({
-        web: {
-          cursor: 'default',
-          transitionDuration: '160ms',
-          transitionProperty: 'transform, box-shadow, border-color',
-        },
-        default: {},
-      }),
-    },
     statCardThreeColumn: {
       flexBasis: '30%',
       minWidth: 230,
@@ -1066,41 +956,6 @@ const createStyles = (colors) =>
     statCardOneColumn: {
       flexBasis: '100%',
       maxWidth: '100%',
-    },
-    statCardActive: {
-      transform: [{ translateY: -2 }],
-      shadowOpacity: 0.13,
-      shadowRadius: 18,
-      elevation: 4,
-    },
-    statIconWrap: {
-      width: 28,
-      height: 28,
-      borderRadius: 8,
-      justifyContent: 'center',
-      alignItems: 'center',
-      marginBottom: 8,
-    },
-    statIconGlyph: {
-      fontSize: 14,
-      fontWeight: '900',
-    },
-    statLabel: {
-      color: colors.textSecondary,
-      fontSize: 10,
-      fontWeight: '900',
-      letterSpacing: 0.5,
-    },
-    statValue: {
-      fontSize: 22,
-      fontWeight: '900',
-      marginTop: 4,
-    },
-    statDetail: {
-      color: colors.textSecondary,
-      fontSize: 11,
-      marginTop: 4,
-      lineHeight: 16,
     },
     miniChartCard: {
       backgroundColor: colors.surface,

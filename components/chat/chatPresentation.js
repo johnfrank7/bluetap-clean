@@ -1,4 +1,5 @@
 const clean = (value) => String(value || '').trim();
+const meaningfulName = (...values) => values.map(clean).find((value) => value && !['branch distributor', 'distributor', 'requester', 'user'].includes(value.toLowerCase())) || '';
 
 const ROLE_CONVERSATION_TYPES = Object.freeze({
   requester: new Set(['requester_branch', 'requester_distributor']),
@@ -95,4 +96,5 @@ module.exports = {
   counterpartRoleLabel,
   conversationAllowedForRole,
   initialsForName,
+  meaningfulName,
 };

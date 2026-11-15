@@ -21,4 +21,5 @@ async function managerRequest(path, { method = 'GET', body } = {}) {
 export const getOutsideRadiusOrders = async () => (await managerRequest('/api/manager/outside-radius-orders')).orders || [];
 export const decideOutsideRadiusOrder = async (orderId, action) => (await managerRequest('/api/manager/outside-radius-orders', { method: 'PATCH', body: { orderId, action } })).order;
 export const getManagerDispatch = async () => managerRequest('/api/manager/dispatch-orders');
+export const quoteManagerOrder = async (orderId, payload = {}) => managerRequest('/api/manager/dispatch-orders', { method: 'PATCH', body: { orderId, action: 'quote-edit', ...payload } });
 export const dispatchManagerOrder = async (orderId, action, payload = {}) => (await managerRequest('/api/manager/dispatch-orders', { method: 'PATCH', body: { orderId, action, ...payload } })).order;

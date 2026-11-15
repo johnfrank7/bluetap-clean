@@ -4,6 +4,7 @@ import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, Text
 import { useChat } from './ChatContext';
 import ChatComposer from './ChatComposer';
 import ChatMessageBubble from './ChatMessageBubble';
+import chatModel from './chatModel';
 import ChatOrderContextCard from './ChatOrderContextCard';
 import ChatReportDialog from './ChatReportDialog';
 import RequestDetailsModal from '../RequestDetailsModal';
@@ -30,6 +31,10 @@ export default function ChatConversationView() {
     closeRequestDetails,
   } = useCurrentPageRequestDetails();
   const [replyTarget, setReplyTarget] = React.useState(null);
+  const [activeMessageMenu, setActiveMessageMenu] = React.useState(null);
+  const rootRef = React.useRef(null);
+  const messageMenuRef = React.useRef(null);
+  const menuRequestRef = React.useRef(0);
   const scrollRef = React.useRef(null);
   const didInitialScroll = React.useRef(false);
   const isNearBottomRef = React.useRef(true);
@@ -41,22 +46,72 @@ export default function ChatConversationView() {
 
   React.useEffect(() => {
     setReplyTarget(null);
+    menuRequestRef.current += 1;
+    setActiveMessageMenu(null);
     didInitialScroll.current = false;
     isNearBottomRef.current = true;
     const timer = setTimeout(() => scrollRef.current?.scrollToEnd?.({ animated: false }), 40);
     return () => clearTimeout(timer);
-  }, [currentConversation?.id]);
+  }, [currentConversation?.id, currentConversation?.historyId]);
+
+  const closeMessageMenu = React.useCallback(() => {
+    menuRequestRef.current += 1;
+    setActiveMessageMenu(null);
+  }, []);
+
+  const toggleDesktopMessageMenu = React.useCallback(({ message, actions, own, anchorRef, onChoose }) => {
+    if (activeMessageMenu?.id === message.id) {
+      closeMessageMenu();
+      return;
+    }
+    const request = ++menuRequestRef.current;
+    anchorRef.current?.measureInWindow?.((x, y, width, height) => {
+      scrollRef.current?.measureInWindow?.((scrollX, scrollY, scrollWidth, scrollHeight) => {
+        rootRef.current?.measureInWindow?.((rootX, rootY) => {
+          if (request !== menuRequestRef.current) return;
+          const position = chatModel.positionMessageMenu({
+            anchor: { x, y, width, height },
+            viewport: { x: scrollX, y: scrollY, width: scrollWidth, height: scrollHeight },
+            root: { x: rootX, y: rootY },
+            own,
+            actionCount: actions.length,
+          });
+          setActiveMessageMenu({ id: message.id, actions, onChoose, anchorRef, position });
+        });
+      });
+    });
+  }, [activeMessageMenu?.id, closeMessageMenu]);
+
+  React.useEffect(() => {
+    if (!activeMessageMenu || typeof document === 'undefined') return undefined;
+    const closeOutside = (event) => {
+      const target = event.target;
+      if (messageMenuRef.current?.contains?.(target) || activeMessageMenu.anchorRef.current?.contains?.(target)) return;
+      closeMessageMenu();
+    };
+    const closeOnEscape = (event) => { if (event.key === 'Escape') closeMessageMenu(); };
+    const closeOnResize = () => closeMessageMenu();
+    document.addEventListener('pointerdown', closeOutside);
+    document.addEventListener('keydown', closeOnEscape);
+    window.addEventListener('resize', closeOnResize);
+    return () => {
+      document.removeEventListener('pointerdown', closeOutside);
+      document.removeEventListener('keydown', closeOnEscape);
+      window.removeEventListener('resize', closeOnResize);
+    };
+  }, [activeMessageMenu, closeMessageMenu]);
 
   React.useEffect(() => {
     const prevLen = prevMessagesLengthRef.current;
     prevMessagesLengthRef.current = messages.length;
+    if (messages.length !== prevLen && activeMessageMenu) closeMessageMenu();
     if (messages.length > prevLen) {
       const latest = messages[messages.length - 1];
       if (latest && (isOwnMessage(latest) || isNearBottomRef.current)) {
         scrollRef.current?.scrollToEnd?.({ animated: true });
       }
     }
-  }, [isOwnMessage, messages]);
+  }, [activeMessageMenu, closeMessageMenu, isOwnMessage, messages]);
 
   const replySenderName = replyTarget
     ? (isOwnMessage(replyTarget) ? 'yourself' : (replyTarget.senderRole === 'manager' ? (currentConversation.branchDisplayName || 'Station') : (currentConversation.displayName || 'User')))
@@ -67,7 +122,7 @@ export default function ChatConversationView() {
 
   if (!currentConversation) return null;
   return (
-    <View style={styles.root}>
+    <View ref={rootRef} style={styles.root}>
       {headerMenuOpen && (
         <Pressable
           accessibilityRole="button"
@@ -91,6 +146,7 @@ export default function ChatConversationView() {
         contentContainerStyle={styles.messages}
         scrollEventThrottle={32}
         onScroll={(event) => {
+          if (activeMessageMenu) closeMessageMenu();
           const { layoutMeasurement, contentOffset, contentSize } = event.nativeEvent;
           const paddingToBottom = 90;
           isNearBottomRef.current = layoutMeasurement.height + contentOffset.y >= contentSize.height - paddingToBottom;
@@ -121,9 +177,11 @@ export default function ChatConversationView() {
             colors={colors}
             onRetry={retryMessage}
             onReport={reportingAllowed ? (item) => setReportTarget({ type: 'message', message: item }) : undefined}
-            onEdit={(item) => { setEditTarget(item); setEditBody(item.body || ''); }}
-            onDelete={setDeleteTarget}
+            onEdit={currentConversation.historyId ? undefined : (item) => { setEditTarget(item); setEditBody(item.body || ''); }}
+            onDelete={currentConversation.historyId ? undefined : setDeleteTarget}
             onReply={canSend ? (item) => setReplyTarget(item) : undefined}
+            desktopMenuOpen={activeMessageMenu?.id === message.id}
+            onToggleDesktopMenu={toggleDesktopMessageMenu}
           />
         ))}
       </ScrollView>
@@ -169,6 +227,30 @@ export default function ChatConversationView() {
           }}
         />
       ) : !threadError && !conversationNotice && <Text style={[styles.readOnly, { color: colors.textSecondary, backgroundColor: colors.surfaceAlt }]}>{sendUnavailableReason || 'Sending is unavailable for this conversation.'}</Text>}
+      {activeMessageMenu && (
+        <View pointerEvents="box-none" style={styles.messageMenuLayer}>
+          <View ref={messageMenuRef} style={[styles.messageMenu, activeMessageMenu.position, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <ScrollView keyboardShouldPersistTaps="always" style={{ maxHeight: activeMessageMenu.position.maxHeight }}>
+              {activeMessageMenu.actions.map((action) => (
+                <Pressable
+                  key={action}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${action} message`}
+                  onPress={(event) => {
+                    event?.stopPropagation?.();
+                    const choose = activeMessageMenu.onChoose;
+                    closeMessageMenu();
+                    choose(action);
+                  }}
+                  style={styles.messageMenuItem}
+                >
+                  <Text style={[styles.messageMenuText, { color: action === 'Delete' || action === 'Report' ? colors.danger : colors.textPrimary }]}>{action === 'Report' ? 'Report this message' : action}</Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+          </View>
+        </View>
+      )}
       <ChatReportDialog visible={!!reportTarget} conversation={currentConversation} message={reportTarget?.message} colors={colors} onClose={() => setReportTarget(null)} />
       <RequestDetailsModal visible={requestDetailsVisible} request={selectedRequest} branches={[]} onClose={closeRequestDetails} />
       <Modal visible={!!editTarget} transparent animationType="fade" onRequestClose={() => setEditTarget(null)}><View style={styles.modalBackdrop}><View accessibilityViewIsModal style={[styles.modalCard, { backgroundColor: colors.surface, borderColor: colors.border }]}><Text style={[styles.modalTitle, { color: colors.textPrimary }]}>Edit message</Text><TextInput accessibilityLabel="Edited message" value={editBody} onChangeText={setEditBody} maxLength={2000} multiline style={[styles.editInput, { color: colors.textPrimary, backgroundColor: colors.surfaceAlt, borderColor: colors.border }]} /><View style={styles.modalActions}><Pressable onPress={() => setEditTarget(null)} style={[styles.secondary, { borderColor: colors.border }]}><Text style={{ color: colors.textPrimary, fontWeight: '800' }}>Cancel</Text></Pressable><Pressable disabled={mutationBusy || !editBody.trim()} onPress={async () => { setMutationBusy(true); try { await editCurrentMessage(editTarget, editBody); setEditTarget(null); } catch {} finally { setMutationBusy(false); } }} style={[styles.primary, { backgroundColor: colors.primaryAction, opacity: mutationBusy ? .6 : 1 }]}><Text style={styles.primaryText}>Save edit</Text></Pressable></View></View></View></Modal>
@@ -178,7 +260,11 @@ export default function ChatConversationView() {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1 },
+  root: { flex: 1, position: 'relative' },
+  messageMenuLayer: { ...StyleSheet.absoluteFillObject, zIndex: 50, elevation: 50 },
+  messageMenu: { position: 'absolute', borderWidth: 1, borderRadius: 10, overflow: 'hidden', shadowColor: '#000', shadowOpacity: .18, shadowRadius: 10, shadowOffset: { width: 0, height: 4 }, elevation: 50 },
+  messageMenuItem: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 12 },
+  messageMenuText: { fontSize: 12, fontWeight: '800' },
   headerMenuBackdrop: { ...StyleSheet.absoluteFillObject, zIndex: 25 },
   threadHeader: { minHeight: 58, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, borderBottomWidth: 1, position: 'relative', zIndex: 30, elevation: 30 },
   back: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },

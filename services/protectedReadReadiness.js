@@ -2,6 +2,7 @@ const clean = (value) => String(value || '').trim();
 const normalized = (value) => clean(value).toLowerCase();
 
 function activeAccount(profile) {
+  if (profile.accountActionHoldIntentId) return false;
   const explicit = normalized(profile.accountStatus);
   if (explicit) return explicit === 'active';
   return ![profile.status, profile.managerStatus, profile.distributorStatus, profile.approvalStatus]

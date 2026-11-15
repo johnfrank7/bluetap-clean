@@ -21,7 +21,7 @@ export function calendarParts(date) {
 }
 
 export default function LocalTimeCard({ compact = false, onBrand = false, style }) {
-  const { colors } = useBlueTapTheme();
+  const { colors, isDark } = useBlueTapTheme();
   const [now, setNow] = React.useState(() => new Date());
 
   React.useEffect(() => {
@@ -41,9 +41,10 @@ export default function LocalTimeCard({ compact = false, onBrand = false, style 
   const { time, period } = clockParts(now);
   const { weekday, date } = calendarParts(now);
   const daytime = now.getHours() >= 6 && now.getHours() < 18;
-  const sunColor = onBrand ? '#FFD54F' : '#F59E0B';
-  const primaryColor = onBrand ? '#FFFFFF' : (colors.iconInteractive || colors.primary);
-  const secondaryColor = onBrand ? '#DDF2FF' : colors.textSecondary;
+  const useBrandColors = onBrand && !isDark;
+  const sunColor = useBrandColors ? '#FFD54F' : '#F59E0B';
+  const primaryColor = useBrandColors ? colors.onPrimary : (isDark ? colors.textPrimary : colors.iconInteractive);
+  const secondaryColor = useBrandColors ? '#DDF2FF' : colors.textSecondary;
   return (
     <View
       accessibilityLabel={`Local time ${time} ${period}, ${weekday}, ${date}`}
@@ -52,7 +53,7 @@ export default function LocalTimeCard({ compact = false, onBrand = false, style 
       style={[
         styles.clock,
         compact && styles.clockCompact,
-        { borderColor: onBrand ? 'rgba(255,255,255,0.28)' : colors.border },
+        { borderColor: useBrandColors ? 'rgba(255,255,255,0.28)' : colors.border },
         style,
       ]}
     >

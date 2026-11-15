@@ -13,11 +13,13 @@ const { createRequiredPasswordChangeHandler } = require('../auth/requiredPasswor
 const { createPasswordRecoveryHandler } = require('../auth/passwordRecoveryHandler');
 const { createPasswordChangeOtpHandler } = require('../auth/passwordChangeOtpHandler');
 const { createManagerContextHandler } = require('../manager/managerContextHandler');
+const { createManagerDeliveryReviewsHandler } = require('../manager/deliveryReviewsHandler');
 const { createOutsideRadiusApprovalsHandler } = require('../manager/outsideRadiusApprovalHandler');
 const { createManagerDispatchHandler } = require('../manager/dispatchHandler');
 const { createManagerWorkspaceHandler } = require('../manager/workspaceHandler');
 const { createManagerProfileHandler } = require('../manager/profileHandler');
 const { createDistributorAssignedOrdersHandler } = require('../distributor/assignedOrdersHandler');
+const { createDistributorDeliveryReviewsHandler } = require('../distributor/deliveryReviewsHandler');
 const { createAdminAccountsHandler } = require('../admin/accountManagementHandler');
 const { createAdminDistributorsHandler } = require('../admin/distributorManagementHandler');
 const { createSessionPolicyHandler } = require('../auth/sessionPolicyHandler');
@@ -25,6 +27,9 @@ const { createAdminDashboardOverviewHandler } = require('../admin/dashboardOverv
 const { createAdminProductsHandler } = require('../admin/productManagementHandler');
 const { createAdminDispatchOverrideHandler } = require('../admin/adminDispatchOverrideHandler');
 const { createRequesterCatalogHandler, createRequesterOrdersHandler } = require('../requester/orderingHandler');
+const { createAdminDeliveryAppealsHandler } = require('../admin/deliveryAppealsHandler');
+const { createRequesterDeliveryReportsHandler } = require('../requester/deliveryReportsHandler');
+const { createRequesterDeliveryAppealsHandler } = require('../requester/deliveryAppealsHandler');
 const { createOrderDetailsHandler } = require('../orders/orderDetailsHandler');
 const { createChatConversationsHandler, createChatMessagesHandler, createChatReadStateHandler } = require('../chat/chatHandler');
 const { createChatReportsHandler } = require('../chat/reportHandler');
@@ -60,15 +65,21 @@ const routes = new Map([
   ['/api/admin/distributors', createAdminDistributorsHandler()],
   ['/api/admin/dashboard/overview', createAdminDashboardOverviewHandler()],
   ['/api/admin/products', createAdminProductsHandler()],
+  ['/api/admin/bundle-promotion-drafts', createAdminProductsHandler(undefined, { promotionDraftOnly: true })],
   ['/api/admin/dispatch-override', createAdminDispatchOverrideHandler()],
   ['/api/requester/catalog', createRequesterCatalogHandler()],
   ['/api/requester/orders', createRequesterOrdersHandler()],
+  ['/api/admin/delivery-appeals', createAdminDeliveryAppealsHandler()],
+  ['/api/requester/delivery-reports', createRequesterDeliveryReportsHandler()],
+  ['/api/requester/delivery-appeals', createRequesterDeliveryAppealsHandler()],
   ['/api/manager/context', createManagerContextHandler()],
+  ['/api/manager/delivery-reviews', createManagerDeliveryReviewsHandler()],
   ['/api/manager/workspace', createManagerWorkspaceHandler()],
   ['/api/manager/profile', createManagerProfileHandler()],
   ['/api/manager/outside-radius-orders', createOutsideRadiusApprovalsHandler()],
   ['/api/manager/dispatch-orders', createManagerDispatchHandler()],
   ['/api/distributor/orders', createDistributorAssignedOrdersHandler()],
+  ['/api/distributor/delivery-reviews', createDistributorDeliveryReviewsHandler()],
   ['/api/orders/details', createOrderDetailsHandler()],
   ['/api/auth/complete-required-password-change', createRequiredPasswordChangeHandler()],
   ['/api/auth/password-recovery', createPasswordRecoveryHandler()],

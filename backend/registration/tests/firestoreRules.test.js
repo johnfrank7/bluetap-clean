@@ -24,9 +24,9 @@ test('client profile updates cannot change trusted verification fields', () => {
   }
 });
 
-test('product catalog is readable only to an active global account and all client mutations are server-only', () => {
+test('product documents containing promotion drafts are Admin-only and all client mutations are server-only', () => {
   assert.match(rules, /function isManagerBranch\(branchId\)[\s\S]*branchId == currentUser\(\)\.branchId/);
-  assert.match(rules, /match \/products\/\{productId\}[\s\S]*allow read:\s*if hasActiveGlobalAccount\(\);/);
+  assert.match(rules, /match \/products\/\{productId\}[\s\S]*allow read:\s*if isAdmin\(\);/);
   assert.match(rules, /match \/products\/\{productId\}[\s\S]*allow create, update, delete:\s*if false;/);
 });
 

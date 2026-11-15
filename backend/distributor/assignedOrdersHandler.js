@@ -3,11 +3,12 @@ const { requireActiveDistributor } = require('../auth/authorization');
 const { applyCors } = require('../utils/cors');
 const { safeOrder, owningBranchId } = require('../manager/dispatchHandler');
 const { OtpError } = require('../utils/otpError');
-const { assignmentVersionForTransition } = require('../utils/relationshipEpochs');
+const { assignmentVersionForTransition, getAssignmentVersion } = require('../utils/relationshipEpochs');
 const { FAILED_DELIVERY_CHAT_GRACE_MS } = require('../chat/chatAuthorization');
 const { postOrderAccessEndsAt, reconcileOrderLifecycleInTransaction } = require('../chat/conversationLifecycleService');
-const { deliveryFailureReasonForCode } = require('../../constants/deliveryFailureReasons');
-const { recordOrderAbuseIncidentInTransaction } = require('../moderation/moderationService');
+const { prepareOrderAbuseIncidentInTransaction } = require('../moderation/moderationService');
+const { attemptIdFor, prepareDeliveryAttemptTransition, stageDeliveryAttemptWrites } = require('../delivery/deliveryAttemptService');
+const { normalizeFailureReport, matchesCommittedReport } = require('../delivery/deliveryReportEvidence');
 
 const clean = (value, max = 128) => String(value || '').trim().slice(0, max);
 const history = (value) => Array.isArray(value) ? value : [];
@@ -26,11 +27,14 @@ async function updateOrder(db, orderId, prepare) {
       const snapshot = await tx.get(ref);
       if (!snapshot.exists) throw new OtpError(404, 'ORDER_NOT_FOUND', 'The assigned delivery was not found.');
       const current = snapshot.data() || {};
-      const update = await prepare(current, tx);
+      const { update, moderationWrite, attemptWrites, replay } = await prepare(current, tx);
+      if (replay) return replay;
       let activeOrderGuard = null;
+      let completedRequesterUid = '';
       if (statusOf(update) === 'delivered') {
         const requesterUid = clean(current.requesterUid || current.requester_id, 128);
         if (requesterUid) {
+          completedRequesterUid = requesterUid;
           const guardRef = db.collection('requesterActiveOrders').doc(requesterUid);
           const guard = await tx.get(guardRef);
           if (guard.exists && guard.data()?.orderId === orderId) activeOrderGuard = guardRef;
@@ -44,7 +48,11 @@ async function updateOrder(db, orderId, prepare) {
         event: update.distributorDeliveryHistory?.[update.distributorDeliveryHistory.length - 1]?.event || 'ORDER_UPDATED',
         now: update.updatedAt || new Date(),
       });
+      if (moderationWrite) tx.set(moderationWrite.ref, moderationWrite.data, { merge: true });
+      stageDeliveryAttemptWrites(tx, attemptWrites);
       tx.update(ref, update);
+      if (completedRequesterUid) tx.set(db.collection('moderationActivity').doc(`user_${completedRequesterUid}`),
+        { updatedAt: update.updatedAt || new Date() }, { merge: true });
       if (activeOrderGuard) tx.delete(activeOrderGuard);
       return { ...current, ...update };
     });
@@ -116,12 +124,44 @@ function createDistributorAssignedOrdersHandler(getAdmin = getFirebaseAdmin) {
           throw new OtpError(404, 'ORDER_NOT_FOUND', 'The assigned delivery was not found.');
         }
         const currentStatus = statusOf(current);
+        if (action === 'fail-delivery' && currentStatus === 'delivery_failed' && body.clientMutationId) {
+          const report = normalizeFailureReport(body, current, now, { replay: true });
+          const mutationId = body.clientMutationId;
+          if (typeof mutationId !== 'string' || !/^[A-Za-z0-9_-]{8,128}$/.test(mutationId)) {
+            throw new OtpError(400, 'DELIVERY_MUTATION_ID_INVALID', 'Use a valid delivery mutation ID.');
+          }
+          const number = current.deliveryAttemptSeq;
+          const attemptId = Number.isSafeInteger(number) && number > 0 ? attemptIdFor(orderId, number) : null;
+          const attemptSnapshot = attemptId ? await tx.get(db.collection('deliveryAttempts').doc(attemptId)) : null;
+          const attempt = attemptSnapshot?.exists ? attemptSnapshot.data() || {} : null;
+          const orderUpdatedAt = current.updatedAt?.toMillis?.() || current.updatedAt?.getTime?.() || new Date(current.updatedAt || 0).getTime();
+          const attemptEndedAt = attempt?.endedAt?.toMillis?.() || attempt?.endedAt?.getTime?.() || new Date(attempt?.endedAt || 0).getTime();
+          const failedAt = current.deliveryFailedAt?.toMillis?.() || current.deliveryFailedAt?.getTime?.() || new Date(current.deliveryFailedAt || 0).getTime();
+          const chatGraceUntil = current.distributorChatGraceUntil?.toMillis?.() || current.distributorChatGraceUntil?.getTime?.() || new Date(current.distributorChatGraceUntil || 0).getTime();
+          if (attempt && !current.activeDeliveryAttemptId && attempt.orderId === orderId
+            && attempt.distributorUid === distributor.decoded.uid && attempt.branchId === distributor.branch.id
+            && attempt.assignmentVersion === getAssignmentVersion(current) && attempt.attemptNumber === number
+            && Number.isFinite(orderUpdatedAt) && orderUpdatedAt > 0 && orderUpdatedAt === attemptEndedAt
+            && failedAt === attemptEndedAt && chatGraceUntil === attemptEndedAt + FAILED_DELIVERY_CHAT_GRACE_MS
+            && current.failureReasonCode === report.code && (current.failureReasonNote || '') === report.note
+            && matchesCommittedReport(attempt, report, mutationId)) {
+            return { replay: {
+              ...current,
+              deliveryFailedAt: new Date(failedAt),
+              distributorChatGraceUntil: new Date(chatGraceUntil),
+              updatedAt: new Date(orderUpdatedAt),
+            } };
+          }
+          throw new OtpError(409, 'DELIVERY_REPORT_REPLAY_CONFLICT', 'This report cannot be replayed because the delivery or submitted details changed.');
+        }
         let update;
         let event;
         let failureReason = '';
         let failureReasonCode = '';
         let failureReasonLabel = '';
         let failureReasonNote = '';
+        let reportFormat = null;
+        let reportEvidence = null;
         let declineReason = '';
         let scheduledAt = null;
 
@@ -169,20 +209,27 @@ function createDistributorAssignedOrdersHandler(getAdmin = getFirebaseAdmin) {
           if (!['accepted', 'scheduled'].includes(currentStatus)) {
             throw new OtpError(409, 'ORDER_NOT_STARTABLE', 'This delivery is not ready to start.');
           }
+          const isMultiTripOrder = Boolean(current.tripId || current.tripNumber || ['planning', 'draft'].includes(current.tripStatus));
+          const isUnapproved = current.managerApproved === false || (isMultiTripOrder && current.managerApproved !== true);
+          if (isUnapproved) {
+            throw new OtpError(409, 'TRIP_APPROVAL_REQUIRED', 'This trip requires Manager final approval before delivery can start.');
+          }
           event = 'DELIVERY_STARTED';
-          update = { status: 'out_for_delivery', deliveryStartedAt: now };
+          update = {
+            status: 'out_for_delivery',
+            deliveryStartedAt: now,
+            ...(isMultiTripOrder ? { tripStatus: 'in_transit' } : {}),
+          };
         } else if (action === 'fail-delivery') {
           if (currentStatus !== 'out_for_delivery') {
             throw new OtpError(409, 'ORDER_NOT_FAILABLE', 'Only deliveries that are out for delivery can be reported as failed.');
           }
-          failureReasonCode = clean(body.failureReasonCode, 48).toUpperCase();
-          const allowedReason = deliveryFailureReasonForCode(failureReasonCode);
-          if (!allowedReason) throw new OtpError(400, 'FAILURE_REASON_INVALID', 'Choose a supported delivery failure reason.');
-          failureReasonLabel = allowedReason.label;
-          failureReasonNote = clean(body.failureReasonNote, 240);
-          if (failureReasonCode === 'OTHER' && !failureReasonNote) {
-            throw new OtpError(400, 'FAILURE_REASON_NOTE_REQUIRED', 'Add a short explanation when choosing Other.');
-          }
+          const report = normalizeFailureReport(body, current, now);
+          failureReasonCode = report.code;
+          failureReasonLabel = report.label;
+          failureReasonNote = report.note;
+          reportFormat = report.format;
+          reportEvidence = report.evidence;
           failureReason = failureReasonNote ? `${failureReasonLabel}: ${failureReasonNote}` : failureReasonLabel;
           event = 'DELIVERY_FAILED';
           update = {
@@ -235,19 +282,29 @@ function createDistributorAssignedOrdersHandler(getAdmin = getFirebaseAdmin) {
           updatedAt: now,
           updated_at: now,
         };
+        const attempt = await prepareDeliveryAttemptTransition({
+          tx, db, orderId, order: current, action,
+          distributorUid: distributor.decoded.uid, branchId: distributor.branch.id, now,
+          failureReasonCode, failureReasonLabel, failureReasonNote, reportFormat, reportEvidence,
+          clientMutationId: body.clientMutationId,
+        });
+        Object.assign(result, attempt.orderUpdate);
+        let moderationWrite = null;
         if (event === 'DELIVERY_FAILED') {
-          await recordOrderAbuseIncidentInTransaction({
+          const moderation = await prepareOrderAbuseIncidentInTransaction({
             tx,
             db,
             orderId,
-            order: { ...current, ...result },
+            order: current,
             incidentType: 'delivery_failure',
             category: failureReasonCode,
             stage: 'out_for_delivery',
             now,
+            deliveryAttemptWrites: attempt.writes,
           });
+          moderationWrite = moderation.write;
         }
-        return result;
+        return { update: result, moderationWrite, attemptWrites: attempt.writes };
       });
       return res.status(200).json({ order: safeOrder(orderId, saved) });
     } catch (error) { return responseError(res, error); }

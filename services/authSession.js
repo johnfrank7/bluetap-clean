@@ -179,10 +179,26 @@ const isFaceRequirementSatisfied = (profile = {}) =>
     ? true
     : isFaceVerified(profile);
 
+export const isOperationalEmailVerificationPending = (profile = {}, user) => {
+  const role = normalizeRole(profile?.role);
+  if (!['manager', 'requester', 'distributor'].includes(role)) return false;
+  if (profile?.emailVerificationRequired !== true && profile?.accountSource !== 'admin_created') return false;
+  const activeUser = user !== undefined ? user : (typeof auth !== 'undefined' ? auth?.currentUser : null);
+  if (!activeUser?.emailVerified) return true;
+  const profileEmail = (profile?.email || '').toString().trim().toLowerCase();
+  const authEmail = (activeUser?.email || '').toString().trim().toLowerCase();
+  if (profileEmail && authEmail && profileEmail !== authEmail) return true;
+  if (profile?.emailOtpVerification?.status === 'reconciliation-failed' || profile?.emailOtpVerification?.profileSynced === false) {
+    return true;
+  }
+  return profile?.emailVerified === false && profile?.emailOtpVerification?.status !== 'not_required';
+};
+
 export const getPostAuthenticationDestination = (profile = {}) => {
   const role = normalizeRole(profile.role);
   if (profile.mustChangePassword === true) return '/required-password-change';
   if (role === 'admin') return '/admin/dashboard';
+  if (isOperationalEmailVerificationPending(profile)) return '/email-verification';
   if (role === 'manager') return '/manager/dashboard';
   if (!['requester', 'distributor'].includes(role)) return '/login';
   if (profile.onboardingStatus === 'face_enrollment_pending' || profile.registrationCompleted === false) {
@@ -502,9 +518,10 @@ const validateRoleAccessOnce = async (expectedRole) => {
     };
   }
 
-  const accountStatus = getCanonicalAccountStatus(profile);
+  const accountStatus = profile.accountActionHoldIntentId ? 'pending' : getCanonicalAccountStatus(profile);
   if (accountStatus !== 'active') {
-    const label = accountStatus === 'terminated' ? 'terminated' : accountStatus === 'suspended' ? 'temporarily suspended' : 'inactive';
+    const label = accountStatus === 'pending' ? 'under an account access review'
+      : accountStatus === 'terminated' ? 'terminated' : accountStatus === 'suspended' ? 'temporarily suspended' : 'inactive';
     return {
       status: `account-${accountStatus}`,
       message: `Your account is ${label}. Please contact BlueTap support.`,
@@ -518,11 +535,7 @@ const validateRoleAccessOnce = async (expectedRole) => {
     return { status: 'password-change-required', message: 'Change your temporary password to continue.', redirectTo: '/required-password-change', clearRole: expected };
   }
 
-  if (
-    (profile.role === 'requester' || profile.role === 'distributor') &&
-    profile.emailVerificationRequired === true &&
-    !currentUser.emailVerified
-  ) {
+  if (isOperationalEmailVerificationPending(profile, currentUser)) {
     return {
       status: 'email-unverified',
       message: 'Verify your email to continue.',

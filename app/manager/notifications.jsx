@@ -1,4 +1,4 @@
-﻿import React from 'react';
+import React from 'react';
 import { useRouter } from 'expo-router';
 import { ActivityIndicator, Animated, StyleSheet, Text, View } from 'react-native';
 import { useAdminTheme } from '../../components/AdminTheme';
@@ -14,6 +14,7 @@ import { useAnimatedPresenceList } from '../../components/useAnimatedPresenceLis
 import useNotificationPageMotion, { NOTIFICATION_LIST_MOTION_DURATION_MS } from '../../components/useNotificationPageMotion';
 import useSingleFlightNavigation from '../../components/useSingleFlightNavigation';
 const { clearManagerNotificationOrigin, consumeManagerNotificationOrigin, resolveManagerNotificationBack } = require('../../services/managerNotificationNavigation');
+const { resolveNotificationNavigationTarget } = require('../../services/managerOrderTargetNavigation');
 
 export default function ManagerNotificationsPage() {
   const router = useRouter();
@@ -75,11 +76,14 @@ export default function ManagerNotificationsPage() {
         metadata={`Order #${event.requestId}${event.requesterName ? ` · ${event.requesterName}` : ''}`}
         onPress={() => {
           markRead([event.id]);
+          const navTarget = resolveNotificationNavigationTarget(event);
           if (event.navigable !== false && event.orderId) {
             clearManagerNotificationOrigin();
             navigateOnce({ pathname: '/manager/request', params: { orderId: event.orderId } });
-          }
-          else setSelectedEventId(event.id);
+          } else if (navTarget.type === 'route' && navTarget.target) {
+            clearManagerNotificationOrigin();
+            navigateOnce(navTarget.target);
+          } else setSelectedEventId(event.id);
         }}
       /></AnimatedPresenceItem>;
       })}

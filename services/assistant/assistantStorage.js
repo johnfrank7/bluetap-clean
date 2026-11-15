@@ -316,6 +316,34 @@ export async function clearDailyAssistantChat({ userId, role = 'requester' } = {
   }
 }
 
+
+export const ASSISTANT_VISIBILITY_KEY = 'bluetap:assistant:visible';
+const visibilityListeners = new Set();
+const visibilityKey = (role) => role === 'requester' || role === 'distributor'
+  ? `${ASSISTANT_VISIBILITY_KEY}:${role}` : ASSISTANT_VISIBILITY_KEY;
+
+export async function getAssistantVisibility(role) {
+  try {
+    const val = await storageGetItem(visibilityKey(role));
+    return val !== 'false';
+  } catch {
+    return true;
+  }
+}
+
+export async function setAssistantVisibility(visible, role) {
+  try {
+    await storageSetItem(visibilityKey(role), visible ? 'true' : 'false');
+    visibilityListeners.forEach((listener) => listener(role, Boolean(visible)));
+    return true;
+  } catch {
+    return false;
+  }
+}
+export function subscribeAssistantVisibility(listener) {
+  visibilityListeners.add(listener);
+  return () => visibilityListeners.delete(listener);
+}
 export default {
   ASSISTANT_STORAGE_VERSION,
   MAX_STORED_MESSAGES,

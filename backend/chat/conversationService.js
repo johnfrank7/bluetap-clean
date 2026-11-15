@@ -118,8 +118,8 @@ function removeAuthorityReason(reasons, reason, { orderId = '' } = {}) {
 }
 
 function hasActiveAuthorityReason(reasons, now = Date.now()) {
-  return Object.values(normalizeAuthorityReasons(reasons)).some((reason) =>
-    reason.active === true && (!reason.accessEndsAt || timeOf(reason.accessEndsAt) > now));
+  return Object.entries(normalizeAuthorityReasons(reasons)).some(([kind, reason]) =>
+    kind !== AUTHORITY_REASONS.POST_ORDER_FOLLOWUP && reason.active === true && (!reason.accessEndsAt || timeOf(reason.accessEndsAt) > now));
 }
 
 function requesterDistributorAssignmentIsCurrent({ order, requesterUid, distributorUid, distributorBranchId, assignmentVersion } = {}) {
@@ -259,7 +259,8 @@ function buildConversationFoundation({ type, authority, createdBy, authorityReas
     const normalizedReasons = normalizeAuthorityReasons(authorityReasons);
     const reasons = Object.values(normalizedReasons);
     const accessEndsAt = reasons.some((reason) => !reason.accessEndsAt) ? null : new Date(Math.max(timeOf(now), ...reasons.map((reason) => timeOf(reason.accessEndsAt))));
-    return { ...base, accessEndsAt, readAccessEndsAt: accessEndsAt, status: hasActiveAuthorityReason(normalizedReasons, timeOf(now)) ? CONVERSATION_STATUS.ACTIVE : CONVERSATION_STATUS.READ_ONLY, participantUserUids: [requesterUid], participantBranchIds: [branchId], participantUserAccess: { [requesterUid]: 'active' }, participantBranchAccess: { [branchId]: 'active' }, requesterUid, branchIds: [branchId], authorityReasons: normalizedReasons, participantState: [participantState('user', requesterUid), participantState('branch', branchId)] };
+    const active = hasActiveAuthorityReason(normalizedReasons, timeOf(now));
+    return { ...base, accessEndsAt, readAccessEndsAt: accessEndsAt, status: active ? CONVERSATION_STATUS.ACTIVE : CONVERSATION_STATUS.READ_ONLY, participantUserUids: [requesterUid], participantBranchIds: [branchId], participantUserAccess: { [requesterUid]: active ? 'active' : 'read_only' }, participantBranchAccess: { [branchId]: active ? 'active' : 'read_only' }, requesterUid, branchIds: [branchId], authorityReasons: normalizedReasons, participantState: [participantState('user', requesterUid), participantState('branch', branchId)].map((state) => ({ ...state, accessState: active ? 'active' : 'read_only' })) };
   }
   if (type === CONVERSATION_TYPES.REQUESTER_DISTRIBUTOR) {
     const [, , orderId, requesterUid, distributorUid, assignmentVersion] = tuple;

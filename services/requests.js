@@ -1,4 +1,4 @@
-import { cancelRequesterOrder, createRequesterOrder, getRequesterOrders, updateRequesterOrder } from './requesterOrdering';
+import { cancelRequesterOrder, createRequesterOrder, getRequesterOrders, quoteRequesterOrder, updateRequesterOrder } from './requesterOrdering';
 import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import { db } from '../firebase';
 import {
@@ -68,6 +68,7 @@ const normalizeRequest = (id, data = {}) => {
 
   return {
     id,
+    pricingDetailsSource: data.pricingDetailsSource || data,
     request_id: data.request_id || data.requestId || '',
     requesterUid: (data.requesterUid || data.requester_id || '').toString().trim(),
     requester_id: (data.requester_id || data.requesterUid || '').toString().trim(),
@@ -105,6 +106,11 @@ const normalizeRequest = (id, data = {}) => {
     transferToBranchName: data.transferToBranchNameSnapshot || '',
     delivery_date: data.delivery_date || '',
     total_cost: totalCost,
+    subtotalAtOrder: data.subtotalAtOrder ?? data.subtotal,
+    deliveryFeeAtOrder: data.deliveryFeeAtOrder ?? data.deliveryFee ?? data.delivery_fee,
+    totalAtOrder: data.totalAtOrder ?? data.total_cost,
+    discountAmount: data.discountAmount ?? data.discount,
+    discountReason: data.discountReason,
     status: data.status || 'Pending',
     created_at: data.created_at || data.createdAt || null,
     createdAt: data.createdAt || data.created_at || null,
@@ -419,6 +425,7 @@ export const createRequest = async (requestData) => {
     deliveryLocation: requestData.deliveryLocation,
     container: requestData.container,
     expectedDeliveryDate: requestData.expectedDeliveryDate || requestData.delivery_date,
+    quoteId: requestData.quoteId,
     items: normalizeItems(requestData).map((item) => ({ productId: item.product_id, quantity: item.quantity })),
   });
   return primeRequesterRequest(order);
@@ -450,4 +457,10 @@ export const updateRequest = async (request, payload) => {
 
   const updated = await updateRequesterOrder(requestId, payload);
   return primeRequesterRequest({ ...updated, id: requestId });
+};
+
+export const quoteRequestEdit = async (request, payload) => {
+  const requestId = typeof request === 'string' ? request : request?.id;
+  if (!requestId) throw new Error('Request is missing an ID.');
+  return quoteRequesterOrder(requestId, payload);
 };

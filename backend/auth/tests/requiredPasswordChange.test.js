@@ -78,6 +78,27 @@ test('required password change updates Auth before clearing the enforcement flag
   assert.deepEqual(f.calls.revoked, ['admin-1']);
 });
 
+test('password-change response routes legacy Admin-created accounts to genuine email verification', async () => {
+  const f = fixture({ role: 'manager', claims: { manager: true, role: 'manager' } });
+  f.profile.accountSource = 'admin_created';
+  f.profile.email = 'manager@example.test';
+  const res = await call(createRequiredPasswordChangeHandler(f.getAdmin, () => now), 'valid-token',
+    { newPassword: 'FreshManager2026' });
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.profile.emailVerificationRequired, true);
+  assert.equal(res.body.profile.mustChangePassword, false);
+});
+
+test('pending account access action blocks password changes before Auth mutation', async () => {
+  const f = fixture();
+  f.profile.accountActionHoldIntentId = 'intent-a';
+  const res = await call(createRequiredPasswordChangeHandler(f.getAdmin, () => now),
+    'valid-token', { newPassword: 'FreshAdmin2026' });
+  assert.equal(res.statusCode, 403);
+  assert.equal(res.body.error.reason, 'ACCOUNT_ACTION_PENDING');
+  assert.deepEqual(f.calls.updates, []);
+});
+
 test('password change permits every trusted account role but rejects invalid profiles, stale login, and missing flags', async () => {
   assert.throws(() => validateNewPassword('short'), (error) => error.reason === 'WEAK_PASSWORD');
   let f = fixture({ role: 'requester', claims: {} });

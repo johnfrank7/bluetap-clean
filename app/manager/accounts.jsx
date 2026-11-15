@@ -12,6 +12,8 @@ import {
   View,
 } from 'react-native';
 import { useAdminTheme } from '../../components/AdminTheme';
+import DropdownChevron from '../../components/DropdownChevron';
+import DropdownMenuOverlay from '../../components/DropdownMenuOverlay';
 import AdminIcon from '../../components/AdminIcon';
 import BlueTapEmptyState from '../../components/BlueTapEmptyState';
 import { TableSkeleton } from '../../components/AdminSkeleton';
@@ -79,12 +81,14 @@ function SelectControl({ value, options, labelFor = titleCase, onSelect, accessi
   const { colors } = useAdminTheme();
   const styles = createStyles(colors);
   const [open, setOpen] = useState(false);
+  const triggerRef = React.useRef(null);
   const selected = labelFor(value);
   const close = () => setOpen(false);
 
   return (
     <>
       <TouchableOpacity
+        ref={triggerRef}
         accessibilityRole="combobox"
         accessibilityLabel={accessibilityLabel}
         accessibilityState={{ expanded: open }}
@@ -94,39 +98,20 @@ function SelectControl({ value, options, labelFor = titleCase, onSelect, accessi
         <Text numberOfLines={1} style={styles.selectText}>
           {selected}
         </Text>
-        <Text style={styles.chevron}>⌄</Text>
+        <DropdownChevron expanded={open} size={16} color={colors.iconSecondary || colors.primary} />
       </TouchableOpacity>
-      <Modal visible={open} transparent animationType="fade" onRequestClose={close}>
-        <View style={styles.selectBackdrop}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Close selection"
-            onPress={close}
-            style={StyleSheet.absoluteFill}
-          />
-          <View style={[styles.selectMenu, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-            <ScrollView style={styles.selectList} keyboardShouldPersistTaps="handled">
-              {options.map((option) => (
-                <TouchableOpacity
-                  key={String(option)}
-                  accessibilityRole="option"
-                  accessibilityState={{ selected: option === value }}
-                  onPress={() => {
-                    onSelect(option);
-                    close();
-                  }}
-                  style={[styles.selectOption, option === value && { backgroundColor: colors.primarySoft }]}
-                >
-                  <Text style={[styles.selectOptionText, option === value && { color: colors.primary }]}>
-                    {labelFor(option)}
-                  </Text>
-                  {option === value ? <Text style={styles.optionCheck}>✓</Text> : null}
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </View>
+      <DropdownMenuOverlay visible={open} anchorRef={triggerRef} onDismiss={close} accessibilityLabel="Close status options">
+        <View style={[styles.selectMenu, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+          <ScrollView style={styles.selectList} keyboardShouldPersistTaps="handled">
+            {options.map((option) => (
+              <TouchableOpacity key={String(option)} accessibilityRole="option" accessibilityState={{ selected: option === value }} onPress={() => { onSelect(option); close(); }} style={[styles.selectOption, option === value && { backgroundColor: colors.primarySoft }]}>
+                <Text style={[styles.selectOptionText, option === value && { color: colors.primary }]}>{labelFor(option)}</Text>
+                {option === value ? <Text style={styles.optionCheck}>{String.fromCharCode(10003)}</Text> : null}
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
         </View>
-      </Modal>
+      </DropdownMenuOverlay>
     </>
   );
 }
@@ -1017,19 +1002,6 @@ const createStyles = (colors, compact = false, isDark = false, width = 1024) =>
       fontSize: 13,
       fontWeight: '700',
       flex: 1,
-    },
-    chevron: {
-      color: colors.primary,
-      fontSize: 19,
-      fontWeight: '900',
-      marginLeft: 8,
-    },
-    selectBackdrop: {
-      flex: 1,
-      backgroundColor: colors.overlay,
-      alignItems: 'center',
-      justifyContent: 'center',
-      padding: 20,
     },
     selectMenu: {
       width: '100%',

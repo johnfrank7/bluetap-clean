@@ -38,6 +38,7 @@ import {
   toDistributorScreenOrder,
   completeAssignedDelivery,
   failAssignedDelivery,
+  getAssignedDistributorOrders,
   useAssignedDistributorOrders,
 } from '../../services/distributorOrders';
 import { useDistributorProfile } from '../../services/distributorProfile';
@@ -45,6 +46,8 @@ import { useLiveGreeting } from '../../services/liveTime';
 import { formatDisplayUniqueId, getProfileUniqueId } from '../../services/uniqueIds';
 const { getCurrentDistributorRequests, getDistributorDashboardCounts } = require('../../services/distributorDashboardMetrics');
 const { getCarouselIndexFromOffset, isCurrentCarouselOffset, resolveCarouselStepIndex, resolveDragTargetIndex } = require('../../services/carouselSnap');
+const { createDeliveryReportSubmission } = require('../../services/deliveryReportSubmission');
+const { analyzeOrderCargo } = require('../../services/managerTripCapacity');
 
 const BLUE = BLUETAP_COLORS.primary;
 const BLUE_LIGHT = BLUETAP_COLORS.primarySoft;
@@ -221,32 +224,26 @@ const getDistributorRequestItems = (request) => {
   if (Array.isArray(request.items) && request.items.length > 0) {
     return request.items.filter(Boolean).map((item, index) => {
       const quantity = Number(item.quantity || 0);
-      const unitPrice = Number(item.product_price ?? item.unitPrice ?? 0);
-      const subtotal = Number(
-        item.line_total ?? item.subtotal ?? unitPrice * quantity
-      );
+      const unitPrice = item.unitPriceAtOrder ?? item.product_price ?? item.unitPrice;
+      const subtotal = item.totalAtOrder ?? item.line_total ?? item.subtotal;
 
       return {
         id: String(item.product_id || item.id || `${request.requestId}-${index}`),
         productName: String(item.product_name || item.productName || item.productNameSnapshot || 'Product'),
         quantity: Number.isFinite(quantity) ? quantity : item.quantity,
-        unitPrice: Number.isFinite(unitPrice) ? unitPrice : 0,
-        subtotal: Number.isFinite(subtotal) ? subtotal : 0,
+        unitPrice,
+        subtotal,
       };
     });
   }
 
   const quantity = getNumericQuantity(request.quantity);
-  const totalAmount = Number(request.total_cost || request.totalAmount || request.totalAtOrder || 0);
-  const unitPrice = quantity > 0 ? totalAmount / quantity : totalAmount;
 
   return [
     {
       id: request.productId || request.requestId,
       productName: request.productsOrdered || request.productName || 'Product',
       quantity: request.quantity || quantity || 'Not set',
-      unitPrice,
-      subtotal: totalAmount,
     },
   ];
 };
@@ -286,7 +283,7 @@ function CurrentRequestCard({ actionsDisabled = false, colors, request, distribu
     <View style={styles.requestCardHeader}><View style={styles.requestTitleBlock}><Text style={styles.requestId}>Request ID: {request.requestId}</Text></View><SoftStatusBadge status={request.status} /></View>
     <View style={styles.compactRequestBody}>
       <View style={[styles.infoGridRow, styles.infoGridRowDivider]}><View style={styles.infoGridColumn}><Text style={styles.infoGridLabel}>Customer Name</Text><Text style={styles.infoGridPrimaryValue} numberOfLines={1}>{request.customerName}</Text><Text style={[styles.infoGridLabel, styles.infoGridLabelGap]}>Requester ID</Text><Text style={styles.infoGridValue} numberOfLines={1}>{requesterUid}</Text></View><View style={styles.infoGridColumn}><Text style={styles.infoGridLabel}>Amount Due</Text><Text style={styles.infoGridValue} numberOfLines={1}>{formatAmountDue(request.total_cost)}</Text><Text style={[styles.infoGridLabel, styles.infoGridLabelGap]}>Distributor ID</Text><Text style={styles.infoGridValue} numberOfLines={1}>{distributorUid}</Text></View></View>
-      <View style={styles.infoGridRow}><View style={styles.infoGridColumn}><Text style={styles.infoGridLabel}>Address</Text><Text style={styles.infoGridValue} numberOfLines={2}>{request.deliveryAddress}</Text><Text style={[styles.infoGridLabel, styles.infoGridLabelGap]}>Scheduled delivery</Text><Text style={styles.infoGridValue} numberOfLines={1}>{request.scheduledDateTime || request.deliveryDate || 'Not set'}</Text></View><View style={styles.infoGridColumn}><Text style={styles.infoGridLabel}>Product Ordered</Text><Text style={styles.infoGridPrimaryValue} numberOfLines={2}>{request.productsOrdered}</Text><Text style={styles.infoGridSubValue} numberOfLines={1}>{request.quantity} | {request.containerType}</Text></View></View>
+      <View style={styles.infoGridRow}><View style={styles.infoGridColumn}><Text style={styles.infoGridLabel}>Address</Text><Text style={styles.infoGridValue} numberOfLines={2}>{request.deliveryAddress}</Text><Text style={[styles.infoGridLabel, styles.infoGridLabelGap]}>Scheduled delivery</Text><Text style={styles.infoGridValue} numberOfLines={1}>{request.scheduledDateTime || request.deliveryDate || 'Not set'}</Text></View><View style={styles.infoGridColumn}><Text style={styles.infoGridLabel}>Product Ordered</Text><Text style={styles.infoGridPrimaryValue} numberOfLines={2}>{request.productsOrdered}</Text><Text style={styles.infoGridSubValue} numberOfLines={1}>{request.quantity} | {request.containerType} · {analyzeOrderCargo(request).badgeLabel}</Text></View></View>
     </View>
     <View style={styles.cardActionsGrid}>
       <Pressable disabled={actionsDisabled} onPress={onDetails} style={({ hovered, pressed }) => [styles.viewDetailsButton, styles.actionGridItem, hovered && { backgroundColor: colors.primarySoft }, pressed && styles.actionButtonPressed, actionsDisabled && styles.actionButtonDisabled]}><Text style={styles.viewDetailsText}>View Details</Text></Pressable>
@@ -356,6 +353,14 @@ function DistributorDashboardContent() {
   const [detailsVisible, setDetailsVisible] = useState(false);
   const [deliveryAction, setDeliveryAction] = useState(null);
   const [processing, setProcessing] = useState(false);
+  const [submissionError, setSubmissionError] = useState('');
+  const [reportLocked, setReportLocked] = useState(false);
+  const actionFlightRef = useRef(false);
+  const reportSubmissionRef = useRef(null);
+  if (!reportSubmissionRef.current) reportSubmissionRef.current = createDeliveryReportSubmission({
+    send: failAssignedDelivery,
+    readOrder: async (orderId) => (await getAssignedDistributorOrders()).find((order) => String(order.id) === String(orderId)) || null,
+  });
   const [toast, setToast] = useState({ visible: false, message: '', type: 'info' });
   const [activeRequestIndex, setActiveRequestIndex] = useState(0);
   const currentRequestsRef = useRef(null);
@@ -528,6 +533,7 @@ function DistributorDashboardContent() {
   ], [colors, dashboardCounts, isDark]);
   const detailsRequestData = activeRequest
     ? {
+        pricingDetailsSource: activeRequest.pricingDetailsSource || activeRequest,
         requestId: activeRequest.requestId,
         status: activeRequest.status,
         orderDate: activeRequest.orderDate || 'Not set',
@@ -553,6 +559,10 @@ function DistributorDashboardContent() {
         deliveryLocation: activeRequest.deliveryLocation,
         branchLocation: activeRequest.branchLocation,
         branchId: activeRequest.branchId,
+        tripId: activeRequest.tripId || null,
+        tripNumber: activeRequest.tripNumber || null,
+        orderContainers: activeRequest.orderContainers || null,
+        tripStatus: activeRequest.tripStatus || null,
         items: getDistributorRequestItems(activeRequest),
         grandTotalAmount: getDistributorTotalAmount(activeRequest),
       }
@@ -578,15 +588,22 @@ function DistributorDashboardContent() {
   };
 
   const submitDeliveryAction = async (failure = {}) => {
-    if (!deliveryAction || processing) return;
+    if (!deliveryAction || actionFlightRef.current) return;
+    actionFlightRef.current = true;
     setProcessing(true);
+    setSubmissionError('');
     try {
-      if (deliveryAction.type === 'failed') await failAssignedDelivery(deliveryAction.id, failure);
+      if (deliveryAction.type === 'failed') await reportSubmissionRef.current.submit(deliveryAction.id, failure);
       else await completeAssignedDelivery(deliveryAction.id);
+      setReportLocked(false);
       setDeliveryAction(null);
       setToast({ visible: true, type: 'success', message: 'Delivery status updated.' });
-    } catch (error) { setToast({ visible: true, type: 'error', message: error.message || 'Delivery could not be updated.' }); }
-    finally { setProcessing(false); }
+    } catch (error) {
+      if (deliveryAction.type === 'failed') {
+        setReportLocked(reportSubmissionRef.current.hasPending());
+        setSubmissionError(error.message || 'The report could not be confirmed. Please try again.');
+      } else setToast({ visible: true, type: 'error', message: error.message || 'Delivery could not be updated.' });
+    } finally { actionFlightRef.current = false; setProcessing(false); }
   };
 
   return (
@@ -656,7 +673,7 @@ function DistributorDashboardContent() {
               ) : activeRequest ? (
                 <PortalSwipeIgnore>
                   <ScrollView ref={currentRequestsRef} horizontal showsHorizontalScrollIndicator={false} snapToInterval={currentRequestSnap} disableIntervalMomentum decelerationRate="fast" scrollEventThrottle={16} contentContainerStyle={[styles.currentRequestsCarousel, { paddingRight: currentRequestPeek }]} onScroll={handleCarouselScroll} onScrollBeginDrag={handleCarouselDragStart} onScrollEndDrag={handleCarouselDragEnd} onMomentumScrollEnd={handleCarouselMomentumEnd} onTouchStart={handleCarouselTouchStart} onTouchEnd={handleCarouselTouchEnd} onTouchCancel={handleCarouselTouchEnd}>
-                    {activeRequestEntries.map((entry, index) => <CurrentRequestSlide key={entry.id} width={currentRequestCardWidth} active={index === activeRequestIndex}><AnimatedPresenceItem phase={entry.phase}><CurrentRequestCard colors={colors} request={entry.item} actionsDisabled={entry.actionsDisabled} distributorProfile={distributorProfile} processing={processing} onFailure={() => setDeliveryAction({ id: entry.item.sourceId, reference: entry.item.requestId, type: 'failed' })} onDetails={() => { commitCarouselIndex(index, { snap: false }); setDetailsVisible(true); }} onAction={() => { commitCarouselIndex(index, { snap: false }); handleCurrentRequestAction(entry.item); }} /></AnimatedPresenceItem></CurrentRequestSlide>)}
+                    {activeRequestEntries.map((entry, index) => <CurrentRequestSlide key={entry.id} width={currentRequestCardWidth} active={index === activeRequestIndex}><AnimatedPresenceItem phase={entry.phase}><CurrentRequestCard colors={colors} request={entry.item} actionsDisabled={entry.actionsDisabled} distributorProfile={distributorProfile} processing={processing} onFailure={() => { reportSubmissionRef.current.cancel(); setSubmissionError(''); setReportLocked(false); setDeliveryAction({ id: entry.item.sourceId, reference: entry.item.requestId, type: 'failed' }); }} onDetails={() => { commitCarouselIndex(index, { snap: false }); setDetailsVisible(true); }} onAction={() => { commitCarouselIndex(index, { snap: false }); handleCurrentRequestAction(entry.item); }} /></AnimatedPresenceItem></CurrentRequestSlide>)}
                   </ScrollView>
                   {activeRequestEntries.length > 1 && <View style={styles.carouselIndicators}><Text style={styles.carouselPosition}>{activeRequestIndex + 1}/{activeRequestEntries.length}</Text>{activeRequestEntries.map((entry, index) => <View key={`${entry.id}-${index}`} style={[styles.carouselIndicator, index === activeRequestIndex && styles.carouselIndicatorActive]} />)}</View>}
                 </PortalSwipeIgnore>
@@ -713,7 +730,9 @@ function DistributorDashboardContent() {
         action={deliveryAction?.type}
         orderReference={deliveryAction?.reference || activeRequest?.requestId}
         busy={processing}
-        onCancel={() => !processing && setDeliveryAction(null)}
+        locked={reportLocked}
+        submissionError={submissionError}
+        onCancel={() => { if (!processing) { reportSubmissionRef.current.cancel(); setSubmissionError(''); setReportLocked(false); setDeliveryAction(null); } }}
         onConfirm={submitDeliveryAction}
       />
       <TopToastFeedback {...toast} onDismiss={() => setToast((value) => ({ ...value, visible: false }))} />

@@ -35,6 +35,7 @@ function fixture() {
     async runTransaction(run) {
       if (failTransaction) throw new Error('Firestore unavailable');
       return run({
+        async get(ref) { return ref.get(); },
         create(ref, data) { records.set(ref.path, data); },
         update(ref, data) { records.set(ref.path, { ...records.get(ref.path), ...data }); },
         set(ref, data) { records.set(ref.path, data); },

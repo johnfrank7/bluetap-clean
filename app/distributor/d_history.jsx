@@ -27,6 +27,8 @@ import {
 } from '../../services/distributorOrders';
 import { formatDisplayUniqueId } from '../../services/uniqueIds';
 import AnimatedPresenceItem from '../../components/AnimatedPresenceItem';
+import DistributorDeliveryReviews from '../../components/DistributorDeliveryReviews';
+import { useDistributorData } from '../../components/RoleDataProviders';
 import { useAnimatedPresenceList } from '../../components/useAnimatedPresenceList';
 
 const BLUE = BLUETAP_COLORS.primary;
@@ -40,19 +42,13 @@ const HISTORY_STATUSES = new Set(['delivered', 'cancelled', 'canceled', 'decline
 const getAmountNumber = (amount) =>
   Number(String(amount || '').replace(/[^\d.]/g, '')) || 0;
 
-const getQuantityNumber = (quantity) => {
-  const match = String(quantity || '').match(/\d+(\.\d+)?/);
-  return Number(match?.[0] || 0);
-};
-
 const getDetailsRequestData = (request) => {
   if (!request) return null;
 
   const totalAmount = getAmountNumber(request.amountPaid);
-  const quantity = getQuantityNumber(request.quantity);
-  const unitPrice = quantity > 0 ? totalAmount / quantity : totalAmount;
 
   return {
+    pricingDetailsSource: request.pricingDetailsSource || request,
     requestId: request.id,
     status: request.status || 'Delivered',
     orderDate: request.scheduledDateTime,
@@ -87,15 +83,9 @@ const getDetailsRequestData = (request) => {
     failureReasonCode: request.failureReasonCode,
     failureReasonLabel: request.failureReasonLabel,
     failureReasonNote: request.failureReasonNote,
-    items: [
-      {
-        id: request.id,
-        productName: request.productName,
-        quantity: request.quantity,
-        unitPrice,
-        subtotal: totalAmount,
-      },
-    ],
+    items: request.items?.length ? request.items : [{ id: request.id, productName: request.productName, quantity: request.quantity }],
+    subtotalAtOrder: request.subtotalAtOrder,
+    deliveryFeeAtOrder: request.deliveryFeeAtOrder,
     grandTotalAmount: totalAmount,
   };
 };
@@ -190,6 +180,7 @@ const HistoryRequestCard = ({ actionsDisabled = false, request, onViewDetails })
 
 export default function DistributorHistory() {
   const { colors, isDark } = useBlueTapTheme();
+  const distributorData = useDistributorData();
   const router = useRouter();
   const [selectedRequestId, setSelectedRequestId] = useState(null);
   const { orders, loading, error, refresh } = useAssignedDistributorOrders();
@@ -245,7 +236,7 @@ export default function DistributorHistory() {
                 <BlueTapEmptyState
                   variant="history"
                   title="No Delivery History"
-                  description="Completed assigned deliveries will appear here."
+                  description="Completed assigned deliveries will appear here. Your reported delivery reviews are listed below."
                 />
               )
                 : historyPresentation.map((entry) => (
@@ -257,6 +248,7 @@ export default function DistributorHistory() {
             />
             </AnimatedPresenceItem>
           ))}
+          <DistributorDeliveryReviews uid={distributorData.readiness === 'READY' ? distributorData.uid : ''} />
         </ScrollView>
       </View>
     </PortalSwipeContainer>

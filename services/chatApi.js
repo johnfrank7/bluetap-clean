@@ -38,6 +38,12 @@ export const loadConversationSummaries = async () => (
   await chatRequest('/api/chat/conversations')
 ).conversations || [];
 
+export async function loadConversationHistory({ cursor = '', limit = 20 } = {}) {
+  const params = new URLSearchParams({ view: 'history', limit: String(limit) });
+  if (cursor) params.set('cursor', cursor);
+  return chatRequest(`/api/chat/conversations?${params.toString()}`);
+}
+
 export const sendMessage = async ({ conversationId, clientMutationId, clientMessageId, body, orderId, replyToMessageId }) => (
   await chatRequest('/api/chat/messages', {
     method: 'POST',
@@ -66,8 +72,9 @@ export const markRead = async ({ conversationId, lastReadSeq }) => (
   })
 ).conversation;
 
-export async function loadMessageHistory({ conversationId, beforeSeq, limit = 40 }) {
+export async function loadMessageHistory({ conversationId, historyId, beforeSeq, limit = 40 }) {
   const params = new URLSearchParams({ conversationId, limit: String(limit) });
+  if (historyId) params.set('historyId', historyId);
   if (beforeSeq) params.set('beforeSeq', String(beforeSeq));
   return chatRequest(`/api/chat/messages?${params.toString()}`);
 }

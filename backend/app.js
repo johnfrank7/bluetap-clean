@@ -4,6 +4,8 @@ const { routes } = require('./routes');
 const { faceUpstreamConfigStatus } = require('./verification/renderFaceClient');
 const { emailProviderConfigStatus } = require('./email/emailProvider');
 const { applyCors } = require('./utils/cors');
+const { assertStagingServerEnvironment } = require('./config/stagingIsolation');
+const { assertLocalQaServerEnvironment, isLocalQaBrowserOrigin } = require('./config/localQaIsolation');
 
 const MAX_REQUEST_BYTES = 5 * 1024 * 1024;
 const MAX_PRODUCT_IMAGE_REQUEST_BYTES = Math.ceil(MAX_REQUEST_BYTES * 4 / 3) + 64 * 1024;
@@ -47,6 +49,12 @@ function readBody(req, maxBytes = MAX_REQUEST_BYTES) {
 function createRequestListener(routeMap = routes) {
   return async (req, rawRes) => {
     const res = addResponseHelpers(rawRes);
+    if (assertLocalQaServerEnvironment() && !isLocalQaBrowserOrigin(req.headers.origin)) {
+      return res.status(403).json({ error: {
+        reason: 'origin-not-allowed',
+        message: 'This website is not allowed to use the BlueTap API.',
+      } });
+    }
     // Apply before route lookup and body parsing so outer errors retain CORS.
     if (!applyCors(req, res)) return;
     if (req.method === 'OPTIONS') return res.status(204).end();
@@ -82,6 +90,7 @@ function createRequestListener(routeMap = routes) {
 }
 
 function createAppServer(routeMap = routes) {
+  if (!assertLocalQaServerEnvironment()) assertStagingServerEnvironment();
   const server = http.createServer(createRequestListener(routeMap));
   server.requestTimeout = 70_000;
   server.headersTimeout = 75_000;
@@ -91,7 +100,7 @@ function createAppServer(routeMap = routes) {
 if (require.main === module) {
   const port = Number(process.env.PORT || 3000);
   const server = createAppServer();
-  server.listen(port, '0.0.0.0', () => {
+  server.listen(port, assertLocalQaServerEnvironment() ? '127.0.0.1' : '0.0.0.0', () => {
     console.log(`BlueTap backend listening on port ${port}`);
     console.log('[face-upstream]', JSON.stringify({
       stage: 'FACE_UPSTREAM_CONFIGURATION',

@@ -1,8 +1,9 @@
-const { verifiedIdentity } = require('../auth/authorization');
+const { verifiedIdentity, requireVerifiedOperationalEmail } = require('../auth/authorization');
 const { requireActiveAccount } = require('../auth/accountStatus');
 const { applyCors } = require('../utils/cors');
 const { OtpError } = require('../utils/otpError');
 const { getFirebaseAdmin } = require('../firebase/firebaseAdmin');
+const { resolveRequesterName } = require('./requesterIdentity');
 
 const clean = (val, max = 128) => String(val || '').trim().slice(0, max);
 
@@ -25,6 +26,7 @@ function createOrderDetailsHandler(getAdmin = getFirebaseAdmin) {
       }
       const profile = userDoc.data() || {};
       requireActiveAccount(profile);
+      requireVerifiedOperationalEmail(profile, decoded);
 
       const params = new URL(req.url, 'http://localhost').searchParams;
       const orderId = clean(params.get('orderId') || params.get('requestId') || params.get('id'));
@@ -111,13 +113,14 @@ function createOrderDetailsHandler(getAdmin = getFirebaseAdmin) {
 
       // Hydrate requester name and contact if missing on order document
       const orderRequesterUid = clean(orderData.requesterUid || orderData.requester_id);
+      safeOrder.requesterName = resolveRequesterName(orderData);
       if (orderRequesterUid && (!safeOrder.contactNumber || !safeOrder.requesterName)) {
         try {
           const reqUserDoc = await db.collection('users').doc(orderRequesterUid).get();
           if (reqUserDoc.exists) {
             const reqUser = reqUserDoc.data() || {};
             if (!safeOrder.requesterName) {
-              safeOrder.requesterName = reqUser.fullName || `${reqUser.firstName || ''} ${reqUser.lastName || ''}`.trim() || reqUser.name || '';
+              safeOrder.requesterName = resolveRequesterName(orderData, { ...reqUser, uid: orderRequesterUid });
             }
             if (!safeOrder.contactNumber) {
               safeOrder.contactNumber = reqUser.phone || reqUser.contactNumber || reqUser.contact || '';

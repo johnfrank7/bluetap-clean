@@ -56,6 +56,18 @@ const getOtpError = (error) => {
   if (reason === 'provider-unavailable') {
     return 'Unable to send verification email. Please try again.';
   }
+  if (reason === 'EMAIL_TRANSPORT_NOT_CONFIGURED' || reason === 'OTP_SECRET_MISSING') {
+    return 'Email verification is not configured for this environment. Please contact BlueTap support.';
+  }
+  if (reason === 'EMAIL_TRANSPORT_AUTH_FAILED' || reason === 'EMAIL_SENDER_NOT_VERIFIED') {
+    return 'Email verification is temporarily unavailable. Please contact BlueTap support.';
+  }
+  if (reason === 'EMAIL_SEND_RATE_LIMITED') {
+    return 'Email delivery is busy. Please try again shortly.';
+  }
+  if (reason === 'EMAIL_SEND_FAILED') {
+    return 'Unable to send verification email. Please try again.';
+  }
   if (reason === 'no-active-code') return 'Please request a new verification code.';
   if (['registration-expired', 'invalid-registration', 'account-exists', 'username-taken', 'face-capture-required'].includes(reason)) return error.message;
   if (['face-service-preparing', 'FACE_SERVICE_PREPARING'].includes(reason)) {
@@ -157,6 +169,9 @@ export default function EmailVerificationPage() {
         }
         if (!profile) throw lastError || new Error('Your finalized profile is not available yet.');
         const destination = getPostAuthenticationDestination(profile);
+        if (destination === '/email-verification') {
+          return false;
+        }
         if (!rootNavigationState?.key) {
           setPendingDestination(destination);
           setMessage('Finishing your account setup...');
@@ -187,8 +202,8 @@ export default function EmailVerificationPage() {
         if (!registration) await reload(account);
         const currentUser = auth.currentUser || account;
         if (!registration && currentUser.emailVerified) {
-          await continueAfterVerification(currentUser);
-          return { alreadyVerified: true };
+          const continued = await continueAfterVerification(currentUser);
+          if (continued) return { alreadyVerified: true };
         }
 
         const currentDraft = registration ? getPendingRegistration() : null;
@@ -270,8 +285,8 @@ export default function EmailVerificationPage() {
         await reload(currentUser);
         const refreshedUser = auth.currentUser || currentUser;
         if (refreshedUser.emailVerified) {
-          await continueAfterVerification(refreshedUser);
-          return;
+          const continued = await continueAfterVerification(refreshedUser);
+          if (continued) return;
         }
       } catch (error) {
         console.log('Email OTP initial refresh error:', error.message);

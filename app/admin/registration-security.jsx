@@ -1,6 +1,8 @@
 import React from 'react';
 import { Modal, Pressable, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import AdminShell from '../../components/AdminShell';
+import DropdownChevron from '../../components/DropdownChevron';
+import DropdownMenuOverlay from '../../components/DropdownMenuOverlay';
 import { SkeletonBlock } from '../../components/AdminSkeleton';
 import { SectionCard, StatusBadge } from '../../components/DashboardUi';
 import { useAdminTheme } from '../../components/AdminTheme';
@@ -15,23 +17,14 @@ const ROLES = [['requester', 'Requester'], ['distributor', 'Distributor'], ['man
 
 function PolicySelect({ label, value, options, onChange, colors, styles }) {
   const [open, setOpen] = React.useState(false);
+  const triggerRef = React.useRef(null);
   const selected = options.find(([option]) => option === value)?.[1] || '';
   return <View style={styles.selectField}>
     <Text style={styles.inputLabel}>{label}</Text>
-    <TouchableOpacity accessibilityRole="combobox" accessibilityLabel={label} accessibilityState={{ expanded: open }} onPress={() => setOpen(true)} style={styles.select}>
-      <Text style={styles.selectText}>{selected}</Text><Text style={styles.chevron}>⌄</Text>
+    <TouchableOpacity ref={triggerRef} accessibilityRole="combobox" accessibilityLabel={label} accessibilityState={{ expanded: open }} onPress={() => setOpen(true)} style={styles.select}>
+      <Text style={styles.selectText}>{selected}</Text><DropdownChevron expanded={open} size={16} color={colors.iconSecondary || colors.primary} />
     </TouchableOpacity>
-    <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
-      <View style={[styles.modalBackdrop, { backgroundColor: colors.overlay }]}>
-        <Pressable accessibilityRole="button" accessibilityLabel={`Close ${label}`} onPress={() => setOpen(false)} style={StyleSheet.absoluteFill} />
-        <View style={[styles.modalCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-          <Text style={styles.modalTitle}>{label}</Text>
-          {options.map(([option, optionLabel]) => <TouchableOpacity key={option} accessibilityRole="option" accessibilityState={{ selected: option === value }} onPress={() => { onChange(option); setOpen(false); }} style={[styles.option, option === value && styles.optionSelected]}>
-            <Text style={[styles.optionText, option === value && styles.optionTextSelected]}>{optionLabel}</Text>{option === value && <Text style={styles.optionCheck}>✓</Text>}
-          </TouchableOpacity>)}
-        </View>
-      </View>
-    </Modal>
+    <DropdownMenuOverlay visible={open} anchorRef={triggerRef} onDismiss={() => setOpen(false)} accessibilityLabel={`Close ${label} options`} maxHeight={320}><View style={[styles.modalCard, { backgroundColor: colors.surface, borderColor: colors.border }]}><Text style={styles.modalTitle}>{label}</Text>{options.map(([option, optionLabel]) => <TouchableOpacity key={option} accessibilityRole="option" accessibilityState={{ selected: option === value }} onPress={() => { onChange(option); setOpen(false); }} style={[styles.option, option === value && styles.optionSelected]}><Text style={[styles.optionText, option === value && styles.optionTextSelected]}>{optionLabel}</Text>{option === value && <Text style={styles.optionCheck}>{String.fromCharCode(10003)}</Text>}</TouchableOpacity>)}</View></DropdownMenuOverlay>
   </View>;
 }
 
@@ -112,7 +105,7 @@ const createStyles = (colors) => StyleSheet.create({
   summaryGrid:{flexDirection:'row',flexWrap:'wrap',gap:10,marginTop:18}, summaryItem:{flexGrow:1,flexBasis:190,backgroundColor:colors.surface,borderWidth:1,borderColor:colors.border,borderRadius:12,padding:12}, summaryLabel:{color:colors.textSecondary,fontSize:11,fontWeight:'800',marginBottom:8}, summaryValue:{color:colors.textPrimary,fontSize:18,fontWeight:'900'},
   title:{color:colors.textPrimary,fontSize:18,fontWeight:'800'}, help:{color:colors.textSecondary,fontSize:13,lineHeight:19,marginTop:5}, setting:{minHeight:72,flexDirection:'row',alignItems:'center',justifyContent:'space-between',gap:20,borderTopWidth:1,borderTopColor:colors.border,marginTop:16,paddingTop:16}, settingCopy:{flex:1}, label:{color:colors.textPrimary,fontWeight:'800'},
   fields:{flexDirection:'row',flexWrap:'wrap',gap:14,marginTop:18}, field:{flexGrow:1,flexBasis:230}, inputLabel:{color:colors.textSecondary,fontSize:12,fontWeight:'700',marginBottom:7}, input:{minHeight:46,borderWidth:1,borderColor:colors.inputBorder,backgroundColor:colors.input,borderRadius:10,paddingHorizontal:12,color:colors.textPrimary,outlineStyle:'none'},
-  roleGrid:{flexDirection:'row',flexWrap:'wrap',gap:14,marginTop:18}, roleCard:{flexGrow:1,flexBasis:280,backgroundColor:colors.surfaceAlt,borderWidth:1,borderColor:colors.border,borderRadius:14,padding:16}, roleTitle:{color:colors.textPrimary,fontSize:16,fontWeight:'900',marginBottom:12}, selectField:{marginTop:10}, select:{minHeight:44,flexDirection:'row',alignItems:'center',justifyContent:'space-between',borderWidth:1,borderColor:colors.inputBorder,backgroundColor:colors.input,borderRadius:10,paddingHorizontal:12}, selectText:{color:colors.textPrimary,fontWeight:'700'}, chevron:{color:colors.primary,fontSize:20},
+  roleGrid:{flexDirection:'row',flexWrap:'wrap',gap:14,marginTop:18}, roleCard:{flexGrow:1,flexBasis:280,backgroundColor:colors.surfaceAlt,borderWidth:1,borderColor:colors.border,borderRadius:14,padding:16}, roleTitle:{color:colors.textPrimary,fontSize:16,fontWeight:'900',marginBottom:12}, selectField:{marginTop:10}, select:{minHeight:44,flexDirection:'row',alignItems:'center',justifyContent:'space-between',borderWidth:1,borderColor:colors.inputBorder,backgroundColor:colors.input,borderRadius:10,paddingHorizontal:12}, selectText:{color:colors.textPrimary,fontWeight:'700'},
   forceRow:{minHeight:72,flexDirection:'row',alignItems:'center',gap:12,borderTopWidth:1,borderTopColor:colors.border,marginTop:16,paddingTop:14}, forceCopy:{flex:1}, modalBackdrop:{flex:1,alignItems:'center',justifyContent:'center',padding:20}, modalCard:{width:'100%',maxWidth:420,borderWidth:1,borderRadius:16,padding:18}, modalTitle:{color:colors.textPrimary,fontSize:18,fontWeight:'900',marginBottom:10}, option:{minHeight:44,flexDirection:'row',alignItems:'center',justifyContent:'space-between',borderRadius:9,paddingHorizontal:12}, optionSelected:{backgroundColor:colors.primarySoft}, optionText:{color:colors.textSecondary,fontWeight:'700'}, optionTextSelected:{color:colors.primary,fontWeight:'900'}, optionCheck:{color:colors.primary,fontWeight:'900'},
   notice:{borderRadius:12,padding:14,borderWidth:1}, errorNotice:{backgroundColor:colors.dangerSoft,borderColor:colors.danger}, successNotice:{backgroundColor:colors.successSoft,borderColor:colors.success}, noticeText:{fontWeight:'700'}, errorText:{color:colors.danger}, successText:{color:colors.success}, retry:{color:colors.primary,fontWeight:'900',marginTop:8}, refreshing:{color:colors.textSecondary,fontSize:12}, skeletonWide:{height:18,width:'42%',marginTop:16}, skeletonGrid:{height:88,marginTop:12}, skeletonRow:{height:58,marginTop:14}, skeletonTall:{height:180,marginTop:16}, button:{alignSelf:'flex-start',minHeight:46,paddingHorizontal:22,alignItems:'center',justifyContent:'center',backgroundColor:colors.primaryAction,borderRadius:10}, buttonText:{color:colors.onPrimary,fontWeight:'800'}, disabled:{opacity:.55},
 });

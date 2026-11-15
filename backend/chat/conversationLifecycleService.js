@@ -1,10 +1,12 @@
 const { OtpError } = require('../utils/otpError');
 const { publishChatActivity } = require('./chatActivity');
+const { historyId, historyRecord } = require('./chatHistory');
 const { getBranchMembershipVersion } = require('../utils/relationshipEpochs');
 const {
   CONVERSATION_TYPES,
   failedDeliveryChatEndsAt,
   normalizedStatus,
+  orderAssignmentVersion,
   orderRequesterUid,
   owningBranchId,
 } = require('./chatAuthorization');
@@ -62,7 +64,7 @@ function authorityIsComplete(type, authority = {}) {
   return true;
 }
 
-function terminalOrderContext(order = {}) {
+function terminalOrderContext(order = {}, graceOverride = null) {
   const status = normalizedStatus(order.status);
   if (!['delivery_failed', 'delivered', 'completed', 'cancelled', 'canceled', 'rejected', 'declined', 'declined_outside_service_area'].includes(status)) return null;
   const productSummary = Array.isArray(order.items)
@@ -71,6 +73,9 @@ function terminalOrderContext(order = {}) {
       quantity: Number.isFinite(Number(item.quantity)) ? Number(item.quantity) : 0,
     }))
     : [];
+  const effectiveGraceUntil = status === 'delivery_failed'
+    ? (graceOverride || failedDeliveryChatEndsAt(order))
+    : null;
   return {
     orderId: orderIdOf(order),
     publicOrderReference: clean(order.requestId || order.request_id).slice(0, 80),
@@ -79,7 +84,7 @@ function terminalOrderContext(order = {}) {
     finalStatus: status,
     branchDisplayName: clean(order.currentBranchNameSnapshot || order.branchNameSnapshot || order.water_station).slice(0, 160),
     deliveryDate: order.deliveredAt || order.delivered_at || null,
-    ...(status === 'delivery_failed' && failedDeliveryChatEndsAt(order) ? { distributorChatGraceUntil: failedDeliveryChatEndsAt(order) } : {}),
+    ...(effectiveGraceUntil ? { distributorChatGraceUntil: effectiveGraceUntil } : {}),
     totalSnapshot: Number.isFinite(Number(order.totalAtOrder ?? order.total_cost)) ? Number(order.totalAtOrder ?? order.total_cost) : null,
   };
 }
@@ -88,7 +93,19 @@ async function loadExistingConversation(tx, db, type, authority) {
   const hash = authorityKeyHash(type, authority);
   const registryRef = db.collection('chatAuthorityRegistry').doc(hash);
   const registrySnapshot = await tx.get(registryRef);
-  if (!registrySnapshot.exists) return null;
+  if (!registrySnapshot.exists) {
+    // Older canonical conversations can predate the authority registry. Match
+    // only the exact server-derived authority and fail closed on duplicates.
+    const matches = await tx.get(db.collection('chatConversations').where('authorityKeyHash', '==', hash).limit(2));
+    if (!(matches.docs || []).length) return null;
+    if (matches.docs.length !== 1) throw new OtpError(409, 'CHAT_STATE_INVALID', 'Duplicate conversation authority requires repair.');
+    const snapshot = matches.docs[0];
+    const conversation = { id: snapshot.id, ...(snapshot.data() || {}) };
+    if (conversation.authorityKeyHash !== hash || conversation.type !== type) {
+      throw new OtpError(409, 'CHAT_STATE_INVALID', 'Conversation authority does not match its registry.');
+    }
+    return { hash, ref: db.collection('chatConversations').doc(conversation.id), conversation };
+  }
   const conversationId = clean(registrySnapshot.data()?.conversationId);
   if (!conversationId) throw new OtpError(409, 'CHAT_STATE_INVALID', 'Conversation authority registry is invalid.');
   const ref = db.collection('chatConversations').doc(conversationId);
@@ -108,23 +125,34 @@ function reasonDeadline(authorityReasons, now) {
   return deadlines.length ? new Date(Math.max(...deadlines)) : now;
 }
 
-function applyTransition(conversation, transition, after, now) {
+function applyTransition(conversation, transition, after, now, before = {}) {
   const reason = clean(transition.reason || transition.authorityReason || 'relationship_changed');
+  const preservePriorFailedGrace = reason === 'delivery_failed_grace'
+    && conversation.lifecycleReason === 'delivery_failed_grace'
+    && normalizedStatus(before?.status) === 'delivery_failed'
+    && timeOf(conversation.accessEndsAt) > 0;
+  const effectiveTransitionAccessEndsAt = preservePriorFailedGrace
+    && (!transition.accessEndsAt || timeOf(conversation.accessEndsAt) <= timeOf(transition.accessEndsAt))
+    ? conversation.accessEndsAt
+    : transition.accessEndsAt;
+
   if (transition.action === 'read_only') {
-    const accessEndsAt = transition.accessEndsAt || now;
+    const accessEndsAt = effectiveTransitionAccessEndsAt || now;
+    const orderContext = terminalOrderContext(after, reason === 'delivery_failed_grace' ? accessEndsAt : null);
     return {
       ...conversation,
       status: CONVERSATION_STATUS.READ_ONLY,
       accessEndsAt,
       readAccessEndsAt: accessEndsAt,
       lifecycleReason: reason,
-      ...(terminalOrderContext(after) ? { orderContext: terminalOrderContext(after) } : {}),
+      ...(orderContext ? { orderContext } : {}),
       ...participantAccessProjection(conversation, 'read_only'),
       updatedAt: now,
     };
   }
   if (transition.action === 'eligible') {
-    const accessEndsAt = transition.accessEndsAt || null;
+    const accessEndsAt = effectiveTransitionAccessEndsAt || null;
+    const orderContext = terminalOrderContext(after, reason === 'delivery_failed_grace' ? accessEndsAt : null);
     return {
       ...conversation,
       status: CONVERSATION_STATUS.ACTIVE,
@@ -133,7 +161,7 @@ function applyTransition(conversation, transition, after, now) {
       lifecycleReason: reason,
       closedAt: null,
       closedReason: null,
-      ...(terminalOrderContext(after) ? { orderContext: terminalOrderContext(after) } : {}),
+      ...(orderContext ? { orderContext } : {}),
       ...participantAccessProjection(conversation, 'active'),
       updatedAt: now,
     };
@@ -151,7 +179,16 @@ function applyTransition(conversation, transition, after, now) {
     return conversation;
   }
   const active = hasActiveAuthorityReason(authorityReasons, timeOf(now));
-  const accessEndsAt = active ? reasonDeadline(authorityReasons, now) : now;
+  const accessEndsAt = reasonDeadline(authorityReasons, now);
+  // A fully archived branch thread may later be reused for a new inquiry.
+  // Exclude its old unread activity without advancing the real read cursor.
+  const archivedParticipantState = !active && ['delivered', 'completed'].includes(normalizedStatus(after.status))
+    ? (conversation.participantState || []).map((state) => ({
+      ...state,
+      archivedIncomingCount: Math.max(Number(state.archivedIncomingCount || 0), Number(state.incomingCount || 0)),
+      unreadCount: 0,
+    }))
+    : conversation.participantState;
   return {
     ...conversation,
     authorityReasons,
@@ -159,7 +196,7 @@ function applyTransition(conversation, transition, after, now) {
     accessEndsAt,
     readAccessEndsAt: accessEndsAt,
     lifecycleReason: reason,
-    ...participantAccessProjection(conversation, active ? 'active' : 'read_only'),
+    ...participantAccessProjection({ ...conversation, participantState: archivedParticipantState }, active ? 'active' : 'read_only'),
     updatedAt: now,
   };
 }
@@ -167,12 +204,22 @@ function applyTransition(conversation, transition, after, now) {
 async function reconcileOrderLifecycleInTransaction({ tx, db, before = {}, after = {}, event, now = new Date() }) {
   if (!tx || !db) throw new OtpError(500, 'CHAT_RECONCILIATION_REQUIRED', 'Chat lifecycle reconciliation requires a transaction.');
   const timestamp = now instanceof Date ? now : new Date(timeOf(now));
+  const beforeStatus = normalizedStatus(before.status);
   const afterStatus = normalizedStatus(after.status);
+  const sameFailureAssignment = beforeStatus === 'delivery_failed'
+    && afterStatus === 'delivery_failed'
+    && clean(before.assignedDistributorUid || before.distributor_id) === clean(after.assignedDistributorUid || after.distributor_id)
+    && orderAssignmentVersion(before) === orderAssignmentVersion(after);
+  const priorFailedGrace = sameFailureAssignment ? failedDeliveryChatEndsAt(before) : null;
+  const nextFailedGrace = afterStatus === 'delivery_failed' ? failedDeliveryChatEndsAt(after) : null;
+  const effectiveFailedGrace = timeOf(priorFailedGrace) > 0 && (timeOf(nextFailedGrace) <= 0 || timeOf(priorFailedGrace) <= timeOf(nextFailedGrace))
+    ? priorFailedGrace
+    : nextFailedGrace;
   const accessEndsAt = ['delivered', 'completed'].includes(afterStatus)
     ? (after.chatAccessEndsAt || after.postOrderChatAccessEndsAt || postOrderAccessEndsAt(after.deliveredAt || after.delivered_at || timestamp))
     : afterStatus === 'delivery_failed'
-      ? failedDeliveryChatEndsAt(after)
-    : null;
+      ? effectiveFailedGrace
+      : null;
   const plan = reconcileOrderAuthorityTransition({ before, after, event, accessEndsAt, now: timeOf(timestamp) });
   const loaded = new Map();
   for (const transition of plan.transitions) {
@@ -181,6 +228,21 @@ async function reconcileOrderLifecycleInTransaction({ tx, db, before = {}, after
     const hash = authorityKeyHash(type, transition.authority);
     if (!loaded.has(hash)) loaded.set(hash, await loadExistingConversation(tx, db, type, transition.authority));
   }
+  const archivedOrderId = orderIdOf(after);
+  const historyEntries = [];
+  if (['delivered', 'completed'].includes(afterStatus) && archivedOrderId) {
+    for (const entry of loaded.values()) {
+      if (!entry || ![CONVERSATION_TYPES.REQUESTER_BRANCH, CONVERSATION_TYPES.REQUESTER_DISTRIBUTOR].includes(entry.conversation.type)) continue;
+      if (entry.conversation.type === CONVERSATION_TYPES.REQUESTER_BRANCH &&
+        clean(entry.conversation.branchIds?.[0]) !== owningBranchId(after)) continue;
+      if (entry.conversation.type === CONVERSATION_TYPES.REQUESTER_DISTRIBUTOR &&
+        (clean(entry.conversation.distributorUid) !== clean(after.assignedDistributorUid || after.distributor_id) ||
+          entry.conversation.assignmentVersion !== orderAssignmentVersion(after))) continue;
+      const ref = db.collection('chatOrderHistory').doc(historyId(entry.conversation.id, archivedOrderId));
+      const snapshot = await tx.get(ref);
+      if (!snapshot.exists) historyEntries.push({ ref, conversation: entry.conversation });
+    }
+  }
   let reconciled = 0;
   for (const transition of plan.transitions) {
     const type = transition.authority?.type;
@@ -188,7 +250,7 @@ async function reconcileOrderLifecycleInTransaction({ tx, db, before = {}, after
     const hash = authorityKeyHash(type, transition.authority);
     const entry = loaded.get(hash);
     if (!entry) continue;
-    entry.conversation = applyTransition(entry.conversation, transition, after, timestamp);
+    entry.conversation = applyTransition(entry.conversation, transition, after, timestamp, before);
     entry.changed = true;
   }
   for (const entry of loaded.values()) {
@@ -197,6 +259,9 @@ async function reconcileOrderLifecycleInTransaction({ tx, db, before = {}, after
     tx.update(entry.ref, update);
     publishChatActivity(tx, db, update, timestamp);
     reconciled += 1;
+  }
+  for (const entry of historyEntries) {
+    tx.create(entry.ref, historyRecord(entry.conversation, after, timestamp, accessEndsAt));
   }
   return { ...plan, accessEndsAt, reconciled };
 }

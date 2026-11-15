@@ -144,9 +144,10 @@ test('portal navigation uses aligned equal slots without a center notch', () => 
   assert.match(nav, /paddingVertical: 8/);
   assert.match(nav, /navSlot:[\s\S]{0,120}flex: 1,[\s\S]{0,120}alignItems: 'center',[\s\S]{0,60}justifyContent: 'center'/);
   assert.match(nav, /navButton:[\s\S]{0,100}width: 44,[\s\S]{0,60}height: 44/);
-  assert.match(nav, /primaryNavButton:[\s\S]{0,120}width: 48,[\s\S]{0,60}height: 48,[\s\S]{0,60}borderRadius: 24/);
+  assert.match(nav, /const ICON_SIZE = 27/);
+  assert.doesNotMatch(nav, /primaryNavButton|transform:|ACTIVE_SCALE/);
   assert.doesNotMatch(nav, /getNotchedNavPath|NOTCH_|notchedNav|notchedSurface|<svg/);
-  assert.doesNotMatch(nav, /primaryNavButton:[\s\S]{0,180}(top: -8|marginTop: -32)/);
+  assert.doesNotMatch(nav, /top: -8|marginTop: -32/);
   assert.match(nav, /minHeight: USER_PORTAL_LAYOUT\.navHeight/);
   assert.match(assistant, /USER_PORTAL_LAYOUT\.navHeight \+/);
   assert.match(assistant, /USER_PORTAL_LAYOUT\.navBottomOffset \+/);

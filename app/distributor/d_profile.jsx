@@ -8,18 +8,21 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useNavigation, useRouter } from 'expo-router';
+import { usePreventRemove } from '@react-navigation/native';
+import { Image as ExpoImage } from 'expo-image';
 import useSingleFlightNavigation from '../../components/useSingleFlightNavigation';
 import useUnsavedChangesGuard from '../../components/useUnsavedChangesGuard';
 
 import { auth, db } from '../../firebase';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { doc, getDoc, runTransaction } from 'firebase/firestore';
 import { findLocalUserForAuthRole, saveLocalUser } from '../../localUsers';
 import { normalizeRole, signOutAndClearSessions } from '../../services/authSession';
 import { getProfileUniqueId } from '../../services/uniqueIds';
@@ -28,10 +31,13 @@ import BlueTapHeader from '../../components/BlueTapHeader';
 import DistributorPortalBackground from '../../components/DistributorPortalBackground';
 import PortalSwipeContainer, { DISTRIBUTOR_TABS } from '../../components/PortalSwipeContainer';
 import { createShadow } from '../../components/shadowStyles';
-import { createPortalStyleSheet, useBlueTapTheme } from '../../components/BlueTapTheme';
+import { createPortalStyleSheet,
+  useBlueTapTheme } from '../../components/BlueTapTheme';
 import BlueTapBrandMark from '../../components/BlueTapBrandMark';
 import TopToastFeedback from '../../components/TopToastFeedback';
 import ChangePasswordModal from '../../components/ChangePasswordModal';
+import ProfileAvatar from '../../components/ProfileAvatar';
+import { getAssistantVisibility, setAssistantVisibility } from '../../services/assistant/assistantStorage';
 import { USER_PORTAL_BOTTOM_CONTENT_INSET, USER_PORTAL_LAYOUT } from '../../constants/userPortalLayout';
 import { BLUETAP_COLORS } from '../../constants/bluetapTheme';
 
@@ -41,6 +47,9 @@ const CARD_BORDER = BLUETAP_COLORS.border;
 const TEXT_MUTED = BLUETAP_COLORS.textSecondary;
 const TEXT_DARK = BLUETAP_COLORS.textPrimary;
 const USE_NATIVE_DRIVER = Platform.OS !== 'web';
+
+const LOGOUT_ICON = require('../../assets/icons/sidebar/log-out.svg');
+const { profileDraftsDiffer } = require('../../services/profileDraftComparison');
 
 const getProfileObject = (profile) => profile || {};
 
@@ -211,10 +220,14 @@ const ProfileField = memo(function ProfileField({
 });
 
 export default function DistributorProfilePage() {
-  const { colors } = useBlueTapTheme();
+  const { colors, isDark } = useBlueTapTheme();
   const router = useRouter();
+  const navigation = useNavigation();
+  const editBaseline = useRef(null);
+  const saveInFlight = useRef(false);
   const { replaceOnce } = useSingleFlightNavigation();
   const editFadeAnim = useRef(new Animated.Value(0)).current;
+  const assistantChanged = useRef(false);
   const toastAnim = useRef(new Animated.Value(0)).current;
   const toastTimerRef = useRef(null);
   const [loading, setLoading] = useState(true);
@@ -224,9 +237,27 @@ export default function DistributorProfilePage() {
   const [resolvedBranchName, setResolvedBranchName] = useState('');
   const [editingProfile, setEditingProfile] = useState(false);
   const [savingProfile, setSavingProfile] = useState(false);
+  const [logoutRequested, setLogoutRequested] = useState(false);
   const [profileDraft, setProfileDraft] = useState(() => buildProfileDraft());
   const [toast, setToast] = useState({ visible: false, message: '', type: 'success' });
   const [changePasswordVisible, setChangePasswordVisible] = useState(false);
+  const [assistantVisible, setAssistantVisible] = useState(true);
+
+  useEffect(() => {
+    let isMounted = true;
+    getAssistantVisibility('distributor').then((visible) => {
+      if (isMounted && !assistantChanged.current) setAssistantVisible(visible);
+    });
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  const handleToggleAssistant = async (value) => {
+    assistantChanged.current = true;
+    setAssistantVisible(value);
+    await setAssistantVisibility(value, 'distributor');
+  };
 
 
   useEffect(() => {
@@ -247,7 +278,6 @@ export default function DistributorProfilePage() {
         const nextProfile = buildProfileData(localProfile, user);
         setUserData(nextProfile);
         setProfileDraft(buildProfileDraft(nextProfile));
-        setLoading(false);
       }
 
       if (!user) {
@@ -368,7 +398,8 @@ export default function DistributorProfilePage() {
   const openProfileEditor = () => {
     if (loading || savingProfile) return;
 
-    setProfileDraft(buildProfileDraft(userData || {}));
+    editBaseline.current = buildProfileDraft(userData || {});
+    setProfileDraft(editBaseline.current);
     setEditingProfile(true);
   };
 
@@ -379,13 +410,13 @@ export default function DistributorProfilePage() {
     setEditingProfile(false);
   };
 
-  const initialProfileDraft = useMemo(() => buildProfileDraft(userData || {}), [userData]);
+  const initialProfileDraft = editBaseline.current || buildProfileDraft(userData || {});
   const isProfileDirty = useMemo(() => {
     if (!editingProfile) return false;
-    return (
-      (profileDraft.fullName || '').trim() !== (initialProfileDraft.fullName || '').trim() ||
-      (profileDraft.contactNumber || '').trim() !== (initialProfileDraft.contactNumber || '').trim() ||
-      (profileDraft.address || '').trim() !== (initialProfileDraft.address || '').trim()
+    return profileDraftsDiffer(
+      { ...profileDraft, phone: profileDraft.contactNumber },
+      { ...initialProfileDraft, phone: initialProfileDraft.contactNumber },
+      normalizePhilippinePhone
     );
   }, [editingProfile, profileDraft, initialProfileDraft]);
 
@@ -393,10 +424,15 @@ export default function DistributorProfilePage() {
     isDirty: isProfileDirty,
     isSubmitting: savingProfile,
     onDiscard: cancelProfileEdit,
+    onSave: saveProfileChanges,
+    navigationManaged: true,
+  });
+  usePreventRemove(isProfileDirty || savingProfile, ({ data }) => {
+    confirmLeave(() => navigation.dispatch(data.action));
   });
 
-  const saveProfileChanges = async () => {
-    if (savingProfile) return;
+  async function saveProfileChanges() {
+    if (saveInFlight.current) return false;
 
     const uid = userData?.uid || auth.currentUser?.uid || '';
     const fullName = (profileDraft.fullName || '').trim();
@@ -405,72 +441,78 @@ export default function DistributorProfilePage() {
 
     if (!uid) {
       Alert.alert('Profile not saved', 'Please log in again before editing your profile.');
-      return;
+      return false;
     }
 
     if (!fullName) {
       Alert.alert('Missing full name', 'Full name cannot be empty.');
-      return;
+      return false;
     }
 
     if (!contactNumber) {
       Alert.alert('Missing contact number', 'Contact number cannot be empty.');
-      return;
+      return false;
     }
 
     const normalizedPhone = normalizePhilippinePhone(contactNumber);
     if (!normalizedPhone) {
       Alert.alert('Invalid Contact Number', 'Please enter a valid Philippine mobile number (e.g. 09XXXXXXXXX or +639XXXXXXXXX).');
-      return;
+      return false;
     }
 
     if (!address) {
       Alert.alert('Missing address', 'Complete address cannot be empty.');
-      return;
+      return false;
     }
 
-    const { updates, localUpdates } = buildChangedProfileUpdate(userData || {}, {
-      fullName,
-      contactNumber: normalizedPhone,
-      address,
-    });
-    const hasChanges = Object.keys(updates).length > 0;
-
     try {
+      if (!auth.currentUser || auth.currentUser.uid !== uid) throw new Error('Please sign in again before saving.');
+      saveInFlight.current = true;
       setSavingProfile(true);
-
-      if (hasChanges && auth.currentUser?.uid) {
-        await setDoc(doc(db, 'users', auth.currentUser.uid), updates, {
-          merge: true,
-        });
-      }
-
-      const nextProfile = {
-        ...(userData || {}),
-        ...localUpdates,
-        uid,
-        email: profileDisplay.email,
-      };
+      const nextProfile = await runTransaction(db, async (transaction) => {
+        const ref = doc(db, 'users', uid);
+        const snapshot = await transaction.get(ref);
+        if (!snapshot.exists()) throw new Error('Profile is no longer available.');
+        const current = snapshot.data();
+        const currentDraft = buildProfileDraft(current);
+        const baseline = editBaseline.current;
+        if (!baseline || ['fullName', 'contactNumber', 'address'].some((key) => String(currentDraft[key] || '').trim() !== String(baseline[key] || '').trim())) {
+          throw new Error('Your profile changed elsewhere. Discard this edit and reopen it before saving.');
+        }
+        const { updates, localUpdates } = buildChangedProfileUpdate(current, { fullName, contactNumber: normalizedPhone, address });
+        if (Object.keys(updates).length) transaction.set(ref, updates, { merge: true });
+        return { ...current, ...localUpdates, uid, email: profileDisplay.email };
+      });
 
       saveLocalUser(nextProfile);
       setUserData(nextProfile);
       setProfileDraft(buildProfileDraft(nextProfile));
       setEditingProfile(false);
       setToast({ visible: true, message: 'Profile updated successfully.', type: 'success' });
+      return true;
     } catch (error) {
       console.log('Distributor profile save error:', error.message);
       setToast({ visible: true, message: error.message || 'Profile could not be saved.', type: 'error' });
+      return false;
     } finally {
+      saveInFlight.current = false;
       setSavingProfile(false);
     }
+  }
+
+  const handleLogout = () => {
+    setEditingProfile(false);
+    setLogoutRequested(true);
   };
-
-  const handleLogout = async () => {
-    if (savingProfile) return;
-
+  const completeLogout = async () => {
     await signOutAndClearSessions();
     router.replace('/login');
   };
+  useEffect(() => {
+    if (!logoutRequested || editingProfile || savingProfile) return;
+    setLogoutRequested(false);
+    completeLogout();
+  }, [logoutRequested, editingProfile, savingProfile, router]);
 
   return (
     <DistributorPortalBackground>
@@ -507,7 +549,7 @@ export default function DistributorProfilePage() {
             {!loading && userData && (
               <View style={styles.identityCard}>
                 <View style={styles.identityAvatar}>
-                  <Text style={styles.identityInitials}>{profileDisplay.fullName.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('').toUpperCase() || 'BT'}</Text>
+                  <ProfileAvatar name={profileDisplay.fullName} uri={userData?.profilePhotoRemoved ? '' : (userData?.profilePhotoUrl || userData?.photoURL || userData?.avatarUrl)} initialsStyle={styles.identityInitials} />
                 </View>
                 <View style={styles.identityCopy}>
                   <Text style={styles.identityName} numberOfLines={1}>{profileDisplay.fullName}</Text>
@@ -632,38 +674,78 @@ export default function DistributorProfilePage() {
             )}
           </View>
 
-          <View style={styles.helpCard}>
-            <Pressable style={({ hovered, pressed }) => [styles.helpRow, hovered && styles.helpRowHovered, pressed && styles.helpRowPressed]} onPress={() => replaceOnce('/distributor/bluetap_AI')} accessibilityRole="button" accessibilityLabel="Open BlueTap Assistant">
-              <View style={styles.helpTextBlock}>
-                <Text style={styles.helpTitle}>BlueTap Assistant</Text>
-                <Text style={styles.helpSubtitle}>Get quick help with deliveries, schedules, and routes.</Text>
-                <Text style={styles.helpAction}>Open Assistant →</Text>
-              </View>
-              <View style={styles.helpIconWrapper}>
-                <BlueTapBrandMark color={colors.iconInteractive || BLUE} size={38} style={styles.helpIcon} />
-              </View>
-            </Pressable>
+          <View style={styles.settingsSection}>
+            <View style={styles.infoHeader}>
+              <Text style={styles.infoTitle}>Account Settings</Text>
+            </View>
+            <View style={styles.infoDivider} />
 
-            <TouchableOpacity
-              accessibilityRole="button"
-              accessibilityLabel="Change Password"
-              disabled={savingProfile}
-              onPress={() => confirmLeave(() => setChangePasswordVisible(true))}
-              style={{ minHeight: 44, justifyContent: 'center', alignItems: 'center', marginTop: 14, borderRadius: 10, backgroundColor: '#075E9E' }}
-            >
-              <Text style={{ color: '#FFFFFF', fontWeight: '800' }}>Change Password</Text>
-            </TouchableOpacity>
+            <View style={styles.settingRow}>
+              <View style={styles.settingTextWrap}>
+                <Text style={styles.settingLabel}>Account Password</Text>
+                <Text style={styles.settingSubtitle}>Update your password for security</Text>
+              </View>
+              <TouchableOpacity
+                accessibilityRole="button"
+                accessibilityLabel="Change Password"
+                dataSet={{ bluetapCta: 'true' }}
+                onPress={() => setChangePasswordVisible(true)}
+                style={styles.changePasswordButton}
+              >
+                <Text style={styles.changePasswordButtonText}>Change Password</Text>
+              </TouchableOpacity>
+            </View>
 
-            <TouchableOpacity
-              activeOpacity={0.85}
-              style={styles.logoutButton}
-              onPress={() => confirmLeave(handleLogout)}
-              disabled={savingProfile}
-            >
-              <Text style={styles.logoutIcon}>{'\u21AA'}</Text>
-              <Text style={styles.logoutText}>Logout</Text>
-            </TouchableOpacity>
+            <View style={styles.settingDivider} />
+
+            <View style={styles.settingRow}>
+              <View style={styles.settingTextWrap}>
+                <Text style={styles.settingLabel}>BlueTap Assistant</Text>
+                <Text style={styles.settingSubtitle}>Show assistant quick access shortcut</Text>
+              </View>
+              <Switch
+                value={assistantVisible}
+                onValueChange={handleToggleAssistant}
+                trackColor={{ false: CARD_BORDER, true: BLUE_LIGHT }}
+                thumbColor={assistantVisible ? BLUE : TEXT_MUTED}
+                accessibilityRole="switch"
+                accessibilityLabel="Toggle BlueTap Assistant Visibility"
+              />
+            </View>
           </View>
+
+            <View style={styles.helpCard}>
+              <Pressable style={({ hovered, pressed }) => [styles.helpRow, hovered && styles.helpRowHovered, pressed && styles.helpRowPressed]} onPress={() => replaceOnce('/distributor/bluetap_AI')} accessibilityRole="button" accessibilityLabel="Open BlueTap Assistant">
+                <View style={styles.helpTextBlock}>
+                  <Text style={styles.helpTitle}>BlueTap Assistant</Text>
+                  <Text style={styles.helpSubtitle}>Get quick help with deliveries, schedules, and routes.</Text>
+                  <Text style={styles.helpAction}>Open Assistant →</Text>
+                </View>
+                <View style={styles.helpIconWrapper}>
+                  <BlueTapBrandMark color={colors.iconInteractive || BLUE} size={38} style={styles.helpIcon} />
+                </View>
+              </Pressable>
+            </View>
+
+          <TouchableOpacity
+            activeOpacity={0.85}
+            style={styles.logoutButton}
+            onPress={() => confirmLeave(handleLogout)}
+            disabled={savingProfile}
+            accessibilityRole="button"
+            accessibilityLabel="Log out of your account"
+            dataSet={!isDark ? { bluetapCta: 'true' } : undefined}
+          >
+            <ExpoImage
+              source={LOGOUT_ICON}
+              contentFit="contain"
+              tintColor={colors.onPrimary || '#FFFFFF'}
+              transition={0}
+              accessible={false}
+              style={styles.logoutIcon}
+            />
+            <Text style={styles.logoutText}>Logout</Text>
+          </TouchableOpacity>
 
         </ScrollView>
       </View>
@@ -675,11 +757,7 @@ export default function DistributorProfilePage() {
         type={toast.type}
         onDismiss={() => setToast((t) => ({ ...t, visible: false }))}
       />
-      <ChangePasswordModal
-        visible={changePasswordVisible}
-        onClose={() => setChangePasswordVisible(false)}
-        onSuccess={() => setToast({ visible: true, message: 'Password updated successfully.', type: 'success' })}
-      />
+      <ChangePasswordModal visible={changePasswordVisible} onClose={() => setChangePasswordVisible(false)} onSuccess={() => setToast({ visible: true, message: 'Password updated successfully.', type: 'success' })} />
       <UnsavedModal />
     </SafeAreaView>
     </DistributorPortalBackground>
@@ -745,7 +823,7 @@ const styles = createPortalStyleSheet({
     marginBottom: 2,
   },
   identityCard: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 14, padding: 12, borderRadius: 16, backgroundColor: BLUE_LIGHT },
-  identityAvatar: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center', backgroundColor: BLUE },
+  identityAvatar: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center', backgroundColor: BLUE, overflow: 'hidden' },
   identityInitials: { color: '#FFFFFF', fontSize: 16, fontWeight: '900' },
   identityCopy: { flex: 1, minWidth: 0 },
   identityName: { color: TEXT_DARK, fontSize: 16, fontWeight: '900' },
@@ -845,6 +923,61 @@ const styles = createPortalStyleSheet({
   buttonDisabled: {
     opacity: 0.65,
   },
+  settingsSection: {
+    marginTop: 18,
+    backgroundColor: BLUETAP_COLORS.surface,
+    borderRadius: USER_PORTAL_LAYOUT.cardRadius,
+    borderWidth: 1,
+    borderColor: CARD_BORDER,
+    padding: 16,
+    ...createShadow({
+      color: '#0D47A1',
+      elevation: 6,
+      opacity: 0.1,
+      radius: 10,
+      offset: { width: 0, height: 5 },
+    }),
+  },
+  settingRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+    gap: 12,
+  },
+  settingTextWrap: {
+    flex: 1,
+    minWidth: 150,
+  },
+  settingLabel: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: TEXT_DARK,
+  },
+  settingSubtitle: {
+    fontSize: 12,
+    color: TEXT_MUTED,
+    marginTop: 2,
+  },
+  settingDivider: {
+    height: 1,
+    backgroundColor: BLUE_LIGHT,
+    marginVertical: 4,
+  },
+  changePasswordButton: {
+    minHeight: 44,
+    paddingHorizontal: 14,
+    borderRadius: 8,
+    backgroundColor: BLUE,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  changePasswordButtonText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '800',
+  },
   helpCard: {
     marginTop: 22,
     backgroundColor: BLUETAP_COLORS.surfaceAlt,
@@ -907,9 +1040,8 @@ const styles = createPortalStyleSheet({
     flexDirection: 'row',
   },
   logoutIcon: {
-    color: '#FFFFFF',
-    fontSize: 15,
-    fontWeight: 'bold',
+    width: 16,
+    height: 16,
     marginRight: 8,
   },
   logoutText: {

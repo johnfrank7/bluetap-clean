@@ -14,11 +14,15 @@ const {
   reconcileDistributorMembershipInTransaction,
   reconcileOrderLifecycleInTransaction,
 } = require('../conversationLifecycleService');
+const { historyId } = require('../chatHistory');
 
 function fixture() {
   const records = new Map();
   const snapshot = (path) => ({ id: path.split('/').pop(), exists: records.has(path), data: () => records.get(path) });
   const collection = (name) => ({
+    where(field, operator, value) {
+      return { kind: 'query', name, field, operator, value, limit(count) { return { ...this, count }; } };
+    },
     doc(id) {
       const path = `${name}/${id}`;
       return { id, path, get: async () => snapshot(path) };
@@ -27,7 +31,11 @@ function fixture() {
   const db = { collection };
   const tx = {
     set(ref, value) { records.set(ref.path, value); },
-    get: async (ref) => snapshot(ref.path),
+    create(ref, value) { if (records.has(ref.path)) throw new Error('Duplicate document'); records.set(ref.path, value); },
+    get: async (ref) => ref.kind === 'query'
+      ? { docs: [...records.keys()].filter((path) => path.startsWith(`${ref.name}/`) && !path.slice(ref.name.length + 1).includes('/') &&
+          ref.operator === '==' && records.get(path)?.[ref.field] === ref.value).slice(0, ref.count || 2).map(snapshot) }
+      : snapshot(ref.path),
     update(ref, update) { records.set(ref.path, { ...records.get(ref.path), ...update }); },
   };
   function seed(type, authority, authorityReasons = {}, id = `conversation-${records.size}`) {
@@ -110,7 +118,11 @@ test('delivery closes direct sends immediately while preserving bounded history 
   assert.equal('deliveryLocation' in direct.orderContext, false);
   assert.equal(branch.authorityReasons.active_order, undefined);
   assert.deepEqual(branch.authorityReasons.post_order_followup.orderIds, ['order-a']);
-  assert.equal(branch.status, 'active');
+  assert.equal(branch.status, 'read_only');
+  assert.equal(f.records.get(`chatOrderHistory/${historyId(directId, 'order-a')}`).assignmentVersion, 2);
+  assert.equal(f.records.get(`chatOrderHistory/${historyId(branchId, 'order-a')}`).orderReference, 'BT-2026-A');
+  await reconcileOrderLifecycleInTransaction({ tx: f.tx, db: f.db, before, after, event: 'DELIVERY_COMPLETED', now: deliveredAt });
+  assert.equal([...f.records.keys()].filter((path) => path.startsWith('chatOrderHistory/')).length, 2);
 });
 
 test('failed delivery grants exactly one hour and rescheduling removes the deadline', async () => {

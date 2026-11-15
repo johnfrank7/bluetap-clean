@@ -1,6 +1,6 @@
 /**
  * Validates password strength according to BlueTap security requirements:
- * - Minimum 8 characters (and recommended 12 for strong passwords)
+ * - Minimum 8 characters
  * - At least one lowercase letter
  * - At least one uppercase letter
  * - At least one numeric digit

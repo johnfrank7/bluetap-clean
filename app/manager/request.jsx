@@ -1,8 +1,10 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import SavedOrderPricing from '../../components/SavedOrderPricing';
 import { useLocalSearchParams } from 'expo-router';
 import {
   ActivityIndicator,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -16,22 +18,51 @@ import {
 import {
   decideOutsideRadiusOrder,
   dispatchManagerOrder,
+  quoteManagerOrder,
 } from '../../services/managerOrderApprovals';
 import { subscribeProducts } from '../../services/products';
 import { haversineDistanceKm } from '../../services/location';
 import { useAdminTheme } from '../../components/AdminTheme';
 import AdminIcon from '../../components/AdminIcon';
 import BlueTapEmptyState from '../../components/BlueTapEmptyState';
+import SoftStatusBadge from '../../components/SoftStatusBadge';
 import TopToastFeedback from '../../components/TopToastFeedback';
 import ManagerShell, { MANAGER_COLORS, ManagerPill } from '../../components/ManagerShell';
 import { useManagerOngoingRequests } from '../../components/ManagerOngoingRequestsMonitor';
 import { useManagerRealtimeData } from '../../components/ManagerRealtimeData';
+import { ManagerDeliveryReviewList, ManagerDeliveryReviewModal } from '../../components/ManagerDeliveryReview';
+import { fetchManagerDeliveryReviews, fetchManagerDeliveryReview, submitManagerDeliveryDecision } from '../../services/managerDeliveryReviews';
+import { createManagerDeliveryReviewFlow } from '../../services/managerDeliveryReviewFlow';
 import { parseTimestamp } from '../../services/notificationTimestamp';
 import LocationMap from '../../components/LocationMap';
 import { ManagerOrderChatAction } from '../../components/chat/ChatOrderActions';
 import AnimatedPresenceItem from '../../components/AnimatedPresenceItem';
 import { useAnimatedPresenceList } from '../../components/useAnimatedPresenceList';
 const { getManagerQueues, toManagerOrder } = require('../../services/managerOperational');
+const {
+  TARGET_HIGHLIGHT_DURATION_MS,
+  matchesOrderIdentifier,
+  resolveManagerOrderTarget,
+} = require('../../services/managerOrderTargetNavigation');
+const { createMutationId } = require('../../services/deliveryReportSubmission');
+const {
+  analyzeOrderCargo,
+  calculateOrderContainers,
+} = require('../../services/managerTripCapacity');
+
+const getCargoBadgeStyles = (styles, tone) => {
+  switch (tone) {
+    case 'orange':
+      return { container: styles.cargoBadgeOrange, text: styles.cargoBadgeOrangeText };
+    case 'purple':
+      return { container: styles.cargoBadgePurple, text: styles.cargoBadgePurpleText };
+    case 'warning':
+      return { container: styles.cargoBadgeWarning, text: styles.cargoBadgeWarningText };
+    case 'blue':
+    default:
+      return { container: null, text: null };
+  }
+};
 
 
 
@@ -68,7 +99,7 @@ const orderProducts = (order) =>
 const orderDistance = (order) =>
   order.distanceKmSnapshot == null ? 'Distance unavailable' : `Approx. ${Number(order.distanceKmSnapshot).toFixed(1)} km`;
 
-function ManagerActionButton({ children, disabled = false, onPress, style }) {
+function ManagerActionButton({ children, disabled = false, onPress, style, hitSlop }) {
   const baseStyle = StyleSheet.flatten(style);
   return (
     <Pressable
@@ -76,10 +107,15 @@ function ManagerActionButton({ children, disabled = false, onPress, style }) {
       accessibilityState={{ disabled: Boolean(disabled) }}
       disabled={disabled}
       onPress={onPress}
-      style={({ hovered, pressed }) => [
+      hitSlop={hitSlop || { top: 4, bottom: 4, left: 4, right: 4 }}
+      style={({ focused, hovered, pressed }) => [
         baseStyle,
         hovered && !disabled && { opacity: 0.9 },
         pressed && !disabled && { opacity: 0.8 },
+        focused && {
+          borderWidth: 2,
+          borderColor: baseStyle?.borderColor || baseStyle?.backgroundColor || '#187BCD',
+        },
       ]}
     >
       {children}
@@ -87,10 +123,139 @@ function ManagerActionButton({ children, disabled = false, onPress, style }) {
   );
 }
 
-function OutsideRadiusApprovalQueue({ orders, loading, styles, colors, isDark, onShowToast, onOpenOrder }) {
+function PaginationBar({
+  currentPage = 1,
+  totalItems = 0,
+  pageSize = 3,
+  onPageChange,
+  styles,
+  itemLabel = 'orders',
+}) {
+  if (totalItems <= pageSize) return null;
+
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+  const safePage = Math.min(Math.max(1, currentPage), totalPages);
+  const startIndex = (safePage - 1) * pageSize + 1;
+  const endIndex = Math.min(safePage * pageSize, totalItems);
+
+  const pages = [];
+  if (totalPages <= 5) {
+    for (let i = 1; i <= totalPages; i++) pages.push(i);
+  } else {
+    pages.push(1);
+    let start = Math.max(2, safePage - 1);
+    let end = Math.min(totalPages - 1, safePage + 1);
+    if (safePage <= 2) end = 3;
+    if (safePage >= totalPages - 1) start = totalPages - 2;
+    if (start > 2) pages.push('ellipsis-start');
+    for (let i = start; i <= end; i++) pages.push(i);
+    if (end < totalPages - 1) pages.push('ellipsis-end');
+    pages.push(totalPages);
+  }
+
+  return (
+    <View style={styles.paginationContainer} accessibilityRole="navigation" accessibilityLabel={`Pagination for ${itemLabel}`}>
+      <Text style={styles.paginationRangeText}>
+        Showing {startIndex}–{endIndex} of {totalItems}
+      </Text>
+      <View style={styles.paginationNavRow}>
+        <TouchableOpacity
+          accessibilityRole="button"
+          accessibilityLabel="Previous page"
+          disabled={safePage <= 1}
+          onPress={() => onPageChange(safePage - 1)}
+          style={[styles.paginationBtn, safePage <= 1 && styles.paginationBtnDisabled]}
+        >
+          <Text style={[styles.paginationBtnText, safePage <= 1 && styles.paginationBtnTextDisabled]}>‹ Prev</Text>
+        </TouchableOpacity>
+
+        {pages.map((p, idx) => {
+          if (typeof p === 'string') {
+            return (
+              <Text key={`ellipsis-${idx}`} style={styles.paginationEllipsis}>
+                …
+              </Text>
+            );
+          }
+          const isSelected = p === safePage;
+          return (
+            <TouchableOpacity
+              key={`page-${p}`}
+              accessibilityRole="button"
+              accessibilityLabel={`Page ${p}`}
+              accessibilityState={{ selected: isSelected }}
+              onPress={() => onPageChange(p)}
+              style={[styles.paginationNumberBtn, isSelected && styles.paginationNumberBtnActive]}
+            >
+              <Text style={[styles.paginationNumberText, isSelected && styles.paginationNumberTextActive]}>
+                {p}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+
+        <TouchableOpacity
+          accessibilityRole="button"
+          accessibilityLabel="Next page"
+          disabled={safePage >= totalPages}
+          onPress={() => onPageChange(safePage + 1)}
+          style={[styles.paginationBtn, safePage >= totalPages && styles.paginationBtnDisabled]}
+        >
+          <Text style={[styles.paginationBtnText, safePage >= totalPages && styles.paginationBtnTextDisabled]}>Next ›</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+}
+
+function OutsideRadiusApprovalQueue({
+  orders,
+  loading,
+  styles,
+  colors,
+  isDark,
+  onShowToast,
+  onOpenOrder,
+  targetOrderId = '',
+  targetHighlighted = false,
+  onSectionLayout,
+  onTargetCardLayout,
+  sectionScrollRef,
+  reviewFlow,
+  reviewState,
+  onOpenReview,
+  style,
+}) {
   const [error, setError] = useState('');
   const [updatingId, setUpdatingId] = useState('');
-  const presentedOrders = useAnimatedPresenceList(orders, (order) => order.id);
+  const PAGE_SIZE = 3;
+  const [currentPage, setCurrentPage] = useState(1);
+  const totalPages = Math.max(1, Math.ceil(orders.length / PAGE_SIZE));
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [orders.length, totalPages, currentPage]);
+
+  useEffect(() => {
+    if (targetOrderId) {
+      const targetIdx = orders.findIndex((order) => matchesOrderIdentifier(order, targetOrderId));
+      if (targetIdx !== -1) {
+        const targetPage = Math.floor(targetIdx / PAGE_SIZE) + 1;
+        if (targetPage !== currentPage) {
+          setCurrentPage(targetPage);
+        }
+      }
+    }
+  }, [targetOrderId, orders]);
+
+  const pagedOrders = useMemo(() => {
+    const start = (currentPage - 1) * PAGE_SIZE;
+    return orders.slice(start, start + PAGE_SIZE);
+  }, [orders, currentPage]);
+
+  const presentedOrders = useAnimatedPresenceList(pagedOrders, (order) => order.id);
 
   const decide = async (order, action) => {
     if (updatingId) return;
@@ -112,17 +277,33 @@ function OutsideRadiusApprovalQueue({ orders, loading, styles, colors, isDark, o
   };
 
   return (
-    <View style={styles.card}>
+    <View style={[styles.card, style]} onLayout={(event) => onSectionLayout?.('exceptions', event.nativeEvent.layout.y)}>
       <View style={styles.cardHeaderRow}>
         <View style={{ flex: 1, minWidth: 0 }}>
           <Text style={styles.eyebrow}>DELIVERY EXCEPTIONS</Text>
-          <Text style={styles.cardTitle}>Order Approvals</Text>
+          <Text style={styles.cardTitle}>Delivery Exceptions</Text>
           <Text style={styles.helperText}>
-            Review delivery requests outside your branch radius or above a product order limit.
+            Review order approvals and reported failed deliveries for your branch.
           </Text>
         </View>
-        <ManagerPill tone="warning">{orders.length} pending</ManagerPill>
+        <ManagerPill tone="warning">{reviewState.activeTab === 'approvals' ? `${orders.length} pending` : `${reviewState.reviews.length} loaded`}</ManagerPill>
       </View>
+
+      <View accessibilityRole="tablist" style={styles.exceptionTabs}>
+        {[
+          ['approvals', 'Approvals'], ['failed', 'Failed Deliveries'],
+        ].map(([tab, label]) => <Pressable key={tab} accessibilityRole="tab" accessibilityLabel={label}
+          accessibilityState={{ selected: reviewState.activeTab === tab }}
+          onPress={() => { reviewFlow.setTab(tab); if (tab === 'failed' && !reviewState.listLoaded) void reviewFlow.load(); }}
+          style={({ focused }) => [styles.exceptionTab, reviewState.activeTab === tab && styles.exceptionTabSelected,
+            focused && styles.exceptionTabFocused]}>
+          <Text style={[styles.exceptionTabText, reviewState.activeTab === tab && styles.exceptionTabTextSelected]}>{label}</Text>
+        </Pressable>)}
+      </View>
+
+      {reviewState.activeTab === 'failed' ? (
+        <ManagerDeliveryReviewList state={reviewState} flow={reviewFlow} colors={colors} onReview={onOpenReview} />
+      ) : <>
 
       {!!error && (
         <View accessibilityRole="alert" style={styles.errorBanner}>
@@ -145,35 +326,65 @@ function OutsideRadiusApprovalQueue({ orders, loading, styles, colors, isDark, o
           style={styles.visualEmpty}
         />
       ) : (
-        <ScrollView nestedScrollEnabled style={styles.sectionScroll} contentContainerStyle={styles.sectionContent}>
+        <ScrollView ref={sectionScrollRef} nestedScrollEnabled style={styles.sectionScroll} contentContainerStyle={styles.sectionContent}>
         {presentedOrders.map((entry) => {
           const order = entry.item;
           const isUpdating = updatingId === order.id;
+          const isTargetOrder = Boolean(targetOrderId) && matchesOrderIdentifier(order, targetOrderId);
+          const isTargetHighlighted = Boolean(isTargetOrder && targetHighlighted);
           const products =
             order.items?.map((item) => `${item.quantity} × ${item.productNameSnapshot}`).filter(Boolean).join(', ') ||
             'Order products';
 
           return (
             <AnimatedPresenceItem key={entry.id} phase={entry.phase}>
-            <View style={styles.orderItem}>
+            <View
+              onLayout={(event) => {
+                if (isTargetOrder) onTargetCardLayout?.('exceptions', event.nativeEvent.layout.y);
+              }}
+              style={[styles.orderItem, isTargetHighlighted && styles.orderItemTargetHighlighted]}
+            >
               <View style={styles.orderHeaderRow}>
                 <View style={{ flex: 1, minWidth: 0 }}>
-                  <Text style={styles.requesterName}>{order.requesterName || 'Requester'}</Text>
-                  <Text style={styles.orderIdText}>#{order.requestId || order.id}</Text>
+                  <Text numberOfLines={1} ellipsizeMode="tail" style={styles.requesterName}>{order.requesterName || 'Requester'}</Text>
+                  <Text numberOfLines={1} ellipsizeMode="tail" style={styles.orderIdText}>#{order.requestId || order.id}</Text>
                 </View>
                 <View style={styles.orderHeaderAside}>
-                  <ManagerPill tone="cyan">{approvalLabel(order)}</ManagerPill>
+                  {Boolean(isTargetHighlighted) ? (
+                    <View style={styles.targetOrderBadge}>
+                      <Text style={styles.targetOrderBadgeText}>Target Order</Text>
+                    </View>
+                  ) : null}
+                  <ManagerPill tone="warning">
+                    {approvalLabel(order)}
+                  </ManagerPill>
                 </View>
               </View>
 
               <View style={styles.productPricingRow}>
                 <View style={styles.requestProductInfo}>
-                  <Text style={[styles.productsSummary, styles.productsSummaryInline]}>{products}</Text>
+                  <Text numberOfLines={2} ellipsizeMode="tail" style={[styles.productsSummary, styles.productsSummaryInline]}>{products}</Text>
+                  {(() => {
+                    const cargo = analyzeOrderCargo(order);
+                    const badgeStyles = getCargoBadgeStyles(styles, cargo.badgeTone);
+                    return (
+                      <View style={styles.containerBadgeRow}>
+                        <View style={[styles.containerBadge, badgeStyles.container]}>
+                          <Text style={[styles.containerBadgeText, badgeStyles.text]}>{cargo.badgeLabel}</Text>
+                        </View>
+                        {Boolean(order.tripNumber || order.tripId) ? (
+                          <View style={styles.tripBadge}>
+                            <Text style={styles.tripBadgeText}>Trip #{order.tripNumber || 1}</Text>
+                          </View>
+                        ) : null}
+                      </View>
+                    );
+                  })()}
                   <View style={styles.requestDeliveryInfo}>
-                    <Text style={styles.detailLine}>
+                    <Text numberOfLines={2} ellipsizeMode="tail" style={styles.detailLine}>
                       Delivery: {order.address || (order.deliveryLocation ? `${order.deliveryLocation.latitude.toFixed(5)}, ${order.deliveryLocation.longitude.toFixed(5)}` : 'Location provided')}
                     </Text>
-                    {order.distanceKmSnapshot != null && <Text style={styles.detailLine}>
+                    {order.distanceKmSnapshot != null && <Text numberOfLines={1} ellipsizeMode="tail" style={styles.detailLine}>
                       Distance: Approx. {Number(order.distanceKmSnapshot).toFixed(1)} km{order.serviceRadiusKmSnapshot != null ? ` · Branch radius ${order.serviceRadiusKmSnapshot} km` : ''}
                     </Text>}
                   </View>
@@ -190,39 +401,43 @@ function OutsideRadiusApprovalQueue({ orders, loading, styles, colors, isDark, o
               {Boolean(order.productLimitViolations?.length > 0 || order.approvalReasons?.includes('NON_STANDARD_DELIVERY_DAY') || order.requesterUniqueId) ? (
                 <View style={styles.detailsBlock}>
                   {(order.productLimitViolations || []).map((item) => (
-                    <Text key={item.productId} style={styles.detailLine}>
+                    <Text key={item.productId} numberOfLines={2} ellipsizeMode="tail" style={styles.detailLine}>
                       {item.productNameSnapshot}: requested {item.requestedQuantity} · limit {item.configuredLimit}. Order exceeds the configured requester product limit.
                     </Text>
                   ))}
                   {Boolean(order.approvalReasons?.includes('NON_STANDARD_DELIVERY_DAY')) ? (
-                    <Text style={styles.detailLine}>The requested date falls outside the effective product delivery weekdays and requires Manager review.</Text>
+                    <Text numberOfLines={2} ellipsizeMode="tail" style={styles.detailLine}>The requested date falls outside the effective product delivery weekdays and requires Manager review.</Text>
                   ) : null}
                   {Boolean(order.requesterUniqueId) ? (
-                    <Text style={styles.detailLine}>Requester UID: {order.requesterUniqueId}</Text>
+                    <Text numberOfLines={1} ellipsizeMode="tail" style={styles.detailLine}>Requester UID: {order.requesterUniqueId}</Text>
                   ) : null}
                 </View>
               ) : null}
 
               <View style={[styles.actionRow, styles.requestActionRow]}>
-                <View style={styles.chatActionWrap}><ManagerOrderChatAction order={order} disabled={entry.actionsDisabled} style={styles.managerChatButton} /></View>
-                <ManagerActionButton disabled={entry.actionsDisabled} onPress={() => onOpenOrder(order)} style={[styles.actionButton, styles.viewDetailsBtn, entry.actionsDisabled && styles.actionDisabled]}>
-                  <Text style={styles.viewDetailsBtnText}>View Details</Text>
-                </ManagerActionButton>
-                <ManagerActionButton
-                  disabled={isUpdating || entry.actionsDisabled}
-                  onPress={() => decide(order, 'approve')}
-                  style={[styles.actionButton, styles.approveButton, (isUpdating || entry.actionsDisabled) && styles.actionDisabled]}
-                >
-                  <Text style={styles.approveButtonText}>{isUpdating ? 'Saving…' : 'Approve'}</Text>
-                </ManagerActionButton>
+                <View style={styles.actionSecondaryGroup}>
+                  <View style={styles.chatActionWrap}><ManagerOrderChatAction order={order} disabled={entry.actionsDisabled} style={styles.managerChatButton} /></View>
+                  <ManagerActionButton disabled={entry.actionsDisabled} onPress={() => onOpenOrder(order)} style={[styles.actionButton, styles.viewDetailsBtn, entry.actionsDisabled && styles.actionDisabled]}>
+                    <Text style={styles.viewDetailsBtnText}>View Details</Text>
+                  </ManagerActionButton>
+                </View>
+                <View style={styles.actionDecisionGroup}>
+                  <ManagerActionButton
+                    disabled={isUpdating || entry.actionsDisabled}
+                    onPress={() => decide(order, 'approve')}
+                    style={[styles.actionButton, styles.approveButton, (isUpdating || entry.actionsDisabled) && styles.actionDisabled]}
+                  >
+                    <Text style={styles.approveButtonText}>{isUpdating ? 'Saving…' : 'Approve'}</Text>
+                  </ManagerActionButton>
 
-                <ManagerActionButton
-                  disabled={isUpdating || entry.actionsDisabled}
-                  onPress={() => decide(order, 'decline')}
-                  style={[styles.actionButton, styles.declineButton, (isUpdating || entry.actionsDisabled) && styles.actionDisabled]}
-                >
-                  <Text style={styles.declineButtonText}>Reject</Text>
-                </ManagerActionButton>
+                  <ManagerActionButton
+                    disabled={isUpdating || entry.actionsDisabled}
+                    onPress={() => decide(order, 'decline')}
+                    style={[styles.actionButton, styles.declineButton, (isUpdating || entry.actionsDisabled) && styles.actionDisabled]}
+                  >
+                    <Text style={styles.declineButtonText}>Reject</Text>
+                  </ManagerActionButton>
+                </View>
               </View>
             </View>
             </AnimatedPresenceItem>
@@ -230,17 +445,28 @@ function OutsideRadiusApprovalQueue({ orders, loading, styles, colors, isDark, o
         })}
         </ScrollView>
       )}
+      <PaginationBar
+        currentPage={currentPage}
+        totalItems={orders.length}
+        pageSize={PAGE_SIZE}
+        onPageChange={setCurrentPage}
+        styles={styles}
+        itemLabel="exceptions"
+      />
+      </>}
     </View>
   );
 }
 
-function EditOrderModal({ visible, order, onClose, onSaveSuccess, colors, styles }) {
+function EditOrderModal({ visible, order, onClose, onDismiss, onSaveSuccess, colors, styles }) {
   const [catalogProducts, setCatalogProducts] = useState([]);
   const [items, setItems] = useState([]);
   const [notes, setNotes] = useState('');
   const [container, setContainer] = useState('');
   const [saving, setSaving] = useState(false);
   const [editError, setEditError] = useState('');
+  const [priceQuote, setPriceQuote] = useState(null);
+  const initializedOrder = useRef(null);
 
   const isEditable = order && EDITABLE_STATUSES.has(order.status);
 
@@ -252,7 +478,12 @@ function EditOrderModal({ visible, order, onClose, onSaveSuccess, colors, styles
   }, []);
 
   useEffect(() => {
-    if (order) {
+    if (!visible || !order) {
+      initializedOrder.current = null;
+      return;
+    }
+    if (initializedOrder.current !== order.id) {
+      initializedOrder.current = order.id;
       setItems(
         (order.items || []).map((it) => {
           const found = catalogProducts.find(
@@ -262,15 +493,16 @@ function EditOrderModal({ visible, order, onClose, onSaveSuccess, colors, styles
             productId: it.productId || it.product_id || it.id || found?.id || '',
             productNameSnapshot: it.productNameSnapshot || it.product_name || 'Product',
             quantity: Number(it.quantity) || 1,
-            unitPrice: Number(it.quantity) > 0 ? (Number(it.totalAtOrder || 0) / Number(it.quantity)) : 0,
+            unitPrice: Number(it.unitPriceAtOrder ?? it.unitPrice ?? 0),
           };
         })
       );
       setNotes(order.notes || order.specialInstructions || '');
       setContainer(order.container || '');
       setEditError('');
+      setPriceQuote(null);
     }
-  }, [order, catalogProducts]);
+  }, [visible, order, catalogProducts]);
 
   const updateQuantity = (index, delta) => {
     setItems((curr) =>
@@ -319,14 +551,20 @@ function EditOrderModal({ visible, order, onClose, onSaveSuccess, colors, styles
     setSaving(true);
     setEditError('');
     try {
-      await dispatchManagerOrder(order.id, 'edit-order', {
+      const payload = {
         items: items.map((it) => ({
           productId: it.productId,
           quantity: it.quantity,
         })),
         notes,
         container,
-      });
+      };
+      const quote = await quoteManagerOrder(order.id, payload);
+      if (quote.requiresConfirmation) {
+        setPriceQuote({ ...quote, payload });
+        return;
+      }
+      await dispatchManagerOrder(order.id, 'edit-order', payload);
       onSaveSuccess?.();
       onClose();
     } catch (err) {
@@ -336,10 +574,26 @@ function EditOrderModal({ visible, order, onClose, onSaveSuccess, colors, styles
     }
   };
 
+  const confirmPriceChange = async () => {
+    if (!order || !priceQuote || saving) return;
+    setSaving(true);
+    setEditError('');
+    try {
+      await dispatchManagerOrder(order.id, 'edit-order', { ...priceQuote.payload, quoteId: priceQuote.quoteId });
+      setPriceQuote(null);
+      onSaveSuccess?.();
+      onClose();
+    } catch (err) {
+      setEditError(err.message || 'Unable to confirm the changes.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   if (!order) return null;
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={() => priceQuote ? setPriceQuote(null) : onClose()} onDismiss={onDismiss}>
       <View style={styles.modalBackdrop}>
         <View accessibilityViewIsModal style={styles.editModalCard}>
           <View style={styles.modalHeaderRow}>
@@ -365,7 +619,6 @@ function EditOrderModal({ visible, order, onClose, onSaveSuccess, colors, styles
                   ['Assigned distributor', order.assignedDistributorName || 'Not assigned'],
                   ['Distributor public ID', order.assignedDistributorUniqueId || order.distributorUniqueId || 'Not available'],
                   ['Container type', order.container || 'Not set'],
-                  ['Total', formatAmount(order.totalAtOrder)],
                   ['Requested branch', order.initialBranchName || order.initialBranchNameSnapshot || order.transferFromBranchName || order.currentBranchName || 'Not available'],
                   ['Current branch', order.currentBranchName || order.branchNameSnapshot || 'Not available'],
                   ['Delivery address', order.address || 'Not available'],
@@ -456,6 +709,11 @@ function EditOrderModal({ visible, order, onClose, onSaveSuccess, colors, styles
             </View>
 
             <View style={styles.modalSection}>
+              <Text style={styles.modalSectionTitle}>Saved Order Pricing</Text>
+              <SavedOrderPricing order={order} colors={colors} />
+            </View>
+
+            <View style={styles.modalSection}>
               <Text style={styles.modalSectionTitle}>Container & Packaging</Text>
               {isEditable ? (
                 <TextInput
@@ -509,12 +767,44 @@ function EditOrderModal({ visible, order, onClose, onSaveSuccess, colors, styles
             ) : null}
           </View>
         </View>
+        {Boolean(priceQuote) && <View style={{ ...StyleSheet.absoluteFillObject, zIndex: 50, elevation: 50, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'center', padding: 18 }}>
+          <View accessibilityViewIsModal style={{ backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1, borderRadius: 16, padding: 18, maxHeight: '90%', width: '100%', maxWidth: 480, alignSelf: 'center' }}>
+            <Text accessibilityRole="header" style={{ color: colors.textPrimary, fontSize: 19, fontWeight: '800', marginBottom: 12 }}>Review Price Changes</Text>
+            <ScrollView style={{ flexGrow: 0, flexShrink: 1 }}>
+              {[['Previous', priceQuote?.before], ['Updated', priceQuote?.after]].map(([label, pricing]) => <View key={label} style={{ marginBottom: 14 }}>
+                <Text style={{ color: colors.textPrimary, fontWeight: '800' }}>{label} total: {pricing?.totalAtOrder == null ? '—' : formatAmount(pricing.totalAtOrder)}</Text>
+                {(pricing?.items || []).map((item, index) => <Text key={`${item.productId || 'item'}-${index}`} style={{ color: colors.textSecondary, marginTop: 4 }}>{item.productNameSnapshot || item.product_name || 'Product'} × {item.quantity} · {item.totalAtOrder == null ? '—' : formatAmount(item.totalAtOrder)}</Text>)}
+                <Text style={{ color: colors.textSecondary, marginTop: 4 }}>Product subtotal: {pricing?.subtotalAtOrder == null ? '—' : formatAmount(pricing.subtotalAtOrder)}</Text>
+                {Boolean(pricing?.pricingSnapshot || Number(pricing?.discountAmount) > 0) && <Text style={{ color: colors.textSecondary }}>Promotional savings: {formatAmount(pricing.discountAmount)}</Text>}
+                <Text style={{ color: colors.textSecondary }}>Delivery fee: {pricing?.deliveryFeeAtOrder == null ? '—' : formatAmount(pricing.deliveryFeeAtOrder)}</Text>
+              </View>)}
+              {!!editError && <Text accessibilityRole="alert" style={{ color: colors.danger, marginBottom: 10 }}>{editError}</Text>}
+            </ScrollView>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
+              <TouchableOpacity accessibilityRole="button" disabled={saving} onPress={() => { setPriceQuote(null); setEditError(''); }} style={[styles.cancelBtn, { flexGrow: 1 }]}><Text style={styles.cancelBtnText}>Keep Editing</Text></TouchableOpacity>
+              <TouchableOpacity accessibilityRole="button" disabled={saving} onPress={confirmPriceChange} style={[styles.saveBtn, { flexGrow: 1 }, saving && styles.actionDisabled]}><Text style={styles.saveBtnText}>{saving ? 'Confirming…' : 'Confirm Changes'}</Text></TouchableOpacity>
+            </View>
+          </View>
+        </View>}
       </View>
     </Modal>
   );
 }
 
-function BranchTransfersQueue({ data, styles, colors, isDark, onShowToast, onOpenOrder }) {
+function BranchTransfersQueue({
+  data,
+  styles,
+  colors,
+  isDark,
+  onShowToast,
+  onOpenOrder,
+  targetOrderId = '',
+  targetHighlighted = false,
+  revealDecisions = false,
+  onSectionLayout,
+  onTargetCardLayout,
+  sectionScrollRef,
+}) {
   const [updatingId, setUpdatingId] = useState('');
   const [decliningOrderId, setDecliningOrderId] = useState('');
   const [declineReason, setDeclineReason] = useState('');
@@ -545,8 +835,14 @@ function BranchTransfersQueue({ data, styles, colors, isDark, onShowToast, onOpe
   const decisions = data.sourceDecisionEvents || [];
   const [showTransferDecisions, setShowTransferDecisions] = useState(false);
 
+  useEffect(() => {
+    if (revealDecisions) {
+      setShowTransferDecisions(true);
+    }
+  }, [revealDecisions, targetOrderId]);
+
   return (
-    <View style={styles.card}>
+    <View style={styles.card} onLayout={(event) => onSectionLayout?.('transfers', event.nativeEvent.layout.y)}>
       <View style={styles.cardHeaderRow}>
         <View style={{ flex: 1, minWidth: 0 }}>
           <Text style={styles.eyebrow}>COORDINATION</Text>
@@ -564,7 +860,7 @@ function BranchTransfersQueue({ data, styles, colors, isDark, onShowToast, onOpe
         </View>
       )}
 
-      <ScrollView nestedScrollEnabled style={styles.sectionScroll} contentContainerStyle={styles.sectionContent}>
+      <ScrollView ref={sectionScrollRef} nestedScrollEnabled style={styles.sectionScroll} contentContainerStyle={styles.sectionContent}>
       {/* Incoming Transfers */}
       <Text style={[styles.subSectionTitle, { marginTop: 10 }]}>Incoming Transfer Requests ({incoming.length})</Text>
       {incoming.length === 0 ? (
@@ -581,27 +877,40 @@ function BranchTransfersQueue({ data, styles, colors, isDark, onShowToast, onOpe
         incoming.map((order) => {
           const isUpdating = updatingId === order.id;
           const isDeclining = decliningOrderId === order.id;
+          const isTargetOrder = Boolean(targetOrderId) && matchesOrderIdentifier(order, targetOrderId);
+          const isTargetHighlighted = Boolean(isTargetOrder && targetHighlighted);
 
           return (
-            <View key={order.id} style={styles.transferItem}>
+            <View
+              key={order.id}
+              onLayout={(event) => {
+                if (isTargetOrder) onTargetCardLayout?.('transfers', event.nativeEvent.layout.y);
+              }}
+              style={[styles.transferItem, isTargetHighlighted && styles.orderItemTargetHighlighted]}
+            >
               <View style={styles.orderHeaderRow}>
                 <View style={styles.orderHeaderMain}>
-                  <Text style={styles.requesterName}>Transfer from {order.transferFromBranchName || 'another branch'}</Text>
-                  <Text style={styles.orderIdText}>#{order.requestId || order.id} · {order.requesterName || 'Requester'}</Text>
+                  <Text numberOfLines={1} ellipsizeMode="tail" style={styles.requesterName}>Transfer from {order.transferFromBranchName || 'another branch'}</Text>
+                  <Text numberOfLines={1} ellipsizeMode="tail" style={styles.orderIdText}>#{order.requestId || order.id} · {order.requesterName || 'Requester'}</Text>
                 </View>
                 <View style={styles.orderHeaderAside}>
+                  {Boolean(isTargetHighlighted) ? (
+                    <View style={styles.targetOrderBadge}>
+                      <Text style={styles.targetOrderBadgeText}>Target Order</Text>
+                    </View>
+                  ) : null}
                   <ManagerPill tone="cyan">{order.status?.replace(/_/g, ' ') || 'Transfer review'}</ManagerPill>
                 </View>
               </View>
 
               <View style={styles.productPricingRow}>
                 <View style={styles.requestProductInfo}>
-                  <Text style={[styles.productsSummary, styles.productsSummaryInline]}>{orderProducts(order)}</Text>
+                  <Text numberOfLines={2} ellipsizeMode="tail" style={[styles.productsSummary, styles.productsSummaryInline]}>{orderProducts(order)}</Text>
                   <View style={styles.requestDeliveryInfo}>
-                    {Boolean(order.address) ? <Text style={styles.detailLine}>Delivery: {order.address}</Text> : null}
-                    <Text style={styles.detailLine}>Distance: {orderDistance(order)}</Text>
-                    {Boolean(order.transferToBranchName) ? <Text style={styles.detailLine}>Destination: {order.transferToBranchName}</Text> : null}
-                    <Text style={styles.detailLine}>Transfer note: {order.transferReason || 'No note provided'}</Text>
+                    {Boolean(order.address) ? <Text numberOfLines={2} ellipsizeMode="tail" style={styles.detailLine}>Delivery: {order.address}</Text> : null}
+                    <Text numberOfLines={1} ellipsizeMode="tail" style={styles.detailLine}>Distance: {orderDistance(order)}</Text>
+                    {Boolean(order.transferToBranchName) ? <Text numberOfLines={1} ellipsizeMode="tail" style={styles.detailLine}>Destination: {order.transferToBranchName}</Text> : null}
+                    <Text numberOfLines={2} ellipsizeMode="tail" style={styles.detailLine}>Transfer note: {order.transferReason || 'No note provided'}</Text>
                   </View>
                 </View>
                 <View style={styles.orderTotalSummary}>
@@ -612,24 +921,28 @@ function BranchTransfersQueue({ data, styles, colors, isDark, onShowToast, onOpe
               </View>
 
               <View style={[styles.actionRow, styles.requestActionRow]}>
-                <ManagerActionButton onPress={() => onOpenOrder(order)} style={[styles.actionButton, styles.viewDetailsBtn]}>
-                  <Text style={styles.viewDetailsBtnText}>View Details</Text>
-                </ManagerActionButton>
-                <ManagerActionButton
-                  disabled={isUpdating}
-                  onPress={() => act(order.id, 'accept-transfer')}
-                  style={[styles.actionButton, styles.approveButton, isUpdating && styles.actionDisabled]}
-                >
-                  <Text style={styles.approveButtonText}>{isUpdating ? 'Saving…' : 'Accept Transfer'}</Text>
-                </ManagerActionButton>
+                <View style={styles.actionSecondaryGroup}>
+                  <ManagerActionButton onPress={() => onOpenOrder(order)} style={[styles.actionButton, styles.viewDetailsBtn]}>
+                    <Text style={styles.viewDetailsBtnText}>View Details</Text>
+                  </ManagerActionButton>
+                </View>
+                <View style={styles.actionDecisionGroup}>
+                  <ManagerActionButton
+                    disabled={isUpdating}
+                    onPress={() => act(order.id, 'accept-transfer')}
+                    style={[styles.actionButton, styles.approveButton, isUpdating && styles.actionDisabled]}
+                  >
+                    <Text style={styles.approveButtonText}>{isUpdating ? 'Saving…' : 'Accept Transfer'}</Text>
+                  </ManagerActionButton>
 
-                <ManagerActionButton
-                  disabled={isUpdating}
-                  onPress={() => setDecliningOrderId(isDeclining ? '' : order.id)}
-                  style={[styles.actionButton, styles.declineButton]}
-                >
-                  <Text style={styles.declineButtonText}>Decline</Text>
-                </ManagerActionButton>
+                  <ManagerActionButton
+                    disabled={isUpdating}
+                    onPress={() => setDecliningOrderId(isDeclining ? '' : order.id)}
+                    style={[styles.actionButton, styles.declineButton]}
+                  >
+                    <Text style={styles.declineButtonText}>Decline</Text>
+                  </ManagerActionButton>
+                </View>
               </View>
 
               {Boolean(isDeclining) ? (
@@ -685,23 +998,36 @@ function BranchTransfersQueue({ data, styles, colors, isDark, onShowToast, onOpe
       ) : showTransferDecisions ? (
         decisions.map((event) => {
           const accepted = event.decision === 'accepted';
+          const isTargetDecision = Boolean(targetOrderId) && matchesOrderIdentifier(event, targetOrderId);
+          const isTargetHighlighted = Boolean(isTargetDecision && targetHighlighted);
           return (
-            <View key={event.id} style={styles.decisionItem}>
+            <View
+              key={event.id}
+              onLayout={(layoutEvent) => {
+                if (isTargetDecision) onTargetCardLayout?.('transfers', layoutEvent.nativeEvent.layout.y);
+              }}
+              style={[styles.decisionItem, isTargetHighlighted && styles.orderItemTargetHighlighted]}
+            >
               <View style={styles.orderHeaderRow}>
                 <View style={styles.orderHeaderMain}>
-                  <Text style={styles.requesterName}>Transfer outcome · {event.targetBranchName || 'Target branch'}</Text>
-                  <Text style={styles.orderIdText}>Order #{event.requestId || 'order'}</Text>
+                  <Text numberOfLines={1} ellipsizeMode="tail" style={styles.requesterName}>Transfer outcome · {event.targetBranchName || 'Target branch'}</Text>
+                  <Text numberOfLines={1} ellipsizeMode="tail" style={styles.orderIdText}>Order #{event.requestId || 'order'}</Text>
                 </View>
                 <View style={styles.orderHeaderAside}>
+                  {Boolean(isTargetHighlighted) ? (
+                    <View style={styles.targetOrderBadge}>
+                      <Text style={styles.targetOrderBadgeText}>Target Order</Text>
+                    </View>
+                  ) : null}
                   <ManagerPill tone={accepted ? 'green' : 'red'}>{accepted ? 'Accepted' : 'Declined'}</ManagerPill>
                 </View>
               </View>
-              <Text style={styles.decisionText}>
+              <Text numberOfLines={2} ellipsizeMode="tail" style={styles.decisionText}>
                 {event.targetBranchName || 'Target branch'} {accepted ? 'accepted' : 'declined'} the transfer.
               </Text>
-              {Boolean(scheduleLabel(event.decidedAt)) ? <Text style={styles.detailLine}>{scheduleLabel(event.decidedAt)}</Text> : null}
+              {Boolean(scheduleLabel(event.decidedAt)) ? <Text numberOfLines={1} ellipsizeMode="tail" style={styles.detailLine}>{scheduleLabel(event.decidedAt)}</Text> : null}
               {!accepted && event.declineReason ? (
-                <Text style={styles.declineReasonText}>Reason: {event.declineReason}</Text>
+                <Text numberOfLines={2} ellipsizeMode="tail" style={styles.declineReasonText}>Reason: {event.declineReason}</Text>
               ) : null}
             </View>
           );
@@ -712,12 +1038,53 @@ function BranchTransfersQueue({ data, styles, colors, isDark, onShowToast, onOpe
   );
 }
 
-function ReceivedRequestsQueue({ orders, loading, styles, colors, isDark, onShowToast, onOpenOrder }) {
+function ReceivedRequestsQueue({
+  orders,
+  loading,
+  styles,
+  colors,
+  isDark,
+  onShowToast,
+  onOpenOrder,
+  targetOrderId = '',
+  targetHighlighted = false,
+  onSectionLayout,
+  onTargetCardLayout,
+  sectionScrollRef,
+  style,
+}) {
   const [updatingId, setUpdatingId] = useState('');
   const [rejectingId, setRejectingId] = useState('');
   const [reason, setReason] = useState('');
   const [error, setError] = useState('');
-  const presentedOrders = useAnimatedPresenceList(orders, (order) => order.id);
+  const PAGE_SIZE = 3;
+  const [currentPage, setCurrentPage] = useState(1);
+  const totalPages = Math.max(1, Math.ceil(orders.length / PAGE_SIZE));
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [orders.length, totalPages, currentPage]);
+
+  useEffect(() => {
+    if (targetOrderId) {
+      const targetIdx = orders.findIndex((order) => matchesOrderIdentifier(order, targetOrderId));
+      if (targetIdx !== -1) {
+        const targetPage = Math.floor(targetIdx / PAGE_SIZE) + 1;
+        if (targetPage !== currentPage) {
+          setCurrentPage(targetPage);
+        }
+      }
+    }
+  }, [targetOrderId, orders]);
+
+  const pagedOrders = useMemo(() => {
+    const start = (currentPage - 1) * PAGE_SIZE;
+    return orders.slice(start, start + PAGE_SIZE);
+  }, [orders, currentPage]);
+
+  const presentedOrders = useAnimatedPresenceList(pagedOrders, (order) => order.id);
 
   const decide = async (order, action) => {
     if (updatingId) return;
@@ -741,9 +1108,9 @@ function ReceivedRequestsQueue({ orders, loading, styles, colors, isDark, onShow
   };
 
   return (
-    <View style={styles.card}>
+    <View style={[styles.card, style]} onLayout={(event) => onSectionLayout?.('review', event.nativeEvent.layout.y)}>
       <View style={styles.cardHeaderRow}>
-        <View style={{ flex: 1 }}>
+        <View style={{ flex: 1, minWidth: 0 }}>
           <Text style={styles.eyebrow}>UPCOMING / NORMAL ORDERS</Text>
           <Text style={styles.cardTitle}>Upcoming & Active Branch Orders ({orders.length})</Text>
           <Text style={styles.helperText}>Accept a branch order for dispatch or reject it with a reason.</Text>
@@ -762,25 +1129,53 @@ function ReceivedRequestsQueue({ orders, loading, styles, colors, isDark, onShow
           style={styles.visualEmpty}
         />
       ) : (
-        <ScrollView nestedScrollEnabled style={styles.sectionScroll} contentContainerStyle={styles.sectionContent}>
+        <ScrollView ref={sectionScrollRef} nestedScrollEnabled style={styles.sectionScroll} contentContainerStyle={styles.sectionContent}>
           {presentedOrders.map((entry) => {
             const order = entry.item;
-            return <AnimatedPresenceItem key={entry.id} phase={entry.phase}><View style={styles.orderItem}>
+            const isTargetOrder = Boolean(targetOrderId) && matchesOrderIdentifier(order, targetOrderId);
+            const isTargetHighlighted = Boolean(isTargetOrder && targetHighlighted);
+            return <AnimatedPresenceItem key={entry.id} phase={entry.phase}><View
+              onLayout={(event) => {
+                if (isTargetOrder) onTargetCardLayout?.('review', event.nativeEvent.layout.y);
+              }}
+              style={[styles.orderItem, isTargetHighlighted && styles.orderItemTargetHighlighted]}
+            >
             <View style={styles.orderHeaderRow}>
               <View style={{ flex: 1, minWidth: 0 }}>
-                <Text style={styles.requesterName}>{order.requesterName || 'Requester'}</Text>
-                <Text style={styles.orderIdText}>#{order.requestId || order.id}</Text>
+                <Text numberOfLines={1} ellipsizeMode="tail" style={styles.requesterName}>{order.requesterName || 'Requester'}</Text>
+                <Text numberOfLines={1} ellipsizeMode="tail" style={styles.orderIdText}>#{order.requestId || order.id}</Text>
               </View>
               <View style={styles.orderHeaderAside}>
-                <ManagerPill tone="blue">Pending review</ManagerPill>
+                {Boolean(isTargetHighlighted) ? (
+                  <View style={styles.targetOrderBadge}>
+                    <Text style={styles.targetOrderBadgeText}>Target Order</Text>
+                  </View>
+                ) : null}
+                <SoftStatusBadge status={order.orderStatusSnapshot || order.status || 'pending'} />
               </View>
             </View>
             <View style={styles.productPricingRow}>
               <View style={styles.requestProductInfo}>
-                <Text style={[styles.productsSummary, styles.productsSummaryInline]}>{orderProducts(order)}</Text>
+                <Text numberOfLines={2} ellipsizeMode="tail" style={[styles.productsSummary, styles.productsSummaryInline]}>{orderProducts(order)}</Text>
+                {(() => {
+                  const cargo = analyzeOrderCargo(order);
+                  const badgeStyles = getCargoBadgeStyles(styles, cargo.badgeTone);
+                  return (
+                    <View style={styles.containerBadgeRow}>
+                      <View style={[styles.containerBadge, badgeStyles.container]}>
+                        <Text style={[styles.containerBadgeText, badgeStyles.text]}>{cargo.badgeLabel}</Text>
+                      </View>
+                      {Boolean(order.tripNumber || order.tripId) ? (
+                        <View style={styles.tripBadge}>
+                          <Text style={styles.tripBadgeText}>Trip #{order.tripNumber || 1}</Text>
+                        </View>
+                      ) : null}
+                    </View>
+                  );
+                })()}
                 <View style={styles.requestDeliveryInfo}>
-                  <Text style={styles.detailLine}>Delivery: {order.address || 'Address provided'}</Text>
-                  {order.distanceKmSnapshot != null ? <Text style={styles.detailLine}>Distance: {orderDistance(order)}</Text> : null}
+                  <Text numberOfLines={2} ellipsizeMode="tail" style={styles.detailLine}>Delivery: {order.address || 'Address provided'}</Text>
+                  {order.distanceKmSnapshot != null ? <Text numberOfLines={1} ellipsizeMode="tail" style={styles.detailLine}>Distance: {orderDistance(order)}</Text> : null}
                 </View>
               </View>
               <View style={styles.orderTotalSummary}>
@@ -792,18 +1187,22 @@ function ReceivedRequestsQueue({ orders, loading, styles, colors, isDark, onShow
               </View>
             </View>
             <View style={[styles.actionRow, styles.requestActionRow]}>
-              <View style={styles.chatActionWrap}>
-                <ManagerOrderChatAction order={order} disabled={entry.actionsDisabled} style={styles.managerChatButton} />
-              </View>
+              <View style={styles.actionSecondaryGroup}>
+                <View style={styles.chatActionWrap}>
+                  <ManagerOrderChatAction order={order} disabled={entry.actionsDisabled} style={styles.managerChatButton} />
+                </View>
                 <ManagerActionButton disabled={entry.actionsDisabled} onPress={() => onOpenOrder(order)} style={[styles.actionButton, styles.viewDetailsBtn, entry.actionsDisabled && styles.actionDisabled]}>
-                <Text style={styles.viewDetailsBtnText}>View Details</Text>
+                  <Text style={styles.viewDetailsBtnText}>View Details</Text>
                 </ManagerActionButton>
+              </View>
+              <View style={styles.actionDecisionGroup}>
                 <ManagerActionButton disabled={!!updatingId || entry.actionsDisabled} onPress={() => decide(order, 'accept-order')} style={[styles.actionButton, styles.approveButton, (!!updatingId || entry.actionsDisabled) && styles.actionDisabled]}>
-                <Text style={styles.approveButtonText}>{updatingId === order.id ? 'Saving…' : 'Accept'}</Text>
+                  <Text style={styles.approveButtonText}>{updatingId === order.id ? 'Saving…' : 'Accept'}</Text>
                 </ManagerActionButton>
                 <ManagerActionButton disabled={!!updatingId || entry.actionsDisabled} onPress={() => { setRejectingId(rejectingId === order.id ? '' : order.id); setReason(''); setError(''); }} style={[styles.actionButton, styles.declineButton, entry.actionsDisabled && styles.actionDisabled]}>
-                <Text style={styles.declineButtonText}>Reject</Text>
+                  <Text style={styles.declineButtonText}>Reject</Text>
                 </ManagerActionButton>
+              </View>
             </View>
             {Boolean(rejectingId === entry.id && !entry.actionsDisabled) ? (
               <View style={styles.declineBox}>
@@ -817,6 +1216,14 @@ function ReceivedRequestsQueue({ orders, loading, styles, colors, isDark, onShow
           })}
         </ScrollView>
       )}
+      <PaginationBar
+        currentPage={currentPage}
+        totalItems={orders.length}
+        pageSize={PAGE_SIZE}
+        onPageChange={setCurrentPage}
+        styles={styles}
+        itemLabel="normal orders"
+      />
     </View>
   );
 }
@@ -829,21 +1236,49 @@ const normalizeOrdersTab = (value) => {
   return 'all';
 };
 
-function BranchOrdersOverview({ data, loading, styles, colors, isDark, onOpenOrder, initialFilter = '', viewAllTick = 0 }) {
+function BranchOrdersOverview({
+  data,
+  loading,
+  styles,
+  colors,
+  isDark,
+  onOpenOrder,
+  initialFilter = '',
+  viewAllTick = 0,
+  targetOrderId = '',
+  targetOrdersTab = null,
+  targetHighlighted = false,
+  onSectionLayout,
+  onTargetCardLayout,
+  sectionScrollRef,
+  style,
+}) {
   const [filter, setFilter] = useState('');
   const [statusTab, setStatusTab] = useState(() => normalizeOrdersTab(initialFilter));
+  const PAGE_SIZE = 5;
+  const [currentPage, setCurrentPage] = useState(1);
 
   useEffect(() => {
     if (initialFilter) {
       setStatusTab(normalizeOrdersTab(initialFilter));
+      setCurrentPage(1);
     }
   }, [initialFilter]);
 
   useEffect(() => {
     if (viewAllTick > 0) {
       setStatusTab('ongoing');
+      setCurrentPage(1);
     }
   }, [viewAllTick]);
+
+  useEffect(() => {
+    if (targetOrdersTab) {
+      setStatusTab(normalizeOrdersTab(targetOrdersTab));
+      setFilter('');
+      setCurrentPage(1);
+    }
+  }, [targetOrdersTab, targetOrderId]);
 
   const activeMergedOrders = useMemo(() => {
     const map = new Map();
@@ -886,7 +1321,33 @@ function BranchOrdersOverview({ data, loading, styles, colors, isDark, onOpenOrd
         (o.assignedDistributorUniqueId && o.assignedDistributorUniqueId.toLowerCase().includes(term))
     );
   }, [activeMergedOrders, data.completed, data.ongoing, data.pendingOrders, filter, statusTab]);
-  const presentedOrders = useAnimatedPresenceList(orders, (order) => order.id);
+
+  const totalPages = Math.max(1, Math.ceil(orders.length / PAGE_SIZE));
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [orders.length, totalPages, currentPage]);
+
+  useEffect(() => {
+    if (targetOrderId) {
+      const targetIdx = orders.findIndex((order) => matchesOrderIdentifier(order, targetOrderId));
+      if (targetIdx !== -1) {
+        const targetPage = Math.floor(targetIdx / PAGE_SIZE) + 1;
+        if (targetPage !== currentPage) {
+          setCurrentPage(targetPage);
+        }
+      }
+    }
+  }, [targetOrderId, orders]);
+
+  const pagedOrders = useMemo(() => {
+    const start = (currentPage - 1) * PAGE_SIZE;
+    return orders.slice(start, start + PAGE_SIZE);
+  }, [orders, currentPage]);
+
+  const presentedOrders = useAnimatedPresenceList(pagedOrders, (order) => order.id);
 
   const statusTabs = [
     { key: 'all', label: `All Active (${tabCounts.all})` },
@@ -914,7 +1375,7 @@ function BranchOrdersOverview({ data, loading, styles, colors, isDark, onOpenOrd
       : 'Orders eligible for review or adjustment will appear here.';
 
   return (
-    <View style={styles.card}>
+    <View style={[styles.card, style]} onLayout={(event) => onSectionLayout?.('branchOrders', event.nativeEvent.layout.y)}>
       <View style={styles.cardHeaderRow}>
         <View style={{ flex: 1, minWidth: 0 }}>
           <Text style={styles.eyebrow}>BRANCH MANAGEMENT</Text>
@@ -923,7 +1384,7 @@ function BranchOrdersOverview({ data, loading, styles, colors, isDark, onOpenOrd
             Review active branch orders, monitor ongoing deliveries, and make eligible pre-delivery adjustments.
           </Text>
         </View>
-        <ManagerPill>
+        <ManagerPill tone={statusTab === 'pending' ? 'warning' : statusTab === 'completed' ? 'success' : 'info'}>
           {statusTab === 'ongoing'
             ? `${orders.length} ongoing`
             : statusTab === 'pending'
@@ -934,50 +1395,58 @@ function BranchOrdersOverview({ data, loading, styles, colors, isDark, onOpenOrd
         </ManagerPill>
       </View>
 
-      <View style={styles.pillGroup} accessibilityRole="tablist">
-        {statusTabs.map((tab) => {
-          const selected = statusTab === tab.key;
-          return (
-            <TouchableOpacity
-              key={tab.key}
-              accessibilityRole="tab"
-              accessibilityState={{ selected }}
-              accessibilitySelected={selected}
-              aria-selected={selected}
-              accessibilityLabel={`Filter branch orders by ${tab.key}`}
-              onPress={() => setStatusTab(tab.key)}
-              style={[
-                styles.schedulePill,
-                selected && {
-                  backgroundColor: colors.primaryAction,
-                  borderColor: colors.primary,
-                },
-              ]}
-            >
-              <Text
+      <View style={styles.branchOrdersToolbar}>
+        <View style={styles.branchOrdersPillGroup} accessibilityRole="tablist">
+          {statusTabs.map((tab) => {
+            const selected = statusTab === tab.key;
+            return (
+              <TouchableOpacity
+                key={tab.key}
+                accessibilityRole="tab"
+                accessibilityState={{ selected }}
+                accessibilitySelected={selected}
+                aria-selected={selected}
+                accessibilityLabel={`Filter branch orders by ${tab.key}`}
+                onPress={() => {
+                  setStatusTab(tab.key);
+                  setCurrentPage(1);
+                }}
                 style={[
-                  styles.schedulePillText,
+                  styles.schedulePill,
                   selected && {
-                    color: '#FFFFFF',
-                    fontWeight: '800',
+                    backgroundColor: colors.primaryAction,
+                    borderColor: colors.primary,
                   },
                 ]}
               >
-                {tab.label}
-              </Text>
-            </TouchableOpacity>
-          );
-        })}
-      </View>
+                <Text
+                  style={[
+                    styles.schedulePillText,
+                    selected && {
+                      color: '#FFFFFF',
+                      fontWeight: '800',
+                    },
+                  ]}
+                >
+                  {tab.label}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
 
-      <View style={styles.searchBarWrap}>
-        <TextInput
-          value={filter}
-          onChangeText={setFilter}
-          placeholder="Filter orders by requester, ID, distributor, address..."
-          placeholderTextColor={colors.placeholder}
-          style={styles.searchInput}
-        />
+        <View style={styles.branchOrdersSearchWrap}>
+          <TextInput
+            value={filter}
+            onChangeText={(text) => {
+              setFilter(text);
+              setCurrentPage(1);
+            }}
+            placeholder="Filter orders by requester, ID, distributor, address..."
+            placeholderTextColor={colors.placeholder}
+            style={styles.searchInput}
+          />
+        </View>
       </View>
 
       {loading ? <View style={styles.emptyContainer}><ActivityIndicator color={colors.primary} /></View> : presentedOrders.length === 0 ? (
@@ -991,41 +1460,53 @@ function BranchOrdersOverview({ data, loading, styles, colors, isDark, onOpenOrd
           style={styles.visualEmpty}
         />
       ) : (
-        <ScrollView nestedScrollEnabled style={styles.sectionScroll} contentContainerStyle={styles.sectionContent}>
+        <ScrollView ref={sectionScrollRef} nestedScrollEnabled style={styles.sectionScroll} contentContainerStyle={styles.sectionContent}>
         {presentedOrders.map((entry) => {
           const order = entry.item;
           const isEditable = EDITABLE_STATUSES.has(order.status);
+          const isTargetOrder = Boolean(targetOrderId) && matchesOrderIdentifier(order, targetOrderId);
+          const isTargetHighlighted = Boolean(isTargetOrder && targetHighlighted);
           const scheduleSummary = order.scheduledDate
             ? `${order.scheduledDate}${order.scheduledWindow ? ` · ${order.scheduledWindow}` : ''}`
             : scheduleLabel(order.scheduledAt);
           return (
             <AnimatedPresenceItem key={entry.id} phase={entry.phase}>
-            <View style={styles.orderItem}>
+            <View
+              onLayout={(event) => {
+                if (isTargetOrder) onTargetCardLayout?.('branchOrders', event.nativeEvent.layout.y);
+              }}
+              style={[styles.orderItem, isTargetHighlighted && styles.orderItemTargetHighlighted]}
+            >
               <View style={styles.orderHeaderRow}>
                 <View style={{ flex: 1, minWidth: 0 }}>
-                  <Text style={styles.requesterName}>{order.requesterName || 'Requester'}</Text>
-                  <Text style={styles.orderIdText}>#{order.requestId || order.id}</Text>
+                  <Text numberOfLines={1} ellipsizeMode="tail" style={styles.requesterName}>{order.requesterName || 'Requester'}</Text>
+                  <Text numberOfLines={1} ellipsizeMode="tail" style={styles.orderIdText}>#{order.requestId || order.id}</Text>
                 </View>
                 <View style={styles.orderHeaderAside}>
-                  <ManagerPill tone={isEditable ? 'blue' : 'green'}>{order.status?.replace(/_/g, ' ')}</ManagerPill>
+                  {Boolean(isTargetHighlighted) ? (
+                    <View style={styles.targetOrderBadge}>
+                      <Text style={styles.targetOrderBadgeText}>Target Order</Text>
+                    </View>
+                  ) : null}
+                  <SoftStatusBadge status={order.status} dark={isDark} compact />
                 </View>
               </View>
 
               <View style={styles.productPricingRow}>
                 <View style={styles.requestProductInfo}>
-                  <Text style={[styles.productsSummary, styles.productsSummaryInline]}>{orderProducts(order)}</Text>
+                  <Text numberOfLines={2} ellipsizeMode="tail" style={[styles.productsSummary, styles.productsSummaryInline]}>{orderProducts(order)}</Text>
                   <View style={styles.requestDeliveryInfo}>
                     {Boolean(order.assignedDistributorName || order.assignedDistributorUid) ? (
-                      <Text style={styles.detailLine}>
+                      <Text numberOfLines={1} ellipsizeMode="tail" style={styles.detailLine}>
                         Distributor: {order.assignedDistributorName || 'Assigned Distributor'}
                         {order.assignedDistributorUniqueId ? ` (${order.assignedDistributorUniqueId})` : ''}
                       </Text>
                     ) : null}
                     {Boolean(scheduleSummary) ? (
-                      <Text style={styles.detailLine}>Schedule: {scheduleSummary}</Text>
+                      <Text numberOfLines={1} ellipsizeMode="tail" style={styles.detailLine}>Schedule: {scheduleSummary}</Text>
                     ) : null}
-                    <Text style={styles.detailLine}>Delivery: {order.address || 'Address provided'}</Text>
-                    {order.distanceKmSnapshot != null ? <Text style={styles.detailLine}>Distance: {orderDistance(order)}</Text> : null}
+                    <Text numberOfLines={2} ellipsizeMode="tail" style={styles.detailLine}>Delivery: {order.address || 'Address provided'}</Text>
+                    {order.distanceKmSnapshot != null ? <Text numberOfLines={1} ellipsizeMode="tail" style={styles.detailLine}>Distance: {orderDistance(order)}</Text> : null}
                   </View>
                 </View>
                 <View style={styles.orderTotalSummary}>
@@ -1036,12 +1517,26 @@ function BranchOrdersOverview({ data, loading, styles, colors, isDark, onOpenOrd
                   ) : null}
                 </View>
               </View>
-              <View style={[styles.actionRow, styles.requestActionRow]}>
-                <ManagerActionButton disabled={entry.actionsDisabled} onPress={() => onOpenOrder(order)} style={[styles.actionButton, styles.editOrderBtn, entry.actionsDisabled && styles.actionDisabled]}>
-                  <Text style={styles.editOrderBtnText}>
-                    {isEditable ? 'Edit Order Details' : 'View Order Details'}
-                  </Text>
-                </ManagerActionButton>
+              <View style={[styles.actionRow, styles.requestActionRow, styles.overviewActionRow]}>
+                <View style={styles.overviewActionGroup}>
+                  <View style={styles.chatActionWrap}>
+                    <ManagerOrderChatAction order={order} disabled={entry.actionsDisabled} style={styles.managerChatButton} />
+                  </View>
+                  <ManagerActionButton
+                    disabled={entry.actionsDisabled}
+                    onPress={() => onOpenOrder(order)}
+                    style={[
+                      styles.actionButton,
+                      styles.overviewActionButton,
+                      isEditable ? styles.editOrderBtn : styles.viewDetailsBtn,
+                      entry.actionsDisabled && styles.actionDisabled,
+                    ]}
+                  >
+                    <Text style={isEditable ? styles.editOrderBtnText : styles.viewDetailsBtnText}>
+                      {isEditable ? 'Edit Order Details' : 'View Order Details'}
+                    </Text>
+                  </ManagerActionButton>
+                </View>
               </View>
             </View>
             </AnimatedPresenceItem>
@@ -1049,6 +1544,14 @@ function BranchOrdersOverview({ data, loading, styles, colors, isDark, onOpenOrd
         })}
         </ScrollView>
       )}
+      <PaginationBar
+        currentPage={currentPage}
+        totalItems={orders.length}
+        pageSize={PAGE_SIZE}
+        onPageChange={setCurrentPage}
+        styles={styles}
+        itemLabel="branch orders"
+      />
     </View>
   );
 }
@@ -1056,19 +1559,46 @@ function BranchOrdersOverview({ data, loading, styles, colors, isDark, onOpenOrd
 export default function ManagerRequestPage() {
   const params = useLocalSearchParams();
   const requestedFilter = Array.isArray(params.filter) ? params.filter[0] : params.filter;
+  const requestedOrderId = Array.isArray(params.orderId) ? params.orderId[0] : params.orderId;
   const { colors, resolvedTheme } = useAdminTheme();
+  const isDark = resolvedTheme === 'dark';
   const { width } = useWindowDimensions();
-  const styles = createStyles(colors, width);
+  const isTwoColumn = width >= 1100;
+  const styles = useMemo(
+    () => createStyles(colors, width, isDark, isTwoColumn),
+    [colors, width, isDark, isTwoColumn]
+  );
   const [toast, setToast] = useState({ visible: false, message: '', type: 'success' });
   const [selectedOrderSnapshot, setSelectedOrder] = useState(null);
-  const [notificationTargetSnapshot, setNotificationTarget] = useState(null);
+  const [activeTargetId, setActiveTargetId] = useState('');
   const [targetHighlighted, setTargetHighlighted] = useState(false);
+  const [dismissedUnavailableRef, setDismissedUnavailableRef] = useState('');
   const [modalVisible, setModalVisible] = useState(false);
   const openedParamRef = useRef('');
+  const scrolledTargetRef = useRef('');
   const contentScrollRef = useRef(null);
+  const sectionOffsetsRef = useRef({});
+  const rowOffsetsRef = useRef({});
+  const localSectionOffsetsRef = useRef({});
+  const sectionScrollRefs = useRef({});
+  const itemOffsetsRef = useRef({});
   const targetHighlightTimerRef = useRef(null);
   const { viewAllTick = 0 } = useManagerOngoingRequests();
   const realtime = useManagerRealtimeData();
+  const reviewScope = realtime.managerUid && realtime.branchId ? `${realtime.managerUid}:${realtime.branchId}` : '';
+  const reviewFlow = useMemo(() => {
+    const uid = realtime.managerUid;
+    const flow = createManagerDeliveryReviewFlow({
+      list: (cursor) => fetchManagerDeliveryReviews(cursor, uid),
+      detail: (attemptId) => fetchManagerDeliveryReview(attemptId, uid),
+      decide: (payload) => submitManagerDeliveryDecision(payload, uid),
+    }, createMutationId);
+    flow.setScope(reviewScope);
+    return flow;
+  }, [reviewScope]);
+  const reviewState = useSyncExternalStore(reviewFlow.subscribe, reviewFlow.getState, reviewFlow.getState);
+  const pendingReviewRef = useRef(null);
+  useEffect(() => { pendingReviewRef.current = null; }, [reviewScope]);
   const dispatchData = useMemo(() => {
     const queues = getManagerQueues(realtime.requests, realtime.incomingTransfers, realtime.branchId);
     const branchLocation = Number.isFinite(Number(realtime.branch?.latitude)) && Number.isFinite(Number(realtime.branch?.longitude))
@@ -1097,15 +1627,37 @@ export default function ManagerRequestPage() {
       ? { latitude: Number(realtime.branch.latitude), longitude: Number(realtime.branch.longitude) }
       : null;
     return live ? { ...toManagerOrder(live.id, live, realtime.branch?.name || '', realtime.users), branchLocation } : selectedOrderSnapshot;
-  }, [realtime.branch?. latitude, realtime.branch?.longitude, realtime.branch?.name, realtime.requests, realtime.users, selectedOrderSnapshot]);
-  const notificationTarget = useMemo(() => {
-    if (!notificationTargetSnapshot) return null;
-    const live = [...realtime.requests, ...realtime.incomingTransfers].find((order) => String(order.id || order.requestId) === String(notificationTargetSnapshot.id || notificationTargetSnapshot.requestId));
-    const branchLocation = Number.isFinite(Number(realtime.branch?.latitude)) && Number.isFinite(Number(realtime.branch?.longitude))
-      ? { latitude: Number(realtime.branch.latitude), longitude: Number(realtime.branch.longitude) }
-      : null;
-    return live ? { ...toManagerOrder(live.id, live, realtime.branch?.name || '', realtime.users), branchLocation } : notificationTargetSnapshot;
-  }, [notificationTargetSnapshot, realtime.branch?.latitude, realtime.branch?.longitude, realtime.branch?.name, realtime.incomingTransfers, realtime.requests, realtime.users]);
+  }, [realtime.branch?.latitude, realtime.branch?.longitude, realtime.branch?.name, realtime.requests, realtime.users, selectedOrderSnapshot]);
+
+  const authorizedSource = useMemo(
+    () =>
+      [...realtime.requests, ...realtime.incomingTransfers].find((order) => {
+        const matchesId = matchesOrderIdentifier(order, requestedOrderId);
+        const branchId = String(order.currentBranchId || order.branchId || '');
+        const incomingBranchId = String(order.transferToBranchId || '');
+        return matchesId && (branchId === String(realtime.branchId) || incomingBranchId === String(realtime.branchId));
+      }) || null,
+    [realtime.branchId, realtime.incomingTransfers, realtime.requests, requestedOrderId]
+  );
+
+  const targetResolution = useMemo(
+    () =>
+      resolveManagerOrderTarget(requestedOrderId, {
+        requests: realtime.requests,
+        incomingTransfers: realtime.incomingTransfers,
+        sourceDecisionEvents: realtime.sourceDecisionEvents,
+        branchId: realtime.branchId,
+        loading: realtime.loading,
+      }),
+    [
+      requestedOrderId,
+      realtime.branchId,
+      realtime.incomingTransfers,
+      realtime.loading,
+      realtime.requests,
+      realtime.sourceDecisionEvents,
+    ]
+  );
 
   const showToast = (message, type = 'success') => {
     setToast({ visible: true, message, type });
@@ -1117,32 +1669,135 @@ export default function ManagerRequestPage() {
     setModalVisible(true);
   };
 
+  const finishReviewHandoff = () => {
+    if (modalVisible || !pendingReviewRef.current) return;
+    const target = pendingReviewRef.current;
+    pendingReviewRef.current = null;
+    setSelectedOrder(null);
+    if (target.scope !== reviewScope) return;
+    void reviewFlow.open(target.attemptId, target.orderId);
+  };
+
+  const handleOpenReview = (review) => {
+    if (modalVisible) {
+      pendingReviewRef.current = { ...review, scope: reviewScope };
+      setModalVisible(false);
+      return;
+    }
+    void reviewFlow.open(review.attemptId, review.orderId);
+  };
+
+  useEffect(() => {
+    // Web and Android can hand off after the hidden-modal render; iOS waits for onDismiss.
+    if (Platform.OS !== 'ios' && !modalVisible && pendingReviewRef.current) finishReviewHandoff();
+  }, [modalVisible]);
+
+  const attemptScrollToTarget = useCallback(() => {
+    if (!targetResolution.canonicalOrderId || !targetResolution.section) return;
+    const scrollKey = `${targetResolution.targetRef}:${targetResolution.section}:${targetResolution.ordersTab || ''}`;
+    if (scrolledTargetRef.current === scrollKey) return;
+    const sectionY = sectionOffsetsRef.current[targetResolution.section];
+    const itemEntry = itemOffsetsRef.current[targetResolution.canonicalOrderId];
+    if (typeof sectionY === 'number') {
+      const targetY = typeof itemEntry?.y === 'number' ? Math.max(0, sectionY + itemEntry.y - 16) : Math.max(0, sectionY - 12);
+      contentScrollRef.current?.scrollTo?.({ y: targetY, animated: true });
+    }
+    if (itemEntry && typeof itemEntry.y === 'number') {
+      const innerScroll = sectionScrollRefs.current[targetResolution.section];
+      innerScroll?.scrollTo?.({ y: Math.max(0, itemEntry.y - 8), animated: true });
+      if (typeof sectionY === 'number') {
+        scrolledTargetRef.current = scrollKey;
+      }
+    }
+  }, [targetResolution.canonicalOrderId, targetResolution.ordersTab, targetResolution.section, targetResolution.targetRef]);
+
+  const handleRowLayout = useCallback(
+    (rowKey, y) => {
+      rowOffsetsRef.current[rowKey] = y;
+      ['review', 'exceptions'].forEach((sec) => {
+        if (typeof localSectionOffsetsRef.current[sec] === 'number') {
+          sectionOffsetsRef.current[sec] = y + localSectionOffsetsRef.current[sec];
+        }
+      });
+      attemptScrollToTarget();
+    },
+    [attemptScrollToTarget]
+  );
+
+  const handleSectionLayout = useCallback(
+    (sectionKey, y) => {
+      localSectionOffsetsRef.current[sectionKey] = y;
+      if (sectionKey === 'review' || sectionKey === 'exceptions') {
+        const rowY = rowOffsetsRef.current.primaryOrders || 0;
+        sectionOffsetsRef.current[sectionKey] = rowY + y;
+      } else {
+        sectionOffsetsRef.current[sectionKey] = y;
+      }
+      attemptScrollToTarget();
+    },
+    [attemptScrollToTarget]
+  );
+
+  const handleTargetCardLayout = useCallback(
+    (sectionKey, y) => {
+      if (targetResolution.canonicalOrderId) {
+        itemOffsetsRef.current[targetResolution.canonicalOrderId] = { section: sectionKey, y };
+      }
+      attemptScrollToTarget();
+    },
+    [attemptScrollToTarget, targetResolution.canonicalOrderId]
+  );
+
   useEffect(() => () => {
     if (targetHighlightTimerRef.current) clearTimeout(targetHighlightTimerRef.current);
   }, []);
 
   useEffect(() => {
-    const requestedOrderId = Array.isArray(params.orderId) ? params.orderId[0] : params.orderId;
-    if (!requestedOrderId || openedParamRef.current === String(requestedOrderId)) return;
-    const authorizedSource = [...realtime.requests, ...realtime.incomingTransfers].find((order) => {
-      const matchesId = String(order.id || order.requestId) === String(requestedOrderId);
-      const branchId = String(order.currentBranchId || order.branchId || '');
-      const incomingBranchId = String(order.transferToBranchId || '');
-      return matchesId && (branchId === String(realtime.branchId) || incomingBranchId === String(realtime.branchId));
-    });
-    if (authorizedSource) {
-      const branchLocation = Number.isFinite(Number(realtime.branch?.latitude)) && Number.isFinite(Number(realtime.branch?.longitude))
-        ? { latitude: Number(realtime.branch.latitude), longitude: Number(realtime.branch.longitude) }
-        : null;
-      openedParamRef.current = String(requestedOrderId);
-      setNotificationTarget({ ...toManagerOrder(authorizedSource.id, authorizedSource, realtime.branch?.name || '', realtime.users), branchLocation });
-      setTargetHighlighted(true);
-      setToast({ visible: true, message: 'The order from your notification is highlighted below.', type: 'info' });
-      setTimeout(() => contentScrollRef.current?.scrollTo?.({ y: 0, animated: true }), 60);
+    const normalizedParam = String(requestedOrderId || '').trim();
+    if (!normalizedParam) {
+      openedParamRef.current = '';
+      scrolledTargetRef.current = '';
+      setActiveTargetId('');
+      setTargetHighlighted(false);
       if (targetHighlightTimerRef.current) clearTimeout(targetHighlightTimerRef.current);
-      targetHighlightTimerRef.current = setTimeout(() => setTargetHighlighted(false), 6000);
+      return;
     }
-  }, [params.orderId, realtime.branch, realtime.branchId, realtime.incomingTransfers, realtime.requests, realtime.users]);
+
+    if (
+      (targetResolution.status === 'resolved' || targetResolution.status === 'resolved_decision') &&
+      (Boolean(authorizedSource) || Boolean(targetResolution.decisionEvent)) &&
+      openedParamRef.current !== normalizedParam
+    ) {
+      openedParamRef.current = normalizedParam;
+      scrolledTargetRef.current = '';
+      setActiveTargetId(targetResolution.canonicalOrderId);
+      setTargetHighlighted(true);
+      const displayRef =
+        targetResolution.order?.requestId ||
+        targetResolution.decisionEvent?.requestId ||
+        targetResolution.canonicalOrderId;
+      setToast({
+        visible: true,
+        message: `Focused Order #${displayRef} in ${targetResolution.sectionTitle}.`,
+        type: 'info',
+      });
+      setTimeout(() => attemptScrollToTarget(), 60);
+      if (targetHighlightTimerRef.current) clearTimeout(targetHighlightTimerRef.current);
+      targetHighlightTimerRef.current = setTimeout(() => setTargetHighlighted(false), TARGET_HIGHLIGHT_DURATION_MS);
+    } else if (targetResolution.status === 'unavailable' && openedParamRef.current !== `missing:${normalizedParam}`) {
+      openedParamRef.current = `missing:${normalizedParam}`;
+      setActiveTargetId('');
+      setTargetHighlighted(false);
+      setToast({
+        visible: true,
+        message: targetResolution.fallbackMessage,
+        type: 'error',
+      });
+      setTimeout(() => contentScrollRef.current?.scrollTo?.({ y: 0, animated: true }), 60);
+    }
+  }, [attemptScrollToTarget, authorizedSource, requestedOrderId, targetResolution]);
+
+  const effectiveTargetId = activeTargetId || targetResolution.canonicalOrderId;
 
   return (
     <ManagerShell
@@ -1157,36 +1812,73 @@ export default function ManagerRequestPage() {
         type={toast.type}
         onDismiss={() => setToast((t) => ({ ...t, visible: false }))}
       />
-      {Boolean(notificationTarget) ? (
-        <View style={[styles.notificationTargetCard, targetHighlighted && styles.notificationTargetHighlighted]}>
+      {Boolean(targetResolution.status === 'unavailable' && dismissedUnavailableRef !== targetResolution.targetRef) ? (
+        <View style={styles.notificationTargetCard}>
           <View style={styles.notificationTargetHeader}>
             <View style={{ flex: 1, minWidth: 0 }}>
-              <Text style={styles.notificationTargetEyebrow}>NOTIFICATION TARGET</Text>
-              <Text style={styles.notificationTargetTitle}>Order #{notificationTarget.requestId || notificationTarget.id}</Text>
-              <Text style={styles.notificationTargetText} numberOfLines={2}>
-                {notificationTarget.requesterName || 'Requester'} · {orderProducts(notificationTarget)}
+              <Text style={styles.notificationTargetEyebrow}>TARGET ORDER UNAVAILABLE</Text>
+              <Text numberOfLines={1} ellipsizeMode="tail" style={styles.notificationTargetTitle}>
+                Order #{targetResolution.targetRef}
+              </Text>
+              <Text style={styles.notificationTargetText} numberOfLines={2} ellipsizeMode="tail">
+                {targetResolution.fallbackMessage}
               </Text>
             </View>
-            <ManagerPill tone="blue">{String(notificationTarget.status || 'Order').replace(/_/g, ' ')}</ManagerPill>
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel="Dismiss target order notice"
+              onPress={() => setDismissedUnavailableRef(targetResolution.targetRef)}
+              style={styles.notificationTargetButton}
+            >
+              <Text style={styles.notificationTargetButtonText}>Dismiss</Text>
+            </TouchableOpacity>
           </View>
-          <TouchableOpacity accessibilityRole="button" onPress={() => handleOpenOrder(notificationTarget)} style={[styles.actionButton, styles.notificationTargetButton]}>
-            <Text style={styles.notificationTargetButtonText}>View Target Order</Text>
-          </TouchableOpacity>
         </View>
       ) : null}
-      {/* 1. Received Requests */}
-      <ReceivedRequestsQueue
-        orders={dispatchData.review}
-        loading={realtime.loading}
-        styles={styles}
-        colors={colors}
-        isDark={resolvedTheme === 'dark'}
-        onShowToast={showToast}
-        onOpenOrder={handleOpenOrder}
-      />
+      {/* Primary Approvals Row: Upcoming / Normal Orders & Delivery Exceptions Side-by-Side */}
+      <View
+        style={styles.ordersRow}
+        onLayout={(event) => handleRowLayout('primaryOrders', event.nativeEvent.layout.y)}
+      >
+        <ReceivedRequestsQueue
+          orders={dispatchData.review}
+          loading={realtime.loading}
+          styles={styles}
+          colors={colors}
+          isDark={isDark}
+          onShowToast={showToast}
+          onOpenOrder={handleOpenOrder}
+          targetOrderId={effectiveTargetId}
+          targetHighlighted={targetHighlighted}
+          onSectionLayout={handleSectionLayout}
+          onTargetCardLayout={handleTargetCardLayout}
+          sectionScrollRef={(node) => {
+            sectionScrollRefs.current.review = node;
+          }}
+          style={styles.ordersColumnCard}
+        />
 
-      {/* 2. Outside Radius Approvals */}
-      <OutsideRadiusApprovalQueue orders={dispatchData.exceptions} loading={realtime.loading} styles={styles} colors={colors} isDark={resolvedTheme === 'dark'} onShowToast={showToast} onOpenOrder={handleOpenOrder} />
+        <OutsideRadiusApprovalQueue
+          orders={dispatchData.exceptions}
+          loading={realtime.loading}
+          styles={styles}
+          colors={colors}
+          isDark={isDark}
+          onShowToast={showToast}
+          onOpenOrder={handleOpenOrder}
+          targetOrderId={effectiveTargetId}
+          targetHighlighted={targetHighlighted}
+          onSectionLayout={handleSectionLayout}
+          onTargetCardLayout={handleTargetCardLayout}
+          sectionScrollRef={(node) => {
+            sectionScrollRefs.current.exceptions = node;
+          }}
+          reviewFlow={reviewFlow}
+          reviewState={reviewState}
+          onOpenReview={handleOpenReview}
+          style={styles.ordersColumnCard}
+        />
+      </View>
 
       {/* 3. Branch Orders Overview & Situational Order Edit */}
       <BranchOrdersOverview
@@ -1194,37 +1886,88 @@ export default function ManagerRequestPage() {
         loading={realtime.loading}
         styles={styles}
         colors={colors}
-        isDark={resolvedTheme === 'dark'}
+        isDark={isDark}
         onOpenOrder={handleOpenOrder}
         initialFilter={requestedFilter}
         viewAllTick={viewAllTick}
+        targetOrderId={effectiveTargetId}
+        targetOrdersTab={targetResolution.section === 'branchOrders' ? targetResolution.ordersTab : null}
+        targetHighlighted={targetHighlighted}
+        onSectionLayout={handleSectionLayout}
+        onTargetCardLayout={handleTargetCardLayout}
+        sectionScrollRef={(node) => {
+          sectionScrollRefs.current.branchOrders = node;
+        }}
       />
 
       {/* 4. Branch Transfers Queue */}
-      <BranchTransfersQueue data={dispatchData} styles={styles} colors={colors} isDark={resolvedTheme === 'dark'} onShowToast={showToast} onOpenOrder={handleOpenOrder} />
+      <BranchTransfersQueue
+        data={dispatchData}
+        styles={styles}
+        colors={colors}
+        isDark={isDark}
+        onShowToast={showToast}
+        onOpenOrder={handleOpenOrder}
+        targetOrderId={effectiveTargetId}
+        targetHighlighted={targetHighlighted}
+        revealDecisions={Boolean(targetResolution.section === 'transfers' && targetResolution.revealDecisions)}
+        onSectionLayout={handleSectionLayout}
+        onTargetCardLayout={handleTargetCardLayout}
+        sectionScrollRef={(node) => {
+          sectionScrollRefs.current.transfers = node;
+        }}
+      />
 
       {/* Shared Order Details, Items Edit, and Distributor Assignment Modal */}
       <EditOrderModal
         visible={modalVisible}
         order={selectedOrder}
         onClose={() => setModalVisible(false)}
+        onDismiss={finishReviewHandoff}
         onSaveSuccess={() => {}}
         colors={colors}
         styles={styles}
       />
+      <ManagerDeliveryReviewModal state={reviewState} flow={reviewFlow} colors={colors} visible={!modalVisible} />
     </ManagerShell>
   );
 }
 
-const createStyles = (colors, width = 1200) =>
+const createStyles = (
+  colors,
+  width = 1200,
+  isDark = false,
+  isTwoColumn = (width >= 1100)
+) =>
   StyleSheet.create({
     card: {
       backgroundColor: colors.surface,
       borderWidth: 1,
       borderColor: colors.border,
       borderRadius: 16,
-      padding: width < 430 ? 14 : 20,
+      padding: width < 430 ? 14 : 18,
       marginBottom: 20,
+      shadowColor: '#000000',
+      shadowOpacity: isDark ? 0.25 : 0.03,
+      shadowRadius: 8,
+      shadowOffset: { width: 0, height: 2 },
+      elevation: 2,
+    },
+    ordersRow: {
+      flexDirection: isTwoColumn ? 'row' : 'column',
+      alignItems: 'stretch',
+      gap: isTwoColumn ? 16 : 20,
+      marginBottom: 20,
+      width: '100%',
+    },
+    ordersColumnCard: {
+      flexGrow: isTwoColumn ? 1 : 0,
+      flexShrink: isTwoColumn ? 1 : 0,
+      flexBasis: isTwoColumn ? 0 : 'auto',
+      minWidth: 0,
+      width: '100%',
+      alignSelf: 'stretch',
+      marginBottom: 0,
     },
     cardHeaderRow: {
       flexDirection: width < 377 ? 'column' : 'row',
@@ -1235,6 +1978,31 @@ const createStyles = (colors, width = 1200) =>
       width: '100%',
       minWidth: 0,
     },
+    exceptionTabs: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 8,
+      marginBottom: 12,
+    },
+    exceptionTab: {
+      minHeight: 44,
+      paddingHorizontal: 14,
+      justifyContent: 'center',
+      borderRadius: 9,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surfaceAlt,
+    },
+    exceptionTabSelected: {
+      borderColor: colors.primary,
+      backgroundColor: colors.primarySoft,
+    },
+    exceptionTabFocused: {
+      borderWidth: 2,
+      borderColor: colors.primary,
+    },
+    exceptionTabText: { color: colors.textPrimary, fontSize: 12, fontWeight: '700' },
+    exceptionTabTextSelected: { color: colors.primary, fontWeight: '900' },
     orderHeaderAside: {
       flexDirection: width < 377 ? 'row' : 'column',
       alignItems: width < 377 ? 'center' : 'flex-end',
@@ -1346,15 +2114,54 @@ const createStyles = (colors, width = 1200) =>
       minHeight: 96,
       marginVertical: 4,
     },
-    sectionScroll: { maxHeight: 440 },
-    sectionContent: { paddingBottom: 4 },
+    sectionScroll: {
+      width: '100%',
+      flexGrow: 1,
+      flexShrink: 0,
+      flexBasis: 'auto',
+    },
+    sectionContent: {
+      paddingBottom: 4,
+      flexGrow: 1,
+      flexShrink: 0,
+    },
     orderItem: {
       borderWidth: 1,
       borderColor: colors.border,
       backgroundColor: colors.surfaceAlt,
       borderRadius: 12,
-      padding: 14,
-      marginBottom: 10,
+      padding: 12,
+      marginBottom: 8,
+      shadowColor: '#000000',
+      shadowOpacity: isDark ? 0.15 : 0.02,
+      shadowRadius: 4,
+      shadowOffset: { width: 0, height: 1 },
+      elevation: 1,
+    },
+    orderItemTargetHighlighted: {
+      borderWidth: 2,
+      borderColor: colors.primary,
+      backgroundColor: isDark ? 'rgba(56, 189, 248, 0.14)' : colors.primarySoft,
+      shadowColor: colors.primary,
+      shadowOpacity: isDark ? 0.32 : 0.18,
+      shadowRadius: 10,
+      shadowOffset: { width: 0, height: 2 },
+      elevation: 4,
+    },
+    targetOrderBadge: {
+      paddingHorizontal: 9,
+      paddingVertical: 3,
+      borderRadius: 999,
+      borderWidth: 1,
+      borderColor: colors.primary,
+      backgroundColor: isDark ? 'rgba(56, 189, 248, 0.22)' : colors.surface,
+      alignSelf: 'flex-start',
+    },
+    targetOrderBadgeText: {
+      color: colors.primary,
+      fontSize: 10,
+      fontWeight: '900',
+      letterSpacing: 0.4,
     },
     orderHeaderRow: {
       flexDirection: width < 377 ? 'column' : 'row',
@@ -1401,6 +2208,62 @@ const createStyles = (colors, width = 1200) =>
       flex: 1,
       marginTop: 0,
     },
+    containerBadgeRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      marginTop: 4,
+      flexWrap: 'wrap',
+    },
+    containerBadge: {
+      paddingHorizontal: 7,
+      paddingVertical: 2,
+      borderRadius: 6,
+      backgroundColor: isDark ? 'rgba(56, 189, 248, 0.15)' : 'rgba(24, 123, 205, 0.10)',
+      borderWidth: 1,
+      borderColor: isDark ? 'rgba(56, 189, 248, 0.3)' : 'rgba(24, 123, 205, 0.25)',
+      alignSelf: 'flex-start',
+    },
+    containerBadgeText: {
+      color: colors.primary,
+      fontSize: 10,
+      fontWeight: '700',
+    },
+    cargoBadgeOrange: {
+      backgroundColor: isDark ? 'rgba(251, 146, 60, 0.15)' : 'rgba(234, 88, 12, 0.10)',
+      borderColor: isDark ? 'rgba(251, 146, 60, 0.3)' : 'rgba(234, 88, 12, 0.25)',
+    },
+    cargoBadgeOrangeText: {
+      color: isDark ? '#fb923c' : '#c2410c',
+    },
+    cargoBadgePurple: {
+      backgroundColor: isDark ? 'rgba(168, 85, 247, 0.15)' : 'rgba(126, 34, 206, 0.10)',
+      borderColor: isDark ? 'rgba(168, 85, 247, 0.3)' : 'rgba(126, 34, 206, 0.25)',
+    },
+    cargoBadgePurpleText: {
+      color: isDark ? '#c084fc' : '#7e22ce',
+    },
+    cargoBadgeWarning: {
+      backgroundColor: isDark ? 'rgba(239, 68, 68, 0.15)' : 'rgba(220, 38, 38, 0.10)',
+      borderColor: isDark ? 'rgba(239, 68, 68, 0.3)' : 'rgba(220, 38, 38, 0.25)',
+    },
+    cargoBadgeWarningText: {
+      color: isDark ? '#f87171' : '#dc2626',
+    },
+    tripBadge: {
+      paddingHorizontal: 7,
+      paddingVertical: 2,
+      borderRadius: 6,
+      backgroundColor: isDark ? 'rgba(168, 85, 247, 0.15)' : 'rgba(126, 34, 206, 0.10)',
+      borderWidth: 1,
+      borderColor: isDark ? 'rgba(168, 85, 247, 0.3)' : 'rgba(126, 34, 206, 0.25)',
+      alignSelf: 'flex-start',
+    },
+    tripBadgeText: {
+      color: isDark ? '#c084fc' : '#7e22ce',
+      fontSize: 10,
+      fontWeight: '700',
+    },
     requestProductInfo: {
       flex: 1,
       minWidth: 0,
@@ -1411,7 +2274,7 @@ const createStyles = (colors, width = 1200) =>
       minWidth: 0,
     },
     orderTotalSummary: {
-      minWidth: width < 550 ? 0 : 160,
+      minWidth: width < 550 ? 0 : 120,
       flexShrink: 0,
       alignItems: width < 550 ? 'flex-start' : 'flex-end',
     },
@@ -1433,6 +2296,12 @@ const createStyles = (colors, width = 1200) =>
       marginTop: 4,
       width: '100%',
       minWidth: 0,
+      backgroundColor: isDark ? 'rgba(245, 158, 11, 0.12)' : 'rgba(245, 158, 11, 0.08)',
+      borderLeftWidth: 3,
+      borderLeftColor: colors.warning,
+      borderRadius: 8,
+      paddingVertical: 8,
+      paddingHorizontal: 12,
     },
     detailLine: {
       color: colors.textSecondary,
@@ -1441,6 +2310,14 @@ const createStyles = (colors, width = 1200) =>
       flexShrink: 1,
       minWidth: 0,
     },
+    detailFieldLabel: {
+      color: colors.textSecondary,
+      fontWeight: '700',
+    },
+    detailFieldValue: {
+      color: colors.textPrimary,
+      fontWeight: '500',
+    },
     amountText: {
       color: colors.primary,
       fontSize: 14,
@@ -1448,45 +2325,77 @@ const createStyles = (colors, width = 1200) =>
       marginTop: 2,
     },
     actionRow: {
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      justifyContent: width >= 800 ? 'flex-end' : 'flex-start',
+      flexDirection: width < 440 ? 'column' : 'row',
       alignItems: 'center',
+      justifyContent: 'space-between',
+      flexWrap: 'wrap',
       gap: 8,
       marginTop: 8,
+    },
+    actionSecondaryGroup: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      flexWrap: 'wrap',
+      gap: 8,
+      flexShrink: 1,
+      flexGrow: width < 440 ? 1 : 0,
+      minWidth: 0,
+      width: width < 440 ? '100%' : 'auto',
+    },
+    actionDecisionGroup: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      flexWrap: 'wrap',
+      gap: 8,
+      flexShrink: 1,
+      flexGrow: width < 440 ? 1 : 0,
+      minWidth: 0,
+      justifyContent: width < 440 ? 'stretch' : 'flex-end',
+      width: width < 440 ? '100%' : 'auto',
     },
     requestActionRow: {
       borderTopWidth: 1,
       borderTopColor: colors.border,
-      marginTop: 10,
+      marginTop: 8,
       paddingTop: 10,
     },
     chatActionWrap: {
-      flexGrow: width < 430 ? 1 : 0,
-      flexShrink: 0,
-      flexBasis: width < 430 ? '48%' : 138,
-      minWidth: width < 430 ? 0 : 138,
+      width: 44,
+      minWidth: 44,
+      maxWidth: 44,
       minHeight: 44,
       maxHeight: 48,
       height: 44,
+      flexShrink: 0,
+      flexGrow: 0,
+      flexBasis: 44,
       justifyContent: 'center',
+      alignItems: 'center',
     },
     managerChatButton: {
-      width: '100%',
-      minHeight: 44,
-      maxHeight: 48,
-      height: 44,
+      width: 38,
+      minWidth: 38,
+      maxWidth: 38,
+      minHeight: 38,
+      maxHeight: 40,
+      height: 38,
+      flexShrink: 0,
+      flexGrow: 0,
+      flexBasis: 38,
       borderRadius: 10,
+      paddingHorizontal: 0,
+      alignItems: 'center',
+      justifyContent: 'center',
     },
     actionButton: {
-      flexGrow: width < 430 ? 1 : 0,
-      flexShrink: 0,
-      flexBasis: width < 430 ? '48%' : 138,
-      minWidth: width < 430 ? 0 : 138,
-      minHeight: 44,
-      maxHeight: 48,
-      height: 44,
-      paddingHorizontal: 12,
+      flexGrow: width < 440 ? 1 : 0,
+      flexShrink: 1,
+      flexBasis: 'auto',
+      minWidth: width < 440 ? 0 : 70,
+      minHeight: 38,
+      maxHeight: 40,
+      height: 38,
+      paddingHorizontal: 10,
       borderRadius: 10,
       alignItems: 'center',
       justifyContent: 'center',
@@ -1525,6 +2434,26 @@ const createStyles = (colors, width = 1200) =>
       fontSize: 12,
       fontWeight: '800',
     },
+    overviewActionRow: {
+      justifyContent: width < 440 ? 'stretch' : 'flex-end',
+    },
+    overviewActionGroup: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      flexWrap: 'wrap',
+      gap: 8,
+      flexShrink: 1,
+      flexGrow: width < 440 ? 1 : 0,
+      width: width < 440 ? '100%' : 'auto',
+      justifyContent: width < 440 ? 'space-between' : 'flex-end',
+    },
+    overviewActionButton: {
+      flexGrow: width < 440 ? 1 : 0,
+      flexShrink: 1,
+      flexBasis: 'auto',
+      minWidth: width < 440 ? 0 : 130,
+      paddingHorizontal: 12,
+    },
     actionDisabled: {
       opacity: 0.6,
     },
@@ -1535,6 +2464,11 @@ const createStyles = (colors, width = 1200) =>
       borderRadius: 12,
       padding: 14,
       marginBottom: 10,
+      shadowColor: '#000000',
+      shadowOpacity: isDark ? 0.15 : 0.02,
+      shadowRadius: 4,
+      shadowOffset: { width: 0, height: 1 },
+      elevation: 1,
     },
     declineBox: {
       marginTop: 8,
@@ -1573,6 +2507,31 @@ const createStyles = (colors, width = 1200) =>
       fontSize: 11,
       marginTop: 2,
     },
+    branchOrdersToolbar: {
+      flexDirection: width < 768 ? 'column' : 'row',
+      alignItems: width < 768 ? 'stretch' : 'center',
+      justifyContent: 'space-between',
+      gap: 10,
+      marginTop: 4,
+      marginBottom: 12,
+      width: '100%',
+    },
+    branchOrdersPillGroup: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      alignItems: 'center',
+      gap: 6,
+      flexGrow: width < 768 ? 0 : 1,
+      flexShrink: 1,
+      flexBasis: width < 768 ? 'auto' : 0,
+      minWidth: 0,
+    },
+    branchOrdersSearchWrap: {
+      width: width < 768 ? '100%' : 300,
+      maxWidth: width < 768 ? '100%' : 340,
+      minWidth: width < 768 ? 0 : 220,
+      flexShrink: 0,
+    },
     searchBarWrap: {
       marginBottom: 12,
     },
@@ -1585,7 +2544,7 @@ const createStyles = (colors, width = 1200) =>
       borderColor: colors.border,
       borderRadius: 8,
       backgroundColor: colors.surfaceAlt,
-      paddingHorizontal: 10,
+      paddingHorizontal: 12,
       color: colors.textPrimary,
       fontSize: 12,
       outlineStyle: 'none',
@@ -1832,29 +2791,44 @@ const createStyles = (colors, width = 1200) =>
     },
     notificationTargetCard: {
       width: '100%',
-      maxWidth: 760,
-      alignSelf: 'center',
-      backgroundColor: colors.primarySoft,
+      backgroundColor: colors.surface,
       borderWidth: 1,
-      borderColor: colors.primary,
-      borderRadius: 16,
-      padding: width < 430 ? 14 : 18,
-      marginBottom: 20,
+      borderColor: colors.border,
+      borderLeftWidth: 4,
+      borderLeftColor: colors.warning,
+      borderRadius: 12,
+      paddingVertical: 12,
+      paddingHorizontal: width < 430 ? 12 : 16,
+      marginBottom: 16,
     },
     notificationTargetHighlighted: {
-      borderWidth: 3,
-      shadowColor: colors.primary,
-      shadowOpacity: 0.28,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 0 },
-      elevation: 6,
+      borderColor: colors.primary,
+      borderWidth: 2,
     },
-    notificationTargetHeader: { flexDirection: width < 430 ? 'column' : 'row', alignItems: 'flex-start', gap: 10 },
-    notificationTargetEyebrow: { color: colors.primary, fontSize: 10, fontWeight: '900', letterSpacing: 0.9 },
-    notificationTargetTitle: { color: colors.textPrimary, fontSize: 17, fontWeight: '900', marginTop: 3 },
-    notificationTargetText: { color: colors.textSecondary, fontSize: 12, lineHeight: 18, marginTop: 4 },
-    notificationTargetButton: { alignSelf: width < 430 ? 'stretch' : 'flex-start', backgroundColor: colors.primaryAction, marginTop: 12 },
-    notificationTargetButtonText: { color: colors.onPrimary, fontSize: 12, fontWeight: '900' },
+    notificationTargetHeader: {
+      flexDirection: width < 430 ? 'column' : 'row',
+      alignItems: width < 430 ? 'flex-start' : 'center',
+      justifyContent: 'space-between',
+      gap: 10,
+      minWidth: 0,
+    },
+    notificationTargetEyebrow: { color: colors.warning, fontSize: 10, fontWeight: '900', letterSpacing: 0.8 },
+    notificationTargetTitle: { color: colors.textPrimary, fontSize: 14, fontWeight: '900', marginTop: 2 },
+    notificationTargetText: { color: colors.textSecondary, fontSize: 12, lineHeight: 17, marginTop: 2 },
+    notificationTargetButton: {
+      alignSelf: width < 430 ? 'stretch' : 'center',
+      minHeight: 36,
+      height: 36,
+      paddingHorizontal: 14,
+      borderRadius: 9,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surfaceAlt,
+      alignItems: 'center',
+      justifyContent: 'center',
+      flexShrink: 0,
+    },
+    notificationTargetButtonText: { color: colors.textPrimary, fontSize: 12, fontWeight: '800' },
     cancelBtn: {
       minHeight: 38,
       paddingHorizontal: 16,
@@ -1992,5 +2966,76 @@ const createStyles = (colors, width = 1200) =>
       color: colors.onPrimary,
       fontSize: 13,
       fontWeight: '800',
+    },
+    paginationContainer: {
+      flexDirection: width < 480 ? 'column' : 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 10,
+      paddingTop: 10,
+      marginTop: 8,
+      borderTopWidth: 1,
+      borderTopColor: colors.border,
+      width: '100%',
+    },
+    paginationRangeText: {
+      color: colors.textSecondary,
+      fontSize: 12,
+      fontWeight: '600',
+    },
+    paginationNavRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+    },
+    paginationBtn: {
+      minHeight: 32,
+      height: 32,
+      paddingHorizontal: 10,
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surfaceAlt,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    paginationBtnDisabled: {
+      opacity: 0.45,
+    },
+    paginationBtnText: {
+      color: colors.textPrimary,
+      fontSize: 12,
+      fontWeight: '700',
+    },
+    paginationBtnTextDisabled: {
+      color: colors.textSecondary,
+    },
+    paginationNumberBtn: {
+      minWidth: 32,
+      height: 32,
+      paddingHorizontal: 6,
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surfaceAlt,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    paginationNumberBtnActive: {
+      borderColor: colors.primaryAction,
+      backgroundColor: colors.primaryAction,
+    },
+    paginationNumberText: {
+      color: colors.textPrimary,
+      fontSize: 12,
+      fontWeight: '700',
+    },
+    paginationNumberTextActive: {
+      color: colors.onPrimary || '#FFFFFF',
+    },
+    paginationEllipsis: {
+      color: colors.textSecondary,
+      fontSize: 12,
+      paddingHorizontal: 2,
     },
   });

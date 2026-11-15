@@ -38,6 +38,34 @@ test('authorized server presentation supplies real requester names and order sta
   assert.equal(distributor.displayName, 'Crystal Jeanne Ortega');
 });
 
+test('reused branch inquiry and archived order keep separate authoritative contexts', () => {
+  const deliveredOrder = { id: 'old-order', requestId: 'BT-OLD', status: 'delivered' };
+  const currentOrder = { id: 'new-order', requestId: 'BT-NEW', status: 'scheduled' };
+  const common = { id: 'branch-thread', type: 'requester_branch', requesterDisplayName: 'Requester', authorityReasons: { post_order_followup: { orderIds: ['old-order'] } } };
+  const inquiry = exportsObject.presentationFor({ ...common, orderContext: null }, 'manager', { orders: [deliveredOrder], users: [] });
+  assert.equal(inquiry.contextLabel, 'General inquiry');
+  assert.equal(inquiry.orderStatus, '');
+  const activeOrder = exportsObject.presentationFor({ ...common, orderContext: currentOrder }, 'manager', { orders: [deliveredOrder, { ...currentOrder, status: 'pending' }], users: [] });
+  assert.equal(activeOrder.orderReference, 'BT-NEW');
+  assert.equal(activeOrder.orderStatus, 'scheduled');
+  const history = exportsObject.presentationFor({ ...common, historyId: 'archive-id', orderContext: deliveredOrder }, 'manager', { orders: [currentOrder], users: [] });
+  assert.equal(history.orderReference, 'BT-OLD');
+  assert.equal(history.orderStatus, 'delivered');
+});
+
+test('Manager Distributor cards prefer the current authorized profile name and History keeps the final order badge', () => {
+  const distributor = exportsObject.presentationFor({ id: 'station-thread', type: 'distributor_branch', distributorUid: 'distributor-a', distributorDisplayName: 'Updated Distributor Name' }, 'manager', {
+    orders: [], users: [{ uid: 'distributor-a', fullName: 'Older Distributor Name' }],
+  });
+  assert.equal(distributor.displayName, 'Updated Distributor Name');
+  assert.equal(presentation.meaningfulName('Branch Distributor', 'Actual Distributor'), 'Actual Distributor');
+  assert.equal(presentation.meaningfulName('Requester', 'Current Requester'), 'Current Requester');
+  assert.equal(presentation.meaningfulName('Requester'), '');
+  assert.match(conversationListSource, /lastMessagePreview: conversation\.lastMessagePreview/);
+  assert.match(conversationListSource, /orderStatus: order\.status === 'completed' \? 'delivered' : order\.status/);
+  assert.doesNotMatch(conversationListSource, /lastMessagePreview: 'Completed delivery'/);
+});
+
 test('active logical participant is readable and sendable; closed, expired and read-only states cannot send', () => {
   const conversation = { status: 'active', participantState: [{ principalType: 'user', principalId: 'r1', accessState: 'active' }] };
   assert.deepEqual(model.conversationAvailability(conversation, 'requester', 'r1'), { readable: true, sendable: true });
@@ -96,19 +124,25 @@ test('message bubbles remain content-sized and wrap long text on shared web/mobi
   assert.match(bubbleSource, /incomingRow: \{ alignItems: 'flex-start' \}/);
   assert.match(bubbleSource, /ref=\{groupRef\}[\s\S]{0,300}style=\{\[styles\.row/);
   assert.match(bubbleSource, /row: \{ width: '100%'/);
-  assert.match(bubbleSource, /\{own && desktopControl\}[\s\S]*styles\.bubble[\s\S]*\{!own && desktopControl\}/);
+  assert.match(bubbleSource, /\{own && actionControl\}[\s\S]*styles\.bubble[\s\S]*\{!own && actionControl\}/);
+  assert.match(bubbleSource, /messageGroup: \{ maxWidth: '82%'/);
+  assert.match(bubbleSource, /actionSlot: \{ width: 36, height: 40/);
   assert.match(bubbleSource, /maxWidth: '100%'/);
   assert.match(bubbleSource, /minWidth: 72/);
+  assert.match(bubbleSource, /replyQuote: \{[\s\S]*?maxWidth: '100%'/);
+  assert.match(bubbleSource, /numberOfLines=\{2\}/);
   assert.match(bubbleSource, /flexWrap: 'nowrap'/);
   assert.match(bubbleSource, /overflowWrap: 'anywhere'/);
   assert.match(bubbleSource, /receipt/);
 });
 
-test('conversation status stays compact in the name row while unread remains visible', () => {
+test('conversation status remains visible with role badges while unread and inquiry context remain clear', () => {
   assert.match(conversationListSource, /styles\.identityRow/);
   assert.match(conversationListSource, /compact numberOfLines=\{1\}/);
   assert.match(conversationListSource, /maxWidth: '52%'/);
   assert.doesNotMatch(conversationListSource, /flexWrap: 'wrap'/);
   assert.match(conversationListSource, /conversation\.unreadCount > 0/);
   assert.match(conversationListSource, /counterpartRoleLabel/);
+  assert.match(conversationListSource, /!!roleLabel && !!conversation\.orderStatus && <SoftStatusBadge/);
+  assert.match(conversationListSource, /\['requester_branch', 'distributor_branch', 'branch_coordination'\]/);
 });

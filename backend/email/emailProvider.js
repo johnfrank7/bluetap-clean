@@ -1,5 +1,6 @@
 // Server-only provider boundary. Imported by backend HTTP handlers only.
 const { OtpError } = require('../utils/otpError');
+const { assertStagingRelayTarget } = require('../config/stagingIsolation');
 
 const RESEND_EMAILS_ENDPOINT = 'https://api.resend.com/emails';
 const USER_AGENT = 'BlueTap-Backend/1.0';
@@ -109,6 +110,7 @@ function createEmailProvider({ env = process.env, fetchImpl = globalThis.fetch, 
     let headers;
     let body;
     if (provider === 'vercel-relay') {
+      assertStagingRelayTarget(env);
       url = relayUrl(env.VERCEL_MAIL_RELAY_URL);
       const secret = String(env.INTERNAL_MAIL_RELAY_SECRET || '');
       if (!url || !secret || !requestId) {

@@ -3,10 +3,14 @@ const test = require('node:test');
 const {
   getManagerQueues,
   getOngoingDeliveryProgress,
+  isActiveDeliveryOrder,
   isCompletedManagerOrder,
+  isFailedOngoingOrder,
   isOngoingAssignedOrder,
   isPendingManagerOrder,
+  isScheduledOngoingOrder,
   pendingBranchApplications,
+  splitOngoingManagerOrders,
   toManagerOrder,
 } = require('../../../services/managerOperational');
 
@@ -116,11 +120,78 @@ test('getOngoingDeliveryProgress maps linear milestones and flags delivery_faile
   assert.equal(outProgress.steps[0].completed, true);
   assert.equal(outProgress.steps[1].completed, true);
   assert.equal(outProgress.steps[2].current, true);
+  assert.equal(outProgress.steps[3].upcoming, true);
+
+  const deliveredProgress = getOngoingDeliveryProgress({ status: 'delivered' });
+  assert.equal(deliveredProgress.activeStepIndex, 3);
+  assert.equal(deliveredProgress.steps.every((step) => step.completed === true), true);
+  assert.equal(deliveredProgress.steps.every((step) => step.current === false && step.upcoming === false), true);
+
+  const invalidProgress = getOngoingDeliveryProgress({ status: 'pending' });
+  assert.equal(invalidProgress.linearSupported, false);
+  assert.equal(invalidProgress.steps.every((step) => step.completed === false && step.current === false), true);
 
   const failedProgress = getOngoingDeliveryProgress({ status: 'delivery_failed' });
   assert.equal(failedProgress.isException, true);
   assert.equal(failedProgress.linearSupported, false);
   assert.equal(failedProgress.activeStepIndex, -1);
+});
+
+test('splitOngoingManagerOrders separates Active Deliveries vs Scheduled orders, deduplicates, and automatically moves orders on start delivery', () => {
+  const initialOrders = [
+    { id: 'act-1', branchId: 'north', status: 'out_for_delivery', assignedDistributorUid: 'dist-1', updatedAt: new Date('2026-03-01T11:00:00Z') },
+    { id: 'act-2', branchId: 'north', status: 'out_for_delivery', assignedDistributorUid: 'dist-2', updatedAt: new Date('2026-03-01T11:30:00Z') },
+    { id: 'sch-1', branchId: 'north', status: 'scheduled', assignedDistributorUid: 'dist-1', updatedAt: new Date('2026-03-01T09:00:00Z') },
+    // Duplicate of sch-1 should be deduplicated
+    { id: 'sch-1', branchId: 'north', status: 'scheduled', assignedDistributorUid: 'dist-1', updatedAt: new Date('2026-03-01T09:00:00Z') },
+    // delivery_failed must not be presented as an active delivery in progress, while preserving Manager visibility
+    { id: 'fail-1', branchId: 'north', status: 'delivery_failed', assignedDistributorUid: 'dist-2', updatedAt: new Date('2026-03-01T10:30:00Z') },
+    // Terminal and unassigned orders must never enter either group
+    { id: 'done-1', branchId: 'north', status: 'delivered', assignedDistributorUid: 'dist-1' },
+    { id: 'canc-1', branchId: 'north', status: 'cancelled', assignedDistributorUid: 'dist-1' },
+    { id: 'pend-1', branchId: 'north', status: 'awaiting_distributor_assignment' },
+  ];
+
+  const beforeQueues = getManagerQueues(initialOrders, [], 'north');
+  assert.equal(beforeQueues.activeDeliveriesCount, 2);
+  assert.equal(beforeQueues.scheduledCount, 1);
+  assert.equal(beforeQueues.failedDeliveriesCount, 1);
+  assert.equal(beforeQueues.ongoingCount, 4);
+  assert.deepEqual(beforeQueues.activeDeliveries.map((o) => o.id), ['act-2', 'act-1']);
+  assert.deepEqual(beforeQueues.scheduledOrders.map((o) => o.id), ['sch-1']);
+  assert.deepEqual(beforeQueues.failedDeliveries.map((o) => o.id), ['fail-1']);
+  assert.equal(isActiveDeliveryOrder(initialOrders[0], 'north'), true);
+  assert.equal(isScheduledOngoingOrder(initialOrders[0], 'north'), false);
+  assert.equal(isScheduledOngoingOrder(initialOrders[2], 'north'), true);
+  assert.equal(isActiveDeliveryOrder(initialOrders[2], 'north'), false);
+  // delivery_failed is NOT a normal delivery in progress, but remains visible in failedDeliveries and dispatch
+  assert.equal(isActiveDeliveryOrder(initialOrders[4], 'north'), false);
+  assert.equal(isScheduledOngoingOrder(initialOrders[4], 'north'), false);
+  assert.equal(isFailedOngoingOrder(initialOrders[4], 'north'), true);
+  assert.equal(beforeQueues.dispatch.some((o) => o.id === 'fail-1'), true);
+
+  // When distributor starts delivery for sch-1 -> status transitions to out_for_delivery
+  const afterStartOrders = initialOrders
+    .filter((o, idx) => idx !== 3)
+    .map((o) => (o.id === 'sch-1' ? { ...o, status: 'out_for_delivery', updatedAt: new Date('2026-03-01T12:00:00Z') } : o));
+
+  const afterQueues = getManagerQueues(afterStartOrders, [], 'north');
+  assert.equal(afterQueues.activeDeliveriesCount, 3);
+  assert.equal(afterQueues.scheduledCount, 0);
+  assert.equal(afterQueues.failedDeliveriesCount, 1);
+  assert.equal(afterQueues.ongoingCount, 4);
+  assert.deepEqual(afterQueues.activeDeliveries.map((o) => o.id), ['sch-1', 'act-2', 'act-1']);
+  assert.deepEqual(afterQueues.scheduledOrders.map((o) => o.id), []);
+
+  // When delivery completes -> status transitions to delivered and leaves both ongoing groups
+  const afterDeliveredOrders = afterStartOrders.map((o) =>
+    o.id === 'sch-1' ? { ...o, status: 'delivered', updatedAt: new Date('2026-03-01T12:30:00Z') } : o
+  );
+  const completedQueues = splitOngoingManagerOrders(afterDeliveredOrders, 'north');
+  assert.equal(completedQueues.activeDeliveriesCount, 2);
+  assert.equal(completedQueues.scheduledCount, 0);
+  assert.equal(completedQueues.activeDeliveries.some((o) => o.id === 'sch-1'), false);
+  assert.equal(completedQueues.scheduledOrders.some((o) => o.id === 'sch-1'), false);
 });
 
 test('toManagerOrder enriches assigned distributor name, public ID, schedule, and product summary from branch users', () => {

@@ -216,6 +216,18 @@ async function collectMaintenanceTargets(db, policy, now = Date.now()) {
   const messageKey = messageKeyFromPath;
   const chatMessagesProtectedByEvidence = chatMessages.filter((doc) => evidenceHeldMessageKeys.has(messageKey(doc)));
   const chatMessagesToDelete = chatMessages.filter((doc) => !evidenceHeldMessageKeys.has(messageKey(doc)));
+  const archivedHistory = await safeQuery(() => db.collection('chatOrderHistory')
+    .where('archivedAt', '<=', new Date(chatCutoff)).limit(BATCH_SIZE).get());
+  const chatHistoryMetadataEligible = [];
+  for (const doc of documents(archivedHistory)) {
+    const history = doc.data() || {};
+    if (!history.conversationId || !history.orderId || millis(history.readAccessEndsAt) > now) continue;
+    try {
+      const remaining = await db.collection('chatConversations').doc(history.conversationId)
+        .collection('messages').where('orderId', '==', history.orderId).limit(1).get();
+      if (documents(remaining).length === 0) chatHistoryMetadataEligible.push(doc);
+    } catch { /* Uncertain nested-message state keeps the history index. */ }
+  }
   const reportEvidenceToPurge = resolvedChatReports.filter((doc) => {
     const report = doc.data() || {};
     return String(report.status || '').toLowerCase() === 'resolved' && millis(report.resolvedAt) > 0 && millis(report.resolvedAt) <= reportEvidenceCutoff && (report.evidenceSnapshot || []).length > 0;
@@ -231,6 +243,7 @@ async function collectMaintenanceTargets(db, policy, now = Date.now()) {
     passwordResetRateLimits: expiredPasswordRateLimits,
     ordersToArchive,
     chatMessagesToDelete,
+    chatHistoryMetadataEligible,
     chatMessagesProtectedByEvidence,
     reportEvidenceToPurge,
     openReportEvidenceProtected: [...openChatReports, ...escalatedChatReports].filter((doc) => (doc.data()?.evidenceSnapshot || []).length > 0),
@@ -245,6 +258,7 @@ function summarizeTargets(targets) {
   const expiredRateLimitRecords = targets.authRateLimits.length + targets.registrationOtpRateLimits.length + targets.passwordResetRateLimits.length;
   const ordersEligibleForArchive = targets.ordersToArchive.length;
   const expiredChatMessages = targets.chatMessagesToDelete.length;
+  const archivedHistoryMetadataEligible = targets.chatHistoryMetadataEligible.length;
   const chatMessagesProtectedByEvidence = targets.chatMessagesProtectedByEvidence.length;
   const reportEvidenceEligibleForPurge = targets.reportEvidenceToPurge.length;
   const expiredRestrictionProjections = targets.expiredRestrictionProjections.length;
@@ -257,6 +271,7 @@ function summarizeTargets(targets) {
     expiredRateLimitRecords,
     ordersEligibleForArchive,
     expiredChatMessages,
+    archivedHistoryMetadataEligible,
     chatMessagesProtectedByEvidence,
     chatMessagesSkipped: chatMessagesProtectedByEvidence,
     openReportEvidenceProtected,
@@ -273,6 +288,7 @@ async function previewCleanup(db, policy, now = Date.now()) {
     counts: summarizeTargets(targets),
     notificationArchitecture: 'derived',
     notificationWindowDays: policy.notificationRetentionDays,
+    archivedHistoryMetadataDeletionEnabled: false,
     protectedData: [...PROTECTED_DATA],
     calculatedAt: new Date(now),
   };
@@ -304,7 +320,7 @@ async function writeCleanupAudit(db, entry) {
   await batch.commit();
 }
 
-async function runCleanup(db, policy, triggeredBy, now = Date.now()) {
+async function runCleanup(db, policy, triggeredBy, now = Date.now(), { allowHistoryMetadataDeletion = false } = {}) {
   const startedAt = Date.now();
   const targets = await collectMaintenanceTargets(db, policy, now);
   const preview = summarizeTargets(targets);
@@ -339,6 +355,9 @@ async function runCleanup(db, policy, triggeredBy, now = Date.now()) {
       previewClears.add(conversationRef.path);
       operations.push({ type: 'update', ref: conversationRef, data: { lastMessagePreview: '', lastMessageAt: null, retentionPreviewClearedAt: archivedAt } });
     }
+  }
+  if (allowHistoryMetadataDeletion === true) {
+    for (const doc of targets.chatHistoryMetadataEligible) operations.push({ type: 'delete', ref: doc.ref });
   }
   for (const doc of targets.reportEvidenceToPurge) {
     operations.push({ type: 'update', ref: doc.ref, data: { evidenceSnapshot: [], retentionHold: false, evidencePurgedAt: archivedAt, updatedAt: archivedAt } });
@@ -376,6 +395,7 @@ async function runCleanup(db, policy, triggeredBy, now = Date.now()) {
       verificationSessions: targets.emailOtpVerifications.length + targets.passwordResetSessions.length,
       rateLimitRecords: targets.authRateLimits.length + targets.registrationOtpRateLimits.length + targets.passwordResetRateLimits.length,
       chatMessages: targets.chatMessagesToDelete.length,
+      archivedHistoryMetadata: allowHistoryMetadataDeletion ? targets.chatHistoryMetadataEligible.length : 0,
     },
     reportEvidencePurged: targets.reportEvidenceToPurge.length,
     restrictionProjectionsCleaned: targets.expiredRestrictionProjections.length,

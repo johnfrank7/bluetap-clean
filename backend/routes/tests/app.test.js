@@ -1,17 +1,20 @@
 const assert = require('node:assert/strict');
 const { readFileSync } = require('node:fs');
+const { createServer } = require('node:http');
 const { resolve } = require('node:path');
 const { test } = require('node:test');
 
-const { createAppServer } = require('../../app');
+const { createAppServer, createRequestListener } = require('../../app');
 const { routes } = require('..');
 const { getClientIp } = require('../../utils/request');
 
 const EXPECTED_ROUTES = [
   '/api/admin/accounts',
   '/api/admin/branches',
+  '/api/admin/bundle-promotion-drafts',
   '/api/admin/chat-review',
   '/api/admin/dashboard/overview',
+  '/api/admin/delivery-appeals',
   '/api/admin/dispatch-override',
   '/api/admin/distributors',
   '/api/admin/managers',
@@ -39,8 +42,10 @@ const EXPECTED_ROUTES = [
   '/api/chat/messages',
   '/api/chat/read-state',
   '/api/chat/reports',
+  '/api/distributor/delivery-reviews',
   '/api/distributor/orders',
   '/api/manager/context',
+  '/api/manager/delivery-reviews',
   '/api/manager/dispatch-orders',
   '/api/manager/moderation',
   '/api/manager/outside-radius-orders',
@@ -49,6 +54,8 @@ const EXPECTED_ROUTES = [
   '/api/moderation/notices',
   '/api/orders/details',
   '/api/requester/catalog',
+  '/api/requester/delivery-appeals',
+  '/api/requester/delivery-reports',
   '/api/requester/orders',
   '/api/verification/face-service-status',
   '/api/verification/registration-face',
@@ -108,8 +115,10 @@ test('health endpoint is lightweight and unknown paths return JSON 404', async (
 
 test('Render routes accept configured origins and reject unlisted production origins', async () => {
   const previousNodeEnv = process.env.NODE_ENV;
+  const previousAppEnv = process.env.APP_ENV;
   const previousAllowedOrigins = process.env.ALLOWED_ORIGINS;
   process.env.NODE_ENV = 'production';
+  process.env.APP_ENV = 'production';
   process.env.ALLOWED_ORIGINS = 'https://bluetap.example';
   try {
     await withServer(async (baseUrl) => {
@@ -128,18 +137,77 @@ test('Render routes accept configured origins and reject unlisted production ori
       assert.equal(productionWeb.status, 204);
       assert.equal(productionWeb.headers.get('access-control-allow-origin'), 'https://bluetap-beta.vercel.app');
 
+      const productionActual = await fetch(`${baseUrl}/health`, {
+        headers: { Origin: 'https://bluetap-beta.vercel.app' },
+      });
+      assert.equal(productionActual.status, 200);
+      assert.equal(productionActual.headers.get('access-control-allow-origin'), 'https://bluetap-beta.vercel.app');
+
       const denied = await fetch(`${baseUrl}/api/auth/check-username`, {
         method: 'OPTIONS',
         headers: { Origin: 'https://unexpected.example' },
       });
       assert.equal(denied.status, 403);
       assert.equal((await denied.json()).error.reason, 'origin-not-allowed');
+      const deniedActual = await fetch(`${baseUrl}/health`, {
+        headers: { Origin: 'https://unexpected.example' },
+      });
+      assert.equal(deniedActual.status, 403);
+      assert.equal(deniedActual.headers.get('access-control-allow-origin'), null);
     });
   } finally {
     if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
     else process.env.NODE_ENV = previousNodeEnv;
+    if (previousAppEnv === undefined) delete process.env.APP_ENV;
+    else process.env.APP_ENV = previousAppEnv;
     if (previousAllowedOrigins === undefined) delete process.env.ALLOWED_ORIGINS;
     else process.env.ALLOWED_ORIGINS = previousAllowedOrigins;
+  }
+});
+
+test('staging CORS admits only its configured web origin for preflight and actual requests', async () => {
+  const keys = ['APP_ENV', 'NODE_ENV', 'ALLOWED_ORIGINS'];
+  const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+  const staging = 'https://bluetap-staging-web.vercel.app';
+  const production = 'https://bluetap-beta.vercel.app';
+  process.env.APP_ENV = 'staging';
+  process.env.NODE_ENV = 'production';
+  process.env.ALLOWED_ORIGINS = `${staging},${production},https://unexpected.example`;
+  const server = createServer(createRequestListener());
+  try {
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const url = `http://127.0.0.1:${server.address().port}/health`;
+    const request = (method, origin, forwardedHost) => fetch(url, {
+      method,
+      headers: {
+        Origin: origin,
+        ...(method === 'OPTIONS' ? { 'Access-Control-Request-Method': 'GET' } : {}),
+        ...(forwardedHost ? { 'X-Forwarded-Host': forwardedHost } : {}),
+      },
+    });
+
+    for (const method of ['OPTIONS', 'GET']) {
+      const allowed = await request(method, staging);
+      assert.equal(allowed.status, method === 'OPTIONS' ? 204 : 200);
+      assert.equal(allowed.headers.get('access-control-allow-origin'), staging);
+      for (const origin of [production, 'https://unexpected.example']) {
+        const denied = await request(method, origin, origin === production ? 'bluetap-beta.vercel.app' : undefined);
+        assert.equal(denied.status, 403);
+        assert.equal(denied.headers.get('access-control-allow-origin'), null);
+        assert.equal((await denied.json()).error.reason, 'origin-not-allowed');
+      }
+    }
+
+    assert.equal((await fetch(url)).status, 200);
+    process.env.ALLOWED_ORIGINS = '';
+    assert.equal((await request('OPTIONS', staging)).status, 403);
+    process.env.ALLOWED_ORIGINS = `${staging}/invalid-path`;
+    assert.equal((await request('GET', staging)).status, 403);
+  } finally {
+    if (server.listening) await new Promise((resolve) => server.close(resolve));
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
   }
 });
 

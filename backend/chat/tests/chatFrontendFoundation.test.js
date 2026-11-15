@@ -24,6 +24,15 @@ test('user and Manager branch unread totals use logical principal state', () => 
   assert.equal(model.formatBadge(100), '99+');
 });
 
+test('an archived conversation reappearing does not replay its old notification', () => {
+  const provider = read('components/chat/ChatDataProvider.jsx');
+  assert.match(provider, /if \(!previouslySeen\) summaryIncomingSeqsRef\.current\.set\(c\.id, incomingSeq\)/);
+  assert.equal(model.shouldNotifyIncomingSummary(false, 0, 8, false), false);
+  assert.equal(model.shouldNotifyIncomingSummary(true, 8, 8, false), false);
+  assert.equal(model.shouldNotifyIncomingSummary(true, 8, 9, true), false);
+  assert.equal(model.shouldNotifyIncomingSummary(true, 8, 9, false), true);
+});
+
 test('receipt semantics move from pending to sent to seen', () => {
   const conversation = { participantState: [
     { principalType: 'user', principalId: 'requester-a', lastReadSeq: 8 },
@@ -91,7 +100,8 @@ test('one visible open thread listener is bounded to forty and cleaned up on cha
   assert.match(realtime, /CHAT_REALTIME_MESSAGE_LIMIT = 40/);
   assert.match(realtime, /orderBy\('seq', 'desc'\)[\s\S]*limit\(CHAT_REALTIME_MESSAGE_LIMIT\)/);
   assert.match(provider, /threadUnsubscribeRef\.current\?\.\(\)/);
-  assert.match(provider, /if \(!panelOpen \|\| !currentConversation\?\.id \|\| accessReadiness !== 'ready' \|\| !availability.readable\) return undefined/);
+  assert.match(provider, /if \(!panelOpen \|\| !currentConversation\?\.id \|\| accessReadiness !== 'ready' \|\| !availability.readable \|\| currentConversation.historyId \|\| currentConversation.type === 'requester_branch'\) return undefined/);
+  assert.match(provider, /loadMessageHistory\(\{ conversationId: currentConversation.id, historyId: currentConversation.historyId, limit: 40 \}\)/);
   assert.match(provider, /threadVersion/);
 });
 
@@ -151,7 +161,7 @@ test('conversation resolution clears stale thread state and localizes resolve er
 
 test('read state advances only after a visible thread presents incoming messages', () => {
   const provider = read('components/chat/ChatDataProvider.jsx');
-  assert.match(provider, /if \(!panelOpen \|\| !currentConversation\?\.id \|\| messages\.length === 0 \|\| accessReadiness !== 'ready' \|\| !availability\.readable\)/);
+  assert.match(provider, /if \(!panelOpen \|\| !currentConversation\?\.id \|\| currentConversation.historyId \|\| messages\.length === 0 \|\| accessReadiness !== 'ready' \|\| !availability\.readable\)/);
   assert.match(provider, /incoming = messages\.filter/);
   assert.match(provider, /markRead\(\{ conversationId: currentConversation\.id, lastReadSeq: newestIncomingSeq \}\)/);
 });
@@ -222,8 +232,10 @@ test('message bubbles keep incoming and outgoing alignment with semantic theme s
   assert.match(source, /onFocus/);
   assert.match(source, /delayLongPress=\{500\}/);
   assert.match(source, /More message actions/);
-  assert.match(source, /event\.key === 'Escape'/);
-  assert.match(source, /\\u2022\\u2022\\u2022/);
+  assert.match(source, /\\u22EE/);
+  const conversation = read('components/chat/ChatConversationView.jsx');
+  assert.match(conversation, /event\.key === 'Escape'/);
+  assert.match(conversation, /document\.addEventListener\('pointerdown', closeOutside\)/);
 });
 
 test('desktop message action visibility survives focus and an open menu while mouse leave hides a closed trigger', () => {
@@ -238,10 +250,42 @@ test('message action presentation keeps fine-pointer hover, touch long-press, an
   const conversation = read('components/chat/ChatConversationView.jsx');
   assert.match(bubble, /const useActionSheet = Platform\.OS !== 'web' \|\| !finePointer/);
   assert.match(bubble, /onLongPress=\{useActionSheet && hasOptions/);
-  assert.match(bubble, /\{own && desktopControl\}[\s\S]*styles\.bubble[\s\S]*\{!own && desktopControl\}/);
-  assert.match(bubble, /pointerEvents=\{buttonVisible \? 'auto' : 'none'\}/);
+  assert.match(bubble, /\{own && actionControl\}[\s\S]*styles\.bubble[\s\S]*\{!own && actionControl\}/);
+  assert.match(bubble, /onToggleDesktopMenu\?\.\(\{ message, actions, own, anchorRef: buttonRef, onChoose: chooseAction \}\)/);
+  assert.match(bubble, /style=\{\[styles\.menuButton, !useActionSheet && !buttonVisible && styles\.menuButtonHidden\]\}/);
+  assert.match(conversation, /desktopMenuOpen=\{activeMessageMenu\?\.id === message\.id\}/);
+  assert.match(conversation, /onToggleDesktopMenu=\{toggleDesktopMessageMenu\}/);
+  assert.match(conversation, /style=\{styles\.messageMenuLayer\}/);
   assert.match(conversation, /\['requester', 'distributor'\]\.includes\(role\) && currentConversation\?\.type === 'requester_distributor'/);
   assert.match(conversation, /onReport=\{reportingAllowed \? \(item\) => setReportTarget/);
+});
+
+test('desktop message menus stay within the chat viewport and open above low anchors', () => {
+  const viewport = { x: 40, y: 80, width: 350, height: 400 };
+  const root = { x: 30, y: 40 };
+  const low = model.positionMessageMenu({ anchor: { x: 350, y: 430, width: 36, height: 40 }, viewport, root, own: true, actionCount: 3 });
+  assert.equal(low.width, 152);
+  assert.ok(low.left >= viewport.x - root.x + 8);
+  assert.ok(low.left + low.width <= viewport.x - root.x + viewport.width - 8);
+  assert.ok(low.top + root.y < 430);
+  assert.ok(low.top + root.y >= viewport.y + 8);
+  const high = model.positionMessageMenu({ anchor: { x: 45, y: 92, width: 36, height: 40 }, viewport, root, actionCount: 2 });
+  assert.ok(high.top + root.y >= 132);
+  assert.ok(high.top + root.y + 96 <= viewport.y + viewport.height - 8);
+  const narrow = model.positionMessageMenu({ anchor: { x: 10, y: 80, width: 36, height: 40 }, viewport: { x: 0, y: 0, width: 190, height: 240 }, root: { x: 0, y: 0 }, actionCount: 3 });
+  assert.ok(narrow.left >= 8);
+  assert.ok(narrow.left + narrow.width <= 182);
+});
+
+test('menu placement does not resize the message list or alter its scroll position', () => {
+  const conversation = read('components/chat/ChatConversationView.jsx');
+  const bubble = read('components/chat/ChatMessageBubble.jsx');
+  assert.match(conversation, /<View pointerEvents="box-none" style=\{styles\.messageMenuLayer\}>/);
+  assert.match(conversation, /messageMenuLayer: \{ \.\.\.StyleSheet\.absoluteFillObject/);
+  assert.match(conversation, /if \(activeMessageMenu\) closeMessageMenu\(\)/);
+  assert.match(conversation, /if \(messages\.length !== prevLen && activeMessageMenu\) closeMessageMenu\(\)/);
+  assert.match(conversation, /menuRequestRef\.current \+= 1/);
+  assert.doesNotMatch(bubble, /position: 'absolute', top: 32, minWidth: 144/);
 });
 
 test('message action controls preserve compact metadata and receipts', () => {
@@ -316,7 +360,7 @@ test('desktop and mobile messenger presentations remain overlay based', () => {
 test('older history uses one bounded API page and merges without duplicate realtime listeners', () => {
   const provider = read('components/chat/ChatDataProvider.jsx');
   const api = read('services/chatApi.js');
-  assert.match(provider, /loadMessageHistory\(\{ conversationId: currentConversation\.id, beforeSeq, limit: 40 \}\)/);
+  assert.match(provider, /loadMessageHistory\(\{ conversationId: currentConversation\.id, historyId: currentConversation.historyId, beforeSeq, limit: 40 \}\)/);
   assert.match(provider, /setOlderMessages\(\(items\) => mergeMessages\(items, page\.messages \|\| \[\]\)\)/);
   assert.match(api, /beforeSeq/);
 });

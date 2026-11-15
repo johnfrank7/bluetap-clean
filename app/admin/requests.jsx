@@ -13,6 +13,9 @@ import {
   View,
 } from 'react-native';
 import AdminShell from '../../components/AdminShell';
+import SavedOrderPricing from '../../components/SavedOrderPricing';
+import DropdownChevron from '../../components/DropdownChevron';
+import DropdownMenuOverlay from '../../components/DropdownMenuOverlay';
 import { useAdminTheme } from '../../components/AdminTheme';
 import { TableSkeleton } from '../../components/AdminSkeleton';
 import { useAdminRealtimeData } from '../../components/AdminDataProvider';
@@ -52,6 +55,8 @@ const ISSUE_STATUSES = new Set([
 ]);
 
 const OVERRIDE_ELIGIBLE_STATUSES = new Set(['awaiting_distributor_assignment', 'distributor_assigned', 'accepted', 'scheduled', 'delivery_failed']);
+const orderContactPhone = (order) => order?.contactNumberSnapshot || order?.deliveryPhoneSnapshot || order?.contact_number || order?.contactNumber || order?.requesterContactNumber || order?.requesterContact || '';
+const orderDistributorName = (order) => order?.assignedDistributorNameSnapshot || order?.distributor_name || order?.assignedDistributorName || order?.distributorNameSnapshot || order?.distributorName || '';
 const PAGE_SIZE = 10;
 const SORT_OPTIONS = [
   { id: 'newest', label: 'Newest first' },
@@ -84,6 +89,18 @@ function RequestsFilterWebStyles({ colors }) {
           background-color: ${colors.primarySoft};
           border-color: ${colors.primary};
         }
+        button[data-admin-requests-details="true"] {
+          background-color: ${primary} !important;
+          border-color: ${primary} !important;
+        }
+        button[data-admin-requests-details="true"]:hover,
+        button[data-admin-requests-details="true"]:focus-visible {
+          background-color: ${primaryStrong} !important;
+          border-color: ${primaryStrong} !important;
+        }
+        button[data-admin-requests-details="true"] > div {
+          color: ${colors.onPrimary} !important;
+        }
       `,
     },
   });
@@ -93,30 +110,6 @@ const formatAmount = (val) => {
   if (val === undefined || val === null || val === '') return '₱0.00';
   const num = Number(val);
   return isNaN(num) || !Number.isFinite(num) ? 'Unavailable' : `₱${num.toFixed(2)}`;
-};
-
-const formatPriceOrUnavailable = (val) => {
-  if (val === undefined || val === null || val === '') return 'Unavailable';
-  const num = Number(val);
-  return isNaN(num) || !Number.isFinite(num) ? 'Unavailable' : `₱${num.toFixed(2)}`;
-};
-
-const normalizeOrderItem = (item = {}) => {
-  const quantity = Number(item.quantity) || 1;
-  const unitPrice = item.unitPriceAtOrder !== undefined && item.unitPriceAtOrder !== null
-    ? Number(item.unitPriceAtOrder)
-    : (item.unitPrice !== undefined && item.unitPrice !== null ? Number(item.unitPrice) : null);
-  const total = item.totalAtOrder !== undefined && item.totalAtOrder !== null
-    ? Number(item.totalAtOrder)
-    : (item.subtotal !== undefined && item.subtotal !== null
-      ? Number(item.subtotal)
-      : (unitPrice !== null ? unitPrice * quantity : null));
-  return {
-    name: item.productNameSnapshot || item.productName || item.name || 'Product',
-    quantity,
-    unitPrice,
-    total,
-  };
 };
 
 const formatDate = (val) => {
@@ -177,6 +170,7 @@ export default function AdminRequestsPage() {
   const [debouncedQuery, setDebouncedQuery] = useState('');
   const [sortBy, setSortBy] = useState('newest');
   const [sortOpen, setSortOpen] = useState(false);
+  const sortTriggerRef = React.useRef(null);
   const [page, setPage] = useState(1);
   const [hoveredOrderId, setHoveredOrderId] = useState(null);
   const [searchFocused, setSearchFocused] = useState(false);
@@ -320,6 +314,14 @@ export default function AdminRequestsPage() {
     };
   }, [requests]);
 
+  const statusOptions = [
+    { id: 'all', label: 'All Orders', count: counts.total, accent: colors.primary, soft: colors.primarySoft, valueColor: colors.textPrimary },
+    { id: 'actionable', label: 'Pending Review', count: counts.actionable, accent: colors.warning, soft: colors.warningSoft, valueColor: counts.actionable > 0 ? colors.warning : colors.textPrimary },
+    { id: 'active', label: 'In Progress', count: counts.active, accent: colors.primary, soft: colors.primarySoft, valueColor: colors.primary },
+    { id: 'delivered', label: 'Delivered', count: counts.delivered, accent: colors.success, soft: colors.successSoft, valueColor: colors.success },
+    { id: 'issues', label: 'Issues & Cancelled', count: counts.issues, accent: colors.danger, soft: colors.dangerSoft, valueColor: colors.danger },
+  ];
+
   const branchCounts = useMemo(() => {
     const result = new Map();
     requests.forEach((order) => {
@@ -346,10 +348,10 @@ export default function AdminRequestsPage() {
       if (debouncedQuery) {
         const customerName = (r.requesterNameSnapshot || r.requesterName || r.customerName || '').toLowerCase();
         const requestId = (r.requestId || r.id || '').toLowerCase();
-        const phone = (r.deliveryPhoneSnapshot || r.contactNumber || '').toLowerCase();
+        const phone = orderContactPhone(r).toLowerCase();
         const address = (r.deliveryAddressSnapshot || r.address || r.deliveryAddress || '').toLowerCase();
         const branchName = (r.branchNameSnapshot || r.branchName || '').toLowerCase();
-        const distributor = (r.distributorNameSnapshot || r.distributorName || '').toLowerCase();
+        const distributor = orderDistributorName(r).toLowerCase();
 
         const match =
           customerName.includes(debouncedQuery) ||
@@ -448,37 +450,26 @@ export default function AdminRequestsPage() {
       <RequestsFilterWebStyles colors={colors} />
       {/* Metrics Summary Row */}
       <View style={styles.metricsRow}>
-        <View style={styles.metricCard}>
-          <Text style={styles.metricValue}>{counts.total}</Text>
-          <Text style={styles.metricLabel}>Total Orders</Text>
-        </View>
-        <View style={[styles.metricCard, counts.actionable > 0 && { borderColor: colors.warning }]}>
-          <Text style={[styles.metricValue, counts.actionable > 0 && { color: colors.warning }]}>
-            {counts.actionable}
-          </Text>
-          <Text style={styles.metricLabel}>Pending Review</Text>
-        </View>
-        <View style={styles.metricCard}>
-          <Text style={[styles.metricValue, { color: colors.primary }]}>{counts.active}</Text>
-          <Text style={styles.metricLabel}>In Progress</Text>
-        </View>
-        <View style={styles.metricCard}>
-          <Text style={[styles.metricValue, { color: colors.success }]}>{counts.delivered}</Text>
-          <Text style={styles.metricLabel}>Delivered</Text>
-        </View>
+        {statusOptions.map((metric) => {
+          const selected = statusFilter === metric.id;
+          return (
+            <View
+              key={metric.id}
+              dataSet={{ adminRequestsMetricSelected: selected ? 'true' : 'false' }}
+              style={[styles.metricCard, viewportWidth < 360 && styles.metricCardNarrow, selected && styles.metricCardSelected, selected && { borderColor: metric.accent, backgroundColor: metric.soft }]}
+            >
+              <Text style={[styles.metricValue, { color: metric.valueColor }]}>{metric.count}</Text>
+              <Text style={[styles.metricLabel, selected && styles.metricLabelSelected]}>{metric.label}</Text>
+            </View>
+          );
+        })}
       </View>
 
       {/* Main Filter & List Container */}
       <View style={styles.card}>
         {/* Status Tabs */}
         <View style={styles.tabsRow}>
-          {[
-            { id: 'all', label: 'All Orders', count: counts.total },
-            { id: 'actionable', label: 'Pending Review', count: counts.actionable },
-            { id: 'active', label: 'In Progress', count: counts.active },
-            { id: 'delivered', label: 'Delivered', count: counts.delivered },
-            { id: 'issues', label: 'Issues & Cancelled', count: counts.issues },
-          ].map((tab) => {
+          {statusOptions.map((tab) => {
             const selected = statusFilter === tab.id;
             return (
               <Pressable
@@ -587,6 +578,7 @@ export default function AdminRequestsPage() {
 
             <View style={styles.sortWrap}>
               <Pressable
+                ref={sortTriggerRef}
                 accessibilityRole="button"
                 accessibilityLabel={`Sort orders. Current selection: ${SORT_OPTIONS.find((option) => option.id === sortBy)?.label}`}
                 accessibilityState={{ expanded: sortOpen }}
@@ -594,9 +586,17 @@ export default function AdminRequestsPage() {
                 style={({ hovered, focused, pressed }) => [styles.sortButton, (hovered || focused || pressed) && styles.controlButtonInteractive]}
               >
                 <Text style={styles.sortButtonLabel}>SORT</Text>
-                <Text style={styles.sortButtonValue}>{SORT_OPTIONS.find((option) => option.id === sortBy)?.label} {sortOpen ? '▴' : '▾'}</Text>
+                <View style={styles.sortButtonValueWrap}><Text style={styles.sortButtonValue}>{SORT_OPTIONS.find((option) => option.id === sortBy)?.label}</Text><DropdownChevron expanded={sortOpen} size={14} color={colors.iconSecondary || colors.primary} /></View>
               </Pressable>
-              {sortOpen && (
+              <DropdownMenuOverlay
+                visible={sortOpen}
+                anchorRef={sortTriggerRef}
+                onDismiss={() => setSortOpen(false)}
+                accessibilityLabel="Close order sort options"
+                minWidth={190}
+                maxWidth={260}
+                maxHeight={280}
+              >
                 <View style={styles.sortMenu}>
                   {SORT_OPTIONS.map((option) => {
                     const selected = option.id === sortBy;
@@ -618,7 +618,7 @@ export default function AdminRequestsPage() {
                     );
                   })}
                 </View>
-              )}
+              </DropdownMenuOverlay>
             </View>
           </View>
         </View>
@@ -666,7 +666,7 @@ export default function AdminRequestsPage() {
               const branchDisplay = order.branchNameSnapshot || order.branchName || order.currentBranchId || 'Unassigned';
               const requesterDisplay = order.requesterNameSnapshot || order.requesterName || order.customerName || 'Customer';
               const orderId = order.requestId || order.id;
-              const rawPhone = order.deliveryPhoneSnapshot || order.contactNumber;
+              const rawPhone = orderContactPhone(order);
               const phoneDisplay = rawPhone ? formatPhilippinePhone(rawPhone) : 'Contact not provided';
 
               return (
@@ -711,7 +711,7 @@ export default function AdminRequestsPage() {
                     <View style={[styles.gridColumn, orderColumnStyle]}>
                       <Text style={styles.fieldLabel}>Dispatch & Schedule</Text>
                       <Text style={styles.fieldValuePrimary}>
-                        {order.distributorNameSnapshot || order.distributorName || 'Not assigned'}
+                        {orderDistributorName(order) || 'Not assigned'}
                       </Text>
                       <Text style={styles.fieldValueSecondary}>
                         {order.scheduledAt
@@ -730,12 +730,11 @@ export default function AdminRequestsPage() {
                     <Pressable
                       accessibilityRole="button"
                       accessibilityLabel={`View details for order ${orderId}`}
+                      dataSet={{ adminRequestsDetails: 'true' }}
                       onPress={() => setSelectedOrder(order)}
                       style={({ hovered, focused, pressed }) => [styles.detailsBtn, (hovered || focused) && styles.detailsBtnHover, pressed && styles.detailsBtnPressed]}
                     >
-                      {({ hovered, focused }) => (
-                        <Text style={[styles.detailsBtnText, (hovered || focused) && styles.detailsBtnTextActive]}>View Details</Text>
-                      )}
+                      <Text style={styles.detailsBtnText}>View Details</Text>
                     </Pressable>
                   </View>
                 </View>
@@ -761,6 +760,7 @@ export default function AdminRequestsPage() {
                   accessibilityRole="button"
                   accessibilityLabel={`Page ${item}`}
                   accessibilityState={{ selected: visiblePage === item }}
+                  dataSet={{ bluetapPaginationState: visiblePage === item ? 'selected' : 'idle' }}
                   onPress={() => setPage(item)}
                   style={({ hovered, focused, pressed }) => [styles.pageButton, visiblePage === item && styles.pageButtonActive, visiblePage !== item && (hovered || focused || pressed) && styles.pageButtonInteractive]}
                 >
@@ -848,7 +848,7 @@ export default function AdminRequestsPage() {
                   <View style={styles.modalGridItem}>
                     <Text style={styles.modalLabel}>Contact Phone</Text>
                     <Text style={styles.modalValue}>
-                      {formatPhilippinePhone(selectedOrder?.deliveryPhoneSnapshot || selectedOrder?.contactNumber) || 'Not provided'}
+                      {formatPhilippinePhone(orderContactPhone(selectedOrder)) || 'Not provided'}
                     </Text>
                   </View>
                   <View style={styles.modalGridItemFull}>
@@ -890,7 +890,7 @@ export default function AdminRequestsPage() {
                   <View style={styles.modalGridItem}>
                     <Text style={styles.modalLabel}>Assigned Distributor</Text>
                     <Text style={styles.modalValue}>
-                      {selectedOrder?.distributorNameSnapshot || selectedOrder?.distributorName || 'Not assigned'}
+                      {orderDistributorName(selectedOrder) || 'Not assigned'}
                     </Text>
                   </View>
                   <View style={styles.modalGridItem}>
@@ -907,45 +907,7 @@ export default function AdminRequestsPage() {
               {/* Ordered Items Table */}
               <View style={styles.modalSection}>
                 <Text style={styles.modalSectionTitle}>Ordered Items & Charges</Text>
-                {Array.isArray(selectedOrder?.items) && selectedOrder.items.length > 0 ? (
-                  selectedOrder.items.map((rawItem, idx) => {
-                    const item = normalizeOrderItem(rawItem);
-                    return (
-                      <View key={idx} style={styles.itemRow}>
-                        <View style={{ flex: 1 }}>
-                          <Text style={styles.itemName}>
-                            {item.name}
-                          </Text>
-                          <Text style={styles.itemSub}>
-                            {formatPriceOrUnavailable(item.unitPrice)} × {item.quantity}
-                          </Text>
-                        </View>
-                        <Text style={styles.itemTotal}>
-                          {formatPriceOrUnavailable(item.total)}
-                        </Text>
-                      </View>
-                    );
-                  })
-                ) : (
-                  <View style={styles.itemRow}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.itemName}>
-                        {selectedOrder?.productNameSnapshot || selectedOrder?.product || 'Standard Product'}
-                      </Text>
-                      <Text style={styles.itemSub}>Qty: {selectedOrder?.quantity || 1}</Text>
-                    </View>
-                    <Text style={styles.itemTotal}>
-                      {formatAmount(selectedOrder?.totalAtOrder || selectedOrder?.totalAmount)}
-                    </Text>
-                  </View>
-                )}
-
-                <View style={styles.totalRow}>
-                  <Text style={styles.totalLabel}>Total Authoritative Amount</Text>
-                  <Text style={styles.totalValue}>
-                    {formatAmount(selectedOrder?.totalAtOrder || selectedOrder?.totalAmount)}
-                  </Text>
-                </View>
+                <SavedOrderPricing order={selectedOrder} colors={colors} />
               </View>
 
               {/* Container & Notes */}
@@ -1124,7 +1086,7 @@ export default function AdminRequestsPage() {
                         style={styles.overrideCombobox}
                       >
                         <Text style={styles.overrideComboboxText}>{selectedOverrideName ? `${selectedOverrideName.name}${selectedOverrideName.publicUid ? ` · ${selectedOverrideName.publicUid}` : ''}` : 'Choose a distributor'}</Text>
-                        <Text style={styles.overrideComboboxIcon}>{overrideDistributorOpen ? '▲' : '▼'}</Text>
+                        <DropdownChevron expanded={overrideDistributorOpen} size={16} color={colors.iconSecondary || colors.primary} />
                       </Pressable>
                       {overrideDistributorOpen && (
                         <View style={styles.overrideOptions}>
@@ -1240,12 +1202,15 @@ const createStyles = (colors, isMobile = false) =>
     metricCard: {
       flex: 1,
       minWidth: 160,
+      maxWidth: 240,
       backgroundColor: colors.surface,
       borderRadius: 14,
       borderWidth: 1,
       borderColor: colors.border,
       padding: 16,
     },
+    metricCardSelected: { borderWidth: 2 },
+    metricCardNarrow: { maxWidth: '100%' },
     metricValue: {
       fontSize: 26,
       fontWeight: '900',
@@ -1257,6 +1222,7 @@ const createStyles = (colors, isMobile = false) =>
       color: colors.textSecondary,
       marginTop: 4,
     },
+    metricLabelSelected: { color: colors.textPrimary, fontWeight: '800' },
     card: {
       backgroundColor: colors.surface,
       borderRadius: 16,
@@ -1410,9 +1376,9 @@ const createStyles = (colors, isMobile = false) =>
     },
     controlButtonInteractive: { borderColor: colors.primary, backgroundColor: colors.primarySoft },
     sortButtonLabel: { color: colors.textSecondary, fontSize: 9, fontWeight: '900', letterSpacing: 0.5 },
-    sortButtonValue: { color: colors.textPrimary, fontSize: 12, fontWeight: '800', marginTop: 1 },
+    sortButtonValueWrap: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 1 },
+    sortButtonValue: { color: colors.textPrimary, fontSize: 12, fontWeight: '800' },
     sortMenu: {
-      marginTop: 6,
       borderWidth: 1,
       borderColor: colors.border,
       borderRadius: 10,
@@ -1593,20 +1559,19 @@ const createStyles = (colors, isMobile = false) =>
       paddingVertical: 7,
       borderRadius: 8,
       borderWidth: 1,
-      borderColor: colors.primary,
-      backgroundColor: colors.primarySoft,
-      minHeight: 34,
+      borderColor: colors.primaryAction,
+      backgroundColor: colors.primaryAction,
+      minHeight: 44,
       justifyContent: 'center',
       ...Platform.select({ web: { transitionDuration: '140ms', transitionProperty: 'background-color, transform, border-color' }, default: {} }),
     },
-    detailsBtnHover: { backgroundColor: colors.primaryAction, borderColor: colors.primaryAction },
+    detailsBtnHover: { backgroundColor: colors.primaryDeep || colors.primaryAction, borderColor: colors.primaryDeep || colors.primaryAction },
     detailsBtnPressed: { transform: [{ scale: 0.98 }] },
     detailsBtnText: {
-      color: colors.primary,
+      color: colors.onPrimary,
       fontWeight: '800',
       fontSize: 12,
     },
-    detailsBtnTextActive: { color: colors.onPrimary },
     paginationSection: {
       flexDirection: 'row',
       flexWrap: 'wrap',
@@ -1621,8 +1586,8 @@ const createStyles = (colors, isMobile = false) =>
     paginationSummary: { color: colors.textSecondary, fontSize: 12, fontWeight: '700' },
     paginationControls: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'flex-end', gap: 6 },
     pageButton: {
-      minWidth: 36,
-      minHeight: 36,
+      minWidth: 44,
+      minHeight: 44,
       paddingHorizontal: 9,
       alignItems: 'center',
       justifyContent: 'center',
@@ -1632,12 +1597,12 @@ const createStyles = (colors, isMobile = false) =>
       backgroundColor: colors.surfaceAlt,
     },
     pageNavButton: { minWidth: 76 },
-    pageButtonActive: { backgroundColor: colors.primaryAction || '#0B67AD', borderColor: colors.primaryAction || '#0B67AD' },
+    pageButtonActive: { backgroundColor: colors.primaryAction, borderColor: colors.primaryAction },
     pageButtonInteractive: { backgroundColor: colors.primarySoft, borderColor: colors.primary, transform: [{ translateY: -1 }] },
-    pageButtonDisabled: { backgroundColor: colors.neutral, borderColor: colors.border, opacity: 0.62 },
+    pageButtonDisabled: { backgroundColor: colors.neutral, borderColor: colors.border },
     pageButtonText: { color: colors.textPrimary, fontSize: 12, fontWeight: '800' },
-    pageButtonTextActive: { color: colors.onPrimary || '#FFFFFF', fontWeight: '900' },
-    pageButtonTextDisabled: { color: colors.textSecondary },
+    pageButtonTextActive: { color: colors.onPrimary, fontWeight: '900' },
+    pageButtonTextDisabled: { color: colors.disabledText },
     pageEllipsis: { color: colors.textSecondary, minWidth: 18, textAlign: 'center', fontWeight: '800' },
     modalBackdrop: {
       flex: 1,
@@ -2084,10 +2049,6 @@ const createStyles = (colors, isMobile = false) =>
       fontWeight: '800',
       flex: 1,
       paddingRight: 10,
-    },
-    overrideComboboxIcon: {
-      color: colors.textSecondary,
-      fontSize: 11,
     },
     overrideOptions: {
       backgroundColor: colors.surface,

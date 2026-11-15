@@ -70,7 +70,8 @@ const getApplicationStatus = (profile, defaultStatus = 'pending') =>
   normalizeApprovalStatus(
     profile?.approvalStatus || profile?.status || profile?.accountStatus || defaultStatus
   );
-const requiresEmailVerification = (profile) => profile?.emailVerificationRequired === true;
+const requiresEmailVerification = (profile) =>
+  profile?.emailVerificationRequired === true || profile?.accountSource === 'admin_created';
 const BASE_SCROLL_PADDING_BOTTOM = 20;
 const DEFAULT_KEYBOARD_GAP = 24;
 const PASSWORD_KEYBOARD_GAP = 112;
@@ -306,10 +307,16 @@ export default function LoginPage() {
   const finishSuccessfulLogin = (profile) => {
     const role = normalizeRole(profile?.role || profile);
 
+    const isSplitUnverifiedProfile =
+      profile?.emailOtpVerification?.status === 'reconciliation-failed' ||
+      profile?.emailOtpVerification?.profileSynced === false ||
+      (profile?.emailVerified === false && profile?.emailOtpVerification?.status !== 'not_required');
+
     if (
-      (role === 'requester' || role === 'distributor') &&
+      (role === 'manager' || role === 'requester' || role === 'distributor') &&
+      profile?.mustChangePassword !== true &&
       requiresEmailVerification(profile) &&
-      !auth.currentUser?.emailVerified
+      (!auth.currentUser?.emailVerified || isSplitUnverifiedProfile)
     ) {
       clearAllAuthSessions();
       setLoading(false);
@@ -788,7 +795,7 @@ export default function LoginPage() {
           <View style={styles.modalBackground}>
             <View style={styles.modalContainer}>
               <Text style={styles.modalTitle}>{recoveryStep === 'email' ? 'Reset your password' : recoveryStep === 'verify' ? 'Check your email' : recoveryStep === 'password' ? 'Create a new password' : 'Password changed'}</Text>
-              <Text style={styles.resetHelperText}>{recoveryStep === 'email' ? 'Enter the email linked to your BlueTap account.' : recoveryStep === 'verify' ? `We sent a verification code to ${recoveryMaskedEmail}.` : recoveryStep === 'password' ? 'Choose a new password with uppercase, lowercase, and a number.' : 'Your password was changed. Sign in with your new password.'}</Text>
+              <Text style={styles.resetHelperText}>{recoveryStep === 'email' ? 'Enter the email linked to your BlueTap account.' : recoveryStep === 'verify' ? `If this email has an eligible BlueTap account, check ${recoveryMaskedEmail} for a code. If none arrives, contact support.` : recoveryStep === 'password' ? 'Choose a new password with uppercase, lowercase, and a number.' : 'Your password was changed. Sign in with your new password.'}</Text>
               {recoveryStep === 'email' ? <TextInput style={[styles.resetInput, !!resetEmailError && styles.resetInputError]} placeholder="Email address" placeholderTextColor={colors.textSecondary} keyboardType="email-address" autoCapitalize="none" value={resetEmail} onChangeText={setResetEmail} /> : null}
               {recoveryStep === 'verify' ? <TextInput style={[styles.resetInput, !!resetEmailError && styles.resetInputError]} placeholder="6-digit code" placeholderTextColor={colors.textSecondary} keyboardType="number-pad" maxLength={6} value={recoveryCode} onChangeText={(value) => setRecoveryCode(value.replace(/\D/g, ''))} /> : null}
               {recoveryStep === 'password' ? <><View style={[styles.resetPasswordField, !!resetEmailError && styles.resetInputError]}><TextInput style={styles.resetPasswordInput} placeholder="New password" placeholderTextColor={colors.textSecondary} secureTextEntry={!showRecoveryPassword} value={recoveryPassword} onChangeText={setRecoveryPassword} /><PasswordVisibilityButton visible={showRecoveryPassword} onPress={() => setShowRecoveryPassword((value) => !value)} label="new password" /></View><View style={styles.resetPasswordField}><TextInput style={styles.resetPasswordInput} placeholder="Confirm new password" placeholderTextColor={colors.textSecondary} secureTextEntry={!showRecoveryConfirmation} value={recoveryPasswordConfirm} onChangeText={setRecoveryPasswordConfirm} /><PasswordVisibilityButton visible={showRecoveryConfirmation} onPress={() => setShowRecoveryConfirmation((value) => !value)} label="password confirmation" /></View></> : null}

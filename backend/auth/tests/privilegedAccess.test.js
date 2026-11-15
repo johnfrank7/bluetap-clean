@@ -67,7 +67,9 @@ test('required password change routes every account through a fresh role-based s
   const root = resolve(__dirname, '..', '..', '..');
   const passwordChangePage = readFileSync(resolve(root, 'app/required-password-change.jsx'), 'utf8');
   assert.match(passwordChangePage, /signInWithEmailAndPassword\(auth, accountEmail, password\)/);
-  assert.match(passwordChangePage, /router\.replace\(getPostAuthenticationDestination\(profile\)\)/);
+  assert.match(passwordChangePage, /const destination = getPostAuthenticationDestination\(profile\)/);
+  assert.match(passwordChangePage, /if \(destination !== '\/email-verification'\) saveRoleSession\(profile\)/);
+  assert.match(passwordChangePage, /router\.replace\(destination\)/);
   assert.match(passwordChangePage, /getRoleLoginPath\(completedRole\)/);
 });
 

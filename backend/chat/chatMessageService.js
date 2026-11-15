@@ -82,6 +82,7 @@ function normalizeParticipantState(state = {}) {
     unreadCount: Number.isSafeInteger(state.unreadCount) && state.unreadCount >= 0 ? state.unreadCount : 0,
     incomingCount: Number.isSafeInteger(state.incomingCount) && state.incomingCount >= 0 ? state.incomingCount : Number(state.unreadCount || 0),
     lastReadIncomingCount: Number.isSafeInteger(state.lastReadIncomingCount) && state.lastReadIncomingCount >= 0 ? state.lastReadIncomingCount : 0,
+    archivedIncomingCount: Number.isSafeInteger(state.archivedIncomingCount) && state.archivedIncomingCount >= 0 ? state.archivedIncomingCount : 0,
     accessState: ['active', 'read_only', 'closed'].includes(state.accessState) ? state.accessState : 'active',
   };
 }
@@ -112,7 +113,7 @@ function applyMessageToParticipantState(states, senderPrincipal, seq, now) {
       throw new OtpError(409, 'CHAT_STATE_INVALID', 'Conversation unread state cannot advance safely.');
     }
     const incomingCount = state.incomingCount + 1;
-    return { ...state, lastIncomingSeq: seq, incomingCount, unreadCount: incomingCount - state.lastReadIncomingCount };
+    return { ...state, lastIncomingSeq: seq, incomingCount, unreadCount: incomingCount - Math.max(state.lastReadIncomingCount, state.archivedIncomingCount) };
   });
   if (!senderFound) throw new OtpError(403, 'CHAT_NOT_AUTHORIZED', 'The sender is not a conversation participant.');
   return {
@@ -146,7 +147,7 @@ function advanceParticipantReadState(states, principal, lastReadSeq, principalIn
       lastReadSeq,
       lastReadAt: now,
       lastReadIncomingCount,
-      unreadCount: Math.max(0, state.incomingCount - lastReadIncomingCount),
+      unreadCount: Math.max(0, state.incomingCount - Math.max(lastReadIncomingCount, state.archivedIncomingCount)),
     };
   });
   if (!found) throw new OtpError(403, 'CHAT_NOT_AUTHORIZED', 'The reader is not a conversation participant.');

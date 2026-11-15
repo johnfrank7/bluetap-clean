@@ -20,6 +20,7 @@ const links = [['dashboard', 'Dashboard', '/admin/dashboard'], ['requests', 'Req
 const DESKTOP_WIDTH = 244;
 const COLLAPSED_WIDTH = 76;
 const DRAWER_WIDTH = 286;
+let cachedSidebarCollapsed = null;
 
 function Tooltip({ visible, label, colors }) { return visible ? <View pointerEvents="none" style={[styles.tooltip, { backgroundColor: colors.tooltip }]}><Text style={[styles.tooltipText, { color: colors.tooltipText }]}>{label}</Text></View> : null; }
 
@@ -41,23 +42,55 @@ function LogoutControl({ collapsed, onPress, colors }) {
   return <View style={styles.navItemWrap}><TouchableOpacity accessibilityRole="button" accessibilityLabel="Log out" accessibilityHint={collapsed ? 'Log out of BlueTap' : undefined} onFocus={() => setTooltip(true)} onBlur={() => setTooltip(false)} onHoverIn={() => setTooltip(true)} onHoverOut={() => setTooltip(false)} onPress={onPress} style={[styles.logout, collapsed && styles.logoutCollapsed, { borderTopColor: colors.sidebarBorder }]}><SidebarIcon name="LogOut" size={20} color={colors.onPrimary} />{!collapsed && <Text style={styles.logoutText}>Log out</Text>}</TouchableOpacity><Tooltip visible={collapsed && tooltip} label="Log out" colors={colors} /></View>;
 }
 
-function AdminShellLayout({ title, subtitle, children }) {
+function AdminShellLayout({ title, subtitle, children, contentScrollRef, onNavigate, overlay }) {
   const { replaceOnce } = useSingleFlightNavigation(); const pathname = usePathname(); const { width } = useWindowDimensions(); const { colors, resolvedTheme } = useAdminTheme(); const compact = width < 900;
-  const [collapsed, setCollapsed] = React.useState(false), [drawerOpen, setDrawerOpen] = React.useState(false), [confirmLogout, setConfirmLogout] = React.useState(false);
+  const [collapsed, setCollapsed] = React.useState(() => cachedSidebarCollapsed ?? false), [drawerOpen, setDrawerOpen] = React.useState(false), [confirmLogout, setConfirmLogout] = React.useState(false);
   const { actionableRequestsCount, pendingDistributorCount } = useAdminRealtimeData();
   const moderationCount = useModerationActivityBadge('admin');
-  const sidebarWidth = React.useRef(new Animated.Value(DESKTOP_WIDTH)).current, drawerProgress = React.useRef(new Animated.Value(0)).current;
+  const sidebarWidth = React.useRef(new Animated.Value(collapsed ? COLLAPSED_WIDTH : DESKTOP_WIDTH)).current, drawerProgress = React.useRef(new Animated.Value(0)).current;
   React.useEffect(() => { warmAdminBackend().catch(() => {}); }, []);
-  React.useEffect(() => { let active = true; AsyncStorage.getItem(ADMIN_SIDEBAR_STORAGE_KEY).then((value) => { if (active && value === 'true') setCollapsed(true); }).catch(() => {}); return () => { active = false; }; }, []);
-  React.useEffect(() => { Animated.timing(sidebarWidth, { toValue: collapsed ? COLLAPSED_WIDTH : DESKTOP_WIDTH, duration: 240, useNativeDriver: false }).start(); AsyncStorage.setItem(ADMIN_SIDEBAR_STORAGE_KEY, String(collapsed)).catch(() => {}); }, [collapsed, sidebarWidth]);
+  React.useEffect(() => {
+    let active = true;
+    if (cachedSidebarCollapsed !== null) return () => { active = false; };
+    AsyncStorage.getItem(ADMIN_SIDEBAR_STORAGE_KEY).then((value) => {
+      if (!active || cachedSidebarCollapsed !== null) return;
+      const savedPreference = value === 'true';
+      cachedSidebarCollapsed = savedPreference;
+      setCollapsed(savedPreference);
+    }).catch(() => {
+      if (active && cachedSidebarCollapsed === null) cachedSidebarCollapsed = false;
+    });
+    return () => { active = false; };
+  }, []);
+  React.useEffect(() => {
+    if (cachedSidebarCollapsed !== null) {
+      cachedSidebarCollapsed = collapsed;
+      AsyncStorage.setItem(ADMIN_SIDEBAR_STORAGE_KEY, String(collapsed)).catch(() => {});
+    }
+    Animated.timing(sidebarWidth, { toValue: collapsed ? COLLAPSED_WIDTH : DESKTOP_WIDTH, duration: 240, useNativeDriver: false }).start();
+  }, [collapsed, sidebarWidth]);
   React.useEffect(() => { if (!compact) setDrawerOpen(false); }, [compact]);
   React.useEffect(() => { Animated.timing(drawerProgress, { toValue: drawerOpen ? 1 : 0, duration: 240, useNativeDriver: false }).start(); }, [drawerOpen, drawerProgress]);
   React.useEffect(() => { if (!globalThis.addEventListener) return undefined; const onKeyDown = (event) => { if (event.key !== 'Escape') return; if (confirmLogout) setConfirmLogout(false); else if (drawerOpen) setDrawerOpen(false); }; globalThis.addEventListener('keydown', onKeyDown); return () => globalThis.removeEventListener?.('keydown', onKeyDown); }, [confirmLogout, drawerOpen]);
-  const toggleNavigation = () => compact ? setDrawerOpen((open) => !open) : setCollapsed((value) => !value);
-  const navigate = (path) => { replaceOnce(path); if (compact) setDrawerOpen(false); };
+  const toggleNavigation = () => {
+    if (compact) {
+      setDrawerOpen((open) => !open);
+      return;
+    }
+    const next = !collapsed;
+    cachedSidebarCollapsed = next;
+    setCollapsed(next);
+  };
+  const runNavigation = (action) => onNavigate ? onNavigate(action) : action();
+  const navigate = (path) => {
+    if (path === pathname) { if (compact) setDrawerOpen(false); return; }
+    if (compact) setDrawerOpen(false);
+    runNavigation(() => replaceOnce(path));
+  };
   const completeLogout = async () => { setConfirmLogout(false); await signOutAndClearSessions(); replaceOnce('/admin/login'); };
+  const attemptLogout = () => { setConfirmLogout(false); runNavigation(completeLogout); };
   const renderSidebar = (isCollapsed, mobile = false) => <Animated.View style={[styles.sidebar, mobile && styles.drawer, { width: mobile ? DRAWER_WIDTH : sidebarWidth, backgroundColor: colors.sidebar, borderRightColor: colors.sidebarBorder, transform: mobile ? [{ translateX: drawerProgress.interpolate({ inputRange: [0, 1], outputRange: [-DRAWER_WIDTH, 0] }) }] : undefined }]}><View style={[styles.brand, { borderBottomColor: colors.sidebarBorder }, isCollapsed && styles.brandCollapsed]}><Image source={require('../assets/icons/bluetapwhitelogo.png')} style={[styles.brandLogo, isCollapsed && styles.brandLogoCollapsed]} resizeMode="contain" />{!isCollapsed && <View><Text style={styles.brandName}>BlueTap</Text><Text style={styles.brandRole}>Administrator</Text></View>}</View><ScrollView style={styles.navigationScroll} contentContainerStyle={styles.navigation} showsVerticalScrollIndicator={false}>{links.map((item) => { const isReq = item[0] === 'requests'; const isDistributor = item[0] === 'distributors'; const isReports = item[0] === 'reports'; const isActive = pathname === item[2] || (isReq && (pathname === '/admin/requests' || pathname === '/admin/request')); return <NavItem key={item[2]} item={item} active={isActive} collapsed={isCollapsed} colors={colors} badgeCount={isReq ? actionableRequestsCount : isDistributor ? pendingDistributorCount : isReports ? moderationCount : undefined} onPrefetch={() => prefetchAdminDestination(item[2])} onPress={() => navigate(item[2])} />; })}</ScrollView><View style={styles.sidebarBottom}><ThemeSwitcher collapsed={isCollapsed} colors={colors} /><LogoutControl collapsed={isCollapsed} colors={colors} onPress={() => setConfirmLogout(true)} /></View></Animated.View>;
-  return <SafeAreaView style={[styles.root, { backgroundColor: colors.background }]}><StatusBar style={resolvedTheme === 'dark' ? 'light' : 'dark'} /><View style={styles.layout}>{!compact && renderSidebar(collapsed)}<View style={styles.main}><View style={[styles.header, compact && styles.compactHeader, { backgroundColor: colors.header, borderBottomColor: colors.border }]}><TouchableOpacity accessibilityRole="button" accessibilityLabel="Toggle navigation" onPress={toggleNavigation} style={[styles.menuButton, { backgroundColor: colors.primarySoft, borderColor: colors.border }]}><SidebarIcon name={compact ? (drawerOpen ? 'X' : 'Menu') : (collapsed ? 'Menu' : 'X')} color={colors.primary} size={20} /></TouchableOpacity><View style={styles.heading}><Text numberOfLines={1} style={[styles.title, { color: colors.textPrimary }]}>{title}</Text>{!!subtitle && <Text numberOfLines={2} style={[styles.subtitle, { color: colors.textSecondary }]}>{subtitle}</Text>}</View>{!compact && <View style={[styles.adminBadge, { backgroundColor: colors.primarySoft, borderColor: colors.border }]}><AdminIcon name="security" color={colors.primary} size={16} /><Text style={[styles.adminBadgeText, { color: colors.primary }]}>Admin</Text></View>}</View><ScrollView contentContainerStyle={[styles.content, compact && styles.compactContent]} keyboardShouldPersistTaps="handled"><PageEnterTransition axis="y" distance={8} duration={230} resetKey={pathname} style={styles.contentEntry}>{children}</PageEnterTransition></ScrollView></View>{compact && <>{drawerOpen && <Pressable accessibilityRole="button" accessibilityLabel="Close navigation" onPress={() => setDrawerOpen(false)} style={[styles.backdrop, { backgroundColor: colors.overlay }]} />}{renderSidebar(false, true)}</>}</View><Modal visible={confirmLogout} transparent animationType="fade" onRequestClose={() => setConfirmLogout(false)}><View style={[styles.modalBackdrop, { backgroundColor: colors.overlay }]}><View accessibilityViewIsModal style={[styles.modal, { backgroundColor: colors.surface, borderColor: colors.border }]}><View style={[styles.modalIcon, { backgroundColor: colors.dangerSoft }]}><AdminIcon name="logout" color={colors.danger} size={24} /></View><Text style={[styles.modalTitle, { color: colors.textPrimary }]}>Log out of BlueTap?</Text><Text style={[styles.modalBody, { color: colors.textSecondary }]}>You will need to sign in again to access Administrator tools.</Text><View style={styles.modalActions}><TouchableOpacity accessibilityRole="button" accessibilityLabel="Cancel logout" onPress={() => setConfirmLogout(false)} style={[styles.modalSecondary, { borderColor: colors.border, backgroundColor: colors.surfaceAlt }]}><Text style={[styles.modalSecondaryText, { color: colors.textPrimary }]}>Cancel</Text></TouchableOpacity><TouchableOpacity accessibilityRole="button" accessibilityLabel="Confirm logout" onPress={completeLogout} style={[styles.modalDanger, { backgroundColor: colors.danger }]}><Text style={styles.modalDangerText}>Log out</Text></TouchableOpacity></View></View></View></Modal></SafeAreaView>;
+  return <SafeAreaView style={[styles.root, { backgroundColor: colors.background }]}><StatusBar style={resolvedTheme === 'dark' ? 'light' : 'dark'} /><View style={styles.layout}>{!compact && renderSidebar(collapsed)}<View style={styles.main}><View style={[styles.header, compact && styles.compactHeader, { backgroundColor: colors.header, borderBottomColor: colors.border }]}><TouchableOpacity accessibilityRole="button" accessibilityLabel="Toggle navigation" onPress={toggleNavigation} style={[styles.menuButton, { backgroundColor: colors.primarySoft, borderColor: colors.border }]}><SidebarIcon name={compact ? (drawerOpen ? 'X' : 'Menu') : (collapsed ? 'Menu' : 'X')} color={colors.primary} size={20} /></TouchableOpacity><View style={styles.heading}><Text numberOfLines={1} style={[styles.title, { color: colors.textPrimary }]}>{title}</Text>{!!subtitle && <Text numberOfLines={2} style={[styles.subtitle, { color: colors.textSecondary }]}>{subtitle}</Text>}</View>{!compact && <View style={[styles.adminBadge, { backgroundColor: colors.primarySoft, borderColor: colors.border }]}><AdminIcon name="security" color={colors.primary} size={16} /><Text style={[styles.adminBadgeText, { color: colors.primary }]}>Admin</Text></View>}</View><ScrollView ref={contentScrollRef} contentContainerStyle={[styles.content, compact && styles.compactContent]} keyboardShouldPersistTaps="handled"><PageEnterTransition axis="y" distance={8} duration={230} resetKey={pathname} style={styles.contentEntry}>{children}</PageEnterTransition></ScrollView></View>{compact && <>{drawerOpen && <Pressable accessibilityRole="button" accessibilityLabel="Close navigation" onPress={() => setDrawerOpen(false)} style={[styles.backdrop, { backgroundColor: colors.overlay }]} />}{renderSidebar(false, true)}</>}</View>{overlay}<Modal visible={confirmLogout} transparent animationType="fade" onRequestClose={() => setConfirmLogout(false)}><View style={[styles.modalBackdrop, { backgroundColor: colors.overlay }]}><View accessibilityViewIsModal style={[styles.modal, { backgroundColor: colors.surface, borderColor: colors.border }]}><View style={[styles.modalIcon, { backgroundColor: colors.dangerSoft }]}><AdminIcon name="logout" color={colors.danger} size={24} /></View><Text style={[styles.modalTitle, { color: colors.textPrimary }]}>Log out of BlueTap?</Text><Text style={[styles.modalBody, { color: colors.textSecondary }]}>You will need to sign in again to access Administrator tools.</Text><View style={styles.modalActions}><TouchableOpacity accessibilityRole="button" accessibilityLabel="Cancel logout" onPress={() => setConfirmLogout(false)} style={[styles.modalSecondary, { borderColor: colors.border, backgroundColor: colors.surfaceAlt }]}><Text style={[styles.modalSecondaryText, { color: colors.textPrimary }]}>Cancel</Text></TouchableOpacity><TouchableOpacity accessibilityRole="button" accessibilityLabel="Confirm logout" onPress={attemptLogout} style={[styles.modalDanger, { backgroundColor: colors.danger }]}><Text style={styles.modalDangerText}>Log out</Text></TouchableOpacity></View></View></View></Modal></SafeAreaView>;
 }
 
 export default function AdminShell(props) {

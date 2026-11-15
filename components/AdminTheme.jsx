@@ -78,6 +78,10 @@ export function AdminThemeProvider({ children }) {
   return <AdminThemeContext.Provider value={value}>{children}</AdminThemeContext.Provider>;
 }
 
+export function useOptionalAdminTheme() {
+  return React.useContext(AdminThemeContext);
+}
+
 export function useAdminTheme() {
   const theme = React.useContext(AdminThemeContext);
   if (!theme) return { colors: light, isTransitioning: false, layout: BLUETAP_LAYOUT, preference: 'light', resolvedTheme: 'light', setPreference: () => {}, ready: true };

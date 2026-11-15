@@ -31,6 +31,7 @@ function fixture(seed = {}, { failCommitAt = 0 } = {}) {
     set: async (value, options) => setRecord(path, value, options),
     update: async (value) => setRecord(path, value, { merge: true }),
     delete: async () => records.delete(path),
+    collection: (name) => collection(`${path}/${name}`),
   });
   const snapshot = (path) => ({
     id: path.split('/').pop(),
@@ -47,7 +48,7 @@ function fixture(seed = {}, { failCommitAt = 0 } = {}) {
     limit: (value) => queryFor(name, filters, sort, value),
     get: async () => {
       let docs = [...records.keys()]
-        .filter((path) => path.startsWith(`${name}/`) && path.split('/').length === 2)
+        .filter((path) => path.startsWith(`${name}/`) && !path.slice(name.length + 1).includes('/'))
         .map(snapshot)
         .filter((doc) => filters.every(([field, op, expected]) => {
           const actual = comparable(doc.data()?.[field]);
@@ -196,6 +197,7 @@ test('preview selects only expired ephemeral records and performs zero mutations
     expiredRateLimitRecords: 3,
     ordersEligibleForArchive: 1,
     expiredChatMessages: 0,
+    archivedHistoryMetadataEligible: 0,
     chatMessagesProtectedByEvidence: 0,
     chatMessagesSkipped: 0,
     openReportEvidenceProtected: 0,
@@ -261,6 +263,25 @@ test('chat retention preserves open report evidence and purges eligible resolved
   assert.deepEqual(f.records.get('chatReports/resolved-report').evidenceSnapshot, []);
   assert.equal(f.records.has('chatRestrictions/user-old'), false);
   assert.equal(result.summary.chatMessagesProtectedByEvidence, 1);
+});
+
+test('archived history metadata is previewed but deletion requires explicit approval and no nested messages', async () => {
+  const f = fixture({
+    'chatOrderHistory/empty': { conversationId: 'conversation-empty', orderId: 'order-a', archivedAt: daysAgo(120), readAccessEndsAt: daysAgo(113) },
+    'chatOrderHistory/held': { conversationId: 'conversation-held', orderId: 'order-b', archivedAt: daysAgo(120), readAccessEndsAt: daysAgo(113) },
+    'chatConversations/conversation-held/messages/held-message': { orderId: 'order-b', body: 'protected', createdAt: daysAgo(120), retentionHoldReportIds: ['open-report'] },
+    'chatReports/open-report': { status: 'open', conversationId: 'conversation-held', createdAt: daysAgo(120), evidenceSnapshot: [{ messageId: 'held-message' }] },
+  });
+  const preview = await previewCleanup(f.db, DEFAULT_RETENTION_POLICY, NOW);
+  assert.equal(preview.counts.archivedHistoryMetadataEligible, 1);
+  assert.equal(preview.archivedHistoryMetadataDeletionEnabled, false);
+  await runCleanup(f.db, DEFAULT_RETENTION_POLICY, 'admin-1', NOW);
+  assert.equal(f.records.has('chatOrderHistory/empty'), true);
+  assert.equal(f.records.has('chatOrderHistory/held'), true);
+  await runCleanup(f.db, DEFAULT_RETENTION_POLICY, 'admin-1', NOW, { allowHistoryMetadataDeletion: true });
+  assert.equal(f.records.has('chatOrderHistory/empty'), false);
+  assert.equal(f.records.has('chatOrderHistory/held'), true);
+  assert.equal(f.records.has('chatConversations/conversation-held/messages/held-message'), true);
 });
 
 test('cleanup releases a stale registration-limit reservation before deleting its session', async () => {

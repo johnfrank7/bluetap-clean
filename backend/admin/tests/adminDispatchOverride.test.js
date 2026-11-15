@@ -20,9 +20,9 @@ function fixture() {
   let auditId = 0;
   const db = { collection(name) { return {
     doc(id = `audit-${++auditId}`) { const path = `${name}/${id}`; return { id, path, get: async () => snap(path), update: async (update) => records.set(path, { ...records.get(path), ...update }), set: async (data) => records.set(path, data) }; },
-    where(field, operator, value) { return { get: async () => ({ docs: [...records.keys()].filter((path) => path.startsWith(`${name}/`) && records.get(path)[field] === value).map(snap) }) }; },
+    where(field, operator, value) { const docs = () => [...records.keys()].filter((path) => path.startsWith(`${name}/`) && records.get(path)[field] === value).map(snap); return { get: async () => ({ docs: docs() }), limit(count) { return { get: async () => ({ docs: docs().slice(0, count) }) }; } }; },
     add: async (data) => { records.set(`${name}/audit-${++auditId}`, data); },
-  }; }, runTransaction: async (run) => run({ get: async (ref) => snap(ref.path), update(ref, data) { records.set(ref.path, { ...records.get(ref.path), ...data }); }, set(ref, data) { records.set(ref.path, data); } }) };
+  }; }, runTransaction: async (run) => run({ get: async (ref) => ref.get(), update(ref, data) { records.set(ref.path, { ...records.get(ref.path), ...data }); }, set(ref, data) { records.set(ref.path, data); } }) };
   const auth = { async verifyIdToken(token) { if (token === 'admin-token') return { uid: 'admin-a', role: 'admin', admin: true }; throw new Error('bad token'); }, async getUser(uid) { return { disabled: uid === 'distributor-disabled' }; } };
   return { records, validDate, handler: createAdminDispatchOverrideHandler(() => ({ auth, db })) };
 }

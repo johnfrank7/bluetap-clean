@@ -6,7 +6,7 @@ const test = require('node:test');
 const root = resolve(__dirname, '../../..');
 const read = (path) => readFileSync(resolve(root, path), 'utf8');
 const requests = read('app/manager/request.jsx');
-const managerDashboard = read('app/manager/dashboard.jsx');
+const managerDashboard = read('components/ManagerOperationsDashboard.jsx');
 const distributors = read('app/manager/distributors.jsx');
 const notifications = read('app/manager/notifications.jsx');
 const notificationModal = read('components/ManagerNotificationDetailsModal.jsx');
@@ -147,15 +147,15 @@ test('Requests and Exceptions expose responsive branch-authorized detail maps wi
   assert.doesNotMatch(requests, /Firebase UID|requesterUid/);
   assert.match(requests, /notificationTargetCard/);
   assert.match(requests, /contentScrollRef\.current\?\.scrollTo/);
-  assert.match(requests, /setTargetHighlighted\(false\), 6000/);
-  assert.match(requests, /width < 430 \? '48%' : 138/);
+  assert.match(requests, /setTargetHighlighted\(false\), TARGET_HIGHLIGHT_DURATION_MS/);
+  assert.match(requests, /minWidth:\s*width\s*<\s*440\s*\?\s*0\s*:\s*70/);
 });
 
-test('Manager responsive surfaces stack actions and preserve wide tables with horizontal scrolling', () => {
+test('Manager responsive surfaces stack actions and keep the accounts table on its dedicated page', () => {
   assert.match(requests, /actionButton/);
   assert.match(requests, /flexDirection: width < 430 \? 'column' : 'row'/);
-  assert.match(managerDashboard, /<ScrollView horizontal/);
-  assert.match(managerDashboard, /table: \{ minWidth: 900/);
+  assert.match(managerDashboard, /cardsPerRow = width >= 1120 \? 4 : width >= 620 \? 2 : 1/);
+  assert.match(managerDashboard, /const compact = width < 1100/);
   assert.match(managerProducts, /const compact = useWindowDimensions\(\)\.width < 760/);
   assert.match(accounts, /<ScrollView horizontal/);
   assert.match(distributors, /flexDirection: width < 600 \? 'column' : 'row'/);
@@ -187,7 +187,7 @@ test('Manager Products separates read-only catalog data, pricing, and branch-sco
 
 test('Manager Analytics uses only shared branch realtime data and contains no demo station series', () => {
   assert.match(managerAnalytics, /useManagerRealtimeData/);
-  assert.match(managerAnalytics, /Snapshot revenue/);
+  assert.match(managerAnalytics, /label="SNAPSHOT REVENUE"/);
   assert.match(managerAnalytics, /Order status distribution/);
   assert.doesNotMatch(managerAnalytics, /Station A|Station B|Aquabea|DEFAULT_STATIONS/);
 });
@@ -296,6 +296,7 @@ test('ManagerOngoingRequestsMonitor initializes cleanly against the actual shado
       if (id === '../constants/bluetapTheme') return { BLUETAP_COLORS: { primary: '#187BCD', primaryDark: '#0D5FA8', danger: '#EF4444', success: '#10B981' } };
       if (id === '../services/managerOperational') return require('../../../services/managerOperational');
       if (id === '../constants/deliveryFailureReasons') return require('../../../constants/deliveryFailureReasons');
+      if (id === '../services/managerTripCapacity') return require('../../../services/managerTripCapacity');
       if (!id.startsWith('.')) return require(id);
       return {};
     }, mod, mod.exports);
@@ -312,4 +313,162 @@ test('ManagerOngoingRequestsMonitor initializes cleanly against the actual shado
   assert.equal(typeof monitorMod.ManagerOngoingRequestsButton, 'function');
   assert.equal(typeof monitorMod.ManagerOngoingRequestsPanel, 'function');
   assert.equal(typeof monitorMod.useManagerOngoingRequests, 'function');
+  assert.equal(typeof monitorMod.resolveStatusToneColors, 'function');
+});
+
+test('Active Chat and Manager Ongoing Requests share centralized status colors with distinct General Inquiry, Scheduled, Waiting, Out for Delivery, Delivered, and Cancelled styling', () => {
+  const babel = require('@babel/core');
+  const {
+    APPROVED_REQUESTER_ORDER_STATUSES,
+    REQUESTER_ORDER_STATUS_LABELS,
+    TERMINAL_REQUESTER_ORDER_STATUSES,
+  } = require('../../../constants/requesterOrderStatus');
+  const { ONGOING_ASSIGNED_STATUSES } = require('../../../services/managerOperational');
+  const chatListSource = read('components/chat/ChatConversationList.jsx');
+  const ongoingMonitorSource = read('components/ManagerOngoingRequestsMonitor.jsx');
+  const ongoingFieldIconSource = read('components/OngoingRequestFieldIcon.jsx');
+  const sidebarIconSource = read('components/SidebarIcon.jsx');
+
+  // 1. ChatConversationList uses status="general_inquiry" for General Inquiry rather than status="pending"
+  assert.match(chatListSource, /status="general_inquiry"\s+label="General inquiry"/);
+  assert.doesNotMatch(chatListSource, /status="pending"\s+label="General inquiry"/);
+
+  // General inquiry is a non-order category and never classified in delivery status tables
+  assert.equal( Object.prototype.hasOwnProperty.call(REQUESTER_ORDER_STATUS_LABELS, 'general inquiry'), false);
+  assert.equal(APPROVED_REQUESTER_ORDER_STATUSES.has('general inquiry'), false);
+  assert.equal(TERMINAL_REQUESTER_ORDER_STATUSES.has('general inquiry'), false);
+  assert.equal(ONGOING_ASSIGNED_STATUSES.has('general_inquiry'), false);
+
+  // Evaluate SoftStatusBadge getSoftStatusMeta across light and dark themes
+  const badgeFullPath = resolve(root, 'components/SoftStatusBadge.jsx');
+  const badgeTransformed = babel.transformSync(readFileSync(badgeFullPath, 'utf8'), {
+    presets: ['babel-preset-expo'],
+    filename: badgeFullPath,
+  }).code;
+  const badgeMod = { exports: {} };
+  new Function('require', 'module', 'exports', badgeTransformed)(
+    (id) => {
+      if (id === 'react') return require('react');
+      if (id === 'react/jsx-runtime') return require('react/jsx-runtime');
+      if (id === 'react-native') return { StyleSheet: { create: (s) => s }, Text: 'Text', View: 'View' };
+      if (id === '../constants/requesterOrderStatus') return require('../../../constants/requesterOrderStatus');
+      if (id === './AdminTheme') return { useOptionalAdminTheme: () => null };
+      if (id === './BlueTapTheme') return { useBlueTapTheme: () => ({ isDark: false }) };
+      if (!id.startsWith('.')) return require(id);
+      return {};
+    },
+    badgeMod,
+    badgeMod.exports
+  );
+
+  const { getSoftStatusMeta } = badgeMod.exports;
+  assert.equal(typeof getSoftStatusMeta, 'function');
+
+  for (const isDark of [false, true]) {
+    const inquiry = getSoftStatusMeta('general_inquiry', { isDark });
+    const scheduled = getSoftStatusMeta('scheduled', { isDark });
+    const waiting = getSoftStatusMeta('awaiting_distributor_assignment', { isDark });
+    const assigned = getSoftStatusMeta('distributor_assigned', { isDark });
+    const outForDelivery = getSoftStatusMeta('out_for_delivery', { isDark });
+    const delivered = getSoftStatusMeta('delivered', { isDark });
+    const cancelled = getSoftStatusMeta('cancelled', { isDark });
+
+    // General inquiry must be visually distinct from Scheduled and Pending/Waiting in both themes
+    assert.notEqual(inquiry.backgroundColor, scheduled.backgroundColor);
+    assert.notEqual(inquiry.color, scheduled.color);
+    assert.notEqual(inquiry.backgroundColor, waiting.backgroundColor);
+    assert.notEqual(inquiry.color, waiting.color);
+
+    // Scheduled, Waiting, Assigned, Out for Delivery, Delivered, and Cancelled must all have distinct colors
+    assert.notEqual(scheduled.backgroundColor, waiting.backgroundColor);
+    assert.notEqual(scheduled.color, assigned.color);
+    assert.notEqual(outForDelivery.color, delivered.color);
+    assert.notEqual(outForDelivery.color, inquiry.color);
+    assert.notEqual(delivered.color, cancelled.color);
+  }
+
+  // 2. Segmented control, separate counts, distributor icon contrast, 5 field icons, and checkmark stepper
+  assert.match(ongoingMonitorSource, /Active Deliveries \(\$\{activeDeliveriesCount\}\)/);
+  assert.match(ongoingMonitorSource, /Scheduled \(\$\{scheduledCount\}\)/);
+  assert.match(ongoingMonitorSource, /\{activeDeliveriesCount\} active/);
+  assert.match(ongoingMonitorSource, /\{scheduledCount\} scheduled/);
+  assert.match(ongoingMonitorSource, /title="No active deliveries"/);
+  assert.match(ongoingMonitorSource, /title="No scheduled orders"/);
+
+  // Assigned Distributor Truck icon receives explicit theme color + tintColor and SidebarIcon falls back to tintColor
+  assert.match(sidebarIconSource, /tintColor = '#FFFFFF',\s*color = tintColor/);
+  assert.match(ongoingMonitorSource, /name="Truck"[\s\S]{0,160}color=\{distributorIconColor\}[\s\S]{0,80}tintColor=\{distributorIconColor\}/);
+
+  // 5 order detail field vector icons
+  for (const iconName of ['Package', 'Layers', 'CalendarClock', 'MapPin', 'ClockHistory']) {
+    assert.match(ongoingMonitorSource, new RegExp(`OngoingRequestFieldIcon[\\s\\S]{0,80}name="${iconName}"`));
+    assert.match(ongoingFieldIconSource, new RegExp(`${iconName}:\\s*require\\(`));
+  }
+  for (const svgFile of ['layers.svg', 'calendar-clock.svg', 'map-pin.svg', 'clock-history.svg']) {
+    const svg = read(`assets/icons/ongoing/${svgFile}`);
+    assert.match(svg, /viewBox="0 0 24 24"/);
+    assert.match(svg, /stroke="#FFFFFF"/);
+    assert.match(svg, /stroke-width="2"/);
+  }
+
+  // Delivery progress stepper renders checkmark inside completed circle and preserves Step X of 4
+  assert.match(ongoingMonitorSource, /Step \{progress\.activeStepIndex \+ 1\} of \{progress\.steps\.length\}/);
+  assert.match(ongoingMonitorSource, /styles\.progressCheckGlyph/);
+  assert.match(ongoingMonitorSource, /'\\u2713'/);
+  assert.match(ongoingMonitorSource, /Step \$\{index \+ 1\}: \$\{step\.label\}, \$\{stepStateLabel\}/);
+});
+
+test('Manager Ongoing Requests sidebar includes read-only fourth Trips tab, overview KPI banner, and expandable OngoingTripCards', () => {
+  const ongoingMonitorSource = read('components/ManagerOngoingRequestsMonitor.jsx');
+
+  // 1. Fourth tab 'trips' in segmented control and header badge pill
+  assert.match(ongoingMonitorSource, /key:\s*'trips'/);
+  assert.match(ongoingMonitorSource, /displayLabel:\s*`Trips \(\$\{tripsCount\}\)`/);
+  assert.match(ongoingMonitorSource, /\{tripsCount\} trips/);
+
+  // 2. Context values and calculations
+  assert.match(ongoingMonitorSource, /trips:\s*\[\]/);
+  assert.match(ongoingMonitorSource, /tripsCount:\s*0/);
+  assert.match(ongoingMonitorSource, /activeTripsCount:\s*0/);
+  assert.match(ongoingMonitorSource, /scheduledTripsCount:\s*0/);
+  assert.match(ongoingMonitorSource, /totalTripOrdersCount:\s*0/);
+  assert.match(ongoingMonitorSource, /groupOrdersIntoTrips\(ongoingRequests\)/);
+
+  // 3. Trips overview KPI banner and Open Manager Dispatch navigation
+  assert.match(ongoingMonitorSource, /styles\.tripsOverviewBanner/);
+  assert.match(ongoingMonitorSource, /Active Trips/);
+  assert.match(ongoingMonitorSource, /Assigned Orders/);
+  assert.match(ongoingMonitorSource, /Open Manager Dispatch →/);
+  assert.match(ongoingMonitorSource, /navigateOnce\('\/manager\/distributors'\)/);
+
+  // 4. Empty state for trips
+  assert.match(ongoingMonitorSource, /title="No delivery trips"/);
+  assert.match(ongoingMonitorSource, /description="Assigned delivery trips will appear here when distributors have active or scheduled routes\."/);
+
+  // 5. Expandable OngoingTripCard component
+  assert.match(ongoingMonitorSource, /function OngoingTripCard/);
+  assert.match(ongoingMonitorSource, /tripDisplayId/);
+  assert.match(ongoingMonitorSource, /Legacy Assignment/);
+  assert.match(ongoingMonitorSource, /5-Gal Used/);
+  assert.match(ongoingMonitorSource, /Other Cargo/);
+  assert.match(ongoingMonitorSource, /⚠️ Unverified Legacy Assignment/);
+  assert.doesNotMatch(ongoingMonitorSource, /✓ Verified Load/);
+  assert.doesNotMatch(ongoingMonitorSource, /⚠️ Unverified Load/);
+  assert.doesNotMatch(ongoingMonitorSource, /⚠️ Unverified Physical Load/);
+  assert.match(ongoingMonitorSource, /View Order Details/);
+  assert.match(ongoingMonitorSource, /ASSIGNED DELIVERIES/);
+  assert.match(ongoingMonitorSource, /styles\.distributorCompactRow/);
+  assert.match(ongoingMonitorSource, /Overdue Delivery/);
+  assert.match(ongoingMonitorSource, /Overdue Scheduled/);
+
+  // 6. Compact layout and mutually exclusive overdue trip counts
+  assert.match(ongoingMonitorSource, /styles\.tripsOverviewMainRow/);
+  assert.match(ongoingMonitorSource, /styles\.tripsKpiInlineItem/);
+  assert.match(ongoingMonitorSource, /trips\.filter\(\(t\)\s*=>\s*t\.isOverdue\)\.length/);
+
+  // 7. Sidebar remains strictly read-only
+  assert.doesNotMatch(
+    ongoingMonitorSource,
+    /dispatchManagerOrder|decideOutsideRadiusOrder|approveManagerDistributor|rejectManagerDistributor|markDelivered/
+  );
 });

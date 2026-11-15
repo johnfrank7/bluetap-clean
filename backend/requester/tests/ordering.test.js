@@ -27,14 +27,15 @@ function fixture(overrides = {}) {
     },
     async get() { return { docs: [...records.keys()].filter((path) => path.startsWith(`${name}/`)).map(snapshot) }; },
     where(field, operator, value) {
-      return { async get() { return { docs: [...records.entries()].filter(([path, data]) => path.startsWith(`${name}/`) && data[field] === value).map(([path]) => snapshot(path)) }; } };
+      const docs = () => [...records.entries()].filter(([path, data]) => path.startsWith(`${name}/`) && data[field] === value).map(([path]) => snapshot(path));
+      return { async get() { return { docs: docs() }; }, limit(count) { return { async get() { return { docs: docs().slice(0, count) }; } }; } };
     },
   });
   const db = {
     collection,
     async runTransaction(run) {
       return run({
-        async get(ref) { return snapshot(ref.path); },
+        async get(ref) { return ref.get(); },
         create(ref, data) { assert.equal(records.has(ref.path), false); records.set(ref.path, data); },
         update(ref, data) { records.set(ref.path, { ...records.get(ref.path), ...data }); },
         set(ref, data) { records.set(ref.path, data); },
@@ -81,6 +82,13 @@ test('valid order uses authenticated UID and ignores a supplied target UID', asy
   assert.equal(result.statusCode, 201); assert.equal(result.body.order.requesterUid, 'requester-1'); assert.equal(result.body.order.requester_id, 'requester-1');
   assert.equal(f.records.get(`requests/${result.body.order.id}`).assignmentVersion, 1);
 });
+test('a promotional quote cannot silently become a regular order when promotions are disabled', async () => {
+  const f = fixture();
+  const result = await call(createRequesterOrdersHandler(f.getAdmin), 'POST', 'requester-token', validOrder({ quoteId: 'previous-quote' }));
+  assert.equal(result.statusCode, 409);
+  assert.equal(result.body.error.reason, 'PROMOTIONS_UNAVAILABLE');
+  assert.equal([...f.records.keys()].some((path) => path.startsWith('requests/')), false);
+});
 test('Requester order reads return only the authenticated UID records with creation timestamps', async () => {
   const f = fixture(); const handler = createRequesterOrdersHandler(f.getAdmin);
   const created = await call(handler, 'POST', 'requester-token', validOrder());
@@ -102,6 +110,20 @@ test('Requester order reads return only the authenticated UID records with creat
 test('server reloads price and calculates quantity and total', async () => {
   const result = await call(createRequesterOrdersHandler(fixture().getAdmin), 'POST', 'requester-token', validOrder({ clientPrice: 1, clientTotal: 1 }));
   assert.equal(result.body.order.items[0].unitPriceAtOrder, 35); assert.equal(result.body.order.items[0].totalAtOrder, 70); assert.equal(result.body.order.totalAtOrder, 70);
+});
+test('order creation uses catalog and fee values re-read inside the transaction', async () => {
+  const f = fixture(); const { db, auth } = f.getAdmin();
+  const original = db.runTransaction;
+  db.runTransaction = async (callback) => {
+    f.records.set('products/refill', { ...f.records.get('products/refill'), price: 40 });
+    f.records.set('branches/central', { ...f.records.get('branches/central'), baseDeliveryFee: 7 });
+    return original(callback);
+  };
+  const result = await call(createRequesterOrdersHandler(() => ({ db, auth })), 'POST', 'requester-token', validOrder());
+  assert.equal(result.statusCode, 201);
+  assert.equal(result.body.order.items[0].unitPriceAtOrder, 40);
+  assert.equal(result.body.order.deliveryFeeAtOrder, 7);
+  assert.equal(result.body.order.totalAtOrder, 87);
 });
 test('order stores product, branch, delivery, distance, and price snapshots', async () => {
   const result = await call(createRequesterOrdersHandler(fixture().getAdmin), 'POST', 'requester-token', validOrder()); const order = result.body.order;
@@ -199,6 +221,33 @@ test('only Admin can create a product and creation is audited', async () => {
   const created = await call(handler, 'POST', 'admin-token', { product_name: 'Premium', price: 49.99, branchIds: ['central'] });
   assert.equal(created.statusCode, 201); assert.equal(created.body.product.price, 49.99);
   assert.ok([...f.records.values()].some((value) => value.action === 'PRODUCT_CREATED'));
+});
+test('Admin promotion configuration is versioned, audited and not applied to orders', async () => {
+  const f = fixture();
+  const handler = createAdminProductsHandler(f.getAdmin);
+  const promotion = { expectedVersion: 0, title: 'Refill bundle', commercialEligibility: 'refill_verified', active: false, branchIds: ['central'], containerChoices: ['Exchange'], tiers: [{ quantity: 3, bundlePriceCentavos: 9000 }], startsAt: null, endsAt: null };
+  const payload = { productId: 'refill', bundlePromotion: promotion };
+  assert.equal((await call(handler, 'PATCH', 'requester-token', payload)).statusCode, 403);
+  const saved = await call(handler, 'PATCH', 'admin-token', payload);
+  assert.equal(saved.statusCode, 200);
+  assert.equal(saved.body.pricingApplicationAvailable, false);
+  assert.equal(saved.body.product.bundlePromotion.version, 1);
+  assert.equal(f.records.get('products/refill').bundlePromotion.productId, 'refill');
+  assert.ok([...f.records.values()].some((entry) => entry.action === 'BUNDLE_PROMOTION_UPDATED'));
+  assert.equal((await call(handler, 'PATCH', 'admin-token', payload)).body.error.reason, 'BUNDLE_PROMOTION_STALE');
+  const enable = await call(handler, 'PATCH', 'admin-token', { productId: 'refill', bundlePromotion: { ...promotion, expectedVersion: 1, active: true } });
+  assert.equal(enable.body.error.reason, 'BUNDLE_PROMOTIONS_UNAVAILABLE');
+  const created = await call(createRequesterOrdersHandler(f.getAdmin), 'POST', 'requester-token', validOrder({ items: [{ productId: 'refill', quantity: 3 }] }));
+  assert.equal(created.statusCode, 201);
+  assert.equal(created.body.order.totalAtOrder, 105);
+});
+test('promotion configuration rejects invalid scope, tiers and timezone', async () => {
+  const f = fixture(); const handler = createAdminProductsHandler(f.getAdmin);
+  const base = { expectedVersion: 0, title: 'Bundle', commercialEligibility: 'refill_verified', active: false, branchIds: ['central'], containerChoices: ['Exchange'], tiers: [{ quantity: 3, bundlePriceCentavos: 9000 }] };
+  for (const changes of [{ branchIds: ['missing'] }, { containerChoices: ['other'] }, { tiers: [{ quantity: 3, bundlePriceCentavos: -1 }] }, { tiers: [{ quantity: 3, bundlePriceCentavos: 10500 }] }, { startsAt: '2026-01-01T00:00:00' }, { commercialEligibility: 'unknown' }]) {
+    const result = await call(handler, 'PATCH', 'admin-token', { productId: 'refill', bundlePromotion: { ...base, ...changes } });
+    assert.equal(result.statusCode, 400);
+  }
 });
 test('Admin deactivates products instead of deleting them', async () => {
   const f = fixture(); const result = await call(createAdminProductsHandler(f.getAdmin), 'PATCH', 'admin-token', { productId: 'refill', active: false });
@@ -336,16 +385,30 @@ test('requester can edit pending order quantities and recalculates total', async
   assert.equal(created.statusCode, 201);
   const orderId = created.body.order.id;
 
-  const edited = await call(orderHandler, 'PATCH', 'requester-token', {
-    orderId,
-    action: 'edit-order',
-    items: [{ productId: 'refill', quantity: 3 }],
-    notes: 'Please ring the doorbell',
-  });
+  const intent = { orderId, items: [{ productId: 'refill', quantity: 3 }], notes: 'Please ring the doorbell' };
+  assert.equal((await call(orderHandler, 'PATCH', 'requester-token', { ...intent, action: 'edit-order' })).body.error.reason, 'EDIT_QUOTE_REQUIRED');
+  const quote = await call(orderHandler, 'PATCH', 'requester-token', { ...intent, action: 'quote-edit' });
+  assert.equal(quote.statusCode, 200);
+  assert.equal(quote.body.before.totalAtOrder, 35);
+  assert.equal(quote.body.after.totalAtOrder, 105);
+  const edited = await call(orderHandler, 'PATCH', 'requester-token', { ...intent, action: 'edit-order', quoteId: quote.body.quoteId });
   assert.equal(edited.statusCode, 200);
   assert.equal(edited.body.order.quantity, 3);
   assert.equal(edited.body.order.subtotalAtOrder, 105); // 3 * 35
   assert.equal(edited.body.order.notes, 'Please ring the doorbell');
+});
+test('requester notes-only edit preserves saved prices after catalog price changes', async () => {
+  const f = fixture(); const handler = createRequesterOrdersHandler(f.getAdmin);
+  const created = await call(handler, 'POST', 'requester-token', validOrder());
+  const id = created.body.order.id;
+  f.records.set('products/refill', { ...f.records.get('products/refill'), price: 90 });
+  const edited = await call(handler, 'PATCH', 'requester-token', { orderId: id, action: 'edit-order', items: [{ productId: 'refill', quantity: 2 }], container: 'Exchange', notes: 'Ring the bell' });
+  assert.equal(edited.statusCode, 200);
+  assert.equal(edited.body.order.totalAtOrder, 70);
+  assert.equal(edited.body.order.items[0].unitPriceAtOrder, 35);
+  const entry = edited.body.order.editHistory.at(-1);
+  assert.equal(entry.previousPricing.totalAtOrder, 70);
+  assert.deepEqual(entry.previousPricing, entry.newPricing);
 });
 
 test('requester cannot edit order once locked or cancelled', async () => {
@@ -364,4 +427,30 @@ test('requester cannot edit order once locked or cancelled', async () => {
   });
   assert.equal(editAttempt.statusCode, 409);
   assert.equal(editAttempt.body.error.reason, 'ORDER_NOT_EDITABLE');
+});
+
+test('a pending edit cannot overwrite an order assigned during product validation', async () => {
+  const f = fixture();
+  const { auth, db } = f.getAdmin();
+  const handler = createRequesterOrdersHandler(() => ({ auth, db }));
+  const created = await call(handler, 'POST', 'requester-token', validOrder());
+  const orderId = created.body.order.id;
+  const originalCollection = db.collection;
+  db.collection = (name) => {
+    const collection = originalCollection(name);
+    if (name !== 'products') return collection;
+    return { ...collection, doc(id) {
+      const ref = collection.doc(id);
+      return { ...ref, async get() {
+        const path = `requests/${orderId}`;
+        f.records.set(path, { ...f.records.get(path), status: 'distributor_assigned', assignedDistributorUid: 'distributor-1' });
+        return ref.get();
+      } };
+    } };
+  };
+  const result = await call(handler, 'PATCH', 'requester-token', { orderId, action: 'quote-edit', items: [{ productId: 'refill', quantity: 3 }] });
+  assert.equal(result.statusCode, 409);
+  assert.equal(result.body.error.reason, 'EDIT_QUOTE_STALE');
+  assert.equal(f.records.get(`requests/${orderId}`).status, 'distributor_assigned');
+  assert.equal(f.records.get(`requests/${orderId}`).quantity, 2);
 });

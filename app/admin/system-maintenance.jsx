@@ -2,6 +2,8 @@ import React from 'react';
 import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import AdminIcon from '../../components/AdminIcon';
 import AdminShell from '../../components/AdminShell';
+import DropdownChevron from '../../components/DropdownChevron';
+import DropdownMenuOverlay from '../../components/DropdownMenuOverlay';
 import { SkeletonBlock } from '../../components/AdminSkeleton';
 import { SectionCard } from '../../components/DashboardUi';
 import { useAdminTheme } from '../../components/AdminTheme';
@@ -46,25 +48,15 @@ const dateText = (value, fallback = 'Never run') => {
 
 function RetentionSelect({ label, detail, value, options, onChange, styles, colors }) {
   const [open, setOpen] = React.useState(false);
+  const triggerRef = React.useRef(null);
   const selected = options.find(([option]) => option === value)?.[1] || 'Choose retention';
   return <View style={styles.policyItem}>
     <Text style={styles.policyLabel}>{label}</Text>
     <Text style={styles.policyDetail}>{detail}</Text>
-    <TouchableOpacity accessibilityRole="combobox" accessibilityLabel={`${label}: ${selected}`} accessibilityState={{ expanded: open }} onPress={() => setOpen(true)} style={styles.select}>
-      <Text style={styles.selectText}>{selected}</Text><Text style={styles.chevron}>⌄</Text>
+    <TouchableOpacity ref={triggerRef} accessibilityRole="combobox" accessibilityLabel={`${label}: ${selected}`} accessibilityState={{ expanded: open }} onPress={() => setOpen(true)} style={styles.select}>
+    <Text style={styles.selectText}>{selected}</Text><DropdownChevron expanded={open} size={16} color={colors.iconSecondary || colors.primary} />
     </TouchableOpacity>
-    <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
-      <View style={[styles.modalBackdrop, { backgroundColor: colors.overlay }]}>
-        <Pressable accessibilityRole="button" accessibilityLabel={`Close ${label}`} onPress={() => setOpen(false)} style={StyleSheet.absoluteFill} />
-        <View accessibilityViewIsModal style={styles.optionModal}>
-          <Text style={styles.modalTitle}>{label}</Text>
-          {options.map(([option, optionLabel]) => <TouchableOpacity key={option} accessibilityRole="option" accessibilityState={{ selected: value === option }} onPress={() => { onChange(option); setOpen(false); }} style={[styles.option, value === option && styles.optionSelected]}>
-            <Text style={[styles.optionText, value === option && styles.optionTextSelected]}>{optionLabel}</Text>
-            {value === option ? <AdminIcon name="check" color={colors.primary} size={16} /> : null}
-          </TouchableOpacity>)}
-        </View>
-      </View>
-    </Modal>
+    <DropdownMenuOverlay visible={open} anchorRef={triggerRef} onDismiss={() => setOpen(false)} accessibilityLabel={`Close ${label} options`} maxHeight={320}><View accessibilityViewIsModal style={styles.optionModal}><Text style={styles.modalTitle}>{label}</Text>{options.map(([option, optionLabel]) => <TouchableOpacity key={option} accessibilityRole="option" accessibilityState={{ selected: value === option }} onPress={() => { onChange(option); setOpen(false); }} style={[styles.option, value === option && styles.optionSelected]}><Text style={[styles.optionText, value === option && styles.optionTextSelected]}>{optionLabel}</Text>{value === option ? <AdminIcon name="check" color={colors.primary} size={16} /> : null}</TouchableOpacity>)}</View></DropdownMenuOverlay>
   </View>;
 }
 
@@ -224,7 +216,7 @@ export default function SystemMaintenancePage() {
 
 const createStyles = (colors) => StyleSheet.create({
   stack:{maxWidth:1100,gap:16}, introCard:{flexDirection:'row',alignItems:'flex-start',gap:14,backgroundColor:colors.primarySoft}, introIcon:{width:48,height:48,borderRadius:14,alignItems:'center',justifyContent:'center',backgroundColor:colors.surface,borderWidth:1,borderColor:colors.border}, introCopy:{flex:1,minWidth:0}, eyebrow:{color:colors.primary,fontSize:10,fontWeight:'900',letterSpacing:1,marginBottom:6}, sectionTitle:{color:colors.textPrimary,fontSize:19,fontWeight:'900'}, body:{color:colors.textSecondary,fontSize:13,lineHeight:20,marginTop:5},
-  policyGrid:{flexDirection:'row',flexWrap:'wrap',gap:12,marginTop:18}, policyItem:{flexGrow:1,flexBasis:300,minHeight:154,padding:15,borderRadius:13,borderWidth:1,borderColor:colors.border,backgroundColor:colors.surfaceAlt}, policyLabel:{color:colors.textPrimary,fontSize:14,fontWeight:'900'}, policyDetail:{color:colors.textSecondary,fontSize:12,lineHeight:18,marginTop:4,flex:1}, select:{minHeight:44,marginTop:12,paddingHorizontal:12,borderWidth:1,borderColor:colors.inputBorder,borderRadius:10,backgroundColor:colors.input,flexDirection:'row',alignItems:'center',justifyContent:'space-between'}, selectText:{color:colors.textPrimary,fontWeight:'800'}, chevron:{color:colors.primary,fontSize:19,fontWeight:'900'}, readOnlyValue:{minHeight:44,marginTop:12,paddingHorizontal:12,borderWidth:1,borderColor:colors.border,borderRadius:10,backgroundColor:colors.neutral,justifyContent:'center'}, readOnlyText:{color:colors.textPrimary,fontWeight:'800'},
+  policyGrid:{flexDirection:'row',flexWrap:'wrap',gap:12,marginTop:18}, policyItem:{flexGrow:1,flexBasis:300,minHeight:154,padding:15,borderRadius:13,borderWidth:1,borderColor:colors.border,backgroundColor:colors.surfaceAlt}, policyLabel:{color:colors.textPrimary,fontSize:14,fontWeight:'900'}, policyDetail:{color:colors.textSecondary,fontSize:12,lineHeight:18,marginTop:4,flex:1}, select:{minHeight:44,marginTop:12,paddingHorizontal:12,borderWidth:1,borderColor:colors.inputBorder,borderRadius:10,backgroundColor:colors.input,flexDirection:'row',alignItems:'center',justifyContent:'space-between'}, selectText:{color:colors.textPrimary,fontWeight:'800'}, readOnlyValue:{minHeight:44,marginTop:12,paddingHorizontal:12,borderWidth:1,borderColor:colors.border,borderRadius:10,backgroundColor:colors.neutral,justifyContent:'center'}, readOnlyText:{color:colors.textPrimary,fontWeight:'800'},
   primaryButton:{minHeight:46,paddingHorizontal:18,borderRadius:10,alignItems:'center',justifyContent:'center',backgroundColor:colors.primaryAction}, primaryButtonText:{color:colors.onPrimary,fontWeight:'900'}, saveButton:{alignSelf:'flex-start',marginTop:16}, secondaryButton:{minHeight:46,paddingHorizontal:18,borderRadius:10,alignItems:'center',justifyContent:'center',backgroundColor:colors.surface,borderWidth:1,borderColor:colors.inputBorder}, secondaryButtonText:{color:colors.primary,fontWeight:'900'}, warningButton:{minHeight:46,paddingHorizontal:18,borderRadius:10,alignItems:'center',justifyContent:'center',backgroundColor:colors.warningAction}, warningButtonText:{color:colors.onWarning,fontWeight:'900'}, disabled:{opacity:.5},
   statusGrid:{flexDirection:'row',flexWrap:'wrap',gap:12,marginTop:18}, statusItem:{flexGrow:1,flexBasis:220,minHeight:94,borderWidth:1,borderColor:colors.border,borderRadius:12,padding:14,backgroundColor:colors.surfaceAlt}, statusLabel:{color:colors.textSecondary,fontSize:11,fontWeight:'800',textTransform:'uppercase'}, statusValue:{color:colors.textPrimary,fontSize:15,fontWeight:'900',marginTop:7}, statusNote:{color:colors.textSecondary,fontSize:11,marginTop:5}, warningCallout:{marginTop:16,borderWidth:1,borderColor:colors.warning,borderRadius:12,padding:14,backgroundColor:colors.warningSoft}, warningTitle:{color:colors.warning,fontWeight:'900'}, warningText:{color:colors.textPrimary,fontSize:12,lineHeight:18,marginTop:4}, actionRow:{flexDirection:'row',flexWrap:'wrap',gap:10,marginTop:16},
   protectedCard:{backgroundColor:colors.surface}, protectedGrid:{flexDirection:'row',flexWrap:'wrap',gap:10,marginTop:16}, protectedItem:{flexGrow:1,flexBasis:245,minHeight:42,flexDirection:'row',alignItems:'center',gap:9,paddingHorizontal:12,borderRadius:10,backgroundColor:colors.successSoft}, protectedText:{color:colors.textPrimary,fontSize:12,fontWeight:'700',flex:1},

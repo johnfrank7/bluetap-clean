@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { Image } from 'expo-image';
 import AdminShell from '../../components/AdminShell';
+import AdminBundlePromotionModal from '../../components/AdminBundlePromotionModal';
 import { CardSkeleton } from '../../components/AdminSkeleton';
 import { StatusBadge } from '../../components/DashboardUi';
 import { useAdminTheme } from '../../components/AdminTheme';
@@ -148,6 +149,7 @@ export default function AdminProductsPage() {
   const [page, setPage] = React.useState(1);
   const [modal, setModal] = React.useState(false);
   const [editing, setEditing] = React.useState(null);
+  const [promotionProduct, setPromotionProduct] = React.useState(null);
   const [form, setForm] = React.useState(empty);
   const [saving, setSaving] = React.useState(false);
   const [toast, setToast] = React.useState({ visible: false, message: '', type: 'info' });
@@ -363,6 +365,7 @@ export default function AdminProductsPage() {
         active: form.active,
         branchIds: form.branchIds,
       };
+      const promotionNeedsVerification = Boolean(editing?.bundlePromotion?.commercialEligibility === 'refill_verified' && ['product_name', 'size', 'containerType'].some((field) => payload[field] !== String(editing[field] || '').trim()));
       if (editing) await updateAdminProduct(editing.id, payload, form.imageFile);
       else await createAdminProduct(payload, form.imageFile);
       initialDraftRef.current = null;
@@ -370,7 +373,7 @@ export default function AdminProductsPage() {
       setEditing(null);
       setForm(empty);
       await productsState.refresh({ force: true });
-      showToast('Product saved successfully.', 'success');
+      showToast(promotionNeedsVerification ? 'Product saved. Verify the refill again in its bundle draft.' : 'Product saved successfully.', 'success');
     } catch (error) {
       const err = adminProductErrorMessage(error);
       showToast(err, 'error');
@@ -611,6 +614,9 @@ export default function AdminProductsPage() {
 
                   {/* BOTTOM ACTION AREA */}
                   <View style={styles.cardActions}>
+                    <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Bundle promotions for ${product.product_name}`} onPress={() => setPromotionProduct(product)} style={styles.editAction}>
+                      <Text style={styles.editActionText}>{product.bundlePromotion ? 'Edit bundle draft' : 'Bundle promotions'}</Text>
+                    </TouchableOpacity>
                     <TouchableOpacity
                       accessibilityRole="button"
                       accessibilityLabel={`Edit ${product.product_name}`}
@@ -853,6 +859,7 @@ export default function AdminProductsPage() {
           </ScrollView>
         </View>
       </Modal>
+      <AdminBundlePromotionModal product={promotionProduct} branches={branches} colors={colors} onClose={() => setPromotionProduct(null)} onSaved={async (result) => { setPromotionProduct(null); try { await productsState.refresh({ force: true }); } catch { /* The draft was already saved; refresh can be retried. */ } showToast(result === 'published' || result === 'publish' ? 'Promotion published.' : result === 'disable' ? 'Promotion disabled.' : result === 'updated' ? 'Promotion draft updated successfully.' : 'Promotion draft saved successfully.', 'success'); }} />
       <UnsavedModal />
     </AdminShell>
   );
@@ -1151,6 +1158,7 @@ const createStyles = (colors, compact, isMobile) =>
     },
     cardActions: {
       flexDirection: 'row',
+      flexWrap: 'wrap',
       justifyContent: 'flex-end',
       gap: 8,
       marginTop: 16,

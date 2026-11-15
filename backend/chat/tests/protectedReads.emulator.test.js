@@ -155,6 +155,23 @@ test('Firestore authorization enforces canonical chat relationships', { skip: !h
     const m3 = client('m3', { role: 'manager' });
     const a1 = client('a1', { admin: true });
 
+    await t.test('Admin-created accounts can read their profile for OTP, while raw products are denied to unverified, mismatched, and verified requesters, and allowed to authorized Admin', async () => {
+      const uid = 'admin-created-email-gate';
+      const email = 'created@example.test';
+      await seed(`users/${uid}`, { role: 'requester', accountStatus: 'active',
+        accountSource: 'admin_created', email, emailVerificationRequired: false });
+      await seed('products/email-gate-probe', { name: 'Test product' });
+      const unverified = client(uid, { email, email_verified: false });
+      const mismatched = client(uid, { email: 'other@example.test', email_verified: true });
+      const verifiedRequester = client(uid, { email, email_verified: true });
+      assert.equal((await getDoc(doc(unverified, `users/${uid}`))).exists(), true);
+      await denied(getDoc(doc(unverified, 'products/email-gate-probe')));
+      await denied(getDoc(doc(mismatched, 'products/email-gate-probe')));
+      await denied(getDoc(doc(verifiedRequester, 'products/email-gate-probe')));
+      await denied(setDoc(doc(unverified, `users/${uid}`), { accountSource: 'public_registration' }, { merge: true }));
+      assert.equal((await getDoc(doc(a1, 'products/email-gate-probe'))).exists(), true);
+    });
+
     await t.test('private order, activity, and moderation reads remain scoped', async () => {
       assert.equal((await getDocs(query(collection(r1, 'requests'), where('requester_id', '==', 'r1')))).size, 1);
       await denied(getDoc(doc(r2, 'requests/o1')));
@@ -180,6 +197,9 @@ test('Firestore authorization enforces canonical chat relationships', { skip: !h
         'moderationMutationIds/mutation',
         'moderationNotices/r1/items/notice',
         'orderAbuseReviews/review',
+        'deliveryAttempts/attempt',
+        'deliveryAttemptEvents/event',
+        'deliveryPenaltyEvents/event',
         'chatMessageRevisions/revision',
         'chatRestrictions/r1',
         'orderingRestrictions/r1',
@@ -193,13 +213,16 @@ test('Firestore authorization enforces canonical chat relationships', { skip: !h
         await denied(setDoc(doc(r1, path), { forged: true }));
         await denied(setDoc(doc(m1, path), { forged: true }));
       }
+      await denied(getDoc(doc(a1, 'deliveryPenaltyEvents/event')));
+      await denied(setDoc(doc(a1, 'deliveryPenaltyEvents/event'), { forged: true }));
     });
 
-    await t.test('valid requester_branch is allowed and cross-branch access is denied', async () => {
+    await t.test('requester_branch direct reads are denied to participants and other branches', async () => {
       await seedConversation('requester-branch-valid', requesterBranch());
-      assert.equal((await getDoc(doc(r1, 'chatConversations/requester-branch-valid'))).exists(), true);
-      assert.equal((await getDoc(doc(m1, 'chatConversations/requester-branch-valid'))).exists(), true);
-      assert.equal((await getDocs(collection(r1, 'chatConversations/requester-branch-valid/messages'))).size, 1);
+      await denied(getDoc(doc(r1, 'chatConversations/requester-branch-valid')));
+      await denied(getDocs(collection(r1, 'chatConversations/requester-branch-valid/messages')));
+      await denied(getDoc(doc(m1, 'chatConversations/requester-branch-valid')));
+      await denied(getDocs(collection(m1, 'chatConversations/requester-branch-valid/messages')));
       await denied(getDoc(doc(m2, 'chatConversations/requester-branch-valid')));
       await denied(getDocs(collection(d1, 'chatConversations/requester-branch-valid/messages')));
     });

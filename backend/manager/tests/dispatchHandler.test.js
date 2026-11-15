@@ -5,6 +5,8 @@ const { createDistributorAssignedOrdersHandler } = require('../../distributor/as
 const { createManagerDispatchHandler } = require('../dispatchHandler');
 const { manilaScheduleDate, scheduledWeekday } = require('../../../services/productOrderPolicy');
 const { DELIVERY_FAILURE_REASONS } = require('../../../constants/deliveryFailureReasons');
+const { CONVERSATION_TYPES } = require('../../chat/chatAuthorization');
+const { authorityKeyHash, buildConversationFoundation } = require('../../chat/conversationService');
 
 function fixture() {
   const records = new Map([
@@ -33,12 +35,42 @@ function fixture() {
     ['distributor-a', { disabled: false }], ['distributor-a2', { disabled: false }], ['distributor-b', { disabled: false }], ['distributor-inactive', { disabled: true }],
   ]);
   const snapshot = (path) => ({ id: path.split('/').pop(), exists: records.has(path), data: () => records.get(path) });
+  let autoId = 0;
   const collection = (name) => ({
-    doc(id) { const path = `${name}/${id}`; return { id, path, get: async () => snapshot(path), set: async (data) => records.set(path, data), update: async (data) => records.set(path, { ...records.get(path), ...data }), delete: async () => records.delete(path) }; },
-    where(field, operator, value) { return { async get() { return { docs: [...records.entries()].filter(([path, data]) => path.startsWith(`${name}/`) && data[field] === value).map(([path]) => snapshot(path)) }; } }; },
+    doc(id = `generated-${++autoId}`) { const path = `${name}/${id}`; return { id, path, get: async () => snapshot(path), set: async (data) => records.set(path, data), update: async (data) => records.set(path, { ...records.get(path), ...data }), delete: async () => records.delete(path) }; },
+    where(field, operator, value) { const docs = () => [...records.entries()].filter(([path, data]) => path.startsWith(`${name}/`) && data[field] === value).map(([path]) => snapshot(path)); return { async get() { return { docs: docs() }; }, limit(count) { return { async get() { return { docs: docs().slice(0, count) }; } }; } }; },
     async get() { return { docs: [...records.keys()].filter((path) => path.startsWith(`${name}/`)).map(snapshot) }; },
   });
-  const db = { collection, async runTransaction(run) { return run({ get: async (ref) => ref.get(), set(ref, data) { records.set(ref.path, data); }, update(ref, data) { records.set(ref.path, { ...records.get(ref.path), ...data }); }, delete(ref) { records.delete(ref.path); } }); } };
+  let transactionQueue = Promise.resolve();
+  const db = { collection, async runTransaction(run) {
+    const previous = transactionQueue;
+    let release;
+    transactionQueue = new Promise((resolve) => { release = resolve; });
+    await previous;
+    try {
+      const writes = [];
+      const stage = (method, ref, data) => writes.push({ method, ref, data });
+      const result = await run({
+        get: async (ref) => {
+          if (writes.length) throw new Error('Firestore transactions require all reads to be executed before all writes.');
+          return ref.get();
+        },
+        set(ref, data) { stage('set', ref, data); },
+        update(ref, data) { stage('update', ref, data); },
+        create(ref, data) { stage('create', ref, data); },
+        delete(ref) { stage('delete', ref); },
+      });
+      for (const { method, ref } of writes) {
+        if (method === 'create' && records.has(ref.path)) throw new Error('Document already exists.');
+      }
+      for (const { method, ref, data } of writes) {
+        if (method === 'delete') records.delete(ref.path);
+        else if (method === 'update') records.set(ref.path, { ...records.get(ref.path), ...data });
+        else records.set(ref.path, data);
+      }
+      return result;
+    } finally { release(); }
+  } };
   const auth = {
     async verifyIdToken(token) {
       const mapping = { 'manager-a-token': 'manager-a', 'manager-b-token': 'manager-b', 'manager-c-token': 'manager-c', 'distributor-a-token': 'distributor-a', 'distributor-a2-token': 'distributor-a2', 'distributor-b-token': 'distributor-b' };
@@ -242,16 +274,20 @@ test('Manager assignment requires scheduled delivery time and rejects past sched
 
 test('Manager can edit order items, quantities, notes, and container in pre-delivery window and total is recalculated', async () => {
   const f = fixture(); const handler = createManagerDispatchHandler(f.getAdmin);
-  const editResult = await call(handler, 'PATCH', 'manager-a-token', {
+  f.records.set('requests/order-a', { ...f.records.get('requests/order-a'), items: [{ ...f.records.get('requests/order-a').items[0], unitPriceAtOrder: 35 }], subtotalAtOrder: 70, deliveryFeeAtOrder: 0 });
+  const intent = {
     orderId: 'order-a',
-    action: 'edit-order',
     items: [
       { productId: 'product-1', quantity: 3 },
       { productId: 'product-2', quantity: 1 },
     ],
     notes: 'Please call upon arrival at gate.',
     container: 'Brand new 5-gallon container',
-  });
+  };
+  assert.equal((await call(handler, 'PATCH', 'manager-a-token', { ...intent, action: 'edit-order' })).body.error.reason, 'EDIT_QUOTE_REQUIRED');
+  const quote = await call(handler, 'PATCH', 'manager-a-token', { ...intent, action: 'quote-edit' });
+  assert.equal(quote.statusCode, 200);
+  const editResult = await call(handler, 'PATCH', 'manager-a-token', { ...intent, action: 'edit-order', quoteId: quote.body.quoteId });
   assert.equal(editResult.statusCode, 200);
   assert.equal(editResult.body.order.totalAtOrder, 255); // 35*3 + 150*1 = 255
   assert.equal(editResult.body.order.items.length, 2);
@@ -264,6 +300,19 @@ test('Manager can edit order items, quantities, notes, and container in pre-deli
   assert.equal(saved.editHistory[0].event, 'ORDER_EDITED');
   assert.equal(saved.editHistory[0].previousTotal, 70);
   assert.equal(saved.editHistory[0].newTotal, 255);
+});
+
+test('Manager notes-only edit retains the accepted price after a catalog price change', async () => {
+  const f = fixture(); const handler = createManagerDispatchHandler(f.getAdmin);
+  f.records.set('products/product-1', { ...f.records.get('products/product-1'), price: 90 });
+  const result = await call(handler, 'PATCH', 'manager-a-token', { orderId: 'order-a', action: 'edit-order', items: [{ productId: 'product-1', quantity: 2 }], container: 'Exchange container', notes: 'Ring the bell' });
+  assert.equal(result.statusCode, 200);
+  const order = f.records.get('requests/order-a');
+  assert.equal(order.totalAtOrder, 70);
+  assert.equal(order.items[0].totalAtOrder, 70);
+  assert.equal(order.notes, 'Ring the bell');
+  assert.deepEqual(order.editHistory.at(-1).previousPricing, order.editHistory.at(-1).newPricing);
+  assert.equal(order.editHistory.at(-1).previousPricing.subtotalAtOrder, null);
 });
 
 test('Manager cannot edit order once out for delivery or terminal, and cannot change protected fields', async () => {
@@ -408,6 +457,184 @@ test('delivery failure codes are allowlisted and OTHER requires a short explanat
   assert.equal(otherWithoutNote.body.error.reason, 'FAILURE_REASON_NOTE_REQUIRED');
 });
 
+test('attributable failure commits moderation, chat grace, and one closed attempt without a read after write', async () => {
+  const f = fixture();
+  const handler = createDistributorAssignedOrdersHandler(f.getAdmin);
+  f.records.set('requests/order-a', { ...f.records.get('requests/order-a'), assignedDistributorUid: 'distributor-a', assignmentVersion: 1, status: 'accepted' });
+  const authority = { type: CONVERSATION_TYPES.REQUESTER_DISTRIBUTOR, orderId: 'order-a', requesterUid: 'requester-1', distributorUid: 'distributor-a', assignmentVersion: 1 };
+  const hash = authorityKeyHash(authority.type, authority);
+  f.records.set(`chatAuthorityRegistry/${hash}`, { authorityKeyHash: hash, conversationId: 'conversation-a', type: authority.type });
+  f.records.set('chatConversations/conversation-a', buildConversationFoundation({ type: authority.type, authority, createdBy: { uid: 'manager-a', role: 'manager' }, now: new Date() }));
+
+  assert.equal((await call(handler, 'PATCH', 'distributor-a-token', { orderId: 'order-a', action: 'start-delivery' })).statusCode, 200);
+  const activeId = f.records.get('requests/order-a').activeDeliveryAttemptId;
+  assert.equal(f.records.get(`deliveryAttempts/${activeId}`).outcome, 'in_progress');
+  const failed = await call(handler, 'PATCH', 'distributor-a-token', { orderId: 'order-a', action: 'fail-delivery', failureReasonCode: 'NO_RESPONSE', failureReasonNote: 'Called twice.' });
+  assert.equal(failed.statusCode, 200);
+  assert.equal(f.records.get('requests/order-a').activeDeliveryAttemptId, null);
+  assert.equal(f.records.get(`deliveryAttempts/${activeId}`).outcome, 'failed');
+  assert.equal(f.records.get(`deliveryAttempts/${activeId}`).responsibility, 'undetermined');
+  assert.equal(f.records.get(`deliveryAttempts/${activeId}`).reviewState, 'reported');
+  assert.equal(f.records.get(`deliveryAttemptEvents/${activeId}_outcome`).kind, 'ATTEMPT_FAILED');
+  assert.equal([...f.records.values()].filter((value) => value?.incidents?.[0]?.orderId === 'order-a').length, 1);
+  assert.equal(f.records.get('chatConversations/conversation-a').lifecycleReason, 'delivery_failed_grace');
+  assert.equal(f.records.get('chatConversations/conversation-a').status, 'active');
+  assert.equal((await call(handler, 'PATCH', 'distributor-a-token', { orderId: 'order-a', action: 'fail-delivery', failureReasonCode: 'NO_RESPONSE' })).statusCode, 409);
+  assert.equal([...f.records.keys()].filter((path) => path.startsWith('deliveryAttempts/')).length, 1);
+
+  assert.equal((await call(handler, 'PATCH', 'distributor-a-token', { orderId: 'order-a', action: 'reschedule-delivery', scheduledAt: defaultSchedule })).statusCode, 200);
+  assert.equal((await call(handler, 'PATCH', 'distributor-a-token', { orderId: 'order-a', action: 'start-delivery' })).statusCode, 200);
+  const secondId = f.records.get('requests/order-a').activeDeliveryAttemptId;
+  assert.notEqual(secondId, activeId);
+  assert.equal((await call(handler, 'PATCH', 'distributor-a-token', { orderId: 'order-a', action: 'fail-delivery', failureReasonCode: 'WEATHER_OR_ROAD' })).statusCode, 200);
+  assert.equal(f.records.get(`deliveryAttempts/${secondId}`).outcome, 'failed');
+  assert.equal((await call(handler, 'PATCH', 'distributor-a-token', { orderId: 'order-a', action: 'reschedule-delivery', scheduledAt: defaultSchedule })).statusCode, 200);
+  assert.equal((await call(handler, 'PATCH', 'distributor-a-token', { orderId: 'order-a', action: 'start-delivery' })).statusCode, 200);
+  const thirdId = f.records.get('requests/order-a').activeDeliveryAttemptId;
+  assert.equal((await call(handler, 'PATCH', 'distributor-a-token', { orderId: 'order-a', action: 'mark-delivered' })).statusCode, 200);
+  assert.equal(f.records.get('requests/order-a').deliveryAttemptSeq, 3);
+  assert.equal(f.records.get(`deliveryAttempts/${thirdId}`).outcome, 'delivered');
+  assert.equal(f.records.get(`deliveryAttempts/${secondId}`).outcome, 'failed');
+  assert.equal(f.records.get(`deliveryAttempts/${activeId}`).outcome, 'failed');
+});
+
+test('legacy active delivery closes with unknown start time and no verified responsibility', async () => {
+  const f = fixture();
+  f.records.set('requests/order-a', { ...f.records.get('requests/order-a'), assignedDistributorUid: 'distributor-a', status: 'out_for_delivery' });
+  const handler = createDistributorAssignedOrdersHandler(f.getAdmin);
+  const result = await call(handler, 'PATCH', 'distributor-a-token', { orderId: 'order-a', action: 'fail-delivery', failureReasonCode: 'WEATHER_OR_ROAD' });
+  assert.equal(result.statusCode, 200);
+  const order = f.records.get('requests/order-a');
+  const attempt = [...f.records.entries()].find(([path]) => path.startsWith('deliveryAttempts/'))[1];
+  assert.equal(order.deliveryAttemptSeq, 1);
+  assert.equal(attempt.startTimeKnown, false);
+  assert.equal(attempt.startedAt, null);
+  assert.equal(attempt.outcome, 'failed');
+  assert.equal(attempt.responsibility, 'undetermined');
+  assert.equal([...f.records.keys()].filter((path) => path.startsWith('orderAbuseReviews/')).length, 0);
+  assert.equal([...f.records.keys()].filter((path) => path.startsWith('deliveryAttemptEvents/')).length, 2);
+});
+
+test('concurrent starts create only one attempt and a wrong assignee cannot close it', async () => {
+  const f = fixture();
+  f.records.set('requests/order-a', { ...f.records.get('requests/order-a'), assignedDistributorUid: 'distributor-a', assignmentVersion: 1, status: 'accepted' });
+  const handler = createDistributorAssignedOrdersHandler(f.getAdmin);
+  const starts = await Promise.all([
+    call(handler, 'PATCH', 'distributor-a-token', { orderId: 'order-a', action: 'start-delivery' }),
+    call(handler, 'PATCH', 'distributor-a-token', { orderId: 'order-a', action: 'start-delivery' }),
+  ]);
+  assert.deepEqual(starts.map((item) => item.statusCode).sort(), [200, 409]);
+  assert.equal(f.records.get('requests/order-a').deliveryAttemptSeq, 1);
+  assert.equal([...f.records.keys()].filter((path) => path.startsWith('deliveryAttempts/')).length, 1);
+  assert.equal((await call(handler, 'PATCH', 'distributor-b-token', { orderId: 'order-a', action: 'mark-delivered' })).statusCode, 404);
+  assert.equal(f.records.get('requests/order-a').status, 'out_for_delivery');
+  assert.equal((await call(handler, 'PATCH', 'distributor-a-token', { orderId: 'order-a', action: 'mark-delivered' })).statusCode, 200);
+  assert.equal((await call(handler, 'PATCH', 'distributor-a-token', { orderId: 'order-a', action: 'mark-delivered' })).statusCode, 409);
+  assert.equal([...f.records.keys()].filter((path) => path.startsWith('deliveryAttempts/')).length, 1);
+});
+
+test('structured contact report is private, server-timed, and exact retries make no new writes', async () => {
+  const f = fixture();
+  f.records.set('requests/order-a', { ...f.records.get('requests/order-a'), assignedDistributorUid: 'distributor-a', assignmentVersion: 1, status: 'accepted' });
+  const handler = createDistributorAssignedOrdersHandler(f.getAdmin);
+  assert.equal((await call(handler, 'PATCH', 'distributor-a-token', { orderId: 'order-a', action: 'start-delivery' })).statusCode, 200);
+  const attemptId = f.records.get('requests/order-a').activeDeliveryAttemptId;
+  const payload = {
+    orderId: 'order-a', action: 'fail-delivery', failureReasonCode: 'NO_RESPONSE', failureReasonNote: '',
+    clientMutationId: 'report-mutation-001', reportFormat: 'structured-v1',
+    reportEvidence: { contactAttempts: [{ method: 'PHONE_CALL', outcome: 'NO_ANSWER' }] },
+  };
+  const first = await call(handler, 'PATCH', 'distributor-a-token', payload);
+  assert.equal(first.statusCode, 200);
+  assert.equal(first.body.order.status, 'delivery_failed');
+  assert.equal(first.body.order.reportEvidence, undefined);
+  const order = f.records.get('requests/order-a');
+  const attempt = f.records.get(`deliveryAttempts/${attemptId}`);
+  const event = f.records.get(`deliveryAttemptEvents/${attemptId}_outcome`);
+  assert.equal(order.reportEvidence, undefined);
+  assert.equal(order.distributorDeliveryHistory.at(-1).reportEvidence, undefined);
+  assert.deepEqual(attempt.reportEvidence, payload.reportEvidence);
+  assert.deepEqual(event.reportEvidence, payload.reportEvidence);
+  assert.equal(attempt.reportFormat, 'structured-v1');
+  assert.equal(attempt.outcomeMutationId, payload.clientMutationId);
+  assert.equal(attempt.reportReceivedAt.getTime(), order.deliveryFailedAt.getTime());
+  assert.equal(event.reportReceivedAt.getTime(), order.deliveryFailedAt.getTime());
+  assert.equal(attempt.responsibility, 'undetermined');
+  assert.equal(attempt.reviewState, 'reported');
+  assert.equal([...f.records.keys()].filter((key) => key.startsWith('orderingRestrictions/') || key.startsWith('moderationNotices/')).length, 0);
+  const count = f.records.size;
+  const replay = await call(handler, 'PATCH', 'distributor-a-token', payload);
+  assert.equal(replay.statusCode, 200);
+  assert.deepEqual(replay.body, first.body);
+  assert.equal(f.records.size, count);
+  assert.equal(f.records.get('requests/order-a'), order);
+  assert.equal(f.records.get(`deliveryAttemptEvents/${attemptId}_outcome`), event);
+  assert.equal([...f.records.values()].filter((value) => value?.incidents?.[0]?.orderId === 'order-a').length, 1);
+  assert.equal((await call(handler, 'PATCH', 'distributor-a-token', { ...payload, reportEvidence: { contactAttempts: [{ method: 'SMS', outcome: 'SENT_NO_REPLY' }] } })).statusCode, 409);
+  assert.equal((await call(handler, 'PATCH', 'distributor-a-token', { ...payload, clientMutationId: 'report-mutation-002' })).statusCode, 409);
+  f.records.set('requests/order-a', { ...order, assignedDistributorUid: 'distributor-a2' });
+  assert.equal((await call(handler, 'PATCH', 'distributor-a-token', payload)).statusCode, 404);
+  f.records.set('requests/order-a', { ...order, assignmentVersion: 2 });
+  assert.equal((await call(handler, 'PATCH', 'distributor-a-token', payload)).statusCode, 409);
+  f.records.set('requests/order-a', order);
+  assert.equal((await call(handler, 'PATCH', 'distributor-a-token', { orderId: 'order-a', action: 'reschedule-delivery', scheduledAt: defaultSchedule })).statusCode, 200);
+  assert.equal((await call(handler, 'PATCH', 'distributor-a-token', payload)).statusCode, 409);
+});
+
+test('structured failure evidence rejects missing, invalid, oversized, and irrelevant fields while legacy reasons still work', async () => {
+  const base = { orderId: 'order-a', action: 'fail-delivery', failureReasonCode: 'NO_RESPONSE', clientMutationId: 'report-mutation-003', reportFormat: 'structured-v1' };
+  const valid = { contactAttempts: [{ method: 'PHONE_CALL', outcome: 'NO_ANSWER' }] };
+  const cases = [
+    [{ ...base, reportEvidence: {} }, 'REPORT_CONTACT_REQUIRED'],
+    [{ ...base, reportEvidence: { contactAttempts: [{ method: 'PHONE_CALL', outcome: 'SENT_NO_REPLY' }] } }, 'REPORT_CONTACT_INVALID'],
+    [{ ...base, reportEvidence: { contactAttempts: [{ method: 'constructor', outcome: 'NO_ANSWER' }] } }, 'REPORT_CONTACT_INVALID'],
+    [{ ...base, reportEvidence: { contactAttempts: Array(4).fill(valid.contactAttempts[0]) } }, 'REPORT_CONTACT_REQUIRED'],
+    [{ ...base, reportEvidence: { contactAttempts: [{ ...valid.contactAttempts[0], phoneNumber: '09123456789' }] } }, 'REPORT_CONTACT_INVALID'],
+    [{ ...base, reportEvidence: { ...valid, screenshot: 'private' } }, 'REPORT_EVIDENCE_INVALID'],
+    [{ ...base, reportEvidence: valid, failureReasonNote: 'x'.repeat(241) }, 'REPORT_NOTE_TOO_LONG'],
+    [{ ...base, reportEvidence: valid, failureReasonNote: 'Private phone details' }, 'REPORT_NOTE_IRRELEVANT'],
+    [{ ...base, reportEvidence: { contactAttempts: [{ ...valid.contactAttempts[0], claimedAt: 'not-a-time' }] } }, 'REPORT_TIME_INVALID'],
+    [{ ...base, reportEvidence: { contactAttempts: [{ ...valid.contactAttempts[0], claimedAt: new Date(Date.now() + 3600000).toISOString() }] } }, 'REPORT_TIME_IMPLAUSIBLE'],
+    [{ ...base, reportEvidence: { contactAttempts: [{ ...valid.contactAttempts[0], claimedAt: new Date(Date.now() - 48 * 3600000).toISOString() }] } }, 'REPORT_TIME_IMPLAUSIBLE'],
+    [{ ...base, reportEvidence: valid, extra: true }, 'REPORT_PAYLOAD_INVALID'],
+    [{ ...base, failureReasonCode: 'RECIPIENT_REFUSED', reportEvidence: {} }, 'REPORT_INTERACTION_REQUIRED'],
+    [{ ...base, failureReasonCode: 'RECIPIENT_REFUSED', reportEvidence: { interactionNote: 'No.' } }, 'REPORT_INTERACTION_INVALID'],
+    [{ ...base, failureReasonCode: 'OTHER', failureReasonNote: 'Road closed.', reportEvidence: valid }, 'REPORT_EVIDENCE_IRRELEVANT'],
+  ];
+  for (const [payload, reason] of cases) {
+    const f = fixture();
+    f.records.set('requests/order-a', { ...f.records.get('requests/order-a'), assignedDistributorUid: 'distributor-a', status: 'out_for_delivery' });
+    const response = await call(createDistributorAssignedOrdersHandler(f.getAdmin), 'PATCH', 'distributor-a-token', payload);
+    assert.equal(response.statusCode, 400, reason);
+    assert.equal(response.body.error.reason, reason);
+    assert.equal(f.records.get('requests/order-a').status, 'out_for_delivery');
+    assert.equal([...f.records.keys()].filter((key) => key.startsWith('deliveryAttemptEvents/')).length, 0);
+  }
+  const f = fixture();
+  f.records.set('requests/order-a', { ...f.records.get('requests/order-a'), assignedDistributorUid: 'distributor-a', status: 'out_for_delivery' });
+  const refusal = await call(createDistributorAssignedOrdersHandler(f.getAdmin), 'PATCH', 'distributor-a-token', {
+    ...base, failureReasonCode: 'RECIPIENT_REFUSED', reportEvidence: { interactionNote: 'Recipient said they would not accept delivery.' },
+  });
+  assert.equal(refusal.statusCode, 200);
+  assert.equal(refusal.body.order.failureReasonNote, '');
+  assert.equal(f.records.get('requests/order-a').failureReason.includes('Recipient said'), false);
+  const attempt = [...f.records.entries()].find(([key]) => key.startsWith('deliveryAttempts/'))[1];
+  assert.equal(attempt.reportEvidence.interactionNote, 'Recipient said they would not accept delivery.');
+  for (const [failureReasonCode, reportEvidence, failureReasonNote] of [
+    ['CUSTOMER_UNAVAILABLE', { contactAttempts: [{ method: 'IN_PERSON', outcome: 'NOT_AT_ADDRESS' }] }, ''],
+    ['WEATHER_OR_ROAD', {}, ''],
+    ['OTHER', {}, 'Road closed.'],
+  ]) {
+    const next = fixture();
+    next.records.set('requests/order-a', { ...next.records.get('requests/order-a'), assignedDistributorUid: 'distributor-a', status: 'out_for_delivery' });
+    const response = await call(createDistributorAssignedOrdersHandler(next.getAdmin), 'PATCH', 'distributor-a-token', {
+      ...base, failureReasonCode, failureReasonNote, reportEvidence,
+    });
+    assert.equal(response.statusCode, 200, failureReasonCode);
+    assert.equal([...next.records.values()].filter((value) => value?.reportFormat === 'structured-v1').length, 2);
+  }
+});
+
 test('Distributor profile completeness blocks mutation actions with 409 PROFILE_INCOMPLETE while GET is allowed', async () => {
   const f = fixture();
   // Set distributor-a profile to be incomplete (missing phone and address)
@@ -502,13 +729,13 @@ test('Manager assignment prevents conflicting schedule slots but permits non-con
   assert.equal(nonConflictAssign.body.order.status, 'distributor_assigned');
 });
 
-test('Manager assignment enforces maximum active workload capacity', async () => {
+test('Manager assignment permits more than 5 valid non-overlapping trips without arbitrary limits', async () => {
   const f = fixture();
   const dispatch = createManagerDispatchHandler(f.getAdmin);
 
-  // Create 5 existing active orders assigned to distributor-a with non-conflicting times
+  // Create 5 existing active orders assigned to distributor-a with non-conflicting times (2 hours apart)
   for (let i = 1; i <= 5; i++) {
-    const time = new Date(Date.now() + (i * 3600000) + 86400000).toISOString();
+    const time = new Date(Date.now() + (i * 2 * 3600000) + 86400000).toISOString();
     f.records.set(`requests/active-order-${i}`, {
       requestId: `BT-ACT-${i}`,
       branchId: 'branch-a',
@@ -516,16 +743,221 @@ test('Manager assignment enforces maximum active workload capacity', async () =>
       status: 'scheduled',
       assignedDistributorUid: 'distributor-a',
       scheduledAt: time,
+      items: [{ productNameSnapshot: 'Purified Water Refill', quantity: 10 }],
     });
   }
 
-  // Attempting to assign another order to distributor-a should be rejected due to capacity
-  const overloadAssign = await call(dispatch, 'PATCH', 'manager-a-token', {
+  // Attempting to assign a 6th valid non-overlapping trip must succeed under the removed 5-trip cap policy
+  const sixthAssignTime = new Date(Date.now() + 86400000 + (12 * 3600000)).toISOString();
+  const sixthAssign = await call(dispatch, 'PATCH', 'manager-a-token', {
     orderId: 'order-a',
     action: 'assign-distributor',
     distributorUid: 'distributor-a',
-    scheduledAt: new Date(Date.now() + 86400000 + 36000000).toISOString(),
+    scheduledAt: sixthAssignTime,
   });
-  assert.equal(overloadAssign.statusCode, 409);
-  assert.equal(overloadAssign.body.error.reason, 'DISTRIBUTOR_WORKLOAD_EXCEEDED');
+  assert.equal(sixthAssign.statusCode, 200);
+  assert.equal(sixthAssign.body.order.assignedDistributorUid, 'distributor-a');
+  assert.equal(sixthAssign.body.order.tripNumber, 6);
+
+  // However, attempting to schedule a trip that overlaps with an existing trip must remain blocked
+  const overlappingTime = new Date(Date.now() + (1 * 2 * 3600000) + 86400000 + (15 * 60 * 1000)).toISOString();
+  f.records.set('requests/order-overlap', {
+    id: 'order-overlap',
+    requestId: 'BT-OVL-1',
+    branchId: 'branch-a',
+    currentBranchId: 'branch-a',
+    status: 'awaiting_distributor_assignment',
+    items: [{ productNameSnapshot: 'Purified Water Refill', quantity: 5 }],
+    totalAtOrder: 150,
+  });
+  const overlapAssign = await call(dispatch, 'PATCH', 'manager-a-token', {
+    orderId: 'order-overlap',
+    action: 'assign-distributor',
+    distributorUid: 'distributor-a',
+    scheduledAt: overlappingTime,
+  });
+  assert.equal(overlapAssign.statusCode, 409);
+  assert.equal(overlapAssign.body.error.reason, 'DISTRIBUTOR_SCHEDULE_CONFLICT');
+});
+
+test('Multi-Trip System: multiple orders can be co-loaded into one trip up to 60 containers with tripId and remaining capacity', async () => {
+  const f = fixture();
+  const dispatch = createManagerDispatchHandler(f.getAdmin);
+
+  const slotTime = new Date(Date.now() + 86400000);
+  slotTime.setHours(9, 0, 0, 0);
+
+  // Set order-a with 35 containers
+  f.records.set('requests/order-a', {
+    ...f.records.get('requests/order-a'),
+    items: [{ productId: 'product-1', productNameSnapshot: 'Refill', quantity: 35 }],
+  });
+
+  // Assign order-a to distributor-a at 9:00 AM
+  const assign1 = await call(dispatch, 'PATCH', 'manager-a-token', {
+    orderId: 'order-a',
+    action: 'assign-distributor',
+    distributorUid: 'distributor-a',
+    scheduledAt: slotTime.toISOString(),
+  });
+  assert.equal(assign1.statusCode, 200);
+  assert.equal(assign1.body.order.status, 'distributor_assigned');
+  assert.equal(assign1.body.order.orderContainers, 35);
+  assert.ok(assign1.body.order.tripId);
+  const tripId = assign1.body.order.tripId;
+
+  // Add order-decline with 20 containers to the SAME trip/slot
+  f.records.set('requests/order-decline', {
+    ...f.records.get('requests/order-decline'),
+    items: [{ productId: 'product-1', productNameSnapshot: 'Refill', quantity: 20 }],
+  });
+
+  const assign2 = await call(dispatch, 'PATCH', 'manager-a-token', {
+    orderId: 'order-decline',
+    action: 'assign-distributor',
+    distributorUid: 'distributor-a',
+    scheduledAt: slotTime.toISOString(),
+    tripId,
+  });
+  assert.equal(assign2.statusCode, 200);
+  assert.equal(assign2.body.order.status, 'distributor_assigned');
+  assert.equal(assign2.body.order.tripId, tripId);
+  assert.equal(assign2.body.order.orderContainers, 20);
+
+  // Verify GET /api/manager/dispatch-orders returns grouped trips
+  const getRes = await call(dispatch, 'GET', 'manager-a-token');
+  assert.equal(getRes.statusCode, 200);
+  assert.ok(Array.isArray(getRes.body.trips));
+  const trip = getRes.body.trips.find((t) => t.tripId === tripId);
+  assert.ok(trip);
+  assert.equal(trip.totalContainers, 55, '35 + 20 = 55 containers');
+  assert.equal(trip.remainingCapacity, 5, '60 - 55 = 5 remaining');
+});
+
+test('Multi-Trip System: rejects co-loading an order that would exceed the 60-container maximum', async () => {
+  const f = fixture();
+  const dispatch = createManagerDispatchHandler(f.getAdmin);
+
+  const slotTime = new Date(Date.now() + 86400000);
+  slotTime.setHours(9, 0, 0, 0);
+
+  // order-a has 45 containers
+  f.records.set('requests/order-a', {
+    ...f.records.get('requests/order-a'),
+    items: [{ productId: 'product-1', productNameSnapshot: 'Refill', quantity: 45 }],
+  });
+
+  const assign1 = await call(dispatch, 'PATCH', 'manager-a-token', {
+    orderId: 'order-a',
+    action: 'assign-distributor',
+    distributorUid: 'distributor-a',
+    scheduledAt: slotTime.toISOString(),
+  });
+  assert.equal(assign1.statusCode, 200);
+
+  // order-decline has 20 containers (45 + 20 = 65 > 60)
+  f.records.set('requests/order-decline', {
+    ...f.records.get('requests/order-decline'),
+    items: [{ productId: 'product-1', productNameSnapshot: 'Refill', quantity: 20 }],
+  });
+
+  const assign2 = await call(dispatch, 'PATCH', 'manager-a-token', {
+    orderId: 'order-decline',
+    action: 'assign-distributor',
+    distributorUid: 'distributor-a',
+    scheduledAt: slotTime.toISOString(),
+  });
+  assert.equal(assign2.statusCode, 409);
+  assert.equal(assign2.body.error.reason, 'TRIP_CAPACITY_EXCEEDED');
+});
+
+test('Multi-Trip System: unapproved trip cannot be started by distributor until Manager final approval', async () => {
+  const f = fixture();
+  const dispatch = createManagerDispatchHandler(f.getAdmin);
+  const distributorHandler = createDistributorAssignedOrdersHandler(f.getAdmin);
+
+  const slotTime = new Date(Date.now() + 86400000);
+  slotTime.setHours(9, 0, 0, 0);
+
+  // Set order as awaiting assignment with 5 containers
+  f.records.set('requests/order-a', {
+    ...f.records.get('requests/order-a'),
+    assignedDistributorUid: 'distributor-a',
+    status: 'distributor_assigned',
+    scheduledAt: slotTime.toISOString(),
+    managerApproved: false, // Unapproved draft
+    tripStatus: 'planning',
+  });
+
+  // Distributor accepts the assignment
+  const acceptRes = await call(distributorHandler, 'PATCH', 'distributor-a-token', {
+    orderId: 'order-a',
+    action: 'accept-assignment',
+  });
+  assert.equal(acceptRes.statusCode, 200);
+
+  // Attempt to start delivery without Manager approval -> must fail
+  const startFail = await call(distributorHandler, 'PATCH', 'distributor-a-token', {
+    orderId: 'order-a',
+    action: 'start-delivery',
+  });
+  assert.equal(startFail.statusCode, 409);
+  assert.equal(startFail.body.error.reason, 'TRIP_APPROVAL_REQUIRED');
+
+  // Manager provides final approval
+  const approveRes = await call(dispatch, 'PATCH', 'manager-a-token', {
+    orderId: 'order-a',
+    action: 'approve-trip',
+  });
+  assert.equal(approveRes.statusCode, 200);
+
+  // Distributor can now start delivery
+  const startSuccess = await call(distributorHandler, 'PATCH', 'distributor-a-token', {
+    orderId: 'order-a',
+    action: 'start-delivery',
+  });
+  assert.equal(startSuccess.statusCode, 200);
+  assert.equal(startSuccess.body.order.status, 'out_for_delivery');
+});
+
+test('Multi-Trip System: missing managerApproved does not grant approval to newly created trip; legacy order starts safely', async () => {
+  const f = fixture();
+  const distributorHandler = createDistributorAssignedOrdersHandler(f.getAdmin);
+
+  // Case 1: Newly created trip with missing managerApproved field
+  f.records.set('requests/order-new-trip', {
+    ...f.records.get('requests/order-a'),
+    id: 'order-new-trip',
+    assignedDistributorUid: 'distributor-a',
+    status: 'scheduled',
+    scheduledAt: new Date(Date.now() + 86400000).toISOString(),
+    tripId: 'trip-draft-1',
+    tripNumber: 1,
+    tripStatus: 'planning',
+    // managerApproved is omitted (undefined)
+  });
+
+  const missingApprovalStart = await call(distributorHandler, 'PATCH', 'distributor-a-token', {
+    orderId: 'order-new-trip',
+    action: 'start-delivery',
+  });
+  assert.equal(missingApprovalStart.statusCode, 409, 'Missing managerApproved on new trip must reject delivery start');
+  assert.equal(missingApprovalStart.body.error.reason, 'TRIP_APPROVAL_REQUIRED');
+
+  // Case 2: Legacy delivery record without trip fields or managerApproved
+  f.records.set('requests/order-legacy', {
+    ...f.records.get('requests/order-a'),
+    id: 'order-legacy',
+    assignedDistributorUid: 'distributor-a',
+    status: 'scheduled',
+    scheduledAt: new Date(Date.now() + 86400000).toISOString(),
+    // No tripId, no tripNumber, no tripStatus, no managerApproved
+  });
+
+  const legacyStart = await call(distributorHandler, 'PATCH', 'distributor-a-token', {
+    orderId: 'order-legacy',
+    action: 'start-delivery',
+  });
+  assert.equal(legacyStart.statusCode, 200, 'Legacy order without trip fields must be permitted to start delivery');
+  assert.equal(legacyStart.body.order.status, 'out_for_delivery');
 });

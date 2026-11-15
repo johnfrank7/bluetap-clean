@@ -1,5 +1,6 @@
 import React from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Image } from 'expo-image';
 
 import { useBlueTapTheme } from '../BlueTapTheme';
 import { useAdminTheme } from '../AdminTheme';
@@ -13,30 +14,78 @@ import { mapResolveError, orderIdOf } from './chatModel';
 
 export { orderIdOf };
 
-function ActionButton({ busy, colors, disabled = false, label, onPress, secondary = false, softPrimary = false, style }) {
+const CHAT_ICON = require('../../assets/icons/chat/message-circle.svg');
+
+function ActionButton({
+  busy,
+  colors,
+  disabled = false,
+  label,
+  icon,
+  iconOnly = false,
+  tooltip,
+  accessibilityLabel,
+  onPress,
+  secondary = false,
+  softPrimary = false,
+  style,
+  hitSlop,
+}) {
   const foreground = secondary || softPrimary ? colors.primary : colors.onPrimary;
+  const accessibleName = accessibilityLabel || tooltip || label;
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={label}
+      accessibilityLabel={accessibleName}
+      title={tooltip || accessibleName}
       accessibilityState={{ busy, disabled: busy || disabled }}
       disabled={busy || disabled}
       onPress={onPress}
+      hitSlop={hitSlop || (iconOnly ? { top: 3, bottom: 3, left: 3, right: 3 } : undefined)}
       style={({ focused, hovered, pressed }) => [
         styles.button,
-        style,
         secondary
-          ? { backgroundColor: colors.surface, borderColor: colors.primary }
+          ? {
+              backgroundColor: colors.surface,
+              borderColor: colors.primary,
+              borderWidth: 1,
+            }
           : softPrimary
-            ? { backgroundColor: colors.primarySoft, borderColor: colors.primary }
-            : { backgroundColor: colors.primaryAction, borderColor: colors.primaryAction },
+            ? {
+                backgroundColor: colors.primarySoft,
+                borderColor: colors.primary,
+                borderWidth: 1,
+              }
+            : {
+                backgroundColor: colors.primaryAction,
+                borderColor: colors.primaryAction,
+                borderWidth: 1,
+              },
+        iconOnly && styles.iconOnlyButton,
+        style,
         hovered && !disabled && !busy && styles.hovered,
-        focused && { borderColor: colors.primaryLight || colors.primary, borderWidth: 2 },
-        pressed && styles.pressed,
+        pressed && !disabled && !busy && styles.pressed,
+        focused && {
+          borderColor: colors.primaryLight || colors.primary,
+          borderWidth: 2,
+        },
         (busy || disabled) && styles.disabled,
       ]}
     >
-      {busy ? <ActivityIndicator size="small" color={foreground} /> : <Text style={[styles.label, { color: foreground }]}>{label}</Text>}
+      {busy ? (
+        <ActivityIndicator size="small" color={foreground} />
+      ) : iconOnly && icon ? (
+        <Image
+          source={icon}
+          contentFit="contain"
+          tintColor={foreground}
+          transition={0}
+          accessible={false}
+          style={{ width: 18, height: 18 }}
+        />
+      ) : (
+        <Text style={[styles.label, { color: foreground }]}>{label}</Text>
+      )}
     </Pressable>
   );
 }
@@ -93,7 +142,14 @@ export function DistributorOrderChatAction({ order, style, disabled = false }) {
   return <ActionButton busy={busy} disabled={disabled} colors={colors} label={DISTRIBUTOR_CHAT_ACTION_LABEL} onPress={open} softPrimary style={style} />;
 }
 
-export function ManagerOrderChatAction({ order, style, disabled = false }) {
+export function ManagerOrderChatAction({
+  order,
+  style,
+  disabled = false,
+  iconOnly = true,
+  accessibilityLabel = 'Message requester',
+  tooltip = 'Message requester',
+}) {
   const { colors } = useAdminTheme();
   const { openBlueTapConversation } = useChat();
   const [busy, setBusy] = React.useState(false);
@@ -107,16 +163,48 @@ export function ManagerOrderChatAction({ order, style, disabled = false }) {
       setBusy(false);
     }
   };
-  return <ActionButton busy={busy} disabled={disabled} colors={colors} label="Message" onPress={open} secondary style={style} />;
+  return (
+    <ActionButton
+      busy={busy}
+      disabled={disabled}
+      colors={colors}
+      label="Message"
+      icon={CHAT_ICON}
+      iconOnly={iconOnly}
+      accessibilityLabel={accessibilityLabel}
+      tooltip={tooltip}
+      onPress={open}
+      secondary
+      style={style}
+    />
+  );
 }
 
 const styles = StyleSheet.create({
   wrap: { width: '100%', flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginTop: 10 },
   compact: { marginTop: 8 },
-  button: { flexGrow: 1, flexBasis: 124, minWidth: 0, minHeight: 44, paddingHorizontal: 10, borderWidth: 1, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  button: {
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: 124,
+    minWidth: 0,
+    minHeight: 44,
+    paddingHorizontal: 10,
+    borderWidth: 1,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  iconOnlyButton: {
+    flexGrow: 0,
+    flexShrink: 0,
+    flexBasis: 'auto',
+    minWidth: 0,
+    paddingHorizontal: 0,
+  },
   label: { fontSize: 12, fontWeight: '900' },
-  hovered: { opacity: 0.94 },
-  pressed: { opacity: 0.82, transform: [{ scale: 0.985 }] },
-  disabled: { opacity: 0.7 },
+  hovered: { opacity: 0.9 },
+  pressed: { opacity: 0.8 },
+  disabled: { opacity: 0.6 },
   error: { width: '100%', fontSize: 11, lineHeight: 16 },
 });

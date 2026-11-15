@@ -9,6 +9,7 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -34,6 +35,7 @@ import {
 } from '../../services/distributorOrders';
 import { useDistributorProfile } from '../../services/distributorProfile';
 import { formatDisplayUniqueId } from '../../services/uniqueIds';
+const { analyzeOrderCargo } = require('../../services/managerTripCapacity');
 import { DistributorOrderChatAction } from '../../components/chat/ChatOrderActions';
 import AnimatedPresenceItem from '../../components/AnimatedPresenceItem';
 import { useAnimatedPresenceList } from '../../components/useAnimatedPresenceList';
@@ -62,19 +64,13 @@ const TIME_SLOTS = [
 const getAmountNumber = (amount) =>
   Number(String(amount || '').replace(/[^\d.]/g, '')) || 0;
 
-const getQuantityNumber = (quantity) => {
-  const match = String(quantity || '').match(/\d+(\.\d+)?/);
-  return Number(match?.[0] || 0);
-};
-
 const getDetailsRequestData = (request) => {
   if (!request) return null;
 
   const totalAmount = getAmountNumber(request.amountDue);
-  const quantity = getQuantityNumber(request.quantity);
-  const unitPrice = quantity > 0 ? totalAmount / quantity : totalAmount;
 
   return {
+    pricingDetailsSource: request.pricingDetailsSource || request,
     requestId: request.id,
     status: request.status || 'Scheduled',
     orderDate: 'Not set',
@@ -99,15 +95,13 @@ const getDetailsRequestData = (request) => {
     failureReasonCode: request.failureReasonCode,
     failureReasonLabel: request.failureReasonLabel,
     failureReasonNote: request.failureReasonNote,
-    items: [
-      {
-        id: request.id,
-        productName: request.productName,
-        quantity: request.quantity,
-        unitPrice,
-        subtotal: totalAmount,
-      },
-    ],
+    tripId: request.tripId || null,
+    tripNumber: request.tripNumber || null,
+    orderContainers: request.orderContainers || null,
+    tripStatus: request.tripStatus || null,
+    items: request.items?.length ? request.items : [{ id: request.id, productName: request.productName, quantity: request.quantity }],
+    subtotalAtOrder: request.subtotalAtOrder,
+    deliveryFeeAtOrder: request.deliveryFeeAtOrder,
     grandTotalAmount: totalAmount,
   };
 };
@@ -119,6 +113,7 @@ const ScheduledRequestCard = ({
   onViewDetails,
   processing,
   actionsDisabled = false,
+  floatingClearance = false,
 }) => {
   const statusNorm = normalizeDistributorOrderStatus(request.status);
   const isDeliveryFailed = statusNorm === 'delivery failed';
@@ -163,7 +158,7 @@ const ScheduledRequestCard = ({
 
           <Text style={[styles.compactLabel, styles.compactLabelGap]}>Quantity</Text>
           <Text style={styles.compactValue} numberOfLines={1}>
-            {request.quantity}
+            {request.quantity} · {analyzeOrderCargo(request).badgeLabel}
           </Text>
         </View>
       </View>
@@ -187,7 +182,7 @@ const ScheduledRequestCard = ({
         )}
       </View>
 
-      <View style={styles.cardActionsRow}>
+      <View style={[styles.cardActionsRow, floatingClearance && styles.cardActionsFloatingClearance]}>
         <TouchableOpacity
           activeOpacity={0.8}
           disabled={actionsDisabled}
@@ -227,6 +222,7 @@ const ScheduledRequestCard = ({
 
 export default function DistributorScheduledRequests() {
   const { colors, isDark } = useBlueTapTheme();
+  const { width } = useWindowDimensions();
   const router = useRouter();
   const params = useLocalSearchParams();
   const openedParamRef = React.useRef('');
@@ -377,12 +373,21 @@ export default function DistributorScheduledRequests() {
               </View>
             )}
 
-            {loading ? (
+            {!!error && scheduledPresentation.length > 0 && (
+              <View style={styles.actionErrorCard}>
+                <Text style={styles.actionErrorText}>{error}</Text>
+                <TouchableOpacity onPress={refresh} style={{ marginTop: 6 }}>
+                  <Text style={[styles.secondaryActionText, { color: colors.primary || BLUE }]}>Tap to retry sync</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+
+            {loading && scheduledPresentation.length === 0 ? (
               <View style={styles.emptyCard}>
                 <ActivityIndicator color={BLUE} />
                 <Text style={styles.emptyText}>Loading assigned schedule...</Text>
               </View>
-            ) : error ? (
+            ) : error && scheduledPresentation.length === 0 ? (
               <View style={styles.emptyCard}>
                 <Text style={styles.emptyTitle}>Schedule unavailable.</Text>
                 <Text style={styles.emptyText}>{error}</Text>
@@ -403,6 +408,7 @@ export default function DistributorScheduledRequests() {
                   request={entry.item}
                   actionsDisabled={entry.actionsDisabled}
                   processing={processingRequestId === entry.id}
+                  floatingClearance={width < 768}
                   onAdvance={advanceDelivery}
                   onOpenRescheduleModal={(req) => {
                     if (!isComplete) {
@@ -670,6 +676,10 @@ const styles = createPortalStyleSheet({
     marginTop: 14,
     justifyContent: 'flex-end',
   },
+  cardActionsFloatingClearance: {
+    // Keep the action row clear of the 54px floating portal controls.
+    marginRight: 56,
+  },
   secondaryActionButton: {
     minHeight: 38,
     paddingHorizontal: 12,
@@ -773,6 +783,7 @@ const styles = createPortalStyleSheet({
   dialogCard: {
     width: '100%',
     maxWidth: 440,
+    maxHeight: '90%',
     backgroundColor: BLUETAP_COLORS.surface,
     borderRadius: 16,
     borderWidth: 1,
@@ -816,7 +827,7 @@ const styles = createPortalStyleSheet({
     marginTop: 16,
   },
   dialogCancelBtn: {
-    minHeight: 38,
+    minHeight: 44,
     paddingHorizontal: 14,
     borderRadius: 8,
     borderWidth: 1,
@@ -831,7 +842,7 @@ const styles = createPortalStyleSheet({
     fontWeight: '700',
   },
   dialogDangerBtn: {
-    minHeight: 38,
+    minHeight: 44,
     paddingHorizontal: 16,
     borderRadius: 8,
     backgroundColor: BLUETAP_COLORS.danger,
@@ -844,7 +855,7 @@ const styles = createPortalStyleSheet({
     fontWeight: 'bold',
   },
   dialogSuccessBtn: {
-    minHeight: 38,
+    minHeight: 44,
     paddingHorizontal: 16,
     borderRadius: 8,
     backgroundColor: BLUETAP_COLORS.primary,

@@ -16,12 +16,23 @@ test('account workspace DTO exposes only safe normalized fields', () => {
     username: 'dinawater', approvalStatus: 'pending', branchId: 'branch-a', mustChangePassword: true,
     password: 'must-never-leak', faceEmbedding: [1, 2, 3], accountSource: 'public_registration',
   }, new Map([['branch-a', 'North Branch']]), { metadata: { lastSignInTime: '2026-09-20T00:00:00Z' } });
-  assert.deepEqual(Object.keys(account).sort(), ['accountSource','branchId','branchName','createdAt','displayUid','email','fullName','lastSignInAt','mustChangePassword','onboarding','publicUid','requestedBranchId','requestedBranchName','role','sessionIdleTimeoutOverrideMinutes','sessionPolicy','status','uid','uniqueId','updatedAt','username'].sort());
+  assert.deepEqual(Object.keys(account).sort(), ['accountSource','branchId','branchName','createdAt','displayUid','email','fullName','lastSignInAt','mustChangePassword','noticeEligible','onboarding','pendingAccountActionId','publicUid','requestedBranchId','requestedBranchName','role','sessionIdleTimeoutOverrideMinutes','sessionPolicy','status','uid','uniqueId','updatedAt','username'].sort());
   assert.equal(account.status, 'pending');
   assert.equal(account.email, 'dina@example.test');
   assert.equal(account.branchName, 'North Branch');
+  assert.equal(account.noticeEligible, false);
   assert.equal('password' in account, false);
   assert.equal('faceEmbedding' in account, false);
+});
+
+test('account-action eligibility requires a matching nonempty Firebase-verified email', () => {
+  const profile = { email: 'requester@example.test', role: 'requester', accountSource: 'admin_created' };
+  assert.equal(safeAccount('requester-1', profile, new Map(), { email: profile.email, emailVerified: false }).noticeEligible, false);
+  assert.equal(safeAccount('requester-1', profile, new Map(), { email: 'other@example.test', emailVerified: true }).noticeEligible, false);
+  const verified = safeAccount('requester-1', profile, new Map(), { email: profile.email, emailVerified: true });
+  assert.equal(verified.noticeEligible, true);
+  assert.equal(verified.onboarding.emailVerification, 'auth_verified');
+  assert.equal(safeAccount('requester-1', { role: 'requester' }, new Map(), { emailVerified: true }).noticeEligible, false);
 });
 
 test('role-specific account status and audit DTO stay canonical and secret-free', () => {
@@ -36,41 +47,115 @@ test('role-specific account status and audit DTO stay canonical and secret-free'
 });
 
 test('Admin suspension and termination disable Auth, revoke sessions, preserve records, and are retry-safe', async () => {
-  const fixture = managementFixture(); const handler = createAdminAccountsHandler(fixture.getAdmin);
-  const suspended = await call(handler, 'PATCH', 'admin-token', { uid: 'manager-1', action: 'suspend' });
+  const fixture = managementFixture(); const handler = accountHandler(fixture);
+  const suspended = await call(handler, 'PATCH', 'admin-token', { uid: 'manager-1', action: 'suspend', clientMutationId: 'suspend-manager-1', reason: 'Reviewed account safety incident.' });
   assert.equal(suspended.statusCode, 200);
   assert.equal(fixture.records.get('users/manager-1').accountStatus, 'suspended');
   assert.equal(fixture.records.get('users/manager-1').managerStatus, 'active');
   assert.equal(fixture.authUsers.get('manager-1').disabled, true);
 
-  const reactivated = await call(handler, 'PATCH', 'admin-token', { uid: 'manager-1', action: 'reactivate' });
+  const reactivated = await call(handler, 'PATCH', 'admin-token', { uid: 'manager-1',
+    action: 'reactivate', clientMutationId: 'reactivate-manager-1' });
   assert.equal(reactivated.statusCode, 200);
   assert.equal(fixture.records.get('users/manager-1').accountStatus, 'active');
   assert.equal(fixture.authUsers.get('manager-1').disabled, false);
 
-  const terminated = await call(handler, 'PATCH', 'admin-token', { uid: 'requester-1', action: 'terminate' });
+  const terminated = await call(handler, 'PATCH', 'admin-token', { uid: 'requester-1', action: 'terminate', clientMutationId: 'terminate-requester-1', reason: 'Reviewed account safety incident.' });
   assert.equal(terminated.statusCode, 200);
   assert.equal(fixture.records.get('users/requester-1').accountStatus, 'terminated');
   assert.equal(fixture.authUsers.get('requester-1').disabled, true);
   assert.ok(fixture.records.has('users/requester-1'));
   assert.ok([...fixture.records.values()].some((value) => value.action === 'ACCOUNT_TERMINATED'));
 
-  const retried = await call(handler, 'PATCH', 'admin-token', { uid: 'requester-1', action: 'terminate' });
+  const retried = await call(handler, 'PATCH', 'admin-token', { uid: 'requester-1', action: 'terminate', clientMutationId: 'terminate-requester-1', reason: 'Reviewed account safety incident.' });
   assert.equal(retried.statusCode, 200);
-  assert.equal(retried.body.changed, false);
-  const reactivationDenied = await call(handler, 'PATCH', 'admin-token', { uid: 'requester-1', action: 'reactivate' });
+  assert.equal(retried.body.accountAction.state, 'applied');
+  const reactivationDenied = await call(handler, 'PATCH', 'admin-token', { uid: 'requester-1',
+    action: 'reactivate', clientMutationId: 'reactivate-terminated-1' });
   assert.equal(reactivationDenied.statusCode, 409);
   assert.equal(reactivationDenied.body.error.reason, 'ACCOUNT_NOT_REACTIVATABLE');
 });
 
+test('general account editor cannot bypass durable access actions', async () => {
+  const fixture = managementFixture(); const handler = accountHandler(fixture);
+  const before = fixture.authUsers.get('requester-1').disabled;
+  const denied = await call(handler, 'PATCH', 'admin-token', { uid: 'requester-1',
+    action: 'updateAccount', fullName: 'Rita Water', email: 'rita@example.test', active: false });
+  assert.equal(denied.statusCode, 409);
+  assert.equal(denied.body.error.reason, 'ACCOUNT_ACTION_ROUTE_REQUIRED');
+  assert.equal(fixture.authUsers.get('requester-1').disabled, before);
+  assert.equal(fixture.records.has('accountActionReservations/requester-1'), false);
+});
+
+test('changing an account email clears Auth verification and notice eligibility', async () => {
+  const fixture = managementFixture();
+  const handler = accountHandler(fixture);
+  const changed = await call(handler, 'PATCH', 'admin-token', {
+    uid: 'requester-1', action: 'updateAccount', role: 'requester',
+    fullName: 'Rita Requester', email: 'new-rita@example.test', active: true,
+  });
+  assert.equal(changed.statusCode, 200);
+  assert.equal(fixture.authUsers.get('requester-1').emailVerified, false);
+  assert.equal(fixture.records.get('users/requester-1').emailVerified, false);
+  assert.equal(changed.body.account.noticeEligible, false);
+  assert.equal(changed.body.account.onboarding.emailVerification, 'verification_required');
+  assert.deepEqual(fixture.revoked, ['requester-1']);
+});
+
+test('unconfigured notice transport rejects a new action before access hold but permits exact replay', async () => {
+  const fixture = managementFixture();
+  const unavailable = createAdminAccountsHandler(fixture.getAdmin, { noticeEnv: {} });
+  const body = { uid: 'requester-1', action: 'deactivate', clientMutationId: 'notice-config-1' };
+  const rejected = await call(unavailable, 'PATCH', 'admin-token', body);
+  assert.equal(rejected.statusCode, 503);
+  assert.equal(rejected.body.error.reason, 'ACCOUNT_NOTICE_TRANSPORT_UNAVAILABLE');
+  assert.equal(fixture.records.has('accountActionReservations/requester-1'), false);
+  assert.equal(fixture.records.has('accountAccessHolds/requester-1'), false);
+  assert.equal(fixture.authUsers.get('requester-1').disabled, undefined);
+  const applied = await call(accountHandler(fixture), 'PATCH', 'admin-token', body);
+  assert.equal(applied.body.accountAction.state, 'applied');
+  const replay = await call(unavailable, 'PATCH', 'admin-token', body);
+  assert.equal(replay.statusCode, 200);
+  assert.equal(replay.body.accountAction.id, applied.body.accountAction.id);
+});
+
+test('protected account-action status and retry preserve intent identity and deny Manager access', async () => {
+  const fixture = managementFixture(); const handler = accountHandler(fixture);
+  const missingReason = await call(handler, 'PATCH', 'admin-token', {
+    uid: 'requester-1', action: 'suspend', clientMutationId: 'reason-required-1',
+  });
+  assert.equal(missingReason.statusCode, 400);
+  assert.equal(fixture.records.has('accountActionReservations/requester-1'), false);
+  const created = await call(handler, 'PATCH', 'admin-token', {
+    uid: 'requester-1', action: 'suspend', clientMutationId: 'reason-required-1',
+    reason: 'Reviewed account safety incident.',
+  });
+  assert.equal(created.statusCode, 200);
+  const intentId = created.body.accountAction.id;
+  const status = await call(handler, 'PATCH', 'admin-token', { action: 'accountActionStatus', intentId });
+  assert.equal(status.body.accountAction.state, 'applied');
+  const denied = await call(handler, 'PATCH', 'manager-token', { action: 'retryAccountAction', intentId });
+  assert.equal(denied.statusCode, 403);
+  const forged = await call(handler, 'PATCH', 'admin-token', { action: 'retryAccountAction', intentId: '0'.repeat(64) });
+  assert.equal(forged.statusCode, 404);
+  const changed = await call(handler, 'PATCH', 'admin-token', {
+    uid: 'requester-1', action: 'suspend', clientMutationId: 'reason-required-1',
+    reason: 'Different reviewed factual reason.',
+  });
+  assert.equal(changed.statusCode, 409);
+  assert.equal([...fixture.records.keys()].filter((key) => key.startsWith('adminAuditLogs/account_action_')).length, 1);
+});
+
 test('global account state changes do not grant Distributor operational approval', async () => {
-  const fixture = managementFixture(); const handler = createAdminAccountsHandler(fixture.getAdmin);
+  const fixture = managementFixture(); const handler = accountHandler(fixture);
   fixture.records.set('users/pending-distributor', { uid: 'pending-distributor', role: 'distributor', fullName: 'Pending Driver', email: 'pending@example.test', accountStatus: 'active', distributorStatus: 'pending', approvalStatus: 'pending', status: 'Pending' });
-  fixture.authUsers.set('pending-distributor', { uid: 'pending-distributor', email: 'pending@example.test', customClaims: {}, metadata: {} });
-  assert.equal((await call(handler, 'PATCH', 'admin-token', { uid: 'pending-distributor', action: 'deactivate' })).statusCode, 200);
-  assert.equal((await call(handler, 'PATCH', 'admin-token', { uid: 'pending-distributor', action: 'reactivate' })).statusCode, 200);
+  fixture.authUsers.set('pending-distributor', { uid: 'pending-distributor', email: 'pending@example.test',
+    emailVerified: true, customClaims: {}, metadata: {} });
+  assert.equal((await call(handler, 'PATCH', 'admin-token', { uid: 'pending-distributor', action: 'deactivate', clientMutationId: 'deactivate-pending-1' })).statusCode, 200);
+  assert.equal((await call(handler, 'PATCH', 'admin-token', { uid: 'pending-distributor',
+    action: 'reactivate', clientMutationId: 'reactivate-pending-1' })).statusCode, 409);
   const profile = fixture.records.get('users/pending-distributor');
-  assert.equal(profile.accountStatus, 'active');
+  assert.equal(profile.accountStatus, 'inactive');
   assert.equal(profile.distributorStatus, 'pending');
   assert.equal(profile.approvalStatus, 'pending');
 });
@@ -95,25 +180,50 @@ function managementFixture() {
   });
   const authUsers = new Map([
     ['admin-1', { uid: 'admin-1', email: 'admin@example.test', customClaims: { admin: true, role: 'admin' }, metadata: {} }],
-    ['requester-1', { uid: 'requester-1', email: 'rita@example.test', customClaims: {}, metadata: { creationTime: '2026-01-01', lastSignInTime: '2026-02-01' } }],
-    ['manager-1', { uid: 'manager-1', email: 'manny@example.test', customClaims: { manager: true }, metadata: {} }],
-    ['distributor-1', { uid: 'distributor-1', email: 'dina@example.test', customClaims: {}, metadata: {} }],
+    ['requester-1', { uid: 'requester-1', email: 'rita@example.test', emailVerified: true, customClaims: {}, metadata: { creationTime: '2026-01-01', lastSignInTime: '2026-02-01' } }],
+    ['manager-1', { uid: 'manager-1', email: 'manny@example.test', emailVerified: true, customClaims: { manager: true }, metadata: {} }],
+    ['distributor-1', { uid: 'distributor-1', email: 'dina@example.test', emailVerified: true, customClaims: {}, metadata: {} }],
   ]);
-  const db = { collection, runTransaction: async (run) => run({ get: async (ref) => snapshot(ref.path), create(ref, data) { records.set(ref.path, data); }, update(ref, data) { records.set(ref.path, { ...records.get(ref.path), ...data }); }, set(ref, data) { records.set(ref.path, data); } }) };
+  const db = { collection, runTransaction: async (run) => {
+    let hasWritten = false;
+    const staged = [];
+    const result = await run({
+      get: async (ref) => {
+        if (hasWritten) throw new Error('Firestore transactions require all reads to be executed before all writes.');
+        return snapshot(ref.path);
+      },
+      create(ref, data) {
+        hasWritten = true;
+        staged.push(() => {
+          if (records.has(ref.path)) throw new Error(`Document already exists: ${ref.path}`);
+          records.set(ref.path, data);
+        });
+      },
+      update(ref, data) { hasWritten = true; staged.push(() => records.set(ref.path, { ...records.get(ref.path), ...data })); },
+      set(ref, data, options) { hasWritten = true; staged.push(() => records.set(ref.path, options?.merge ? { ...records.get(ref.path), ...data } : data)); },
+      delete(ref) { hasWritten = true; staged.push(() => records.delete(ref.path)); },
+    });
+    staged.forEach((apply) => apply());
+    return result;
+  } };
   const auth = {
     verifyIdToken: async (token) => token === 'admin-token' ? { uid: 'admin-1', admin: true, role: 'admin' } : { uid: 'manager-1', manager: true, role: 'manager' },
     getUser: async (uid) => authUsers.get(uid), getUserByEmail: async (email) => { const user = [...authUsers.values()].find((item) => item.email === email); if (!user) throw Object.assign(new Error('not found'), { code: 'auth/user-not-found' }); return user; }, listUsers: async () => ({ users: [...authUsers.values()] }),
-    createUser: async ({ email, password, displayName }) => { const uid = `created-${authUsers.size}`; const user = { uid, email, password, displayName, metadata: {} }; authUsers.set(uid, user); return user; }, deleteUser: async (uid) => authUsers.delete(uid), setCustomUserClaims: async () => {},
+    createUser: async ({ email, password, displayName, emailVerified = false }) => { const uid = `created-${authUsers.size}`; const user = { uid, email, password, displayName, emailVerified, metadata: {} }; authUsers.set(uid, user); return user; }, deleteUser: async (uid) => authUsers.delete(uid), setCustomUserClaims: async () => {},
     updateUser: async (uid, changes) => { const current = authUsers.get(uid); authUsers.set(uid, { ...current, ...changes }); return authUsers.get(uid); },
     revokeRefreshTokens: async (uid) => { revoked.push(uid); },
   };
   return { records, authUsers, revoked, getAdmin: () => ({ auth, db }) };
 }
+function accountHandler(fixture) {
+  return createAdminAccountsHandler(fixture.getAdmin,
+    { sendEmail: async () => ({ provider: 'test', providerStatus: 200 }) });
+}
 function response() { return { statusCode: 200, body: null, setHeader() {}, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; }, end() { return this; } }; }
 async function call(handler, method, token, body = {}) { const res = response(); await handler({ method, headers: { authorization: `Bearer ${token}` }, body }, res); return res; }
 
 test('Accounts & Audit endpoint lists all operational roles and rejects Manager access', async () => {
-  const fixture = managementFixture(); const handler = createAdminAccountsHandler(fixture.getAdmin);
+  const fixture = managementFixture(); const handler = accountHandler(fixture);
   const allowed = await call(handler, 'GET', 'admin-token');
   assert.equal(allowed.statusCode, 200);
   assert.deepEqual(allowed.body.accounts.map((account) => account.role).sort(), ['distributor', 'manager', 'requester']);
@@ -124,8 +234,8 @@ test('Accounts & Audit endpoint lists all operational roles and rejects Manager 
 });
 
 test('Admin deactivation and temporary-password reset are authoritative and audited', async () => {
-  const fixture = managementFixture(); const handler = createAdminAccountsHandler(fixture.getAdmin);
-  const deactivated = await call(handler, 'PATCH', 'admin-token', { uid: 'requester-1', action: 'deactivate' });
+  const fixture = managementFixture(); const handler = accountHandler(fixture);
+  const deactivated = await call(handler, 'PATCH', 'admin-token', { uid: 'requester-1', action: 'deactivate', clientMutationId: 'deactivate-requester-1' });
   assert.equal(deactivated.statusCode, 200);
   assert.equal(fixture.records.get('users/requester-1').accountStatus, 'inactive');
   assert.equal(fixture.authUsers.get('requester-1').disabled, true);
@@ -139,7 +249,7 @@ test('Admin deactivation and temporary-password reset are authoritative and audi
 });
 
 test('Admin can revoke every session for one account without changing its profile status', async () => {
-  const fixture = managementFixture(); const handler = createAdminAccountsHandler(fixture.getAdmin);
+  const fixture = managementFixture(); const handler = accountHandler(fixture);
   const result = await call(handler, 'PATCH', 'admin-token', { uid: 'requester-1', action: 'signOutAllSessions' });
   assert.equal(result.statusCode, 200);
   assert.deepEqual(fixture.revoked, ['requester-1']);
@@ -150,7 +260,7 @@ test('Admin can revoke every session for one account without changing its profil
 test('Admin account edits keep the session override and Manager branch server-authoritative and audited', async () => {
   const fixture = managementFixture();
   fixture.records.set('branches/south', { name: 'South', code: 'S', status: 'active' });
-  const handler = createAdminAccountsHandler(fixture.getAdmin);
+  const handler = accountHandler(fixture);
   const requester = await call(handler, 'PATCH', 'admin-token', {
     uid: 'requester-1', action: 'updateAccount', fullName: 'Rita Updated', email: 'rita@example.test', role: 'requester',
     sessionIdleTimeoutOverrideMinutes: 10, requirePasswordChange: true, active: true,
@@ -175,7 +285,7 @@ test('Admin Distributor reassignment requires an active branch, records an audit
   const membershipHash = authorityKeyHash('distributor_branch', membershipAuthority);
   fixture.records.set(`chatAuthorityRegistry/${membershipHash}`, { authorityKeyHash: membershipHash, conversationId: 'old-membership-thread', type: 'distributor_branch' });
   fixture.records.set('chatConversations/old-membership-thread', buildConversationFoundation({ type: 'distributor_branch', authority: membershipAuthority, createdBy: { uid: 'distributor-1', role: 'distributor' }, now: new Date('2026-09-29T00:00:00Z') }));
-  const handler = createAdminAccountsHandler(fixture.getAdmin);
+  const handler = accountHandler(fixture);
   const moved = await call(handler, 'PATCH', 'admin-token', { uid: 'distributor-1', action: 'updateAccount', fullName: 'Dina Driver', email: 'dina@example.test', role: 'distributor', branchId: 'south', active: true });
   assert.equal(moved.statusCode, 200); assert.equal(fixture.records.get('users/distributor-1').branchId, 'south');
   assert.equal(fixture.records.get('users/distributor-1').branchMembershipVersion, 2);
@@ -193,7 +303,7 @@ test('Admin Distributor reassignment requires an active branch, records an audit
 });
 
 test('Admin can manually assign an active branch to a legacy active Distributor with no branch', async () => {
-  const fixture = managementFixture(); const handler = createAdminAccountsHandler(fixture.getAdmin);
+  const fixture = managementFixture(); const handler = accountHandler(fixture);
   fixture.records.set('users/legacy-distributor', { uid: 'legacy-distributor', role: 'distributor', fullName: 'Legacy Driver', email: 'legacy@example.test', username: 'legacy_driver', distributorStatus: 'active', approvalStatus: 'active', branchId: null });
   fixture.authUsers.set('legacy-distributor', { uid: 'legacy-distributor', email: 'legacy@example.test', customClaims: {}, metadata: {} });
   const assigned = await call(handler, 'PATCH', 'admin-token', { uid: 'legacy-distributor', action: 'updateAccount', fullName: 'Legacy Driver', email: 'legacy@example.test', role: 'distributor', branchId: 'north', active: true });
@@ -203,12 +313,16 @@ test('Admin can manually assign an active branch to a legacy active Distributor 
 });
 
 test('Admin-created active Distributor requires and receives an authoritative active branch', async () => {
-  const fixture = managementFixture(); const handler = createAdminAccountsHandler(fixture.getAdmin);
+  const fixture = managementFixture(); const handler = accountHandler(fixture);
   const missing = await call(handler, 'POST', 'admin-token', { role: 'distributor', fullName: 'New Driver', email: 'new@example.test', username: 'new_driver', temporaryPassword: 'SafePassword2026' });
   assert.equal(missing.statusCode, 404); assert.equal(missing.body.error.reason, 'BRANCH_NOT_FOUND');
   const created = await call(handler, 'POST', 'admin-token', { role: 'distributor', fullName: 'New Driver', email: 'new@example.test', username: 'new_driver', temporaryPassword: 'SafePassword2026', branchId: 'north' });
   assert.equal(created.statusCode, 201); assert.equal(created.body.account.status, 'active'); assert.equal(created.body.account.branchId, 'north');
   const profile = fixture.records.get(`users/${created.body.account.uid}`); assert.equal(profile.distributorStatus, 'active'); assert.equal(profile.branchId, 'north');
+  assert.equal(profile.emailVerificationRequired, true);
+  assert.equal(fixture.authUsers.get(created.body.account.uid).emailVerified, false);
+  assert.equal(created.body.account.noticeEligible, false);
+  assert.equal(created.body.account.onboarding.emailVerification, 'verification_required');
   assert.equal(profile.branchMembershipVersion, 1);
 });
 
@@ -285,3 +399,178 @@ test('backfillLegacyUids is idempotent, converts legacy hyphenated UIDs, and doe
   assert.equal(fixture.records.get('users/legacy-manager').publicUid, 'Man009');
   assert.equal(fixture.records.get('users/requester-duplicate-oldest').publicUid, 'Req005');
 });
+
+test('Admin account creation enforces Firestore read-before-write, rejects duplicate usernames, and leaves no partial state on transaction failure', async () => {
+  const fixture = managementFixture();
+  const handler = accountHandler(fixture);
+
+  const distRes = await call(handler, 'POST', 'admin-token', {
+    role: 'distributor', fullName: 'Dist One', email: 'dist1@example.test',
+    username: 'dist_one', temporaryPassword: 'SafePassword2026', branchId: 'north',
+  });
+  assert.equal(distRes.statusCode, 201);
+  assert.equal(distRes.body.account.publicUid, 'Dis001');
+  assert.equal(fixture.records.get('usernames/dist_one')?.uid, distRes.body.account.uid);
+
+  const reqRes = await call(handler, 'POST', 'admin-token', {
+    role: 'requester', fullName: 'Req One', email: 'req1@example.test',
+    username: 'req_one', temporaryPassword: 'SafePassword2026',
+  });
+  assert.equal(reqRes.statusCode, 201);
+  assert.equal(reqRes.body.account.publicUid, 'Req001');
+  assert.equal(fixture.records.get('usernames/req_one')?.uid, reqRes.body.account.uid);
+
+  const mgrRes = await call(handler, 'POST', 'admin-token', {
+    role: 'manager', fullName: 'Mgr One', email: 'mgr1@example.test',
+    temporaryPassword: 'SafePassword2026', branchId: 'north',
+  });
+  assert.equal(mgrRes.statusCode, 201);
+  assert.equal(mgrRes.body.account.publicUid, 'Man001');
+
+  const authCountBeforeDup = fixture.authUsers.size;
+  const dupPrecheck = await call(handler, 'POST', 'admin-token', {
+    role: 'requester', fullName: 'Req Dup', email: 'reqdup@example.test',
+    username: 'req_one', temporaryPassword: 'SafePassword2026',
+  });
+  assert.equal(dupPrecheck.statusCode, 409);
+  assert.equal(dupPrecheck.body.error.reason, 'USERNAME_ALREADY_IN_USE');
+  assert.equal(fixture.authUsers.size, authCountBeforeDup);
+  assert.equal(fixture.records.get('accountCounters/requester')?.lastNumber, 1);
+
+  // Simulate a concurrent username claim racing between pre-check and transaction execution
+  const { auth, db } = fixture.getAdmin();
+  const originalRunTransaction = db.runTransaction;
+  db.runTransaction = async (run) => {
+    fixture.records.set('usernames/raced_user', { uid: 'concurrent-owner' });
+    return originalRunTransaction(run);
+  };
+  const raced = await call(handler, 'POST', 'admin-token', {
+    role: 'distributor', fullName: 'Raced Dist', email: 'raced@example.test',
+    username: 'raced_user', temporaryPassword: 'SafePassword2026', branchId: 'north',
+  });
+  db.runTransaction = originalRunTransaction;
+  assert.equal(raced.statusCode, 409);
+  assert.equal(raced.body.error.reason, 'USERNAME_ALREADY_IN_USE');
+  assert.equal([...fixture.authUsers.values()].some((u) => u.email === 'raced@example.test'), false);
+  assert.equal([...fixture.records.values()].some((d) => d?.email === 'raced@example.test'), false);
+  assert.equal(fixture.records.get('usernames/raced_user')?.uid, 'concurrent-owner');
+  assert.equal(fixture.records.get('accountCounters/distributor')?.lastNumber, 1);
+});
+
+const emulatorReady = Boolean(
+  process.env.FIRESTORE_EMULATOR_HOST &&
+  process.env.FIREBASE_AUTH_EMULATOR_HOST &&
+  (!process.env.GCLOUD_PROJECT || process.env.GCLOUD_PROJECT === 'demo-bluetap')
+);
+
+test('real Auth and Firestore emulators provision Admin-created Distributor, Requester, and Manager accounts atomically and reject duplicate usernames without partial records',
+  { skip: !emulatorReady }, async () => {
+    const { randomUUID } = require('node:crypto');
+    const { initializeApp, deleteApp } = require('firebase-admin/app');
+    const { getAuth } = require('firebase-admin/auth');
+    const { getFirestore } = require('firebase-admin/firestore');
+    const suffix = randomUUID().slice(0, 8);
+    const projectId = 'demo-bluetap';
+    const app = initializeApp({ projectId }, `admin-create-tx-${suffix}`);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+    const adminUid = `admin-${suffix}`;
+    const branchId = `branch-${suffix}`;
+    try {
+      await db.collection('users').doc(adminUid).set({ uid: adminUid, role: 'admin', email: `admin-${suffix}@example.test`, accountStatus: 'active' });
+      await db.collection('branches').doc(branchId).set({ name: 'North Emulator Branch', code: 'NEB', status: 'active' });
+      const authFacade = {
+        verifyIdToken: async (token) => token === 'admin-token' ? { uid: adminUid, admin: true, role: 'admin', email: `admin-${suffix}@example.test` } : Promise.reject(new Error('invalid token')),
+        getUser: (uid) => auth.getUser(uid),
+        getUserByEmail: (email) => auth.getUserByEmail(email),
+        listUsers: (max) => auth.listUsers(max),
+        createUser: (props) => auth.createUser(props),
+        deleteUser: (uid) => auth.deleteUser(uid),
+        setCustomUserClaims: (uid, claims) => auth.setCustomUserClaims(uid, claims),
+        updateUser: (uid, props) => auth.updateUser(uid, props),
+        revokeRefreshTokens: (uid) => auth.revokeRefreshTokens(uid),
+      };
+      const handler = createAdminAccountsHandler(() => ({ auth: authFacade, db }), {
+        sendEmail: async () => ({ provider: 'test', providerStatus: 200 }),
+      });
+
+      // 1. Admin-created Distributor (with username)
+      const distUsername = `dist_${suffix}`.slice(0, 20);
+      const distEmail = `dist-${suffix}@example.test`;
+      const distRes = await call(handler, 'POST', 'admin-token', {
+        role: 'distributor', fullName: 'Emulator Distributor', email: distEmail,
+        username: distUsername, temporaryPassword: 'SafePassword2026', branchId,
+      });
+      assert.equal(distRes.statusCode, 201);
+      const distUid = distRes.body.account.uid;
+      assert.match(distRes.body.account.publicUid, /^Dis\d{3,}$/);
+      assert.equal((await auth.getUser(distUid)).emailVerified, false);
+      assert.equal((await db.collection('usernames').doc(distUsername).get()).data()?.uid, distUid);
+      assert.equal((await db.collection('users').doc(distUid).get()).data()?.accountSource, 'admin_created');
+
+      // 2. Admin-created Requester (with username)
+      const reqUsername = `req_${suffix}`.slice(0, 20);
+      const reqEmail = `req-${suffix}@example.test`;
+      const reqRes = await call(handler, 'POST', 'admin-token', {
+        role: 'requester', fullName: 'Emulator Requester', email: reqEmail,
+        username: reqUsername, temporaryPassword: 'SafePassword2026',
+      });
+      assert.equal(reqRes.statusCode, 201);
+      const reqUid = reqRes.body.account.uid;
+      assert.match(reqRes.body.account.publicUid, /^Req\d{3,}$/);
+      assert.equal((await auth.getUser(reqUid)).emailVerified, false);
+      assert.equal((await db.collection('usernames').doc(reqUsername).get()).data()?.uid, reqUid);
+      assert.equal((await db.collection('users').doc(reqUid).get()).data()?.accountSource, 'admin_created');
+
+      // 3. Admin-created Manager (without username)
+      const mgrEmail = `mgr-${suffix}@example.test`;
+      const mgrRes = await call(handler, 'POST', 'admin-token', {
+        role: 'manager', fullName: 'Emulator Manager', email: mgrEmail,
+        temporaryPassword: 'SafePassword2026', branchId,
+      });
+      assert.equal(mgrRes.statusCode, 201);
+      const mgrUid = mgrRes.body.account.uid;
+      assert.match(mgrRes.body.account.publicUid, /^Man\d{3,}$/);
+      const mgrAuthUser = await auth.getUser(mgrUid);
+      assert.equal(mgrAuthUser.emailVerified, false);
+      assert.equal(mgrAuthUser.customClaims?.manager, true);
+      assert.equal((await db.collection('users').doc(mgrUid).get()).data()?.accountSource, 'admin_created');
+
+      // 4. Duplicate username rejection (pre-check and in-transaction race) + rollback verification
+      const dupEmail = `dup-${suffix}@example.test`;
+      const dupRes = await call(handler, 'POST', 'admin-token', {
+        role: 'distributor', fullName: 'Duplicate Distributor', email: dupEmail,
+        username: distUsername, temporaryPassword: 'SafePassword2026', branchId,
+      });
+      assert.equal(dupRes.statusCode, 409);
+      assert.equal(dupRes.body.error.reason, 'USERNAME_ALREADY_IN_USE');
+      await assert.rejects(auth.getUserByEmail(dupEmail), (err) => err.code === 'auth/user-not-found');
+      assert.equal((await db.collection('usernames').doc(distUsername).get()).data()?.uid, distUid);
+
+      // In-transaction race: claim username right before db.runTransaction runs
+      const racedUsername = `race_${suffix}`.slice(0, 20);
+      const racedEmail = `race-${suffix}@example.test`;
+      const counterBeforeRace = (await db.collection('accountCounters').doc('requester').get()).data()?.lastNumber;
+      const realRunTransaction = db.runTransaction.bind(db);
+      db.runTransaction = async (updateFn) => {
+        await db.collection('usernames').doc(racedUsername).set({ uid: 'existing-race-winner', createdAt: new Date() });
+        return realRunTransaction(updateFn);
+      };
+      try {
+        const raceRes = await call(handler, 'POST', 'admin-token', {
+          role: 'requester', fullName: 'Raced Requester', email: racedEmail,
+          username: racedUsername, temporaryPassword: 'SafePassword2026',
+        });
+        assert.equal(raceRes.statusCode, 409);
+        assert.equal(raceRes.body.error.reason, 'USERNAME_ALREADY_IN_USE');
+      } finally {
+        db.runTransaction = realRunTransaction;
+      }
+      await assert.rejects(auth.getUserByEmail(racedEmail), (err) => err.code === 'auth/user-not-found');
+      assert.equal((await db.collection(' users'.trim()).where('email', '==', racedEmail).get()).empty, true);
+      assert.equal((await db.collection('usernames').doc(racedUsername).get()).data()?.uid, 'existing-race-winner');
+      assert.equal((await db.collection('accountCounters').doc('requester').get()).data()?.lastNumber, counterBeforeRace);
+    } finally {
+      await deleteApp(app);
+    }
+  });

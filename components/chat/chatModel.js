@@ -120,11 +120,41 @@ function formatBadge(count) {
   return value > 99 ? '99+' : String(value);
 }
 
+function isFailedDeliveryConversation(conversation) {
+  if (clean(conversation?.type) !== 'requester_distributor') return false;
+  const order = conversation?.orderContextLocal || conversation?.orderContext || {};
+  const status = clean(conversation?.orderStatus || order.status || order.finalStatus).toLowerCase().replace(/[\s-]+/g, '_');
+  return status === 'delivery_failed' || clean(conversation?.lifecycleReason) === 'delivery_failed_grace';
+}
+
 function conversationAvailability(conversation, role, uid, branchId, now = Date.now()) {
   const state = principalStateFor(conversation, role, uid, branchId);
-  const deadline = timeOf(conversation?.accessEndsAt);
-  const readable = Boolean(conversation && ['active', 'read_only'].includes(conversation.status)
+  const baseReadable = Boolean(conversation && ['active', 'read_only'].includes(conversation.status)
     && ['active', 'read_only'].includes(state?.accessState)
+    && conversation.retentionExpired !== true);
+  if (isFailedDeliveryConversation(conversation)) {
+    const order = conversation?.orderContextLocal || conversation?.orderContext || {};
+    const sendDeadline = timeOf(conversation?.accessEndsAt || order.distributorChatGraceUntil);
+    const failedAt = timeOf(order.firstDeliveryFailedAt || order.initialDeliveryFailedAt || order.deliveryFailedAt || order.delivery_failed_at)
+      || (sendDeadline > 0 ? sendDeadline - (60 * 60 * 1000) : 0);
+    const historicalReadDeadline = failedAt > 0 ? failedAt + (7 * 24 * 60 * 60 * 1000) : 0;
+    const retentionDeadline = timeOf(conversation?.retentionExpiresAt);
+    const distinctReadDeadline = timeOf(conversation?.readAccessEndsAt) > 0
+      && timeOf(conversation?.readAccessEndsAt) !== sendDeadline
+      ? timeOf(conversation?.readAccessEndsAt)
+      : 0;
+    const readable = Boolean(baseReadable
+      && (!historicalReadDeadline || historicalReadDeadline > now)
+      && (!retentionDeadline || retentionDeadline > now)
+      && (!distinctReadDeadline || distinctReadDeadline > now));
+    const sendable = Boolean(readable
+      && conversation.status === 'active'
+      && state?.accessState === 'active'
+      && sendDeadline > now);
+    return { readable, sendable };
+  }
+  const deadline = timeOf(conversation?.accessEndsAt);
+  const readable = Boolean(baseReadable
     && (!deadline || deadline > now)
     && (conversation.status !== 'read_only' || deadline > now));
   return { readable, sendable: readable && conversation.status === 'active' && state.accessState === 'active' };
@@ -133,17 +163,22 @@ function conversationAvailability(conversation, role, uid, branchId, now = Date.
 function conversationLifecycleNotice(conversation, now = Date.now()) {
   if (clean(conversation?.type) !== 'requester_distributor') return null;
   const order = conversation.orderContextLocal || conversation.orderContext || {};
-  const status = clean(order.status || order.finalStatus).toLowerCase().replace(/[\s-]+/g, '_');
+  const status = clean(conversation.orderStatus || order.status || order.finalStatus).toLowerCase().replace(/[\s-]+/g, '_');
   if (['delivered', 'completed'].includes(status)) {
     return { state: 'closed', title: 'Delivery completed', body: 'Messaging for this delivery has ended.' };
   }
-  if (status !== 'delivery_failed') return null;
+  if (status !== 'delivery_failed' && clean(conversation?.lifecycleReason) !== 'delivery_failed_grace') return null;
   const deadline = timeOf(conversation.accessEndsAt || order.distributorChatGraceUntil);
   if (deadline > now) {
     const minutes = Math.max(1, Math.ceil((deadline - now) / 60000));
     return { state: 'grace', title: 'Delivery attempt failed', body: `Messaging remains available for ${minutes} more ${minutes === 1 ? 'minute' : 'minutes'}.`, minutes };
   }
-  return { state: 'closed', title: 'Messaging window ended', body: 'Contact the station if you still need assistance.' };
+  return {
+    state: 'closed',
+    readOnly: true,
+    title: 'Messaging window ended',
+    body: 'Read-only · Previous messages remain visible, but sending is disabled. Contact the station if you still need assistance.',
+  };
 }
 
 function messageActionNames({ own = false, withinWindow = false, reportable = false, replyable = false } = {}) {
@@ -161,6 +196,25 @@ function messageActionNames({ own = false, withinWindow = false, reportable = fa
 
 function messageActionTriggerVisible({ hovered = false, focused = false, menuOpen = false } = {}) {
   return Boolean(hovered || focused || menuOpen);
+}
+
+function positionMessageMenu({ anchor, viewport, root, own = false, actionCount = 1 }) {
+  const gap = 6;
+  const edge = 8;
+  const width = Math.min(152, Math.max(0, viewport.width - edge * 2));
+  const menuHeight = actionCount * 44 + 8;
+  const maxHeight = Math.max(0, viewport.height - edge * 2);
+  const height = Math.min(menuHeight, maxHeight);
+  const desiredLeft = own ? anchor.x + anchor.width - width : anchor.x;
+  const left = Math.max(viewport.x + edge, Math.min(desiredLeft, viewport.x + viewport.width - width - edge));
+  const below = anchor.y + anchor.height + gap;
+  const above = anchor.y - menuHeight - gap;
+  const top = below + height <= viewport.y + viewport.height - edge
+    ? below
+    : above >= viewport.y + edge
+      ? above
+      : Math.max(viewport.y + edge, Math.min(below, viewport.y + viewport.height - height - edge));
+  return { left: left - root.x, top: top - root.y, width, maxHeight };
 }
 
 function orderIdOf(order) {
@@ -253,23 +307,30 @@ function mapResolveError(error) {
   return 'Unable to open conversation. Please try again.';
 }
 
+function shouldNotifyIncomingSummary(previouslySeen, previousSeq, incomingSeq, visible) {
+  return previouslySeen && incomingSeq > previousSeq && !visible;
+}
+
 module.exports = {
   conversationAvailability,
   conversationLifecycleNotice,
   createClientMutationId,
   formatBadge,
+  isFailedDeliveryConversation,
   isOwnMessage,
   mapResolveError,
   messageFailurePresentation,
   mergeMessages,
   messageActionNames,
   messageActionTriggerVisible,
+  positionMessageMenu,
   normalizeChatIntent,
   orderIdOf,
   principalFor,
   principalStateFor,
   receiptFor,
   sendContextOrderId,
+  shouldNotifyIncomingSummary,
   timeOf,
   totalUnread,
   unreadForConversation,

@@ -11,7 +11,6 @@ export default function BlueTapEmptyState({
   description = 'When you have active requests or order history, they will appear here.',
   actionLabel,
   onAction,
-  actionRef,
   actionStyle,
   actionTextStyle,
   compact = false,
@@ -74,7 +73,6 @@ export default function BlueTapEmptyState({
 
       {!!actionLabel && !!onAction && (
         <Pressable
-          ref={actionRef}
           onPress={onAction}
           style={({ pressed, hovered, focused }) => [
             styles.actionButton,

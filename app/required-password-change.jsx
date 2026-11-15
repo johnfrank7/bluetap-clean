@@ -47,8 +47,9 @@ export default function RequiredPasswordChangePage() {
         if (!profile || profile.mustChangePassword === true) {
           throw new Error('Account profile refresh failed.');
         }
-        saveRoleSession(profile);
-        router.replace(getPostAuthenticationDestination(profile));
+        const destination = getPostAuthenticationDestination(profile);
+        if (destination !== '/email-verification') saveRoleSession(profile);
+        router.replace(destination);
       } catch {
         await signOutAndClearSessions();
         passwordChangeFlow.current = false;
@@ -64,7 +65,7 @@ export default function RequiredPasswordChangePage() {
   return <LinearGradient colors={isDark ? [colors.background, colors.header] : [colors.primary, colors.primaryLight]} style={styles.screen}><View style={styles.card}>
     <Text style={styles.eyebrow}>BLUETAP ACCOUNT SECURITY</Text>
     <Text style={styles.title}>Create a new password</Text>
-    <Text style={styles.help}>Your temporary password must be replaced before you can access BlueTap.</Text>
+    <Text style={styles.help}>Replace your temporary password first. If your account requires email ownership verification, that step follows before dashboard access.</Text>
     <Text style={styles.label}>New password</Text>
     <View style={styles.passwordField}><TextInput secureTextEntry={!showPassword} autoCapitalize="none" value={password} onChangeText={setPassword} style={styles.passwordInput} placeholder="Enter a new password" placeholderTextColor={colors.textSecondary} /><PasswordVisibilityButton visible={showPassword} onPress={() => setShowPassword((visible) => !visible)} label="new password" /></View>
     <Text style={styles.hint}>Use at least 12 characters with uppercase, lowercase, and a number.</Text>

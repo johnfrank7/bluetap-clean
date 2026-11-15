@@ -1,14 +1,17 @@
 const { randomUUID } = require('node:crypto');
 const { publishChatActivity } = require('./chatActivity');
+const { historyId, historyIsReadable, historyRecord } = require('./chatHistory');
 const { getFirebaseAdmin } = require('../firebase/firebaseAdmin');
+const { resolveRequesterName } = require('../orders/requesterIdentity');
 const { canonicalAccountStatus } = require('../auth/accountStatus');
 const { assertChatSendAllowed } = require('../moderation/moderationService');
-const { verifiedIdentity } = require('../auth/authorization');
+const { verifiedIdentity, requireVerifiedOperationalEmail } = require('../auth/authorization');
 const { applyCors } = require('../utils/cors');
 const { OtpError } = require('../utils/otpError');
 const { getAssignmentVersion, getBranchMembershipVersion } = require('../utils/relationshipEpochs');
 const {
   CONVERSATION_TYPES,
+  FAILED_DELIVERY_CHAT_GRACE_MS,
   TERMINAL_ORDER_STATUSES,
   assertCanonicalConversationParticipants,
   authorizeBranchCoordination,
@@ -35,7 +38,7 @@ const {
   hasActiveAuthorityReason,
   normalizeAuthorityReasons,
 } = require('./conversationService');
-const { isAccessExpired, participantAccessProjection } = require('./conversationLifecycleService');
+const { POST_ORDER_FOLLOWUP_DAYS, isAccessExpired, participantAccessProjection } = require('./conversationLifecycleService');
 const {
   advanceParticipantReadState,
   applyMessageToParticipantState,
@@ -100,6 +103,9 @@ function requireOnlyFields(body, allowed) {
 }
 
 function chatAccountError(profile = {}) {
+  if (profile.accountActionHoldIntentId) {
+    throw new OtpError(403, 'CHAT_ACCOUNT_ACTION_PENDING', 'An account access change is pending.');
+  }
   const status = canonicalAccountStatus(profile);
   if (status === 'active') return;
   const reason = {
@@ -121,12 +127,14 @@ function requireChatProfile(profile, uid, expectedRole = '') {
   return { ...profile, uid: clean(uid) };
 }
 
-async function verifyChatIdentity(req, auth) {
+async function verifyChatIdentity(req, auth, db) {
   const decoded = await verifiedIdentity(req, auth);
   if (typeof auth.getUser === 'function') {
     const account = await auth.getUser(decoded.uid).catch(() => null);
     if (!account || account.disabled === true) throw new OtpError(403, 'CHAT_ACCOUNT_INACTIVE', 'This account is inactive.');
   }
+  const profile = await db.collection('users').doc(decoded.uid).get();
+  if (profile.exists) requireVerifiedOperationalEmail(profile.data() || {}, decoded);
   return decoded;
 }
 
@@ -208,8 +216,10 @@ function activeManager(profile, uid, branch, claims = null) {
 }
 
 function profileDisplayName(profile = {}) {
-  const composed = `${profile.firstName || ''} ${profile.lastName || ''}`.trim();
-  return clean(profile.fullName || profile.full_name || composed || profile.username, 160);
+  const composed = `${profile.firstName || profile.first_name || ''} ${profile.lastName || profile.last_name || ''}`.trim();
+  return [profile.fullName, profile.full_name, composed, profile.displayName, profile.username]
+    .map((value) => clean(value, 160))
+    .find((value) => value && !['branch distributor', 'distributor', 'requester', 'user'].includes(value.toLowerCase())) || '';
 }
 
 function safeOrderContext(order = {}, requester = {}) {
@@ -221,11 +231,11 @@ function safeOrderContext(order = {}, requester = {}) {
     orderId,
     requestId: reference,
     publicOrderReference: reference,
-    requesterName: clean(order.requesterNameSnapshot || order.requester_name || profileDisplayName(requester), 160),
+    requesterName: resolveRequesterName(order, requester),
     status: normalizedStatus(order.status),
     ...(Number.isFinite(total) ? { totalAtOrder: total } : {}),
     currentBranchName: clean(order.currentBranchNameSnapshot || order.branchNameSnapshot || order.water_station, 160),
-    ...(order.distributorChatGraceUntil ? { distributorChatGraceUntil: order.distributorChatGraceUntil } : {}),
+    ...((normalizedStatus(order.status) === 'delivery_failed' ? (failedDeliveryChatEndsAt(order) || order.distributorChatGraceUntil) : order.distributorChatGraceUntil) ? { distributorChatGraceUntil: normalizedStatus(order.status) === 'delivery_failed' ? (failedDeliveryChatEndsAt(order) || order.distributorChatGraceUntil) : order.distributorChatGraceUntil } : {}),
     ...(order.deliveryFailedAt || order.delivery_failed_at ? { deliveryFailedAt: order.deliveryFailedAt || order.delivery_failed_at } : {}),
   };
 }
@@ -262,7 +272,7 @@ async function resolveConversationIntent(tx, db, callerUid, callerClaims, body, 
         reason: AUTHORITY_REASONS.REQUESTER_INQUIRY,
         reasonOptions: { grantedAt: now },
         createdBy,
-        presentation: { requesterDisplayName: profileDisplayName(requester) },
+        presentation: { requesterDisplayName: profileDisplayName(requester), orderContext: null },
       };
     }
 
@@ -313,6 +323,7 @@ async function resolveConversationIntent(tx, db, callerUid, callerClaims, body, 
       authorityReasons: addAuthorityReason({}, reason, reasonOptions),
       reason,
       reasonOptions,
+      ...(reason === AUTHORITY_REASONS.POST_ORDER_FOLLOWUP ? { historyArchivedAt: order.deliveredAt || order.delivered_at || now } : {}),
       createdBy,
       presentation: { requesterDisplayName: profileDisplayName(effectiveRequester), orderContext: safeOrderContext(order, effectiveRequester) },
     };
@@ -343,6 +354,7 @@ async function resolveConversationIntent(tx, db, callerUid, callerClaims, body, 
         order,
         assignmentVersion,
         now,
+        mode: 'read',
       });
     } catch (error) {
       if (error instanceof OtpError && ['INVALID_ASSIGNMENT_VERSION', 'CHAT_ASSIGNMENT_VERSION_STALE'].includes(error.reason)) {
@@ -352,6 +364,7 @@ async function resolveConversationIntent(tx, db, callerUid, callerClaims, body, 
     }
     return {
       type,
+      order,
       authority: { ...authority, branchId },
       authorityReasons: {},
       createdBy,
@@ -431,6 +444,12 @@ async function resolveOrCreateConversation({ db, callerUid, callerClaims, body, 
         conversationRef = db.collection('chatConversations').doc(conversation.id);
         tx.create(registryRef, { authorityKeyHash: hash, conversationId: conversation.id, type: resolved.type, createdAt: now });
       } else {
+        if (resolved.reason === AUTHORITY_REASONS.POST_ORDER_FOLLOWUP) {
+          throw new OtpError(409, 'CHAT_READ_ONLY', 'Completed delivery history is read-only.');
+        }
+        if (resolved.type === CONVERSATION_TYPES.REQUESTER_DISTRIBUTOR && resolved.authority?.sendExpired) {
+          throw new OtpError(403, 'CHAT_ASSIGNMENT_NOT_WRITABLE', 'The failed-delivery messaging window has ended.');
+        }
         const conversationId = createConversationId();
         conversationRef = db.collection('chatConversations').doc(conversationId);
         const foundation = { ...buildConversationFoundation({ ...resolved, now }), ...(resolved.presentation || {}) };
@@ -447,9 +466,22 @@ async function resolveOrCreateConversation({ db, callerUid, callerClaims, body, 
     assertCanonicalConversationParticipants(conversation);
     if (conversation.status === CONVERSATION_STATUS.CLOSED) throw new OtpError(409, 'CHAT_CLOSED', 'This conversation is closed.');
 
+    if (resolved.reason === AUTHORITY_REASONS.POST_ORDER_FOLLOWUP && !created) {
+      const orderId = resolved.reasonOptions.orderId;
+      const historyRef = db.collection('chatOrderHistory').doc(historyId(conversation.id, orderId));
+      const historySnapshot = await tx.get(historyRef);
+      if (!historySnapshot.exists) {
+        const tagged = await tx.get(conversationRef.collection('messages').where('orderId', '==', orderId).limit(1));
+        if ((tagged.docs || []).length) {
+          tx.create(historyRef, historyRecord(conversation, resolved.presentation.orderContext,
+            resolved.historyArchivedAt, resolved.reasonOptions.accessEndsAt));
+        }
+      }
+    }
+
     if (resolved.type === CONVERSATION_TYPES.REQUESTER_BRANCH && !created) {
       const authorityReasons = addAuthorityReason(conversation.authorityReasons, resolved.reason, resolved.reasonOptions);
-      const status = hasActiveAuthorityReason(authorityReasons, timeOf(now)) ? CONVERSATION_STATUS.ACTIVE : conversation.status;
+      const status = hasActiveAuthorityReason(authorityReasons, timeOf(now)) ? CONVERSATION_STATUS.ACTIVE : CONVERSATION_STATUS.READ_ONLY;
       const projection = participantAccessProjection(conversation, status === CONVERSATION_STATUS.ACTIVE ? 'active' : 'read_only');
       const reasons = Object.values(normalizeAuthorityReasons(authorityReasons));
       const accessEndsAt = reasons.some((reason) => !reason.accessEndsAt) ? null : new Date(Math.max(...reasons.map((reason) => timeOf(reason.accessEndsAt))));
@@ -457,21 +489,64 @@ async function resolveOrCreateConversation({ db, callerUid, callerClaims, body, 
       conversation = { ...conversation, authorityReasons, status, accessEndsAt, readAccessEndsAt: accessEndsAt, ...projection, ...(resolved.presentation || {}), updatedAt: now };
     } else if (!created) {
       const directAssignment = resolved.type === CONVERSATION_TYPES.REQUESTER_DISTRIBUTOR;
-      const status = directAssignment ? CONVERSATION_STATUS.ACTIVE : conversation.status;
-      const accessEndsAt = directAssignment ? (resolved.authority.accessEndsAt || null) : conversation.accessEndsAt;
-      const accessFields = directAssignment ? { accessEndsAt, readAccessEndsAt: accessEndsAt } : {};
+      const existingDeadline = timeOf(conversation.accessEndsAt);
+      const resolvedDeadline = timeOf(resolved.authority.accessEndsAt);
+      const accessEndsAt = directAssignment
+        ? (existingDeadline > 0 && resolvedDeadline > 0
+          ? (existingDeadline <= resolvedDeadline ? conversation.accessEndsAt : resolved.authority.accessEndsAt)
+          : (resolved.authority.accessEndsAt || (normalizedStatus(resolved.order?.status) === 'delivery_failed' ? conversation.accessEndsAt : null) || null))
+        : conversation.accessEndsAt;
+      const directSendExpired = directAssignment
+        && normalizedStatus(resolved.order?.status) === 'delivery_failed'
+        && (Boolean(resolved.authority?.sendExpired) || isAccessExpired(accessEndsAt, now));
+      if (directSendExpired && !hasFailedDeliveryHistoricalRead(conversation, resolved.order, timeOf(accessEndsAt), timeOf(now))) {
+        throw new OtpError(403, 'CHAT_NOT_AUTHORIZED', 'Historical conversation access has ended.');
+      }
+      const status = directAssignment
+        ? (directSendExpired ? CONVERSATION_STATUS.READ_ONLY : CONVERSATION_STATUS.ACTIVE)
+        : conversation.status;
+      const accessFields = directAssignment
+        ? {
+          accessEndsAt,
+          readAccessEndsAt: accessEndsAt,
+          ...(accessEndsAt ? { lifecycleReason: 'delivery_failed_grace' } : {}),
+        }
+        : {};
       const projection = participantAccessProjection(conversation, status === CONVERSATION_STATUS.ACTIVE ? 'active' : 'read_only');
       tx.update(conversationRef, { status, ...accessFields, ...projection, ...(resolved.presentation || {}), updatedAt: now });
       conversation = { ...conversation, status, ...accessFields, ...projection, ...(resolved.presentation || {}), updatedAt: now };
     }
     publishChatActivity(tx, db, conversation, now);
-    return { created, conversation };
+    return { created, conversation: conversation.type === CONVERSATION_TYPES.REQUESTER_BRANCH
+      ? { ...conversation, lastMessagePreview: '' }
+      : conversation };
   });
 }
+
+const FAILED_DELIVERY_HISTORICAL_READ_MS = POST_ORDER_FOLLOWUP_DAYS * 24 * 60 * 60 * 1000;
 
 function hasBoundedHistoricalRead(conversation, nowMs) {
   return conversation.status === CONVERSATION_STATUS.READ_ONLY &&
     timeOf(conversation.readAccessEndsAt || conversation.accessEndsAt) > nowMs;
+}
+
+function hasFailedDeliveryHistoricalRead(conversation, order, trustedGraceEndsAt, nowMs) {
+  if (!conversation || conversation.status === CONVERSATION_STATUS.CLOSED || conversation.retentionExpired === true) return false;
+  if (!trustedGraceEndsAt || trustedGraceEndsAt <= 0) return false;
+  const retentionExpiresAt = timeOf(conversation.retentionExpiresAt);
+  if (retentionExpiresAt > 0 && retentionExpiresAt <= nowMs) return false;
+  const graceDerivedFailedAt = trustedGraceEndsAt - FAILED_DELIVERY_CHAT_GRACE_MS;
+  const orderFailedAt = timeOf(order?.firstDeliveryFailedAt || order?.initialDeliveryFailedAt || order?.deliveryFailedAt || order?.delivery_failed_at);
+  const failedAt = orderFailedAt > 0 && graceDerivedFailedAt > 0
+    ? Math.min(orderFailedAt, graceDerivedFailedAt)
+    : (graceDerivedFailedAt > 0 ? graceDerivedFailedAt : orderFailedAt);
+  if (failedAt <= 0 || nowMs >= failedAt + FAILED_DELIVERY_HISTORICAL_READ_MS) return false;
+  const storedAccessEndsAt = timeOf(conversation.accessEndsAt);
+  const storedReadEndsAt = timeOf(conversation.readAccessEndsAt);
+  if (storedReadEndsAt > 0 && storedReadEndsAt !== storedAccessEndsAt && storedReadEndsAt !== trustedGraceEndsAt && storedReadEndsAt <= nowMs) {
+    return false;
+  }
+  return true;
 }
 
 function reasonOrderIds(conversation, reason) {
@@ -485,6 +560,7 @@ async function requesterBranchAuthorityCurrent(tx, db, conversation, nowMs) {
   const inquiryCurrent = reasons.requester_inquiry?.active === true &&
     (!reasons.requester_inquiry.accessEndsAt || timeOf(reasons.requester_inquiry.accessEndsAt) > nowMs);
   const validOrderIds = new Set();
+  let historicalRead = false;
   for (const reason of [AUTHORITY_REASONS.ACTIVE_ORDER, AUTHORITY_REASONS.POST_ORDER_FOLLOWUP]) {
     for (const orderId of reasonOrderIds(conversation, reason)) {
       const snapshot = await tx.get(db.collection('requests').doc(orderId));
@@ -493,11 +569,11 @@ async function requesterBranchAuthorityCurrent(tx, db, conversation, nowMs) {
       if (orderRequesterUid(order) !== clean(conversation.requesterUid) || owningBranchId(order) !== clean(conversation.branchIds?.[0])) continue;
       const status = normalizedStatus(order.status);
       if (reason === AUTHORITY_REASONS.ACTIVE_ORDER && !TERMINAL_ORDER_STATUSES.has(status)) validOrderIds.add(orderId);
-      const accessEndsAt = reasons[reason]?.accessEndsAt;
-      if (reason === AUTHORITY_REASONS.POST_ORDER_FOLLOWUP && ['delivered', 'completed'].includes(status) && timeOf(accessEndsAt) > nowMs) validOrderIds.add(orderId);
+      const accessEndsAt = order.chatAccessEndsAt || order.postOrderChatAccessEndsAt;
+      if (reason === AUTHORITY_REASONS.POST_ORDER_FOLLOWUP && ['delivered', 'completed'].includes(status) && timeOf(accessEndsAt) > nowMs) historicalRead = true;
     }
   }
-  return { current: inquiryCurrent || validOrderIds.size > 0, validOrderIds };
+  return { current: inquiryCurrent || validOrderIds.size > 0 || historicalRead, sendCurrent: inquiryCurrent || validOrderIds.size > 0, inquiryCurrent, validOrderIds };
 }
 
 async function authorizeConversation(tx, db, conversation, callerUid, callerClaims, mode, nowMs) {
@@ -511,12 +587,14 @@ async function authorizeConversation(tx, db, conversation, callerUid, callerClai
     await assertChatSendAllowed(tx, db, callerUid, branchContextId, nowMs);
   }
   if (conversation.status === CONVERSATION_STATUS.CLOSED) throw new OtpError(409, 'CHAT_CLOSED', 'This conversation is closed.');
-  if (isAccessExpired(conversation.accessEndsAt, nowMs) || (conversation.status === CONVERSATION_STATUS.READ_ONLY && !hasBoundedHistoricalRead(conversation, nowMs))) {
+  if ((mode === 'send' || conversation.type !== CONVERSATION_TYPES.REQUESTER_DISTRIBUTOR) &&
+    (isAccessExpired(conversation.accessEndsAt, nowMs) || (conversation.status === CONVERSATION_STATUS.READ_ONLY && !hasBoundedHistoricalRead(conversation, nowMs)))) {
     throw new OtpError(mode === 'send' ? 409 : 403, mode === 'send' ? 'CHAT_READ_ONLY' : 'CHAT_NOT_AUTHORIZED', 'Conversation access has ended.');
   }
   let principal;
   let senderBranchId = '';
   let validContextOrderIds = new Set();
+  let inquiryCurrent = false;
 
   if (conversation.type === CONVERSATION_TYPES.REQUESTER_BRANCH) {
     const branchId = clean(conversation.branchIds?.[0] || conversation.participantBranchIds?.[0], 128);
@@ -538,7 +616,8 @@ async function authorizeConversation(tx, db, conversation, callerUid, callerClai
     }
     const relationship = await requesterBranchAuthorityCurrent(tx, db, conversation, nowMs);
     validContextOrderIds = relationship.validOrderIds;
-    if (!relationship.current && !(mode === 'read' && hasBoundedHistoricalRead(conversation, nowMs))) {
+    inquiryCurrent = relationship.inquiryCurrent;
+    if (!(mode === 'send' ? relationship.sendCurrent : relationship.current) && !(mode === 'read' && hasBoundedHistoricalRead(conversation, nowMs))) {
       throw new OtpError(403, 'CHAT_NOT_AUTHORIZED', 'The branch relationship is no longer current.');
     }
   } else if (conversation.type === CONVERSATION_TYPES.REQUESTER_DISTRIBUTOR) {
@@ -569,27 +648,38 @@ async function authorizeConversation(tx, db, conversation, callerUid, callerClai
       if (error instanceof OtpError) throw new OtpError(409, 'CHAT_STALE_ASSIGNMENT', 'The Distributor assignment has changed.');
       throw error;
     }
-    if (!current) {
-      if (!(mode === 'read' && hasBoundedHistoricalRead(conversation, nowMs))) {
-        throw new OtpError(409, 'CHAT_STALE_ASSIGNMENT', 'The Distributor assignment has changed.');
-      }
-    }
     const status = normalizedStatus(order.status);
+    if (!current) {
+      throw new OtpError(409, 'CHAT_STALE_ASSIGNMENT', 'The Distributor assignment has changed.');
+    }
+    if (status !== 'delivery_failed' && (isAccessExpired(conversation.accessEndsAt, nowMs) || (conversation.status === CONVERSATION_STATUS.READ_ONLY && !hasBoundedHistoricalRead(conversation, nowMs)))) {
+      throw new OtpError(mode === 'send' ? 409 : 403, mode === 'send' ? 'CHAT_READ_ONLY' : 'CHAT_NOT_AUTHORIZED', 'Conversation access has ended.');
+    }
     const deliveredHistoricalReadActive = ['delivered', 'completed'].includes(status)
       && hasBoundedHistoricalRead(conversation, nowMs);
     if (mode === 'send' && ['delivered', 'completed'].includes(status)) {
       throw new OtpError(409, 'CHAT_READ_ONLY', 'Delivery completion ended messaging for this conversation.');
     }
     if (status === 'delivery_failed') {
-      const trustedGraceEndsAt = timeOf(failedDeliveryChatEndsAt(order));
-      if (!trustedGraceEndsAt || trustedGraceEndsAt <= nowMs) {
+      const storedGraceEndsAt = timeOf(conversation.accessEndsAt);
+      const orderGraceEndsAt = timeOf(failedDeliveryChatEndsAt(order));
+      const trustedGraceEndsAt = storedGraceEndsAt > 0 && orderGraceEndsAt > 0
+        ? Math.min(storedGraceEndsAt, orderGraceEndsAt)
+        : (orderGraceEndsAt || storedGraceEndsAt);
+      if (!trustedGraceEndsAt) {
         throw new OtpError(mode === 'send' ? 409 : 403, mode === 'send' ? 'CHAT_READ_ONLY' : 'CHAT_NOT_AUTHORIZED', 'The failed-delivery messaging window has ended.');
+      }
+      if (mode === 'send' && trustedGraceEndsAt <= nowMs) {
+        throw new OtpError(409, 'CHAT_READ_ONLY', 'The failed-delivery messaging window has ended.');
+      }
+      if (mode === 'read' && trustedGraceEndsAt <= nowMs && !hasFailedDeliveryHistoricalRead(conversation, order, trustedGraceEndsAt, nowMs)) {
+        throw new OtpError(403, 'CHAT_NOT_AUTHORIZED', 'Historical conversation access has ended.');
       }
     }
     if (mode === 'send' && TERMINAL_ORDER_STATUSES.has(status)) {
       throw new OtpError(409, 'CHAT_READ_ONLY', 'This conversation is read-only.');
     }
-    if (mode === 'read' && TERMINAL_ORDER_STATUSES.has(status) && !deliveredHistoricalReadActive && !hasBoundedHistoricalRead(conversation, nowMs)) {
+    if (mode === 'read' && TERMINAL_ORDER_STATUSES.has(status) && !deliveredHistoricalReadActive) {
       throw new OtpError(403, 'CHAT_NOT_AUTHORIZED', 'Historical conversation access has ended.');
     }
     if (caller.role === 'distributor') senderBranchId = branchId;
@@ -640,7 +730,7 @@ async function authorizeConversation(tx, db, conversation, callerUid, callerClai
     throw new OtpError(403, 'CHAT_NOT_AUTHORIZED', 'The logical principal is not a participant.');
   }
   if (mode === 'send' && principalState.accessState !== 'active') throw new OtpError(409, 'CHAT_READ_ONLY', 'This conversation is read-only.');
-  return { caller, principal, senderBranchId, validContextOrderIds };
+  return { caller, principal, senderBranchId, validContextOrderIds, inquiryCurrent };
 }
 
 function contextualOrderId(conversation, suppliedOrderId, authorization) {
@@ -654,10 +744,7 @@ function contextualOrderId(conversation, suppliedOrderId, authorization) {
 function requesterBranchContextOrderId(conversation, validOrderIds) {
   const preferred = clean(conversation.orderContext?.orderId || conversation.orderContext?.id, 128);
   if (preferred && validOrderIds.has(preferred)) return preferred;
-  const candidates = [
-    ...reasonOrderIds(conversation, AUTHORITY_REASONS.ACTIVE_ORDER),
-    ...reasonOrderIds(conversation, AUTHORITY_REASONS.POST_ORDER_FOLLOWUP),
-  ];
+  const candidates = reasonOrderIds(conversation, AUTHORITY_REASONS.ACTIVE_ORDER);
   return candidates.reverse().find((orderId) => validOrderIds.has(orderId)) || '';
 }
 
@@ -704,6 +791,27 @@ async function sendMessage({ db, callerUid, callerClaims, body, now, createMessa
 
   return db.runTransaction(async (tx) => {
     const conversation = await readRequired(tx, conversationRef, 'CHAT_CONVERSATION_NOT_FOUND', 'The conversation was not found.');
+    let readAuthorization;
+    try {
+      readAuthorization = await authorizeConversation(tx, db, conversation, callerUid, callerClaims, 'read', timeOf(now));
+    } catch (readError) {
+      // Keep the existing send error semantics when no readable retry is possible.
+      await authorizeConversation(tx, db, conversation, callerUid, callerClaims, 'send', timeOf(now));
+      throw readError;
+    }
+    const mutationId = mutationRegistryId(readAuthorization.principal, clientMutationId);
+    const mutationRef = db.collection('chatMutationIds').doc(mutationId);
+    const mutationSnapshot = await tx.get(mutationRef);
+    if (mutationSnapshot.exists) {
+      const retryOrderId = clean(body.orderId, 128) || (conversation.type === CONVERSATION_TYPES.REQUESTER_DISTRIBUTOR ? clean(conversation.orderId, 128) : '');
+      const mutation = mutationSnapshot.data() || {};
+      if (mutation.conversationId !== conversationId || mutation.bodyHash !== messageBodyHash(conversationId, normalizedBody, retryOrderId) ||
+        mutation.senderPrincipalKey !== principalKey(readAuthorization.principal)) {
+        throw new OtpError(409, 'CHAT_MUTATION_CONFLICT', 'clientMutationId was already used for a different message.');
+      }
+      const existing = await readRequired(tx, conversationRef.collection('messages').doc(clean(mutation.messageId, 128)), 'CHAT_STATE_INVALID', 'The committed message could not be loaded.');
+      return { created: false, message: existing, conversation };
+    }
     const authorization = await authorizeConversation(tx, db, conversation, callerUid, callerClaims, 'send', timeOf(now));
     const orderId = contextualOrderId(conversation, body.orderId, authorization);
 
@@ -714,6 +822,12 @@ async function sendMessage({ db, callerUid, callerClaims, body, now, createMessa
         throw new OtpError(404, 'CHAT_REPLY_TARGET_NOT_FOUND', 'The message you are replying to was not found.');
       }
       const target = withId(replySnapshot);
+      if (target.orderId) {
+        const targetOrder = await readAuthoritativeOrder(tx, db, target.orderId);
+        if (['delivered', 'completed'].includes(normalizedStatus(targetOrder.status))) {
+          throw new OtpError(409, 'CHAT_READ_ONLY', 'Completed delivery history is read-only.');
+        }
+      }
       if (!Number.isSafeInteger(Number(target.seq)) || Number(target.seq) < 1) {
         throw new OtpError(400, 'CHAT_REPLY_TARGET_INVALID', 'The reply target is invalid.');
       }
@@ -740,18 +854,7 @@ async function sendMessage({ db, callerUid, callerClaims, body, now, createMessa
       };
     }
 
-    const mutationId = mutationRegistryId(authorization.principal, clientMutationId);
-    const mutationRef = db.collection('chatMutationIds').doc(mutationId);
-    const mutationSnapshot = await tx.get(mutationRef);
     const bodyHash = messageBodyHash(conversationId, normalizedBody, orderId);
-    if (mutationSnapshot.exists) {
-      const mutation = mutationSnapshot.data() || {};
-      if (mutation.conversationId !== conversationId || mutation.bodyHash !== bodyHash || mutation.senderPrincipalKey !== principalKey(authorization.principal)) {
-        throw new OtpError(409, 'CHAT_MUTATION_CONFLICT', 'clientMutationId was already used for a different message.');
-      }
-      const existing = await readRequired(tx, conversationRef.collection('messages').doc(clean(mutation.messageId, 128)), 'CHAT_STATE_INVALID', 'The committed message could not be loaded.');
-      return { created: false, message: existing, conversation };
-    }
 
     const rateRef = db.collection('chatRateLimits').doc(rateLimitDocumentId(callerUid));
     const rateSnapshot = await tx.get(rateRef);
@@ -821,6 +924,23 @@ async function mutateMessage({ db, callerUid, callerClaims, body, now, operation
     const conversation = await readRequired(tx, conversationRef, 'CHAT_CONVERSATION_NOT_FOUND', 'The conversation was not found.');
     const authorization = await authorizeConversation(tx, db, conversation, callerUid, callerClaims, editing ? 'send' : 'read', timeOf(now));
     const message = await readRequired(tx, messageRef, 'CHAT_MESSAGE_NOT_FOUND', 'The message was not found.');
+    if (conversation.type === CONVERSATION_TYPES.REQUESTER_DISTRIBUTOR && conversation.status !== CONVERSATION_STATUS.ACTIVE) {
+      throw new OtpError(409, 'CHAT_READ_ONLY', 'Completed delivery history is read-only.');
+    }
+    const targetOrderId = clean(message.orderId || (conversation.type === CONVERSATION_TYPES.REQUESTER_DISTRIBUTOR ? conversation.orderId : ''), 128);
+    if (targetOrderId) {
+      const messageOrder = await readAuthoritativeOrder(tx, db, targetOrderId);
+      const messageOrderStatus = normalizedStatus(messageOrder.status);
+      if (['delivered', 'completed'].includes(messageOrderStatus)) {
+        throw new OtpError(409, 'CHAT_READ_ONLY', 'Completed delivery history is read-only.');
+      }
+      if (conversation.type === CONVERSATION_TYPES.REQUESTER_DISTRIBUTOR && messageOrderStatus === 'delivery_failed') {
+        const trustedGraceEndsAt = timeOf(failedDeliveryChatEndsAt(messageOrder));
+        if (!trustedGraceEndsAt || trustedGraceEndsAt <= timeOf(now) || isAccessExpired(conversation.accessEndsAt, timeOf(now))) {
+          throw new OtpError(409, 'CHAT_READ_ONLY', 'The failed-delivery messaging window has ended.');
+        }
+      }
+    }
     if (clean(message.senderUid, 128) !== callerUid) throw new OtpError(403, 'CHAT_MESSAGE_MUTATION_DENIED', 'Only the original sender may change this message.');
     assertMessageMutationWindow(message, timeOf(now));
     if (message.deletedAt) {
@@ -912,13 +1032,113 @@ async function listMessages({ db, callerUid, callerClaims, conversationId, page,
     if (page.beforeSeq) query = query.where('seq', '<', page.beforeSeq);
     query = query.limit(page.limit);
     const snapshot = await tx.get(query);
-    const messages = (snapshot.docs || []).map(withId);
+    const candidates = (snapshot.docs || []).map(withId);
+    let messages = candidates;
+    if (conversation.type === CONVERSATION_TYPES.REQUESTER_BRANCH) {
+      const orderIds = [...new Set(candidates.map((message) => clean(message.orderId, 128)).filter(Boolean))];
+      const deliveredIds = new Set();
+      for (const orderId of orderIds) {
+        const orderSnapshot = await tx.get(db.collection('requests').doc(orderId));
+        if (!orderSnapshot.exists || ['delivered', 'completed'].includes(normalizedStatus(orderSnapshot.data()?.status))) deliveredIds.add(orderId);
+      }
+      messages = candidates.filter((message) => !deliveredIds.has(clean(message.orderId, 128)));
+    } else if (conversation.type === CONVERSATION_TYPES.REQUESTER_DISTRIBUTOR) {
+      const expectedOrderId = clean(conversation.orderId, 128);
+      messages = candidates.filter((message) => !message.orderId || clean(message.orderId, 128) === expectedOrderId);
+    }
     return {
       messages,
-      nextBeforeSeq: messages.length === page.limit ? messages[messages.length - 1].seq : null,
+      nextBeforeSeq: candidates.length === page.limit ? candidates[candidates.length - 1].seq : null,
       lastMessageSeq: Number(conversation.lastMessageSeq || 0),
       participantState: conversation.participantState || [],
     };
+  });
+}
+
+async function authorizedHistory(tx, db, history, callerUid, callerClaims, now) {
+  if (!history?.conversationId || !history?.orderId) throw new OtpError(404, 'CHAT_HISTORY_NOT_FOUND', 'History is unavailable.');
+  const conversation = await readRequired(tx, db.collection('chatConversations').doc(history.conversationId), 'CHAT_HISTORY_NOT_FOUND', 'History is unavailable.');
+  const order = await readAuthoritativeOrder(tx, db, history.orderId);
+  if (!historyIsReadable(history, order, now) || conversation.type !== history.type ||
+    (conversation.type === CONVERSATION_TYPES.REQUESTER_BRANCH &&
+      (orderRequesterUid(order) !== conversation.requesterUid || owningBranchId(order) !== clean(conversation.branchIds?.[0]))) ||
+    (conversation.type === CONVERSATION_TYPES.REQUESTER_DISTRIBUTOR &&
+      (conversation.orderId !== history.orderId || conversation.assignmentVersion !== history.assignmentVersion))) {
+    throw new OtpError(403, 'CHAT_NOT_AUTHORIZED', 'Historical conversation access has ended.');
+  }
+  const authorization = await authorizeConversation(tx, db, conversation, callerUid, callerClaims, 'read', timeOf(now));
+  return { conversation, order, authorization };
+}
+
+async function listHistoryMessages({ db, callerUid, callerClaims, historyId, conversationId, page, now }) {
+  return db.runTransaction(async (tx) => {
+    const history = await readRequired(tx, db.collection('chatOrderHistory').doc(historyId), 'CHAT_HISTORY_NOT_FOUND', 'History is unavailable.');
+    if (history.conversationId !== conversationId) throw new OtpError(404, 'CHAT_HISTORY_NOT_FOUND', 'History is unavailable.');
+    const { conversation } = await authorizedHistory(tx, db, history, callerUid, callerClaims, now);
+    let query = db.collection('chatConversations').doc(conversation.id).collection('messages')
+      .where('orderId', '==', history.orderId).orderBy('seq', 'desc');
+    if (page.beforeSeq) query = query.where('seq', '<', page.beforeSeq);
+    const snapshot = await tx.get(query.limit(page.limit));
+    const messages = (snapshot.docs || []).map(withId);
+    return { messages, nextBeforeSeq: messages.length === page.limit ? messages[messages.length - 1].seq : null };
+  });
+}
+
+async function listHistoryConversations({ db, callerUid, callerClaims, now, cursor = '', limit = 20 }) {
+  return db.runTransaction(async (tx) => {
+    const caller = requireChatProfile(await readRequired(tx, db.collection('users').doc(callerUid), 'CHAT_NOT_AUTHORIZED', 'Chat access is not authorized.'), callerUid);
+    const manager = caller.role === 'manager';
+    if (manager) {
+      const branch = await readRequired(tx, db.collection('branches').doc(caller.branchId), 'CHAT_NOT_AUTHORIZED', 'Your branch is unavailable.');
+      activeManager(caller, callerUid, branch, callerClaims);
+    } else if (caller.role === 'distributor') activeDistributor(caller, callerUid);
+    else activeRequester(caller, callerUid);
+    const principalId = manager ? caller.branchId : callerUid;
+    const field = manager ? 'participantBranchIds' : 'participantUserUids';
+    const historyQuery = db.collection('chatOrderHistory').where(field, 'array-contains', principalId).orderBy('archivedAt', 'desc');
+    let position = null;
+    if (cursor) {
+      const cursorSnapshot = await tx.get(db.collection('chatOrderHistory').doc(cursor));
+      if (!cursorSnapshot.exists || !(cursorSnapshot.data()?.[field] || []).includes(principalId)) {
+        throw new OtpError(400, 'CHAT_HISTORY_CURSOR_INVALID', 'History cursor is invalid.');
+      }
+      position = cursorSnapshot;
+    }
+    const conversations = [];
+    let scanned = 0;
+    let hasMore = true;
+    const maxScanned = Math.min(90, limit * 3);
+    while (conversations.length < limit && scanned < maxScanned && hasMore) {
+      const batchSize = Math.min(limit, maxScanned - scanned);
+      const query = position ? historyQuery.startAfter(position) : historyQuery;
+      const snapshot = await tx.get(query.limit(batchSize + 1));
+      const candidates = snapshot.docs || [];
+      hasMore = candidates.length > batchSize;
+      for (const item of candidates.slice(0, batchSize)) {
+        position = item;
+        scanned += 1;
+        const history = withId(item);
+        try {
+          const { conversation, order, authorization } = await authorizedHistory(tx, db, history, callerUid, callerClaims, now);
+          const presentation = await conversationPresentation(tx, db, conversation, authorization);
+          const latest = await tx.get(db.collection('chatConversations').doc(conversation.id).collection('messages')
+            .where('orderId', '==', history.orderId).orderBy('seq', 'desc').limit(1));
+          const lastMessage = latest.docs?.[0]?.data();
+          conversations.push({ ...conversation, ...presentation, id: conversation.id, historyId: history.id,
+            archivedAt: history.archivedAt, accessEndsAt: history.readAccessEndsAt, readAccessEndsAt: history.readAccessEndsAt,
+            orderContext: safeOrderContext(order), historyOrderId: history.orderId,
+            orderReference: history.orderReference, status: CONVERSATION_STATUS.READ_ONLY,
+            lastMessagePreview: lastMessage ? (lastMessage.deletedAt ? 'Message deleted' : messagePreview(lastMessage.body)) : '' });
+        } catch (error) {
+          if (!(error instanceof OtpError) || ![403, 404, 409].includes(error.status)) throw error;
+        }
+        if (conversations.length === limit) {
+          if (item !== candidates[Math.min(candidates.length, batchSize) - 1]) hasMore = true;
+          break;
+        }
+      }
+    }
+    return { view: 'history', conversations, nextCursor: hasMore && position ? position.id : null };
   });
 }
 
@@ -932,14 +1152,33 @@ async function listConversations({ db, callerUid, callerClaims, now }) {
     } else if (caller.role === 'distributor') activeDistributor(caller, callerUid);
     const query = db.collection('chatConversations')
       .where(manager ? 'participantBranchIds' : 'participantUserUids', 'array-contains', manager ? caller.branchId : callerUid)
+      .where('status', '==', CONVERSATION_STATUS.ACTIVE)
       .orderBy('updatedAt', 'desc').limit(50);
     const snapshot = await tx.get(query);
+    const docs = [...(snapshot.docs || [])];
+    if (!manager) {
+      const readOnlyQuery = db.collection('chatConversations')
+        .where('participantUserUids', 'array-contains', callerUid)
+        .where('status', '==', CONVERSATION_STATUS.READ_ONLY)
+        .orderBy('updatedAt', 'desc').limit(50);
+      const readOnlySnapshot = await tx.get(readOnlyQuery);
+      const seenIds = new Set(docs.map((doc) => doc.id));
+      for (const doc of readOnlySnapshot.docs || []) {
+        if (!seenIds.has(doc.id) && clean(doc.data()?.type) === CONVERSATION_TYPES.REQUESTER_DISTRIBUTOR) {
+          seenIds.add(doc.id);
+          docs.push(doc);
+        }
+      }
+      docs.sort((left, right) => timeOf(right.data()?.updatedAt) - timeOf(left.data()?.updatedAt));
+    }
     const conversations = [];
-    for (const item of snapshot.docs) {
+    for (const item of docs.slice(0, 50)) {
       const conversation = withId(item);
       try {
         const authorization = await authorizeConversation(tx, db, conversation, callerUid, callerClaims, 'read', timeOf(now));
         const presentation = await conversationPresentation(tx, db, conversation, authorization);
+        if (conversation.type === CONVERSATION_TYPES.REQUESTER_DISTRIBUTOR && ['delivered', 'completed'].includes(normalizedStatus(presentation.orderContext?.status))) continue;
+        if (conversation.type === CONVERSATION_TYPES.REQUESTER_BRANCH && !authorization.inquiryCurrent && authorization.validContextOrderIds.size === 0) continue;
         if (conversation.type === CONVERSATION_TYPES.BRANCH_COORDINATION) {
           const branchNameSnapshots = {};
           for (const branchId of conversation.participantBranchIds || []) {
@@ -950,8 +1189,39 @@ async function listConversations({ db, callerUid, callerClaims, now }) {
         } else if (conversation.type === CONVERSATION_TYPES.REQUESTER_BRANCH) {
           const branchId = clean(conversation.branchIds?.[0] || conversation.participantBranchIds?.[0], 128);
           const branchSnapshot = await tx.get(db.collection('branches').doc(branchId));
-          conversations.push({ ...conversation, ...presentation, branchNameSnapshot: branchSnapshot.exists ? clean(branchSnapshot.data()?.name, 160) : '' });
-        } else conversations.push({ ...conversation, ...presentation });
+          let activePreview = '';
+          if (conversation.lastMessageId) {
+            const lastMessage = await tx.get(db.collection('chatConversations').doc(conversation.id)
+              .collection('messages').doc(clean(conversation.lastMessageId, 128)));
+            if (lastMessage.exists) {
+              const message = lastMessage.data() || {};
+              const orderId = clean(message.orderId, 128);
+              if (!orderId || authorization.validContextOrderIds.has(orderId)) {
+                activePreview = message.deletedAt ? 'Message deleted' : messagePreview(message.body);
+              }
+            }
+          }
+          conversations.push({ ...conversation, ...presentation, lastMessagePreview: activePreview,
+            branchNameSnapshot: branchSnapshot.exists ? clean(branchSnapshot.data()?.name, 160) : '' });
+        } else {
+          const isFailedDelivery = conversation.type === CONVERSATION_TYPES.REQUESTER_DISTRIBUTOR
+            && normalizedStatus(presentation.orderContext?.status) === 'delivery_failed';
+          const failedDeadline = isFailedDelivery
+            ? (presentation.orderContext?.distributorChatGraceUntil || conversation.accessEndsAt || null)
+            : null;
+          const failedExpired = Boolean(failedDeadline && timeOf(failedDeadline) <= timeOf(now));
+          conversations.push(failedExpired
+            ? {
+              ...conversation,
+              ...presentation,
+              status: CONVERSATION_STATUS.READ_ONLY,
+              accessEndsAt: conversation.accessEndsAt || failedDeadline,
+              readAccessEndsAt: conversation.readAccessEndsAt || failedDeadline,
+              lifecycleReason: conversation.lifecycleReason || 'delivery_failed_grace',
+              ...participantAccessProjection(conversation, 'read_only'),
+            }
+            : { ...conversation, ...presentation });
+        }
       } catch (error) {
         if (!(error instanceof OtpError) || ![403, 404, 409].includes(error.status)) throw error;
       }
@@ -987,10 +1257,19 @@ function createChatHandler(mode, getAdmin = getFirebaseAdmin, dependencies = {})
     if (!allowed.includes(req.method)) return res.status(405).json({ error: { reason: 'method-not-allowed', message: `Use ${allowed.join(' or ')}.` } });
     try {
       const { auth, db } = getAdmin();
-      const decoded = await verifyChatIdentity(req, auth);
+      const decoded = await verifyChatIdentity(req, auth, db);
       const timestamp = now();
       if (mode === 'conversations') {
-        if (req.method === 'GET') return res.status(200).json(await listConversations({ db, callerUid: decoded.uid, callerClaims: decoded, now: timestamp }));
+        if (req.method === 'GET') {
+          const params = new URL(req.url || '/api/chat/conversations', 'http://localhost').searchParams;
+          if (params.get('view') === 'history') {
+            const cursor = clean(params.get('cursor'), 128);
+            const limit = Math.min(30, Math.max(1, Number(params.get('limit')) || 20));
+            if (!Number.isInteger(limit)) throw new OtpError(400, 'CHAT_HISTORY_PAGE_INVALID', 'History page size is invalid.');
+            return res.status(200).json(await listHistoryConversations({ db, callerUid: decoded.uid, callerClaims: decoded, now: timestamp, cursor, limit }));
+          }
+          return res.status(200).json(await listConversations({ db, callerUid: decoded.uid, callerClaims: decoded, now: timestamp }));
+        }
         const result = await resolveOrCreateConversation({ db, callerUid: decoded.uid, callerClaims: decoded, body: parseBody(req), now: timestamp, createConversationId });
         return res.status(result.created ? 201 : 200).json(result);
       }
@@ -1013,6 +1292,10 @@ function createChatHandler(mode, getAdmin = getFirebaseAdmin, dependencies = {})
       const params = new URL(req.url || '/api/chat/messages', 'http://localhost').searchParams;
       const conversationId = requiredId(params.get('conversationId'), 'CHAT_CONVERSATION_REQUIRED', 'conversationId is required.');
       const page = normalizeMessagePage({ limit: params.get('limit'), beforeSeq: params.get('beforeSeq') });
+      if (params.get('historyId')) {
+        const historyId = requiredId(params.get('historyId'), 'CHAT_HISTORY_REQUIRED', 'historyId is required.');
+        return res.status(200).json(await listHistoryMessages({ db, callerUid: decoded.uid, callerClaims: decoded, historyId, conversationId, page, now: timestamp }));
+      }
       return res.status(200).json(await listMessages({ db, callerUid: decoded.uid, callerClaims: decoded, conversationId, page, now: timestamp }));
     } catch (error) {
       return errorResponse(res, error);
@@ -1033,6 +1316,8 @@ module.exports = {
   deleteMessage,
   editMessage,
   listMessages,
+  listHistoryMessages,
+  listHistoryConversations,
   listConversations,
   resolveOrCreateConversation,
   sendMessage,
