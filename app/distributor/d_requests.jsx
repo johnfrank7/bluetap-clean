@@ -196,7 +196,7 @@ const PendingRequestCard = memo(function PendingRequestCard({
   onViewDetails,
   request,
 }) {
-  useBlueTapTheme();
+  const { colors } = useBlueTapTheme();
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const translateY = fadeAnim.interpolate({
     inputRange: [0, 1],
