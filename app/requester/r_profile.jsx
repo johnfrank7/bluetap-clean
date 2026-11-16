@@ -563,7 +563,7 @@ export default function ProfilePage() {
             </View>
             <View style={styles.infoDivider} />
 
-            <View style={[styles.settingRow, width < 768 && styles.floatingActionClearance]}>
+            <View style={[styles.settingRow, width < 768 && styles.floatingActionClearance, width < 380 && styles.settingRowCompact]}>
               <View style={styles.settingTextWrap}>
                 <Text style={styles.settingLabel}>Account Password</Text>
                 <Text style={styles.settingSubtitle}>Update your password for security</Text>
@@ -598,7 +598,7 @@ export default function ProfilePage() {
 
             <View style={styles.settingDivider} />
 
-            <View style={[styles.settingRow, width < 768 && styles.floatingActionClearance]}>
+            <View style={[styles.settingRow, width < 768 && styles.floatingActionClearance, width < 380 && styles.settingRowCompact]}>
               <View style={styles.settingTextWrap}>
                 <Text style={styles.settingLabel}>How to Use BlueTap</Text>
                 <Text style={styles.settingSubtitle}>Revisit the 5-step Requester onboarding guide</Text>
@@ -615,15 +615,15 @@ export default function ProfilePage() {
             </View>
           </View>
 
-            <View style={[styles.helpCard, width < 768 && styles.floatingActionClearance]}>
-              <Pressable style={({ hovered, pressed }) => [styles.helpRow, hovered && styles.helpRowHovered, pressed && styles.helpRowPressed]} onPress={() => replaceOnce('/requester/bluetap_AI')} accessibilityRole="button" accessibilityLabel="Open BlueTap Assistant">
+            <View style={styles.helpCard}>
+              <Pressable style={({ hovered, pressed }) => [styles.helpRow, width < 768 && styles.floatingActionClearance, hovered && styles.helpRowHovered, pressed && styles.helpRowPressed]} onPress={() => replaceOnce('/requester/bluetap_AI')} accessibilityRole="button" accessibilityLabel="Open BlueTap Assistant">
                 <View style={styles.helpTextBlock}>
-                  <Text style={styles.helpTitle}>BlueTap Assistant</Text>
+                  <Text style={[styles.helpTitle, width < 380 && styles.helpTitleCompact]}>BlueTap Assistant</Text>
                   <Text style={styles.helpSubtitle}>Get quick help with orders, delivery, notifications, and your account.</Text>
                   <Text style={styles.helpAction}>Open Assistant →</Text>
                 </View>
-                <View style={styles.helpIconWrapper}>
-                  <BlueTapBrandMark color={colors.iconInteractive || BLUE} size={38} style={styles.helpIcon} />
+                <View style={[styles.helpIconWrapper, width < 380 && styles.helpIconWrapperCompact]}>
+                  <BlueTapBrandMark color={colors.iconInteractive || BLUE} size={width < 380 ? 28 : 38} />
                 </View>
               </Pressable>
             </View>
@@ -842,13 +842,18 @@ const styles = createPortalStyleSheet({
     paddingVertical: 10,
     gap: 12,
   },
+  settingRowCompact: {
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+    gap: 8,
+  },
   floatingActionClearance: {
     // Keep profile actions clear of the 54px floating portal controls.
     marginRight: 56,
   },
   settingTextWrap: {
     flex: 1,
-    minWidth: 150,
+    minWidth: 0,
   },
   settingLabel: {
     fontSize: 14,
@@ -867,6 +872,7 @@ const styles = createPortalStyleSheet({
   },
   changePasswordButton: {
     minHeight: 44,
+    flexShrink: 0,
     paddingHorizontal: 14,
     borderRadius: 8,
     backgroundColor: BLUE,
@@ -905,12 +911,14 @@ const styles = createPortalStyleSheet({
   helpRowPressed: { opacity: 0.84, transform: [{ scale: 0.98 }] },
   helpTextBlock: {
     flex: 1,
+    minWidth: 0,
   },
   helpTitle: {
     color: BLUE,
     fontSize: 19,
     fontWeight: 'bold',
   },
+  helpTitleCompact: { fontSize: 16 },
   helpSubtitle: {
     color: TEXT_DARK,
     fontSize: 13,
@@ -924,10 +932,7 @@ const styles = createPortalStyleSheet({
     borderRadius: 999,
     padding: 6,
   },
-  helpIcon: {
-    width: 38,
-    height: 38,
-  },
+  helpIconWrapperCompact: { padding: 4 },
   logoutButton: {
     marginTop: 18,
     minHeight: 44,
