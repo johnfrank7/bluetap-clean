@@ -381,7 +381,7 @@ export default function ManagerShell({
             </TouchableOpacity>
 
             <View style={styles.heading}>
-              <Text numberOfLines={1} style={[styles.title, { color: colors.textPrimary }]}>
+              <Text numberOfLines={compact && active === 'reports' ? 2 : 1} style={[styles.title, compact && active === 'reports' && styles.reportsTitle, { color: colors.textPrimary }]}>
                 {title}
               </Text>
               {!!subtitle && (
@@ -541,6 +541,7 @@ const styles = StyleSheet.create({
   menuButton: { width: 42, height: 42, borderRadius: 11, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   heading: { flex: 1, minWidth: 0 },
   title: { fontSize: 24, fontWeight: '900' },
+  reportsTitle: { fontSize: 20, lineHeight: 24 },
   managerBadge: { minHeight: 34, flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1, borderRadius: 999, paddingHorizontal: 10 },
   managerBadgeText: { fontSize: 12, fontWeight: '900' },
   managerIdentity: {
