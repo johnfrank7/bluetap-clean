@@ -116,6 +116,7 @@ const ScheduledRequestCard = ({
   actionsDisabled = false,
   floatingClearance = false,
 }) => {
+  const { colors } = useBlueTapTheme();
   const statusNorm = normalizeDistributorOrderStatus(request.status);
   const isDeliveryFailed = statusNorm === 'delivery failed';
   const isScheduledOrAccepted = statusNorm === 'accepted' || statusNorm === 'scheduled';
