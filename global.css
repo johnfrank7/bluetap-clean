@@ -32,6 +32,10 @@
   --bluetap-pagination-disabled: #eef3f7;
   --bluetap-pagination-disabled-text: #526579;
   --bluetap-action-fill: #0b67ad;
+  --bluetap-account-danger: #b52f2f;
+  --bluetap-account-on-danger: #ffffff;
+  --bluetap-account-disabled: #eef3f7;
+  --bluetap-account-disabled-text: #526579;
 }
 
 [data-bluetap-theme='dark'] {
@@ -48,6 +52,10 @@
   --bluetap-pagination-disabled: #112a40;
   --bluetap-pagination-disabled-text: #9fb4c8;
   --bluetap-action-fill: #1565c0;
+  --bluetap-account-danger: #b91c1c;
+  --bluetap-account-on-danger: #ffffff;
+  --bluetap-account-disabled: #112a40;
+  --bluetap-account-disabled-text: #9fb4c8;
 }
 
 /* Theme-safe pagination colors across Admin and Manager web pages. */
@@ -94,6 +102,55 @@ button[aria-label='Next page']:disabled {
 button[aria-label='Previous page']:disabled > div,
 button[aria-label='Next page']:disabled > div {
   color: var(--bluetap-pagination-disabled-text) !important;
+}
+
+/* These controls need explicit web colors even when a button reset overrides RN styles. */
+:is(button, [role='button'])[data-manager-request-page='selected'] {
+  background-color: var(--bluetap-pagination-selected) !important;
+  border-color: var(--bluetap-pagination-selected) !important;
+}
+:is(button, [role='button'])[data-manager-request-page='selected'] :is(div, span) {
+  color: var(--bluetap-pagination-on-selected) !important;
+}
+:is(button, [role='button'])[data-manager-request-page='selected']:hover {
+  filter: brightness(0.9);
+}
+:is(button, [role='button'])[data-manager-request-page='idle'] {
+  background-color: var(--bluetap-pagination-surface) !important;
+  border-color: var(--bluetap-pagination-border) !important;
+}
+:is(button, [role='button'])[data-manager-request-page='idle'] :is(div, span) {
+  color: var(--bluetap-pagination-text) !important;
+}
+:is(button, [role='button'])[data-manager-request-page='idle']:hover {
+  background-color: var(--bluetap-pagination-hover) !important;
+  border-color: var(--bluetap-pagination-hover-border) !important;
+}
+:is(button, [role='button'])[data-account-access-action='danger'] {
+  background-color: var(--bluetap-account-danger) !important;
+  border-color: var(--bluetap-account-danger) !important;
+}
+:is(button, [role='button'])[data-account-access-action='danger'] :is(div, span) {
+  color: var(--bluetap-account-on-danger) !important;
+}
+:is(button, [role='button'])[data-account-access-action='primary'] {
+  background-color: var(--bluetap-action-fill) !important;
+  border-color: var(--bluetap-action-fill) !important;
+}
+:is(button, [role='button'])[data-account-access-action='primary'] :is(div, span) {
+  color: var(--bluetap-pagination-on-selected) !important;
+}
+:is(button, [role='button'])[data-account-access-action='disabled'] {
+  background-color: var(--bluetap-account-disabled) !important;
+  border-color: var(--bluetap-pagination-border) !important;
+  opacity: 1 !important;
+}
+:is(button, [role='button'])[data-account-access-action='disabled'] :is(div, span) {
+  color: var(--bluetap-account-disabled-text) !important;
+}
+:is(button, [role='button'])[data-account-access-action='danger']:hover,
+:is(button, [role='button'])[data-account-access-action='primary']:hover {
+  filter: brightness(0.9);
 }
 
 *:focus-visible {

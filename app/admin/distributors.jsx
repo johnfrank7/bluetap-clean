@@ -41,6 +41,26 @@ function DistributorsFilterWebStyles({ colors }) {
         button[data-admin-distributors-action-tone="primary"] > div {
           color: ${colors.onPrimary || '#FFFFFF'} !important;
         }
+        [data-admin-distributors-action-tone="success"]:not([aria-disabled="true"]):not(:disabled) {
+          background-color: ${colors.successAction} !important;
+          border-color: ${colors.successAction} !important;
+        }
+        [data-admin-distributors-action-tone="success"]:not([aria-disabled="true"]):not(:disabled) :is(div, span) {
+          color: ${colors.onSuccess} !important;
+        }
+        [data-admin-distributors-action-tone="success"]:not([aria-disabled="true"]):not(:disabled):hover {
+          filter: brightness(0.9);
+        }
+        button[data-admin-distributors-action-disabled="true"],
+        [role="button"][data-admin-distributors-action-disabled="true"] {
+          background-color: ${colors.neutral} !important;
+          border-color: ${colors.border} !important;
+          opacity: 1 !important;
+        }
+        button[data-admin-distributors-action-disabled="true"] :is(div, span),
+        [role="button"][data-admin-distributors-action-disabled="true"] :is(div, span) {
+          color: ${colors.disabledText} !important;
+        }
       `,
     },
   });
@@ -59,7 +79,7 @@ const dateText = (value, fallback = 'Not recorded') => { const time = timeOf(val
 const phoneText = (value) => value ? formatPhilippinePhone(value) || String(value) : 'Not provided';
 const publicUidText = (item) => item.publicUid || 'Not assigned';
 
-function Action({ label, tone = 'neutral', disabled, onPress, styles }) { return <Pressable accessibilityRole="button" accessibilityLabel={label} dataSet={{ adminDistributorsActionTone: tone }} disabled={disabled} onPress={onPress} style={({ hovered, focused, pressed }) => [styles.action, styles[`action${tone}`], (hovered || focused) && styles.hovered, pressed && styles.pressed, disabled && styles.disabled]}><Text style={[styles.actionText, styles[`actionText${tone}`]]}>{label}</Text></Pressable>; }
+function Action({ label, tone = 'neutral', disabled, onPress, styles }) { return <Pressable accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ disabled: !!disabled }} dataSet={{ adminDistributorsActionTone: tone, adminDistributorsActionDisabled: disabled ? 'true' : 'false' }} disabled={disabled} onPress={onPress} style={({ hovered, focused, pressed }) => [styles.action, styles[`action${tone}`], !disabled && (hovered || focused) && styles.hovered, !disabled && pressed && styles.pressed, disabled && styles.actionDisabled]}><Text style={[styles.actionText, styles[`actionText${tone}`], disabled && styles.actionTextDisabled]}>{label}</Text></Pressable>; }
 function Choice({ label, selected, onPress, styles }) {
   return (
     <Pressable
@@ -131,6 +151,8 @@ function ApprovalModal({ state, setState, query, setQuery, choices, busy, onAppr
 function EditModal({ state, setState, branches, busy, onSave, colors, styles }) { return <Modal visible={!!state} transparent animationType="fade" onRequestClose={() => setState(null)}><View style={styles.backdrop}><View accessibilityViewIsModal style={styles.modal}><Text style={styles.modalTitle}>Edit Distributor</Text><Text style={styles.modalCopy}>Changes use the protected Admin account workflow and are recorded in the audit log.</Text><Text style={styles.inputLabel}>Full name</Text><TextInput accessibilityLabel="Distributor full name" value={state?.fullName || ''} onChangeText={(value) => setState((current) => ({ ...current, fullName: value }))} placeholderTextColor={colors.textSecondary} style={styles.input} /><Text style={styles.inputLabel}>Email</Text><TextInput accessibilityLabel="Distributor email" value={state?.email || ''} onChangeText={(value) => setState((current) => ({ ...current, email: value }))} autoCapitalize="none" keyboardType="email-address" placeholderTextColor={colors.textSecondary} style={styles.input} /><Text style={styles.inputLabel}>Assigned branch</Text><BranchOptions choices={branches} selected={state?.branchId} onSelect={(value) => setState((current) => ({ ...current, branchId: value }))} styles={styles} /><View style={styles.footer}><Action label="Cancel" onPress={() => setState(null)} styles={styles} /><Action label={busy ? 'Saving…' : 'Save changes'} tone="primary" disabled={!state?.fullName.trim() || !state?.email.trim() || !state?.branchId || !!busy} onPress={onSave} styles={styles} /></View></View></View></Modal>; }
 
 const createStyles = (colors, isMobile) => StyleSheet.create({
+  actionDisabled:{backgroundColor:colors.neutral,borderColor:colors.border,opacity:1},
+  actionTextDisabled:{color:colors.disabledText},
   summaryGrid:{flexDirection:'row',flexWrap:'wrap',gap:10,marginBottom:16},summary:{flexGrow:1,flexBasis:isMobile ? '47%' : 190,minWidth:isMobile ? '45%' : undefined,maxWidth:isMobile ? '49%' : undefined,minHeight:isMobile ? 84 : 104,backgroundColor:colors.surface,borderWidth:1,borderColor:colors.border,borderRadius:14,padding:isMobile ? 12 : 16,justifyContent:isMobile ? 'center' : 'space-between'},summaryTop:{flexDirection:'row',justifyContent:'space-between',alignItems:'center',gap:12},summaryColumn:{flexDirection:'column',gap:3},summaryLabel:{color:colors.textPrimary,fontSize:isMobile ? 13 : 15,fontWeight:'900'},summaryCount:{color:colors.textPrimary,fontSize:isMobile ? 22 : 25,fontWeight:'900'},summaryHelp:{color:colors.textSecondary,fontSize:12,lineHeight:17,marginTop:10},
   card:{backgroundColor:colors.surface,borderRadius:18,padding:20,borderWidth:1,borderColor:colors.border},toolbar:{flexDirection:'row',flexWrap:'wrap',gap:16,alignItems:'flex-end'},searchWrap:{flexGrow:1,flexBasis:320,minWidth:0},sortWrap:{flexGrow:1,flexBasis:370},controlLabel:{color:colors.textPrimary,fontSize:12,fontWeight:'900',marginBottom:7},searchRow:{flexDirection:'row',gap:8},input:{flex:1,minWidth:0,minHeight:44,borderWidth:1,borderColor:colors.inputBorder,borderRadius:10,paddingHorizontal:12,color:colors.textPrimary,backgroundColor:colors.input,outlineStyle:'none'},choiceRow:{flexDirection:'row',flexWrap:'wrap',gap:8},choice:{minHeight:44,justifyContent:'center',alignItems:'center',paddingHorizontal:14,paddingVertical:10,borderRadius:10,borderWidth:1,borderColor:colors.border,backgroundColor:colors.surfaceAlt},choiceSelected:{backgroundColor:colors.primaryAction || '#0B67AD',borderColor:colors.primaryAction || '#0B67AD'},choiceUnselected:{backgroundColor:colors.surfaceAlt,borderColor:colors.border},choiceText:{fontSize:13,fontWeight:'800'},choiceTextSelected:{color:colors.onPrimary || '#FFFFFF',fontWeight:'900'},choiceTextUnselected:{color:colors.textPrimary,fontWeight:'800'},hovered:{borderColor:colors.primary},pressed:{opacity:.82},statusFilters:{marginTop:16},branchFilters:{marginTop:16},results:{minHeight:50,flexDirection:'row',alignItems:'center',justifyContent:'space-between',gap:12,borderBottomWidth:1,borderBottomColor:colors.border},resultText:{color:colors.textSecondary,fontSize:13,fontWeight:'700'},resetText:{color:colors.primary,fontSize:12,fontWeight:'900'},error:{borderWidth:1,borderColor:colors.danger,backgroundColor:colors.dangerSoft,borderRadius:10,padding:12,marginVertical:10},errorText:{color:colors.danger,fontWeight:'700'},retryText:{color:colors.primary,fontWeight:'900',marginTop:7},
   table:{minWidth:1160},tableRow:{minHeight:86,flexDirection:'row',alignItems:'center',borderBottomWidth:1,borderBottomColor:colors.border},tableHeader:{minHeight:48,backgroundColor:colors.surfaceAlt},cell:{paddingHorizontal:10},col0:{width:180},col1:{width:120},col2:{width:160},col3:{width:210},col4:{width:150},col5:{width:125},col6:{width:215},headerText:{color:colors.textSecondary,fontSize:11,fontWeight:'900',textTransform:'uppercase'},name:{color:colors.textPrimary,fontSize:14,fontWeight:'900'},muted:{color:colors.textSecondary,fontSize:12,marginTop:3},body:{color:colors.textPrimary,fontSize:12,lineHeight:17},publicUid:{color:colors.primary,fontSize:12,fontWeight:'900'},requested:{color:colors.warning,fontSize:10,fontWeight:'900',marginTop:4,textTransform:'uppercase'},actions:{flexDirection:'row',flexWrap:'wrap',alignItems:'center',gap:6},action:{minHeight:36,justifyContent:'center',alignItems:'center',borderRadius:8,borderWidth:1,borderColor:colors.border,paddingHorizontal:10,backgroundColor:colors.surfaceAlt},actionprimary:{backgroundColor:colors.primaryAction,borderColor:colors.primaryAction},actionsuccess:{backgroundColor:colors.successAction,borderColor:colors.successAction},actiondanger:{backgroundColor:colors.dangerSoft,borderColor:colors.danger},actionText:{color:colors.textPrimary,fontSize:11,fontWeight:'900'},actionTextprimary:{color:colors.onPrimary || '#FFFFFF'},actionTextsuccess:{color:colors.onSuccess},actionTextdanger:{color:colors.danger},disabled:{opacity:.5},

@@ -182,8 +182,9 @@ function PaginationBar({
             <TouchableOpacity
               key={`page-${p}`}
               accessibilityRole="button"
-              accessibilityLabel={`Page ${p}`}
+              accessibilityLabel={isSelected ? `Current page, page ${p}` : `Go to page ${p}`}
               accessibilityState={{ selected: isSelected }}
+              dataSet={{ managerRequestPage: isSelected ? 'selected' : 'idle' }}
               onPress={() => onPageChange(p)}
               style={[styles.paginationNumberBtn, isSelected && styles.paginationNumberBtnActive]}
             >
@@ -3000,7 +3001,8 @@ const createStyles = (
       justifyContent: 'center',
     },
     paginationBtnDisabled: {
-      opacity: 0.45,
+      backgroundColor: colors.neutral,
+      borderColor: colors.border,
     },
     paginationBtnText: {
       color: colors.textPrimary,
@@ -3008,7 +3010,7 @@ const createStyles = (
       fontWeight: '700',
     },
     paginationBtnTextDisabled: {
-      color: colors.textSecondary,
+      color: colors.disabledText,
     },
     paginationNumberBtn: {
       minWidth: 32,
